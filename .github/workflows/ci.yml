@@ -41,3 +41,11 @@ jobs:
           key: cara-${{ hashFiles('src/keepout/sources/cara.py') }}
       - run: uv sync --locked
       - run: uv run pytest -m validation -v
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --locked
+      - run: uv run mkdocs build --strict
