@@ -14,8 +14,12 @@ import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
-from keepout.errors import ChecksumMismatch, SourceUnavailable
+import scipy.io
+from scipy.io.matlab import MatReadError
+
+from keepout.errors import CaraFormatError, ChecksumMismatch, SourceUnavailable
 
 CARA_REPO = "nasa/CARA_Analysis_Tools"
 CARA_COMMIT = "1c78beb1f7aefc384886c3be1d09e4681acb5d37"
@@ -136,3 +140,29 @@ def fetch(
     partial.write_bytes(data)
     partial.replace(target)
     return target
+
+
+def load_mat(path: Path) -> dict[str, Any]:
+    """Load a MATLAB v5 MAT-file into a dict of variables.
+
+    Metadata keys (``__header__``, ``__version__``, ``__globals__``) are
+    removed. MATLAB structs are returned as objects with attribute access.
+
+    Raises
+    ------
+    CaraFormatError
+        If the file is not a readable MATLAB v5 file (including v7.3/HDF5).
+    FileNotFoundError
+        If ``path`` does not exist.
+    """
+    if not path.is_file():
+        raise FileNotFoundError(path)
+    try:
+        raw = scipy.io.loadmat(path, squeeze_me=True, struct_as_record=False)
+    except NotImplementedError as exc:
+        raise CaraFormatError(
+            f"{path}: MATLAB v7.3 (HDF5) files are not supported"
+        ) from exc
+    except (ValueError, MatReadError) as exc:
+        raise CaraFormatError(f"{path}: not a readable MAT-file ({exc})") from exc
+    return {key: value for key, value in raw.items() if not key.startswith("__")}
