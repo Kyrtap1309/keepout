@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import numpy as np
@@ -48,3 +49,30 @@ def test_load_mat_rejects_empty_file(tmp_path: Path) -> None:
 def test_load_mat_missing_file_is_not_masked(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
         load_mat(tmp_path / "missing.mat")
+
+
+def test_load_mat_rejects_truncated_file(tmp_path: Path) -> None:
+    path = tmp_path / "truncated.mat"
+    scipy.io.savemat(path, {"a": np.arange(1000.0)})
+    path.write_bytes(path.read_bytes()[:4000])
+    with pytest.raises(CaraFormatError, match=r"truncated\.mat"):
+        load_mat(path)
+
+
+def test_load_mat_rejects_corrupt_compressed_data(tmp_path: Path) -> None:
+    path = tmp_path / "corrupt.mat"
+    scipy.io.savemat(path, {"a": np.arange(1000.0)}, do_compression=True)
+    data = bytearray(path.read_bytes())
+    data[-10] ^= 0xFF
+    path.write_bytes(bytes(data))
+    with pytest.raises(CaraFormatError, match=r"corrupt\.mat"):
+        load_mat(path)
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores file permissions")
+def test_load_mat_unreadable_file_is_not_masked(tmp_path: Path) -> None:
+    path = tmp_path / "locked.mat"
+    scipy.io.savemat(path, {"a": 1.0})
+    path.chmod(0)
+    with pytest.raises(PermissionError):
+        load_mat(path)

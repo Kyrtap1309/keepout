@@ -1,4 +1,5 @@
 import hashlib
+import http.client
 import io
 import re
 import tempfile
@@ -137,4 +138,31 @@ def test_http_download_wraps_http_404(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(urllib.request, "urlopen", not_found)
     with pytest.raises(SourceUnavailable, match="404"):
+        cara.http_download("https://example.invalid/x")
+
+
+class _BrokenBody(io.BytesIO):
+    def read(self, size: int | None = -1) -> bytes:
+        raise http.client.IncompleteRead(b"partial")
+
+
+def test_http_download_wraps_mid_read_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def dropped(url: str, timeout: float) -> io.BytesIO:
+        return _BrokenBody()
+
+    monkeypatch.setattr(urllib.request, "urlopen", dropped)
+    with pytest.raises(SourceUnavailable, match=r"example\.invalid"):
+        cara.http_download("https://example.invalid/x")
+
+
+def test_http_download_wraps_connection_reset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def reset(url: str, timeout: float) -> io.BytesIO:
+        raise ConnectionResetError("reset by peer")
+
+    monkeypatch.setattr(urllib.request, "urlopen", reset)
+    with pytest.raises(SourceUnavailable, match="reset by peer"):
         cara.http_download("https://example.invalid/x")

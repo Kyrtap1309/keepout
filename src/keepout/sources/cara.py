@@ -8,9 +8,11 @@ verified by SHA-256 and cached under :func:`cache_dir`.
 from __future__ import annotations
 
 import hashlib
+import http.client
 import os
 import urllib.error
 import urllib.request
+import zlib
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -96,7 +98,7 @@ def http_download(url: str) -> bytes:
     try:
         with urllib.request.urlopen(url, timeout=60) as response:
             body: bytes = response.read()
-    except (urllib.error.URLError, TimeoutError) as exc:
+    except (OSError, http.client.HTTPException) as exc:
         raise SourceUnavailable(f"cannot download {url}: {exc}") from exc
     return body
 
@@ -152,17 +154,17 @@ def load_mat(path: Path) -> dict[str, Any]:
     ------
     CaraFormatError
         If the file is not a readable MATLAB v5 file (including v7.3/HDF5).
-    FileNotFoundError
-        If ``path`` does not exist.
+    OSError
+        If ``path`` cannot be opened (e.g. ``FileNotFoundError``,
+        ``PermissionError``).
     """
-    if not path.is_file():
-        raise FileNotFoundError(path)
-    try:
-        raw = scipy.io.loadmat(path, squeeze_me=True, struct_as_record=False)
-    except NotImplementedError as exc:
-        raise CaraFormatError(
-            f"{path}: MATLAB v7.3 (HDF5) files are not supported"
-        ) from exc
-    except (ValueError, MatReadError) as exc:
-        raise CaraFormatError(f"{path}: not a readable MAT-file ({exc})") from exc
+    with path.open("rb") as stream:
+        try:
+            raw = scipy.io.loadmat(stream, squeeze_me=True, struct_as_record=False)
+        except NotImplementedError as exc:
+            raise CaraFormatError(
+                f"{path}: MATLAB v7.3 (HDF5) files are not supported"
+            ) from exc
+        except (ValueError, MatReadError, OSError, zlib.error) as exc:
+            raise CaraFormatError(f"{path}: not a readable MAT-file ({exc})") from exc
     return {key: value for key, value in raw.items() if not key.startswith("__")}
