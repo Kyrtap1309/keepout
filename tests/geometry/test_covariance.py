@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from astropy.time import Time
+from geometry_builders import EPOCH
 from hypothesis import given
 from hypothesis import strategies as st
 from hypothesis.extra.numpy import arrays
@@ -9,7 +9,6 @@ from keepout._types import FloatArray, StateVector
 from keepout.covariance import Covariance, make_covariance, problems, repair
 from keepout.errors import CovarianceError, GeometryError
 
-EPOCH = Time("2010-03-13T22:37:52.618", scale="utc")
 VALID = np.diag([100.0, 400.0, 25.0, 1e-2, 4e-2, 1e-2])
 STATE = StateVector(EPOCH, [7000e3, 100.0, 50.0], [10.0, 7500.0, 1000.0], "GCRF")
 

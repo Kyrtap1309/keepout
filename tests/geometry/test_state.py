@@ -1,10 +1,8 @@
 import numpy as np
 import pytest
-from astropy.time import Time
+from geometry_builders import EPOCH
 
 from keepout._types import StateVector
-
-EPOCH = Time("2010-03-13T22:37:52.618", scale="utc")
 
 
 def test_state_vector_copies_and_freezes_arrays() -> None:

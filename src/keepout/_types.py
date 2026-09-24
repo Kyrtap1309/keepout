@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, TypeAlias
+from typing import Literal, TypeAlias, get_args
 
 import numpy as np
 import numpy.typing as npt
@@ -15,7 +15,7 @@ FloatArray: TypeAlias = npt.NDArray[np.float64]
 RefFrame: TypeAlias = Literal["GCRF", "EME2000", "ITRF"]
 """Reference frames a state vector can be expressed in."""
 
-REF_FRAMES: tuple[RefFrame, ...] = ("GCRF", "EME2000", "ITRF")
+REF_FRAMES: tuple[RefFrame, ...] = get_args(RefFrame)
 
 
 def as_vector(value: npt.ArrayLike, name: str) -> FloatArray:

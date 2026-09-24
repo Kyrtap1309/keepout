@@ -15,13 +15,14 @@ from astropy.time import Time
 
 from keepout._types import REF_FRAMES, FloatArray, StateVector
 from keepout.cdm.keywords import (
-    COVARIANCE_AXES,
     KEYWORDS,
     REQUIRED,
     FieldValue,
     SectionKind,
     ValueKind,
     covariance_names,
+    format_value,
+    parse_value,
 )
 from keepout.covariance import Covariance, Policy, make_covariance
 from keepout.errors import GeometryError
@@ -30,6 +31,8 @@ from keepout.objects import ObjectState
 
 COMMENT = "COMMENT"
 USER_DEFINED_PREFIX = "USER_DEFINED_"
+
+_COVARIANCE_NAMES = {size: frozenset(covariance_names(size)) for size in range(6, 10)}
 
 
 @dataclass(frozen=True)
@@ -49,6 +52,47 @@ class Field:
     keyword: str
     value: FieldValue
     unit: str | None = None
+
+
+def parse_field(kind: SectionKind, keyword: str, text: str, unit: str | None) -> Field:
+    """Build a field from message text: typed SI value if known, raw text if not.
+
+    Parameters
+    ----------
+    kind
+        Section the field belongs to.
+    keyword
+        CDM keyword (not ``COMMENT``).
+    text
+        Value text, without the unit.
+    unit
+        Unit given in the message, if any.
+
+    Raises
+    ------
+    ValueError
+        If a known keyword has a wrong unit or an invalid value.
+    """
+    spec = KEYWORDS[kind].get(keyword)
+    if spec is None:
+        return Field(keyword, text, unit)
+    return Field(keyword, parse_value(spec, text, unit))
+
+
+def format_field(kind: SectionKind, field: Field) -> tuple[str, str | None]:
+    """Message text and unit of a field (not ``COMMENT``).
+
+    Parameters
+    ----------
+    kind
+        Section the field belongs to.
+    field
+        Field to write.
+    """
+    spec = KEYWORDS[kind].get(field.keyword)
+    if spec is None:
+        return str(field.value), field.unit
+    return format_value(spec, field.value)
 
 
 def _matches(value: object, kind: ValueKind) -> bool:
@@ -183,18 +227,14 @@ def covariance_dimension(section: Section) -> int:
     ValueError
         If the entries do not form a complete 6x6 to 9x9 lower triangle.
     """
-    present = {field.keyword for field in section.fields}
-    dimension = 0
-    for size in range(6, 10):
-        if set(covariance_names(size)) <= present:
-            dimension = size
-    given = set(covariance_names(9)) & present
-    if dimension == 0 or given != set(covariance_names(dimension)):
-        raise ValueError(
-            f"{section.get('OBJECT')} covariance must be a complete 6x6, 7x7, "
-            "8x8 or 9x9 lower triangle"
-        )
-    return dimension
+    given = _COVARIANCE_NAMES[9] & {field.keyword for field in section.fields}
+    for dimension in range(6, 10):
+        if given == _COVARIANCE_NAMES[dimension]:
+            return dimension
+    raise ValueError(
+        f"{section.get('OBJECT')} covariance must be a complete 6x6, 7x7, "
+        "8x8 or 9x9 lower triangle"
+    )
 
 
 @dataclass(frozen=True)
@@ -265,11 +305,11 @@ class CdmObject:
     def covariance_rtn(self) -> FloatArray:
         """Full symmetric RTN covariance as given (6x6 to 9x9), unvalidated."""
         dimension = covariance_dimension(self.section)
+        rows, columns = np.tril_indices(dimension)
+        values = [_number(self.section, name) for name in covariance_names(dimension)]
         matrix = np.zeros((dimension, dimension))
-        for row in range(dimension):
-            for column in range(row + 1):
-                name = f"C{COVARIANCE_AXES[row]}_{COVARIANCE_AXES[column]}"
-                matrix[row, column] = matrix[column, row] = _number(self.section, name)
+        matrix[rows, columns] = values
+        matrix[columns, rows] = values
         return matrix
 
     def state(self) -> StateVector:

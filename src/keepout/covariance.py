@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, TypeAlias
+from typing import Literal, TypeAlias, get_args
 
 import numpy as np
 import numpy.typing as npt
@@ -137,7 +137,7 @@ class Covariance:
     epoch: Time
 
     def __post_init__(self) -> None:
-        if self.frame not in ("RTN", "GCRF"):
+        if self.frame not in get_args(CovarianceFrame):
             raise ValueError(f"unsupported covariance frame {self.frame!r}")
         array = _as_matrix(self.matrix)
         found = problems(array)
@@ -208,7 +208,7 @@ def make_covariance(
     tuple
         The covariance and diagnostics (empty when the matrix was valid).
     """
-    if policy not in ("raise", "repair"):
+    if policy not in get_args(Policy):
         raise ValueError(f"unknown covariance policy {policy!r}")
     array = _as_matrix(matrix)
     if policy == "raise" or not problems(array):

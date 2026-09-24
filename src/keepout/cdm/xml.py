@@ -13,8 +13,16 @@ from collections.abc import Iterator, Sequence
 from pathlib import Path
 from xml.etree import ElementTree
 
-from keepout.cdm.keywords import KEYWORDS, SectionKind, format_value, parse_value
-from keepout.cdm.model import COMMENT, USER_DEFINED_PREFIX, Cdm, Field, Section
+from keepout.cdm.keywords import KEYWORDS, SectionKind
+from keepout.cdm.model import (
+    COMMENT,
+    USER_DEFINED_PREFIX,
+    Cdm,
+    Field,
+    Section,
+    format_field,
+    parse_field,
+)
 from keepout.errors import CdmParseError
 
 NDM_NAMESPACE = "urn:ccsds:schema:ndmxml"
@@ -51,7 +59,6 @@ def _leaves(
 def _fields(
     element: ElementTree.Element, kind: SectionKind, path: str
 ) -> tuple[Field, ...]:
-    table = KEYWORDS[kind]
     fields: list[Field] = []
     seen: set[str] = set()
     for leaf, leaf_path in _leaves(element, path):
@@ -63,13 +70,8 @@ def _fields(
         if keyword in seen:
             raise CdmParseError("duplicate keyword", path=leaf_path, keyword=keyword)
         seen.add(keyword)
-        unit = leaf.get("units")
-        spec = table.get(keyword)
-        if spec is None:
-            fields.append(Field(keyword, text, unit))
-            continue
         try:
-            fields.append(Field(keyword, parse_value(spec, text, unit)))
+            fields.append(parse_field(kind, keyword, text, leaf.get("units")))
         except ValueError as exc:
             raise CdmParseError(str(exc), path=leaf_path, keyword=keyword) from exc
     return tuple(fields)
@@ -111,6 +113,10 @@ def loads(text: str) -> Cdm:
         Field("CCSDS_CDM_VERS", version),
         *_fields(header, "header", "cdm/header"),
     )
+    first, second = (
+        Section("segment", _fields(segment, "segment", f"cdm/body/segment[{index}]"))
+        for index, segment in enumerate(segments, start=1)
+    )
     try:
         return Cdm(
             Section("header", header_fields),
@@ -118,14 +124,7 @@ def loads(text: str) -> Cdm:
                 "relative",
                 _fields(relative, "relative", "cdm/body/relativeMetadataData"),
             ),
-            (
-                Section(
-                    "segment", _fields(segments[0], "segment", "cdm/body/segment[1]")
-                ),
-                Section(
-                    "segment", _fields(segments[1], "segment", "cdm/body/segment[2]")
-                ),
-            ),
+            (first, second),
         )
     except ValueError as exc:
         raise CdmParseError(str(exc)) from exc
@@ -163,16 +162,13 @@ def _groups(
             group = previous
         resolved.append(group)
         previous = group
+    # Comments join the next field's group; trailing comments the last one.
+    upcoming = previous
     groups: list[tuple[str, ...]] = []
-    for index, candidate in enumerate(resolved):
-        if candidate is None:
-            upcoming = next((g for g in resolved[index + 1 :] if g is not None), None)
-            if upcoming is not None:
-                candidate = upcoming
-            else:
-                candidate = groups[-1] if groups else default
-        groups.append(candidate)
-    return groups
+    for candidate in reversed(resolved):
+        upcoming = candidate if candidate is not None else upcoming
+        groups.append(upcoming)
+    return groups[::-1]
 
 
 def _write(
@@ -181,27 +177,21 @@ def _write(
     kind: SectionKind,
     version: str,
 ) -> None:
-    table = KEYWORDS[kind]
-    stack: list[tuple[str, ElementTree.Element]] = []
+    names: list[str] = []
+    elements = [parent]
     for field, group in zip(fields, _groups(fields, kind, version), strict=True):
         depth = 0
-        while depth < min(len(stack), len(group)) and stack[depth][0] == group[depth]:
+        while depth < min(len(names), len(group)) and names[depth] == group[depth]:
             depth += 1
-        del stack[depth:]
+        del names[depth:], elements[depth + 1 :]
         for name in group[depth:]:
-            container = stack[-1][1] if stack else parent
-            stack.append((name, ElementTree.SubElement(container, name)))
-        element = ElementTree.SubElement(
-            stack[-1][1] if stack else parent, field.keyword
-        )
+            names.append(name)
+            elements.append(ElementTree.SubElement(elements[-1], name))
+        element = ElementTree.SubElement(elements[-1], field.keyword)
         if field.keyword == COMMENT:
             element.text = str(field.value)
             continue
-        spec = table.get(field.keyword)
-        if spec is None:
-            text, unit = str(field.value), field.unit
-        else:
-            text, unit = format_value(spec, field.value)
+        text, unit = format_field(kind, field)
         element.text = text
         if unit is not None:
             element.set("units", unit)
@@ -226,18 +216,12 @@ def dumps(cdm: Cdm) -> str:
     header_fields = [f for f in cdm.header.fields if f.keyword != "CCSDS_CDM_VERS"]
     _write(ElementTree.SubElement(root, "header"), header_fields, "header", cdm.version)
     body = ElementTree.SubElement(root, "body")
-    _write(
-        ElementTree.SubElement(body, "relativeMetadataData"),
-        cdm.relative.fields,
-        "relative",
-        cdm.version,
-    )
-    for segment in cdm.segments:
+    for tag, section in (
+        ("relativeMetadataData", cdm.relative),
+        *(("segment", segment) for segment in cdm.segments),
+    ):
         _write(
-            ElementTree.SubElement(body, "segment"),
-            segment.fields,
-            "segment",
-            cdm.version,
+            ElementTree.SubElement(body, tag), section.fields, section.kind, cdm.version
         )
     ElementTree.indent(root)
     declaration = '<?xml version="1.0" encoding="UTF-8"?>\n'

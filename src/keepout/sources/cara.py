@@ -98,9 +98,9 @@ def http_download(url: str) -> bytes:
     try:
         with urllib.request.urlopen(url, timeout=60) as response:
             body: bytes = response.read()
+            return body
     except (OSError, http.client.HTTPException) as exc:
         raise SourceUnavailable(f"cannot download {url}: {exc}") from exc
-    return body
 
 
 def _sha256(data: bytes) -> str:
@@ -128,8 +128,10 @@ def fetch(
     """
     root = cache if cache is not None else cache_dir()
     target = root / "cara" / CARA_COMMIT / file.path
-    if target.is_file() and _sha256(target.read_bytes()) == file.sha256:
-        return target
+    if target.is_file():
+        with target.open("rb") as cached:
+            if hashlib.file_digest(cached, "sha256").hexdigest() == file.sha256:
+                return target
 
     data = download(file.url)
     actual = _sha256(data)

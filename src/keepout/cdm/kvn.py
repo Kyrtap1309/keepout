@@ -5,8 +5,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from keepout.cdm.keywords import KEYWORDS, SectionKind, format_value, parse_value
-from keepout.cdm.model import COMMENT, Cdm, Field, Section
+from keepout.cdm.keywords import KEYWORDS, SectionKind
+from keepout.cdm.model import COMMENT, Cdm, Field, Section, format_field, parse_field
 from keepout.errors import CdmParseError
 
 _ASSIGNMENT = re.compile(r"^(?P<keyword>[A-Z0-9_]+)\s*=\s*(?P<value>.*)$")
@@ -25,12 +25,9 @@ def _split_unit(text: str) -> tuple[str, str | None]:
 
 def _field(kind: SectionKind, keyword: str, text: str, line: int) -> Field:
     spec = KEYWORDS[kind].get(keyword)
-    if spec is None:
-        value, unit = _split_unit(text)
-        return Field(keyword, value, unit)
-    value, unit = (text, None) if spec.kind == "str" else _split_unit(text)
+    value, unit = (text, None) if spec and spec.kind == "str" else _split_unit(text)
     try:
-        return Field(keyword, parse_value(spec, value, unit))
+        return parse_field(kind, keyword, value, unit)
     except ValueError as exc:
         raise CdmParseError(str(exc), line=line, keyword=keyword) from exc
 
@@ -50,12 +47,12 @@ def loads(text: str) -> Cdm:
     """
     kinds: list[SectionKind] = []
     sections: list[list[Field]] = []
-    seen: list[set[str]] = []
+    seen: set[str] = set()
 
     def start(kind: SectionKind) -> None:
         kinds.append(kind)
         sections.append([])
-        seen.append(set())
+        seen.clear()
 
     for number, raw in enumerate(text.splitlines(), start=1):
         line = raw.strip()
@@ -98,9 +95,9 @@ def loads(text: str) -> Cdm:
             start("segment")
         elif kinds[-1] == "header" and keyword in KEYWORDS["relative"]:
             start("relative")
-        if keyword in seen[-1]:
+        if keyword in seen:
             raise CdmParseError("duplicate keyword", line=number, keyword=keyword)
-        seen[-1].add(keyword)
+        seen.add(keyword)
         sections[-1].append(_field(kinds[-1], keyword, value, number))
     if kinds != _LAYOUT:
         raise CdmParseError(
@@ -130,16 +127,11 @@ def dumps(cdm: Cdm) -> str:
     """
     lines: list[str] = []
     for section in (cdm.header, cdm.relative, *cdm.segments):
-        table = KEYWORDS[section.kind]
         for field in section.fields:
             if field.keyword == COMMENT:
                 lines.append(f"COMMENT {field.value}".rstrip())
                 continue
-            spec = table.get(field.keyword)
-            if spec is None:
-                text, unit = str(field.value), field.unit
-            else:
-                text, unit = format_value(spec, field.value)
+            text, unit = format_field(section.kind, field)
             line = f"{field.keyword:<{_KEYWORD_WIDTH}} = {text}"
             lines.append(f"{line} [{unit}]" if unit is not None else line.rstrip())
     return "\n".join(lines) + "\n"

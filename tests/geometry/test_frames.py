@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from astropy.time import Time
+from geometry_builders import EPOCH
 from hypothesis import assume, given
 from hypothesis import strategies as st
 from hypothesis.extra.numpy import arrays
@@ -14,7 +14,6 @@ from keepout.frames import (
     to_gcrf,
 )
 
-EPOCH = Time("2010-03-13T22:37:52.618", scale="utc")
 EARTH_ROTATION_RATE = 7.292115146706979e-5  # rad/s (IERS conventions)
 
 vectors = arrays(np.float64, (3,), elements=st.floats(min_value=-1e7, max_value=1e7))

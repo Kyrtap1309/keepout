@@ -1,10 +1,6 @@
-from pathlib import Path
-
-from cdm_builders import assert_equivalent
+from cdm_builders import DATA, assert_equivalent
 
 import keepout.cdm
-
-DATA = Path(__file__).parent / "data"
 
 
 def test_load_detects_the_format() -> None:

@@ -2,13 +2,12 @@ from pathlib import Path
 from xml.etree import ElementTree
 
 import pytest
-from cdm_builders import assert_equivalent, cdms
+from cdm_builders import DATA, assert_equivalent, cdms
 from hypothesis import given, settings
 
 from keepout.cdm import Cdm, kvn, xml
 from keepout.errors import CdmParseError
 
-DATA = Path(__file__).parent / "data"
 B1_KVN = DATA / "b1_example.kvn"
 B1_XML = DATA / "b1_example.xml"
 TRACSS = DATA / "tracss_v2.kvn"

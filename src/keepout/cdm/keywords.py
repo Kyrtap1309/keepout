@@ -14,6 +14,7 @@ import re
 from dataclasses import dataclass
 from typing import Literal, TypeAlias
 
+import numpy as np
 from astropy.time import Time
 
 ValueKind: TypeAlias = Literal["str", "int", "float", "time"]
@@ -104,13 +105,16 @@ def covariance_names(dimension: int) -> tuple[str, ...]:
 _COVARIANCE_GROUP = ("data", "covarianceMatrix")
 _COVARIANCE = [
     Keyword(
-        f"C{COVARIANCE_AXES[row]}_{COVARIANCE_AXES[column]}",
+        name,
         "float",
         _COVARIANCE_UNITS[(_AXIS_CLASS[row], _AXIS_CLASS[column])],
         group=_COVARIANCE_GROUP,
     )
-    for row in range(len(COVARIANCE_AXES))
-    for column in range(row + 1)
+    for name, row, column in zip(
+        covariance_names(len(COVARIANCE_AXES)),
+        *np.tril_indices(len(COVARIANCE_AXES)),
+        strict=True,
+    )
 ]
 
 _RELATIVE_STATE = ("relativeStateVector",)

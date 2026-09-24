@@ -1,14 +1,17 @@
 """Builders, Hypothesis strategies and comparison helpers for CDM tests."""
 
 import string
+from pathlib import Path
 
+import numpy as np
 import pytest
 from astropy.time import Time
 from hypothesis import strategies as st
 
-from keepout.cdm.keywords import COVARIANCE_AXES, covariance_names, parse_epoch
+from keepout.cdm.keywords import covariance_names, parse_epoch
 from keepout.cdm.model import Cdm, Field, Section
 
+DATA = Path(__file__).parent / "data"
 TCA = parse_epoch("2010-03-13T22:37:52.618")
 CREATED = parse_epoch("2010-03-12T22:31:12.000")
 DIAGONAL = (100.0, 400.0, 25.0, 1e-2, 4e-2, 1e-2)
@@ -32,11 +35,12 @@ def segment_fields(index: int, frame: str = "EME2000") -> list[Field]:
     values = (*POSITIONS[index], *VELOCITIES[index])
     names = ("X", "Y", "Z", "X_DOT", "Y_DOT", "Z_DOT")
     fields += [Field(name, value) for name, value in zip(names, values, strict=True)]
-    for row in range(6):
-        for column in range(row + 1):
-            value = DIAGONAL[row] if row == column else 0.0
-            name = f"C{COVARIANCE_AXES[row]}_{COVARIANCE_AXES[column]}"
-            fields.append(Field(name, value))
+    covariance = np.diag(DIAGONAL)
+    rows, columns = np.tril_indices(6)
+    fields += [
+        Field(name, float(covariance[row, column]))
+        for name, row, column in zip(covariance_names(6), rows, columns, strict=True)
+    ]
     return fields
 
 

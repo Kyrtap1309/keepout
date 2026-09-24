@@ -22,7 +22,7 @@ from astropy.time import Time
 
 from keepout._types import FloatArray
 from keepout.errors import GeometryError
-from keepout.objects import EPOCH_TOLERANCE_S, ObjectState
+from keepout.objects import ObjectState, require_same_epoch
 
 
 @dataclass(frozen=True, eq=False)
@@ -80,9 +80,9 @@ def encounter_plane(primary: ObjectState, secondary: ObjectState) -> EncounterPl
     GeometryError
         If the epochs differ or the relative velocity is zero.
     """
-    offset = abs(float((secondary.state.epoch - primary.state.epoch).to_value("s")))
-    if offset > EPOCH_TOLERANCE_S:
-        raise GeometryError(f"primary and secondary epochs differ by {offset:.3g} s")
+    require_same_epoch(
+        secondary.state.epoch, primary.state.epoch, "primary and secondary"
+    )
     r = secondary.state.r - primary.state.r
     v = secondary.state.v - primary.state.v
     speed = float(np.linalg.norm(v))

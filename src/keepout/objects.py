@@ -5,12 +5,29 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+from astropy.time import Time
+
 from keepout._types import StateVector
 from keepout.covariance import Covariance
 from keepout.errors import GeometryError
 
 EPOCH_TOLERANCE_S = 1e-3
 """Largest epoch difference [s] treated as "the same epoch"."""
+
+
+def require_same_epoch(first: Time, second: Time, what: str) -> None:
+    """Raise :class:`GeometryError` if two epochs differ by more than the tolerance.
+
+    Parameters
+    ----------
+    first, second
+        Epochs to compare.
+    what
+        What is compared, for the error message (e.g. ``"state and covariance"``).
+    """
+    offset = abs(float((first - second).to_value("s")))
+    if offset > EPOCH_TOLERANCE_S:
+        raise GeometryError(f"{what} epochs differ by {offset:.3g} s")
 
 
 @dataclass(frozen=True, eq=False)
@@ -47,9 +64,9 @@ class ObjectState:
                 "ObjectState needs a GCRF state and covariance; convert with "
                 "keepout.frames.to_gcrf and Covariance.in_gcrf"
             )
-        offset = abs(float((self.state.epoch - self.covariance.epoch).to_value("s")))
-        if offset > EPOCH_TOLERANCE_S:
-            raise GeometryError(f"state and covariance epochs differ by {offset:.3g} s")
+        require_same_epoch(
+            self.state.epoch, self.covariance.epoch, "state and covariance"
+        )
         radius = self.hard_body_radius
         if radius is not None and not (math.isfinite(radius) and radius >= 0.0):
             raise ValueError(f"hard_body_radius must be finite and >= 0, got {radius}")

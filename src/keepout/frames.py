@@ -19,6 +19,7 @@ from astropy.coordinates import (
     CartesianDifferential,
     CartesianRepresentation,
 )
+from scipy.linalg import block_diag
 
 from keepout._types import FloatArray, StateVector
 from keepout.errors import GeometryError
@@ -61,10 +62,7 @@ def rtn_rotation(r: npt.ArrayLike, v: npt.ArrayLike) -> FloatArray:
 
 
 def _six_by_six(rotation: FloatArray) -> FloatArray:
-    block = np.zeros((6, 6))
-    block[:3, :3] = rotation
-    block[3:, 3:] = rotation
-    return block
+    return np.asarray(block_diag(rotation, rotation), dtype=np.float64)
 
 
 def rtn_to_inertial_covariance(
@@ -131,8 +129,9 @@ def to_gcrf(state: StateVector) -> StateVector:
         GCRS(obstime=state.epoch)
     )
     cartesian = gcrs.cartesian
-    r = np.asarray(cartesian.xyz.to_value(u.m), dtype=np.float64)
-    v = np.asarray(
-        cartesian.differentials["s"].d_xyz.to_value(u.m / u.s), dtype=np.float64
+    return StateVector(
+        state.epoch,
+        cartesian.xyz.to_value(u.m),
+        cartesian.differentials["s"].d_xyz.to_value(u.m / u.s),
+        "GCRF",
     )
-    return StateVector(state.epoch, r, v, "GCRF")

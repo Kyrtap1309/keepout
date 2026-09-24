@@ -6,6 +6,7 @@ from astropy.time import Time
 from hypothesis import assume
 from hypothesis import strategies as st
 from hypothesis.extra.numpy import arrays
+from scipy.spatial.transform import Rotation
 
 from keepout._types import FloatArray, StateVector
 from keepout.covariance import Covariance
@@ -37,16 +38,9 @@ def object_state(
 def rotations(draw: st.DrawFn) -> FloatArray:
     """Uniform-ish proper rotation matrices from random quaternions."""
     quaternion = draw(arrays(np.float64, (4,), elements=st.floats(-1.0, 1.0)))
-    norm = float(np.linalg.norm(quaternion))
-    assume(norm > 0.1)
-    w, x, y, z = quaternion / norm
-    return np.array(
-        [
-            [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
-            [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
-            [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
-        ]
-    )
+    assume(float(np.linalg.norm(quaternion)) > 0.1)
+    matrix: FloatArray = Rotation.from_quat(quaternion, scalar_first=True).as_matrix()
+    return matrix
 
 
 @st.composite

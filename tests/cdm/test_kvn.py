@@ -2,7 +2,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from cdm_builders import assert_equivalent, cdms
+from cdm_builders import DATA, assert_equivalent, cdms
 from hypothesis import given, settings
 
 from keepout.cdm import Cdm, kvn
@@ -10,7 +10,6 @@ from keepout.cdm.keywords import format_epoch
 from keepout.encounter import encounter_plane
 from keepout.errors import CdmParseError, CovarianceError
 
-DATA = Path(__file__).parent / "data"
 B1 = DATA / "b1_example.kvn"
 TRACSS = DATA / "tracss_v2.kvn"
 EARTH_ROTATION_RATE = 7.292115146706979e-5  # rad/s
