@@ -1,0 +1,78 @@
+# Frames, units and CDM support
+
+## Units
+
+Every keepout type uses SI units: metres, metres per second, seconds and
+kilograms. CDM files give the state vector in km and km/s and OD spans in
+days; the readers convert on input and the writers convert back on output.
+
+## Reference frames
+
+| CDM `REF_FRAME` | Treatment in keepout |
+|-----------------|----------------------|
+| `GCRF` | used as is |
+| `EME2000` | treated as GCRF. The two differ by the ~20 mas frame bias (≈0.7 m at 7000 km); a rotation common to both objects does not change Pc. |
+| `ITRF` | converted to GCRF with astropy (ITRS → GCRS), including the Earth-rotation term ω × r of the velocity |
+
+Any other frame is rejected with `GeometryError`.
+
+### Earth-orientation (IERS) data
+
+The ITRF conversion needs Earth-orientation parameters. keepout never changes
+astropy's configuration: by default astropy downloads IERS-A predictions when
+it needs them and otherwise falls back to its bundled tables with a warning.
+For Pc this does not matter — UT1 and polar-motion errors rotate both objects
+together, and the ω × r term does not depend on them. Absolute positions
+(used for screening from milestone M5) do depend on them.
+
+## RTN frame
+
+RTN is built from an object's inertial (GCRF) state:
+R = r/|r|, N = (r × v)/|r × v|, T = N × R.
+
+CDM covariances are given in each object's RTN frame. For ITRF messages keepout
+builds RTN from the state **after** conversion to GCRF (assumption: the
+originator's RTN is inertial). The 6×6 covariance is rotated with the same
+matrix for position and velocity; the rotation rate of the RTN frame is
+neglected, which affects only velocity terms and not Pc.
+
+## Encounter plane
+
+For relative position r = r₂ − r₁ and relative velocity v = v₂ − v₁ at TCA
+(Foster & Estes 1992; Chan 2008):
+
+- y = v/|v| is normal to the encounter plane;
+- x is the unit component of r perpendicular to v;
+- z = x × y.
+
+The plane is spanned by (x, z); the miss vector is (|r⊥|, 0) and the combined
+position covariance C₁ + C₂ is projected onto it. When r is parallel to v, x is
+any unit vector perpendicular to v — Pc does not depend on that choice.
+
+## Covariance validation and repair
+
+A `Covariance` must be symmetric (to 1e-9 of its largest entry) and positive
+semi-definite (no eigenvalue below −1e-10 of its largest entry). Operational
+CDMs often violate this, so `CdmObject.covariance()` and `Cdm.object_states()`
+default to `policy="repair"`: the matrix is symmetrised and negative
+eigenvalues are clipped to zero, and each change is returned as a diagnostic.
+`policy="raise"` raises `CovarianceError` instead.
+
+## CDM versions
+
+- **CCSDS 508.0-B-1** (June 2013, including Technical Corrigendum 2, which
+  allows namespace-qualified `ndm:` XML) — every keyword typed.
+- **CDM 2.0 as issued by TraCSS** (based on the 508.0-P-1.1 draft) — read and
+  written; keywords beyond 508.0-B-1 are preserved as text, except `HBR`,
+  which is typed.
+- JSON and CSV variants are not supported yet (planned with the Space-Track
+  client).
+
+## References
+
+- CCSDS 508.0-B-1, *Conjunction Data Message*, Blue Book, 2013 (Cor. 2, 2021).
+- Office of Space Commerce, *TraCSS CDM Specification 001*, v2.1.
+- J. L. Foster and H. S. Estes, *A Parametric Analysis of Orbital Debris
+  Collision Probability and Maneuver Rate for Space Vehicles*, NASA JSC-25898,
+  1992.
+- F. K. Chan, *Spacecraft Collision Probability*, The Aerospace Press, 2008.

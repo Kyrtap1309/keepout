@@ -38,6 +38,12 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - Frames, units and CDM support: frames-and-units.md
   - Reference:
+      - CDM: reference/cdm.md
+      - Covariance: reference/covariance.md
+      - Encounter plane: reference/encounter.md
+      - Frames: reference/frames.md
+      - Objects and state vectors: reference/objects.md
       - CARA reference data: reference/cara.md
       - Errors: reference/errors.md

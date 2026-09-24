@@ -4,7 +4,19 @@ Spacecraft conjunction assessment in Python: CCSDS CDM ingest, probability of
 collision (Pc), risk trends and collision-avoidance manoeuvre planning.
 
 !!! warning "Pre-alpha"
-    Milestone M0 — project skeleton. APIs will change.
+    Milestone M1 — CDM + covariance. APIs will change.
+
+## Reading a CDM
+
+```python
+import keepout.cdm
+from keepout.encounter import encounter_plane
+
+cdm = keepout.cdm.load("event.cdm")  # KVN or XML, CDM 1.0 or 2.0
+primary, secondary, diagnostics = cdm.object_states()  # GCRF, SI units
+plane = encounter_plane(primary, secondary)
+print(plane.miss_distance, plane.covariance, diagnostics)
+```
 
 ## Validation philosophy
 
