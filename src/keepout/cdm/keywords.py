@@ -85,8 +85,9 @@ _COVARIANCE_UNITS = {
 }
 
 
-def covariance_names(dimension: int) -> tuple[str, ...]:
-    """Lower-triangle covariance keywords of the leading block, row by row.
+def covariance_entries(dimension: int) -> tuple[tuple[str, int, int], ...]:
+    """Lower-triangle covariance keywords of the leading block with their
+    (row, column), row by row.
 
     Parameters
     ----------
@@ -95,11 +96,22 @@ def covariance_names(dimension: int) -> tuple[str, ...]:
     """
     if not 1 <= dimension <= len(COVARIANCE_AXES):
         raise ValueError(f"covariance dimension must be 1..9, got {dimension}")
+    rows, columns = np.tril_indices(dimension)
     return tuple(
-        f"C{COVARIANCE_AXES[row]}_{COVARIANCE_AXES[column]}"
-        for row in range(dimension)
-        for column in range(row + 1)
+        (f"C{COVARIANCE_AXES[row]}_{COVARIANCE_AXES[column]}", int(row), int(column))
+        for row, column in zip(rows, columns, strict=True)
     )
+
+
+def covariance_names(dimension: int) -> tuple[str, ...]:
+    """Lower-triangle covariance keywords of the leading block, row by row.
+
+    Parameters
+    ----------
+    dimension
+        Block size, 1 to 9.
+    """
+    return tuple(name for name, _, _ in covariance_entries(dimension))
 
 
 _COVARIANCE_GROUP = ("data", "covarianceMatrix")
@@ -110,11 +122,7 @@ _COVARIANCE = [
         _COVARIANCE_UNITS[(_AXIS_CLASS[row], _AXIS_CLASS[column])],
         group=_COVARIANCE_GROUP,
     )
-    for name, row, column in zip(
-        covariance_names(len(COVARIANCE_AXES)),
-        *np.tril_indices(len(COVARIANCE_AXES)),
-        strict=True,
-    )
+    for name, row, column in covariance_entries(len(COVARIANCE_AXES))
 ]
 
 _RELATIVE_STATE = ("relativeStateVector",)
@@ -211,6 +219,8 @@ REQUIRED: dict[SectionKind, tuple[str, ...]] = {
 }
 
 _UNITLESS = {"", "n/a"}
+_INTEGER = re.compile(r"^[+-]?[0-9]+$")
+_REAL = re.compile(r"^[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$")
 _CALENDAR = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.(\d+))?Z?$")
 _ORDINAL = re.compile(r"^(\d{4})-(\d{3})T(\d{2}:\d{2}:\d{2}(?:\.(\d+))?)Z?$")
 
@@ -302,17 +312,16 @@ def parse_value(keyword: Keyword, text: str, unit: str | None) -> FieldValue:
         raise ValueError("empty value")
     if keyword.kind == "time":
         return parse_epoch(text)
+    # CCSDS numbers only: Python's int()/float() also take "1_0", "inf", ...
     if keyword.kind == "int":
-        try:
-            return int(text)
-        except ValueError:
-            raise ValueError(f"invalid integer {text!r}") from None
-    try:
-        number = float(text)
-    except ValueError:
-        raise ValueError(f"invalid number {text!r}") from None
+        if not _INTEGER.match(text):
+            raise ValueError(f"invalid integer {text!r}")
+        return int(text)
+    if not _REAL.match(text):
+        raise ValueError(f"invalid number {text!r}")
+    number = float(text)
     if not math.isfinite(number):
-        raise ValueError(f"non-finite number {text!r}")
+        raise ValueError(f"number out of range {text!r}")
     return number * keyword.scale
 
 

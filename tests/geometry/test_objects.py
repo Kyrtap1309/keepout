@@ -1,7 +1,7 @@
 import astropy.units as u
 import numpy as np
 import pytest
-from geometry_builders import EPOCH, object_state
+from builders import EPOCH, object_state
 
 from keepout._types import StateVector
 from keepout.covariance import Covariance

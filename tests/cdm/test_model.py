@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
+from builders import DIAGONAL_COVARIANCE
 from cdm_builders import (
-    DIAGONAL,
     TCA,
     minimal_cdm,
     replace,
@@ -10,7 +10,7 @@ from cdm_builders import (
 )
 
 from keepout.cdm.keywords import covariance_names
-from keepout.cdm.model import Field, Section
+from keepout.cdm.model import DuplicateKeyword, Field, Section
 from keepout.encounter import encounter_plane
 from keepout.errors import CovarianceError, GeometryError
 
@@ -33,7 +33,7 @@ def test_typed_accessors() -> None:
     assert first.user_defined == {}
     np.testing.assert_array_equal(first.position, [7000e3, 0.0, 0.0])
     np.testing.assert_array_equal(first.velocity, [0.0, 7500.0, 0.0])
-    np.testing.assert_array_equal(first.covariance_rtn, np.diag(DIAGONAL))
+    np.testing.assert_array_equal(first.covariance_rtn, DIAGONAL_COVARIANCE)
     assert cdm.object2.designator == "10002"
 
 
@@ -43,8 +43,21 @@ def test_section_rejects_repeated_keywords() -> None:
         Field("MISS_DISTANCE", 1.0),
         Field("MISS_DISTANCE", 2.0),
     )
-    with pytest.raises(ValueError, match="repeats keyword MISS_DISTANCE"):
+    with pytest.raises(DuplicateKeyword, match="repeats keyword MISS_DISTANCE") as info:
         Section("relative", fields)
+    assert (info.value.keyword, info.value.index) == ("MISS_DISTANCE", 2)
+
+
+def test_comments_may_repeat() -> None:
+    fields = (Field("COMMENT", "a"), Field("TCA", TCA), Field("COMMENT", "b"))
+    assert Section("relative", fields).comments == ("a", "b")
+
+
+@pytest.mark.parametrize("keyword", ["1ABC", "lower", "HAS SPACE", "", "X-Y"])
+def test_section_rejects_malformed_keywords(keyword: str) -> None:
+    # Every keyword must be writable as both KVN and an XML element name.
+    with pytest.raises(ValueError, match="must be upper-case letters"):
+        Section("relative", (Field(keyword, "1"),))
 
 
 def test_section_rejects_wrongly_typed_values() -> None:
@@ -122,30 +135,43 @@ def test_covariance_policies() -> None:
     cdm = minimal_cdm(segment1=replace(segment_fields(1), "CT_R", 1e6))
     with pytest.raises(CovarianceError):
         cdm.object1.covariance(policy="raise")
-    covariance, diagnostics = cdm.object1.covariance()
+    covariance = cdm.object1.covariance()
     assert covariance.frame == "RTN"
-    assert diagnostics[0].startswith("clipped 1 negative eigenvalue")
+    assert covariance.repairs[0].startswith("clipped 1 negative eigenvalue")
 
 
 def test_object_states() -> None:
-    primary, secondary, diagnostics = minimal_cdm().object_states()
-    assert diagnostics == ()
+    primary, secondary = minimal_cdm().object_states()
+    assert primary.covariance.repairs == secondary.covariance.repairs == ()
     assert primary.object_id == "10001"
     assert primary.state.frame == "GCRF"
     assert primary.covariance.frame == "GCRF"
     np.testing.assert_allclose(
-        primary.covariance.in_rtn(primary.state).matrix, np.diag(DIAGONAL), atol=1e-9
+        primary.covariance.in_rtn(primary.state).matrix, DIAGONAL_COVARIANCE, atol=1e-9
     )
     # r = (0, 0, 500), v = (0, -7500, 7500): half of r lies along v.
     plane = encounter_plane(primary, secondary)
     assert plane.miss_distance == pytest.approx(500.0 / np.sqrt(2.0), rel=1e-12)
 
 
-def test_object_state_diagnostics_are_labelled() -> None:
+def test_object_state_carries_its_covariance_repairs() -> None:
     cdm = minimal_cdm(segment1=replace(segment_fields(1), "CT_R", 1e6))
-    _, _, diagnostics = cdm.object_states()
-    assert len(diagnostics) == 1
-    assert diagnostics[0].startswith("OBJECT1: clipped 1 negative eigenvalue")
+    first, second = cdm.object_states()
+    (repair,) = first.covariance.repairs
+    assert repair.startswith("clipped 1 negative eigenvalue")
+    assert second.covariance.repairs == ()
+    assert cdm.object1.object_state().covariance.repairs == (repair,)
+
+
+def test_objects_in_different_frames_share_one_inertial_frame() -> None:
+    # The same physical state given in EME2000 and in GCRF: after conversion
+    # both objects coincide, so the frame bias is not mistaken for a miss.
+    first = minimal_cdm().object1.object_state()
+    gcrf = segment_fields(2, frame="GCRF")
+    for keyword, value in zip("XYZ", first.state.r, strict=True):
+        gcrf = replace(gcrf, keyword, float(value))
+    _, second = minimal_cdm(segment2=gcrf).object_states()
+    np.testing.assert_allclose(second.state.r, first.state.r, atol=1e-6)
 
 
 def test_hbr_and_user_defined() -> None:
@@ -158,5 +184,5 @@ def test_hbr_and_user_defined() -> None:
     cdm = minimal_cdm(segment1=fields)
     assert cdm.object1.hbr == 5.0
     assert cdm.object1.user_defined == {"USER_DEFINED_RUN_ID": "abc"}
-    primary, _, _ = cdm.object_states()
+    primary, _ = cdm.object_states()
     assert primary.hard_body_radius == 5.0

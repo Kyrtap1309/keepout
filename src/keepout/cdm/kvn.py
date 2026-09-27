@@ -5,11 +5,20 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from keepout.cdm._io import read_text, write_text
 from keepout.cdm.keywords import KEYWORDS, SectionKind
-from keepout.cdm.model import COMMENT, Cdm, Field, Section, format_field, parse_field
-from keepout.errors import CdmParseError
+from keepout.cdm.model import (
+    COMMENT,
+    Cdm,
+    DuplicateKeyword,
+    Field,
+    Section,
+    format_field,
+    parse_field,
+)
+from keepout.errors import CdmParseError, CdmWriteError
 
-_ASSIGNMENT = re.compile(r"^(?P<keyword>[A-Z0-9_]+)\s*=\s*(?P<value>.*)$")
+_ASSIGNMENT = re.compile(r"^(?P<keyword>[A-Z][A-Z0-9_]*)\s*=\s*(?P<value>.*)$")
 _UNIT = re.compile(r"^(?P<value>.*?)\s*\[(?P<unit>[^\[\]]*)\]$")
 _COMMENT = re.compile(r"^COMMENT(?:\s+(?P<text>.*))?$")
 _KEYWORD_WIDTH = 30
@@ -32,8 +41,31 @@ def _field(kind: SectionKind, keyword: str, text: str, line: int) -> Field:
         raise CdmParseError(str(exc), line=line, keyword=keyword) from exc
 
 
+def _opens(kinds: list[SectionKind], keyword: str) -> SectionKind | None:
+    """The section a keyword starts, if it starts one."""
+    if keyword == "OBJECT":
+        return "segment"
+    if kinds[-1] == "header" and keyword in KEYWORDS["relative"]:
+        return "relative"
+    return None
+
+
+def _section(kind: SectionKind, fields: list[Field], lines: list[int]) -> Section:
+    try:
+        return Section(kind, tuple(fields))
+    except DuplicateKeyword as exc:
+        raise CdmParseError(
+            "duplicate keyword", line=lines[exc.index], keyword=exc.keyword
+        ) from exc
+    except ValueError as exc:
+        raise CdmParseError(str(exc)) from exc
+
+
 def loads(text: str) -> Cdm:
     """Parse a CDM in KVN.
+
+    Comments go to the section of the keyword that follows them, so comments
+    just before ``TCA`` or ``OBJECT`` open the new section.
 
     Parameters
     ----------
@@ -47,12 +79,12 @@ def loads(text: str) -> Cdm:
     """
     kinds: list[SectionKind] = []
     sections: list[list[Field]] = []
-    seen: set[str] = set()
+    lines: list[list[int]] = []
+    pending: list[tuple[Field, int]] = []
 
-    def start(kind: SectionKind) -> None:
-        kinds.append(kind)
-        sections.append([])
-        seen.clear()
+    def append(field: Field, number: int) -> None:
+        sections[-1].append(field)
+        lines[-1].append(number)
 
     for number, raw in enumerate(text.splitlines(), start=1):
         line = raw.strip()
@@ -64,7 +96,9 @@ def loads(text: str) -> Cdm:
                 raise CdmParseError(
                     "CCSDS_CDM_VERS must be the first keyword", line=number
                 )
-            sections[-1].append(Field(COMMENT, (comment.group("text") or "").strip()))
+            pending.append(
+                (Field(COMMENT, (comment.group("text") or "").strip()), number)
+            )
             continue
         assignment = _ASSIGNMENT.match(line)
         if assignment is None:
@@ -72,7 +106,6 @@ def loads(text: str) -> Cdm:
                 f"expected 'KEYWORD = value', got {line!r}", line=number
             )
         keyword = assignment.group("keyword")
-        value = assignment.group("value").strip()
         if not sections:
             if keyword != "CCSDS_CDM_VERS":
                 raise CdmParseError(
@@ -80,8 +113,10 @@ def loads(text: str) -> Cdm:
                     line=number,
                     keyword=keyword,
                 )
-            start("header")
-        elif keyword == "OBJECT":
+            opened: SectionKind | None = "header"
+        else:
+            opened = _opens(kinds, keyword)
+        if opened == "segment":
             if kinds[-1] == "header":
                 raise CdmParseError(
                     "object section before relative metadata (TCA)",
@@ -92,27 +127,28 @@ def loads(text: str) -> Cdm:
                 raise CdmParseError(
                     "more than two object sections", line=number, keyword=keyword
                 )
-            start("segment")
-        elif kinds[-1] == "header" and keyword in KEYWORDS["relative"]:
-            start("relative")
-        if keyword in seen:
-            raise CdmParseError("duplicate keyword", line=number, keyword=keyword)
-        seen.add(keyword)
-        sections[-1].append(_field(kinds[-1], keyword, value, number))
+        if opened is not None:
+            kinds.append(opened)
+            sections.append([])
+            lines.append([])
+        for field, at in pending:
+            append(field, at)
+        pending.clear()
+        value = assignment.group("value").strip()
+        append(_field(kinds[-1], keyword, value, number), number)
+    for field, at in pending:
+        append(field, at)
     if kinds != _LAYOUT:
         raise CdmParseError(
             "a CDM needs a header, relative metadata (starting at TCA) and "
             "OBJECT1 and OBJECT2 sections"
         )
+    header, relative, first, second = (
+        _section(kind, fields, numbers)
+        for kind, fields, numbers in zip(kinds, sections, lines, strict=True)
+    )
     try:
-        return Cdm(
-            Section("header", tuple(sections[0])),
-            Section("relative", tuple(sections[1])),
-            (
-                Section("segment", tuple(sections[2])),
-                Section("segment", tuple(sections[3])),
-            ),
-        )
+        return Cdm(header, relative, (first, second))
     except ValueError as exc:
         raise CdmParseError(str(exc)) from exc
 
@@ -120,18 +156,33 @@ def loads(text: str) -> Cdm:
 def dumps(cdm: Cdm) -> str:
     """Write a CDM as KVN, with CCSDS units.
 
+    A multi-line comment is written as one ``COMMENT`` line per line.
+
     Parameters
     ----------
     cdm
         The message.
+
+    Raises
+    ------
+    CdmWriteError
+        If a value other than a comment contains a line break (KVN has no
+        escaping).
     """
     lines: list[str] = []
     for section in (cdm.header, cdm.relative, *cdm.segments):
         for field in section.fields:
             if field.keyword == COMMENT:
-                lines.append(f"COMMENT {field.value}".rstrip())
+                lines.extend(
+                    f"COMMENT {text}".rstrip()
+                    for text in str(field.value).splitlines() or [""]
+                )
                 continue
             text, unit = format_field(section.kind, field)
+            if len(text.splitlines()) > 1:
+                raise CdmWriteError(
+                    f"{field.keyword}: KVN cannot hold a multi-line value {text!r}"
+                )
             line = f"{field.keyword:<{_KEYWORD_WIDTH}} = {text}"
             lines.append(f"{line} [{unit}]" if unit is not None else line.rstrip())
     return "\n".join(lines) + "\n"
@@ -145,7 +196,7 @@ def load(path: str | Path) -> Cdm:
     path
         File to read.
     """
-    return loads(Path(path).read_text(encoding="utf-8-sig"))
+    return loads(read_text(path))
 
 
 def dump(cdm: Cdm, path: str | Path) -> None:
@@ -158,4 +209,4 @@ def dump(cdm: Cdm, path: str | Path) -> None:
     path
         File to write.
     """
-    Path(path).write_text(dumps(cdm), encoding="utf-8")
+    write_text(path, dumps(cdm))

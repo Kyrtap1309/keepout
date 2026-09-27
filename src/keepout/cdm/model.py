@@ -8,7 +8,9 @@ their raw text and unit.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
+from functools import cached_property
 
 import numpy as np
 from astropy.time import Time
@@ -20,19 +22,43 @@ from keepout.cdm.keywords import (
     FieldValue,
     SectionKind,
     ValueKind,
+    covariance_entries,
     covariance_names,
     format_value,
     parse_value,
 )
 from keepout.covariance import Covariance, Policy, make_covariance
 from keepout.errors import GeometryError
-from keepout.frames import to_gcrf
+from keepout.frames import to_gcrf, to_gcrf_all
 from keepout.objects import ObjectState
 
 COMMENT = "COMMENT"
 USER_DEFINED_PREFIX = "USER_DEFINED_"
 
+KEYWORD_PATTERN = re.compile(r"[A-Z][A-Z0-9_]*")
+"""What a keyword may look like: valid in KVN and as an XML element name."""
+
 _COVARIANCE_NAMES = {size: frozenset(covariance_names(size)) for size in range(6, 10)}
+
+
+class DuplicateKeyword(ValueError):
+    """A section repeats a keyword.
+
+    Parameters
+    ----------
+    kind
+        Section kind.
+    keyword
+        The repeated keyword.
+    index
+        Position of the repeat in the section's fields, so that readers can
+        report where it is in the message.
+    """
+
+    def __init__(self, kind: SectionKind, keyword: str, index: int) -> None:
+        super().__init__(f"{kind} section repeats keyword {keyword}")
+        self.keyword = keyword
+        self.index = index
 
 
 @dataclass(frozen=True)
@@ -118,8 +144,10 @@ class Section:
 
     Raises
     ------
+    DuplicateKeyword
+        If a keyword is repeated.
     ValueError
-        For an unknown kind, a repeated keyword, a value of the wrong type or
+        For an unknown kind, a malformed keyword, a value of the wrong type or
         a unit on a known keyword.
     """
 
@@ -131,12 +159,15 @@ class Section:
             raise ValueError(f"unknown section kind {self.kind!r}")
         table = KEYWORDS[self.kind]
         seen: set[str] = set()
-        for field in self.fields:
+        for index, field in enumerate(self.fields):
+            if not KEYWORD_PATTERN.fullmatch(field.keyword):
+                raise ValueError(
+                    f"keyword {field.keyword!r} must be upper-case letters, digits "
+                    "and underscores, starting with a letter"
+                )
             if field.keyword != COMMENT:
                 if field.keyword in seen:
-                    raise ValueError(
-                        f"{self.kind} section repeats keyword {field.keyword}"
-                    )
+                    raise DuplicateKeyword(self.kind, field.keyword, index)
                 seen.add(field.keyword)
             spec = table.get(field.keyword)
             kind: ValueKind = "str" if spec is None else spec.kind
@@ -150,18 +181,19 @@ class Section:
                     "store the SI value with unit=None"
                 )
 
+    @cached_property
+    def _values(self) -> dict[str, FieldValue]:
+        return {f.keyword: f.value for f in self.fields if f.keyword != COMMENT}
+
     def get(self, keyword: str) -> FieldValue | None:
-        """Value of the first field with this keyword, or None.
+        """Value of the field with this keyword, or None.
 
         Parameters
         ----------
         keyword
-            Keyword to look up.
+            Keyword to look up (not ``COMMENT``; see :attr:`comments`).
         """
-        for field in self.fields:
-            if field.keyword == keyword:
-                return field.value
-        return None
+        return self._values.get(keyword)
 
     @property
     def comments(self) -> tuple[str, ...]:
@@ -286,30 +318,26 @@ class CdmObject:
             if keyword.startswith(USER_DEFINED_PREFIX)
         }
 
+    def _vector(self, keywords: tuple[str, str, str]) -> FloatArray:
+        return np.array([_number(self.section, k) for k in keywords])
+
     @property
     def position(self) -> FloatArray:
         """Position in ``ref_frame`` [m]."""
-        return np.array(
-            [_number(self.section, k) for k in ("X", "Y", "Z")], dtype=np.float64
-        )
+        return self._vector(("X", "Y", "Z"))
 
     @property
     def velocity(self) -> FloatArray:
         """Velocity in ``ref_frame`` [m/s]."""
-        return np.array(
-            [_number(self.section, k) for k in ("X_DOT", "Y_DOT", "Z_DOT")],
-            dtype=np.float64,
-        )
+        return self._vector(("X_DOT", "Y_DOT", "Z_DOT"))
 
     @property
     def covariance_rtn(self) -> FloatArray:
         """Full symmetric RTN covariance as given (6x6 to 9x9), unvalidated."""
         dimension = covariance_dimension(self.section)
-        rows, columns = np.tril_indices(dimension)
-        values = [_number(self.section, name) for name in covariance_names(dimension)]
         matrix = np.zeros((dimension, dimension))
-        matrix[rows, columns] = values
-        matrix[columns, rows] = values
+        for name, row, column in covariance_entries(dimension):
+            matrix[row, column] = matrix[column, row] = _number(self.section, name)
         return matrix
 
     def state(self) -> StateVector:
@@ -328,10 +356,8 @@ class CdmObject:
             )
         return StateVector(self.tca, self.position, self.velocity, frame)
 
-    def covariance(
-        self, *, policy: Policy = "repair"
-    ) -> tuple[Covariance, tuple[str, ...]]:
-        """Validated 6x6 RTN covariance at TCA.
+    def covariance(self, *, policy: Policy = "repair") -> Covariance:
+        """Validated 6x6 RTN covariance at TCA; repairs are in its ``repairs``.
 
         Parameters
         ----------
@@ -343,9 +369,7 @@ class CdmObject:
             self.covariance_rtn[:6, :6], "RTN", self.tca, policy=policy
         )
 
-    def object_state(
-        self, *, policy: Policy = "repair"
-    ) -> tuple[ObjectState, tuple[str, ...]]:
+    def object_state(self, *, policy: Policy = "repair") -> ObjectState:
         """GCRF object state with covariance; RTN axes from the GCRF state.
 
         Parameters
@@ -353,12 +377,11 @@ class CdmObject:
         policy
             Covariance policy, as in :meth:`covariance`.
         """
-        state = to_gcrf(self.state())
-        covariance, diagnostics = self.covariance(policy=policy)
-        return (
-            ObjectState(self.designator, state, covariance.in_gcrf(state), self.hbr),
-            diagnostics,
-        )
+        return self._at(to_gcrf(self.state()), policy)
+
+    def _at(self, state: StateVector, policy: Policy) -> ObjectState:
+        covariance = self.covariance(policy=policy).in_gcrf(state)
+        return ObjectState(self.designator, state, covariance, self.hbr)
 
 
 @dataclass(frozen=True)
@@ -465,17 +488,14 @@ class Cdm:
 
     def object_states(
         self, *, policy: Policy = "repair"
-    ) -> tuple[ObjectState, ObjectState, tuple[str, ...]]:
-        """Both objects in GCRF, with diagnostics labelled by object.
+    ) -> tuple[ObjectState, ObjectState]:
+        """Both objects in GCRF (covariance repairs in ``covariance.repairs``).
 
         Parameters
         ----------
         policy
             Covariance policy; see :func:`keepout.covariance.make_covariance`.
         """
-        first, first_diagnostics = self.object1.object_state(policy=policy)
-        second, second_diagnostics = self.object2.object_state(policy=policy)
-        diagnostics = tuple(f"OBJECT1: {d}" for d in first_diagnostics) + tuple(
-            f"OBJECT2: {d}" for d in second_diagnostics
-        )
-        return first, second, diagnostics
+        objects = (self.object1, self.object2)
+        first, second = to_gcrf_all([item.state() for item in objects])
+        return objects[0]._at(first, policy), objects[1]._at(second, policy)

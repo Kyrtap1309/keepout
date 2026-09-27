@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from geometry_builders import EPOCH
+from builders import EPOCH
 
 from keepout._types import StateVector
 

@@ -2,7 +2,7 @@
 
 import math
 
-from scipy import integrate, special
+from scipy import integrate, special, stats
 
 
 def isotropic_pc(miss: float, sigma: float, radius: float) -> float:
@@ -30,7 +30,6 @@ def principal_axes_pc(
     breakpoints where the chord mass steps (``h(u) = |mv|``), using
     ``scipy.stats.norm`` rather than keepout's erf/erfc helpers.
     """
-    from scipy import stats
 
     def integrand(u: float) -> float:
         half_chord = math.sqrt(max(radius * radius - u * u, 0.0))

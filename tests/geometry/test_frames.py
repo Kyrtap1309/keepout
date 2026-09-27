@@ -1,6 +1,8 @@
+import astropy.units as u
 import numpy as np
 import pytest
-from geometry_builders import EPOCH
+from astropy.time import Time
+from builders import EARTH_ROTATION_RATE, EPOCH, LEO_R, LEO_V
 from hypothesis import assume, given
 from hypothesis import strategies as st
 from hypothesis.extra.numpy import arrays
@@ -8,13 +10,15 @@ from hypothesis.extra.numpy import arrays
 from keepout._types import FloatArray, StateVector
 from keepout.errors import GeometryError
 from keepout.frames import (
+    FRAME_BIAS,
     inertial_to_rtn_covariance,
     rtn_rotation,
     rtn_to_inertial_covariance,
     to_gcrf,
+    to_gcrf_all,
 )
 
-EARTH_ROTATION_RATE = 7.292115146706979e-5  # rad/s (IERS conventions)
+MAS = np.pi / (180.0 * 3600.0 * 1000.0)
 
 vectors = arrays(np.float64, (3,), elements=st.floats(min_value=-1e7, max_value=1e7))
 square_roots = arrays(
@@ -30,7 +34,7 @@ def well_posed(r: FloatArray, v: FloatArray) -> bool:
 
 
 def test_rtn_of_circular_equatorial_orbit_is_identity() -> None:
-    rotation = rtn_rotation([7000e3, 0.0, 0.0], [0.0, 7500.0, 0.0])
+    rotation = rtn_rotation(LEO_R, LEO_V)
     np.testing.assert_allclose(rotation, np.eye(3), atol=1e-15)
 
 
@@ -76,17 +80,73 @@ def test_covariance_rtn_round_trip(
 
 
 def test_gcrf_state_is_returned_unchanged() -> None:
-    state = StateVector(EPOCH, [7000e3, 0.0, 0.0], [0.0, 7500.0, 0.0], "GCRF")
+    state = StateVector(EPOCH, LEO_R, LEO_V, "GCRF")
     assert to_gcrf(state) is state
 
 
-def test_eme2000_is_relabelled_as_gcrf() -> None:
+def test_frame_bias_is_the_iau_2006_rotation() -> None:
+    # IERS Conventions 2010, sec. 5.5.4: B = R1(-eta0) R2(xi0) R3(d_alpha0)
+    # with d_alpha0 = -14.6 mas, xi0 = -16.617 mas, eta0 = -6.819 mas. To
+    # first order B[2, 1] = eta0, B[0, 2] = -xi0, B[1, 0] = -d_alpha0.
+    np.testing.assert_allclose(FRAME_BIAS @ FRAME_BIAS.T, np.eye(3), atol=1e-15)
+    skew = FRAME_BIAS - np.eye(3)
+    np.testing.assert_allclose(
+        [skew[2, 1], skew[0, 2], skew[1, 0]],
+        np.array([-6.819, 16.617, 14.6]) * MAS,
+        atol=0.01 * MAS,
+    )
+
+
+def test_eme2000_is_rotated_by_the_frame_bias() -> None:
     state = StateVector(EPOCH, [7000e3, 1.0, 2.0], [3.0, 7500.0, 4.0], "EME2000")
     converted = to_gcrf(state)
     assert converted.frame == "GCRF"
     assert converted.epoch is state.epoch
-    np.testing.assert_array_equal(converted.r, state.r)
-    np.testing.assert_array_equal(converted.v, state.v)
+    np.testing.assert_allclose(FRAME_BIAS @ converted.r, state.r, atol=1e-8)
+    np.testing.assert_allclose(FRAME_BIAS @ converted.v, state.v, atol=1e-11)
+    # Along x only the y and z rotations (xi0, d_alpha0) move the vector:
+    # 22 mas, i.e. 0.75 m at 7000 km -- enough to matter against a hard body.
+    shift = float(np.linalg.norm(converted.r - state.r))
+    assert shift == pytest.approx(np.hypot(16.617, 14.6) * MAS * 7000e3, rel=1e-3)
+
+
+def test_itrf_matches_vallado_example_3_15() -> None:
+    # Vallado, Fundamentals of Astrodynamics and Applications (4th ed.),
+    # Example 3-15. Residuals of ~0.25 m and ~0.5 mm/s come from astropy's
+    # bundled Earth-orientation data differing from the book's.
+    epoch = Time("2004-04-06T07:51:28.386009", scale="utc")
+    itrf = StateVector(
+        epoch,
+        np.array([-1033.4793830, 7901.2952754, 6380.3565958]) * 1e3,
+        np.array([-3.225636520, -2.872451450, 5.531924446]) * 1e3,
+        "ITRF",
+    )
+    gcrf = to_gcrf(itrf)
+    np.testing.assert_allclose(
+        gcrf.r, np.array([5102.508958, 6123.011401, 6378.136928]) * 1e3, atol=1.0
+    )
+    np.testing.assert_allclose(
+        gcrf.v,
+        np.array([-4.743220157, 0.790536497, 5.533755272]) * 1e3,
+        atol=2e-3,
+    )
+
+
+def test_batched_conversion_matches_one_at_a_time() -> None:
+    states = [
+        StateVector(EPOCH, [6778137.0, 0.0, 0.0], [0.0, 5900.0, 4400.0], "ITRF"),
+        StateVector(EPOCH, LEO_R, LEO_V, "GCRF"),
+        StateVector(EPOCH, [7000e3, 1.0, 2.0], [3.0, 7500.0, 4.0], "EME2000"),
+        StateVector(EPOCH + 60 * u.s, [0.0, 7e6, 1e5], [-7e3, 0.0, 1e3], "ITRF"),
+    ]
+    batched = to_gcrf_all(states)
+    assert batched[1] is states[1]
+    for state, together in zip(states, batched, strict=True):
+        alone = to_gcrf(state)
+        assert together.frame == "GCRF"
+        assert together.epoch is state.epoch
+        np.testing.assert_allclose(together.r, alone.r, rtol=0, atol=1e-6)
+        np.testing.assert_allclose(together.v, alone.v, rtol=0, atol=1e-9)
 
 
 def test_itrf_point_fixed_on_the_equator_moves_with_earth_rotation() -> None:

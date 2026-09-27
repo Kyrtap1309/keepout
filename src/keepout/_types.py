@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Literal, TypeAlias, get_args
 
@@ -40,6 +41,12 @@ def as_vector(value: npt.ArrayLike, name: str) -> FloatArray:
         raise ValueError(f"{name} must be finite")
     array.flags.writeable = False
     return array
+
+
+def require_positive(value: float, name: str) -> None:
+    """Raise ``ValueError`` unless ``value`` is finite and positive."""
+    if not (math.isfinite(value) and value > 0.0):
+        raise ValueError(f"{name} must be finite and > 0, got {value}")
 
 
 @dataclass(frozen=True, eq=False, init=False)

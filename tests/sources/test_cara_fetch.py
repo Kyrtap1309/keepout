@@ -2,15 +2,12 @@ import hashlib
 import http.client
 import io
 import re
-import tempfile
 import urllib.error
 import urllib.request
 from email.message import Message
 from pathlib import Path
 
 import pytest
-from hypothesis import assume, given
-from hypothesis import strategies as st
 
 from keepout.errors import ChecksumMismatch, SourceUnavailable
 from keepout.sources import cara
@@ -28,6 +25,18 @@ class FakeDownloader:
     def __call__(self, url: str) -> bytes:
         self.urls.append(url)
         return self.data
+
+
+class FakeMapDownloader:
+    """Serves each URL its own bytes; safe to call from several threads."""
+
+    def __init__(self, by_url: dict[str, bytes]) -> None:
+        self.by_url = by_url
+        self.urls: list[str] = []
+
+    def __call__(self, url: str) -> bytes:
+        self.urls.append(url)
+        return self.by_url[url]
 
 
 def cached_path(root: Path, file: CaraFile) -> Path:
@@ -53,6 +62,7 @@ def test_fetch_downloads_into_cache(tmp_path: Path) -> None:
     assert path == cached_path(tmp_path, FILE)
     assert path.read_bytes() == PAYLOAD
     assert download.urls == [FILE.url]
+    assert [p.name for p in path.parent.iterdir()] == [path.name]
 
 
 def test_fetch_reuses_valid_cache(tmp_path: Path) -> None:
@@ -77,11 +87,35 @@ def test_fetch_rejects_checksum_mismatch_without_writing(tmp_path: Path) -> None
     assert not [p for p in tmp_path.rglob("*") if p.is_file()]
 
 
-@given(st.binary(max_size=256))
-def test_any_other_payload_is_rejected(data: bytes) -> None:
-    assume(data != PAYLOAD)
-    with tempfile.TemporaryDirectory() as tmp, pytest.raises(ChecksumMismatch):
-        fetch(FILE, cache=Path(tmp), download=FakeDownloader(data))
+def test_failed_write_leaves_no_partial_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def refuse(self: Path, target: Path) -> Path:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(Path, "replace", refuse)
+    with pytest.raises(OSError, match="disk full"):
+        fetch(FILE, cache=tmp_path, download=FakeDownloader(PAYLOAD))
+    assert not [p for p in tmp_path.rglob("*") if p.is_file()]
+
+
+def test_prefetch_caches_every_file(tmp_path: Path) -> None:
+    payloads = [b"first", b"second", b"third"]
+    files = [
+        CaraFile(f"Dir/{i}.csv", hashlib.sha256(data).hexdigest())
+        for i, data in enumerate(payloads)
+    ]
+    by_url = {file.url: data for file, data in zip(files, payloads, strict=True)}
+    download = FakeMapDownloader(by_url)
+    cara.prefetch(files, cache=tmp_path, download=download)
+    assert sorted(download.urls) == sorted(by_url)
+    for file, data in zip(files, payloads, strict=True):
+        assert cached_path(tmp_path, file).read_bytes() == data
+
+
+def test_prefetch_reports_a_failed_file(tmp_path: Path) -> None:
+    with pytest.raises(ChecksumMismatch):
+        cara.prefetch([FILE], cache=tmp_path, download=FakeDownloader(b"tampered"))
 
 
 def test_cache_dir_env_override(

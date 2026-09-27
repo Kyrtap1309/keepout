@@ -3,18 +3,26 @@
 import string
 from pathlib import Path
 
-import numpy as np
 import pytest
 from astropy.time import Time
+from builders import DIAGONAL_COVARIANCE, EPOCH
 from hypothesis import strategies as st
 
-from keepout.cdm.keywords import covariance_names, parse_epoch
+from keepout.cdm.keywords import (
+    REQUIRED,
+    SEGMENT,
+    covariance_entries,
+    covariance_names,
+    parse_epoch,
+)
 from keepout.cdm.model import Cdm, Field, Section
 
 DATA = Path(__file__).parent / "data"
-TCA = parse_epoch("2010-03-13T22:37:52.618")
+B1_KVN = DATA / "b1_example.kvn"
+B1_XML = DATA / "b1_example.xml"
+TRACSS = DATA / "tracss_v2.kvn"
+TCA = EPOCH
 CREATED = parse_epoch("2010-03-12T22:31:12.000")
-DIAGONAL = (100.0, 400.0, 25.0, 1e-2, 4e-2, 1e-2)
 POSITIONS = {1: (7000e3, 0.0, 0.0), 2: (7000e3, 0.0, 500.0)}
 VELOCITIES = {1: (0.0, 7500.0, 0.0), 2: (0.0, 0.0, 7500.0)}
 
@@ -35,11 +43,9 @@ def segment_fields(index: int, frame: str = "EME2000") -> list[Field]:
     values = (*POSITIONS[index], *VELOCITIES[index])
     names = ("X", "Y", "Z", "X_DOT", "Y_DOT", "Z_DOT")
     fields += [Field(name, value) for name, value in zip(names, values, strict=True)]
-    covariance = np.diag(DIAGONAL)
-    rows, columns = np.tril_indices(6)
     fields += [
-        Field(name, float(covariance[row, column]))
-        for name, row, column in zip(covariance_names(6), rows, columns, strict=True)
+        Field(name, float(DIAGONAL_COVARIANCE[row, column]))
+        for name, row, column in covariance_entries(6)
     ]
     return fields
 
@@ -141,18 +147,18 @@ def extras(prefix: str) -> st.SearchStrategy[list[Field]]:
     )
 
 
+_REQUIRED_TEXT = tuple(
+    name
+    for name in REQUIRED["segment"]
+    if SEGMENT[name].kind == "str" and name not in ("OBJECT", "REF_FRAME")
+)
+
+
 @st.composite
 def segments(draw: st.DrawFn, index: int) -> Section:
-    fields = [Field("OBJECT", f"OBJECT{index}"), *draw(comments())]
-    for name in (
-        "OBJECT_DESIGNATOR",
-        "CATALOG_NAME",
-        "OBJECT_NAME",
-        "INTERNATIONAL_DESIGNATOR",
-        "EPHEMERIS_NAME",
-        "COVARIANCE_METHOD",
-        "MANEUVERABLE",
-    ):
+    # Comments open the section, where both KVN and NDM/XML put them.
+    fields = [*draw(comments()), Field("OBJECT", f"OBJECT{index}")]
+    for name in _REQUIRED_TEXT:
         fields.append(Field(name, draw(words)))
     fields.append(
         Field("REF_FRAME", draw(st.sampled_from(["EME2000", "GCRF", "ITRF"])))
@@ -187,8 +193,8 @@ def cdms(draw: st.DrawFn) -> Cdm:
         ),
     )
     relative_fields = [
-        Field("TCA", draw(epochs())),
         *draw(comments()),
+        Field("TCA", draw(epochs())),
         Field("MISS_DISTANCE", draw(reals)),
     ]
     if draw(st.booleans()):

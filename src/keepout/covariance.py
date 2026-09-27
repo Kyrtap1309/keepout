@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, TypeAlias, get_args
 
 import numpy as np
@@ -16,8 +16,12 @@ from keepout.frames import inertial_to_rtn_covariance, rtn_to_inertial_covarianc
 CovarianceFrame: TypeAlias = Literal["RTN", "GCRF"]
 """Frames a :class:`Covariance` can be expressed in."""
 
+COVARIANCE_FRAMES: tuple[CovarianceFrame, ...] = get_args(CovarianceFrame)
+
 Policy: TypeAlias = Literal["raise", "repair"]
 """What to do with an invalid covariance: raise, or repair with a diagnostic."""
+
+POLICIES: tuple[Policy, ...] = get_args(Policy)
 
 SYMMETRY_RTOL = 1e-9
 """Allowed asymmetry, relative to the largest absolute entry."""
@@ -35,12 +39,24 @@ def _as_matrix(matrix: npt.ArrayLike) -> FloatArray:
     return array
 
 
-def _scale(matrix: FloatArray) -> float:
-    return float(np.max(np.abs(matrix)))
+def _inspect(array: FloatArray) -> tuple[float, float, FloatArray, FloatArray]:
+    """Scale, asymmetry, and eigen-decomposition of the symmetric part."""
+    scale = float(np.max(np.abs(array)))
+    asymmetry = float(np.max(np.abs(array - array.T)))
+    eigenvalues, eigenvectors = np.linalg.eigh(0.5 * (array + array.T))
+    return scale, asymmetry, eigenvalues, eigenvectors
 
 
-def _asymmetry(matrix: FloatArray) -> float:
-    return float(np.max(np.abs(matrix - matrix.T)))
+def _problems(array: FloatArray) -> tuple[str, ...]:
+    scale, asymmetry, eigenvalues, _ = _inspect(array)
+    found: list[str] = []
+    if asymmetry > SYMMETRY_RTOL * scale:
+        found.append(f"not symmetric (max asymmetry {asymmetry:.3g})")
+    if eigenvalues[0] < -PSD_RTOL * scale:
+        found.append(
+            f"not positive semi-definite (min eigenvalue {eigenvalues[0]:.3g})"
+        )
+    return tuple(found)
 
 
 def problems(matrix: npt.ArrayLike) -> tuple[str, ...]:
@@ -62,16 +78,7 @@ def problems(matrix: npt.ArrayLike) -> tuple[str, ...]:
     CovarianceError
         If the matrix is not 6x6 or contains non-finite values.
     """
-    array = _as_matrix(matrix)
-    scale = _scale(array)
-    found: list[str] = []
-    asymmetry = _asymmetry(array)
-    if asymmetry > SYMMETRY_RTOL * scale:
-        found.append(f"not symmetric (max asymmetry {asymmetry:.3g})")
-    smallest = float(np.linalg.eigvalsh(0.5 * (array + array.T))[0])
-    if smallest < -PSD_RTOL * scale:
-        found.append(f"not positive semi-definite (min eigenvalue {smallest:.3g})")
-    return tuple(found)
+    return _problems(_as_matrix(matrix))
 
 
 def repair(matrix: npt.ArrayLike) -> tuple[FloatArray, tuple[str, ...]]:
@@ -85,15 +92,13 @@ def repair(matrix: npt.ArrayLike) -> tuple[FloatArray, tuple[str, ...]]:
     Returns
     -------
     tuple
-        The repaired matrix and diagnostics describing what was changed.
+        The repaired matrix and diagnostics describing what was changed (empty
+        if the matrix was already valid).
     """
-    array = _as_matrix(matrix)
-    scale = _scale(array)
+    scale, asymmetry, eigenvalues, eigenvectors = _inspect(_as_matrix(matrix))
     diagnostics: list[str] = []
-    asymmetry = _asymmetry(array)
     if asymmetry > SYMMETRY_RTOL * scale:
         diagnostics.append(f"symmetrised covariance (max asymmetry {asymmetry:.3g})")
-    eigenvalues, eigenvectors = np.linalg.eigh(0.5 * (array + array.T))
     negative = eigenvalues < -PSD_RTOL * scale
     if np.any(negative):
         diagnostics.append(
@@ -112,6 +117,12 @@ def _require_gcrf(state: StateVector) -> None:
         )
 
 
+def _frozen(array: FloatArray) -> FloatArray:
+    symmetric = 0.5 * (array + array.T)
+    symmetric.flags.writeable = False
+    return symmetric
+
+
 @dataclass(frozen=True, eq=False)
 class Covariance:
     """A validated 6x6 position-velocity covariance in SI units (m, m/s).
@@ -124,6 +135,9 @@ class Covariance:
         ``"RTN"`` or ``"GCRF"``.
     epoch
         Epoch the covariance refers to.
+    repairs
+        What :func:`make_covariance` changed to make the matrix valid; empty
+        when it was valid as given. Kept through frame changes.
 
     Raises
     ------
@@ -135,17 +149,63 @@ class Covariance:
     matrix: FloatArray
     frame: CovarianceFrame
     epoch: Time
+    repairs: tuple[str, ...] = field(default=(), kw_only=True)
 
     def __post_init__(self) -> None:
-        if self.frame not in get_args(CovarianceFrame):
+        if self.frame not in COVARIANCE_FRAMES:
             raise ValueError(f"unsupported covariance frame {self.frame!r}")
         array = _as_matrix(self.matrix)
-        found = problems(array)
+        found = _problems(array)
         if found:
             raise CovarianceError("invalid covariance: " + "; ".join(found))
-        array = 0.5 * (array + array.T)
-        array.flags.writeable = False
-        object.__setattr__(self, "matrix", array)
+        object.__setattr__(self, "matrix", _frozen(array))
+        object.__setattr__(self, "repairs", tuple(self.repairs))
+
+    @classmethod
+    def _trusted(
+        cls,
+        matrix: FloatArray,
+        frame: CovarianceFrame,
+        epoch: Time,
+        repairs: tuple[str, ...] = (),
+    ) -> Covariance:
+        """Wrap a matrix already known to be valid, skipping the checks."""
+        covariance = object.__new__(cls)
+        for name, value in (
+            ("matrix", _frozen(matrix)),
+            ("frame", frame),
+            ("epoch", epoch),
+            ("repairs", repairs),
+        ):
+            object.__setattr__(covariance, name, value)
+        return covariance
+
+    @classmethod
+    def from_position(
+        cls, position: npt.ArrayLike, frame: CovarianceFrame, epoch: Time
+    ) -> Covariance:
+        """A covariance known only in position; the velocity block is zero.
+
+        Parameters
+        ----------
+        position
+            3x3 position covariance [m^2].
+        frame
+            ``"RTN"`` or ``"GCRF"``.
+        epoch
+            Epoch the covariance refers to.
+
+        Raises
+        ------
+        CovarianceError
+            If ``position`` is not 3x3 or not a valid covariance.
+        """
+        block = np.array(position, dtype=np.float64)
+        if block.shape != (3, 3):
+            raise CovarianceError(f"position covariance must be 3x3, got {block.shape}")
+        matrix = np.zeros((6, 6))
+        matrix[:3, :3] = block
+        return cls(matrix, frame, epoch)
 
     @property
     def position(self) -> FloatArray:
@@ -164,7 +224,7 @@ class Covariance:
         if self.frame == "GCRF":
             return self
         matrix = rtn_to_inertial_covariance(self.matrix, state.r, state.v)
-        return Covariance(matrix, "GCRF", self.epoch)
+        return Covariance._trusted(matrix, "GCRF", self.epoch, self.repairs)
 
     def in_rtn(self, state: StateVector) -> Covariance:
         """Return this covariance in the object's RTN frame.
@@ -178,7 +238,7 @@ class Covariance:
         if self.frame == "RTN":
             return self
         matrix = inertial_to_rtn_covariance(self.matrix, state.r, state.v)
-        return Covariance(matrix, "RTN", self.epoch)
+        return Covariance._trusted(matrix, "RTN", self.epoch, self.repairs)
 
 
 def make_covariance(
@@ -187,7 +247,7 @@ def make_covariance(
     epoch: Time,
     *,
     policy: Policy = "repair",
-) -> tuple[Covariance, tuple[str, ...]]:
+) -> Covariance:
     """Build a :class:`Covariance`, repairing it if the policy allows.
 
     Parameters
@@ -201,17 +261,15 @@ def make_covariance(
     policy
         ``"raise"`` raises :class:`~keepout.errors.CovarianceError` for an
         invalid matrix; ``"repair"`` (default, as in operational practice)
-        symmetrises it and clips negative eigenvalues.
-
-    Returns
-    -------
-    tuple
-        The covariance and diagnostics (empty when the matrix was valid).
+        symmetrises it and clips negative eigenvalues, recording what it did
+        in :attr:`Covariance.repairs`.
     """
-    if policy not in get_args(Policy):
+    if policy not in POLICIES:
         raise ValueError(f"unknown covariance policy {policy!r}")
+    if frame not in COVARIANCE_FRAMES:
+        raise ValueError(f"unsupported covariance frame {frame!r}")
     array = _as_matrix(matrix)
-    if policy == "raise" or not problems(array):
-        return Covariance(array, frame, epoch), ()
-    fixed, diagnostics = repair(array)
-    return Covariance(fixed, frame, epoch), diagnostics
+    if policy == "raise":
+        return Covariance(array, frame, epoch)
+    fixed, repairs = repair(array)
+    return Covariance._trusted(fixed if repairs else array, frame, epoch, repairs)

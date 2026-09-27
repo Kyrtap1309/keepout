@@ -2,22 +2,27 @@
 
 from __future__ import annotations
 
+import dataclasses
 import math
-from typing import Literal, TypeAlias, get_args
+from collections.abc import Callable
+from typing import Any, Literal, TypeAlias
 
 import numpy as np
 
 from keepout.conjunction import Conjunction
-from keepout.objects import ObjectState
+from keepout.orbits import orbital_period
 from keepout.pc.elrod import elrod
 from keepout.pc.foster import foster
-from keepout.pc.result import PcResult
+from keepout.pc.result import Method, PcResult
 
-MethodChoice: TypeAlias = Literal["auto", "foster", "elrod"]
+MethodChoice: TypeAlias = Literal["auto"] | Method
 """Methods :func:`compute_pc` accepts; ``"auto"`` picks one."""
 
-EARTH_MU = 3.986004418e14
-"""Earth's gravitational parameter [m^3/s^2] (WGS 84)."""
+_METHODS: dict[str, Callable[..., PcResult]] = {
+    "auto": foster,
+    "foster": foster,
+    "elrod": elrod,
+}
 
 SIGMA_EXTENT = 5.0
 """Standard deviations of the combined position covariance along the
@@ -41,32 +46,25 @@ def encounter_duration(conjunction: Conjunction) -> float:
     standard deviation of the combined 3x3 position covariance along the
     relative velocity: only that extent is crossed during the encounter.
     """
-    combined = (
-        conjunction.primary.covariance.position
-        + conjunction.secondary.covariance.position
-    )
-    direction = conjunction.plane.relative_velocity / conjunction.relative_speed
-    sigma_along = math.sqrt(max(float(direction @ combined @ direction), 0.0))
-    extent = SIGMA_EXTENT * sigma_along + conjunction.hard_body_radius
-    return 2.0 * extent / conjunction.relative_speed
+    plane = conjunction.plane
+    direction = plane.direction
+    variance = float(direction @ plane.combined_covariance @ direction)
+    extent = SIGMA_EXTENT * math.sqrt(max(variance, 0.0)) + conjunction.hard_body_radius
+    return 2.0 * extent / plane.relative_speed
 
 
-def orbital_period(obj: ObjectState) -> float | None:
-    """Two-body orbital period [s] from a GCRF state; ``None`` if unbound."""
-    r = float(np.linalg.norm(obj.state.r))
-    v = float(np.linalg.norm(obj.state.v))
-    energy = 0.5 * v * v - EARTH_MU / r
-    if energy >= 0.0:
-        return None
-    semi_major_axis = -EARTH_MU / (2.0 * energy)
-    return 2.0 * math.pi * math.sqrt(semi_major_axis**3 / EARTH_MU)
+def applicability(conjunction: Conjunction, duration: float) -> tuple[str, ...]:
+    """Warnings about the assumptions behind 2-D Pc for this conjunction.
 
-
-def applicability(conjunction: Conjunction) -> tuple[str, ...]:
-    """Warnings about the assumptions behind 2-D Pc for this conjunction."""
+    Parameters
+    ----------
+    conjunction
+        The conjunction at TCA.
+    duration
+        Its :func:`encounter_duration` [s].
+    """
     warnings: list[str] = []
-    duration = encounter_duration(conjunction)
-    period = orbital_period(conjunction.primary)
+    period = orbital_period(conjunction.primary.state)
     if period is not None and duration > DURATION_LIMIT * period:
         warnings.append(
             f"2-D Pc assumptions questionable: the encounter lasts about "
@@ -75,12 +73,8 @@ def applicability(conjunction: Conjunction) -> tuple[str, ...]:
             "differ"
         )
     plane = conjunction.plane
-    distance = float(np.linalg.norm(plane.relative_position))
-    along = (
-        abs(float(plane.relative_position @ plane.relative_velocity))
-        / conjunction.relative_speed
-    )
-    if along > TCA_OFFSET_LIMIT * distance:
+    along = abs(plane.closest_approach_offset)
+    if along > TCA_OFFSET_LIMIT * float(np.linalg.norm(plane.relative_position)):
         warnings.append(
             f"states are {along:.3g} m from closest approach along the relative "
             "velocity; Pc uses the straight-line closest approach"
@@ -88,7 +82,9 @@ def applicability(conjunction: Conjunction) -> tuple[str, ...]:
     return tuple(warnings)
 
 
-def compute_pc(conjunction: Conjunction, method: MethodChoice = "auto") -> PcResult:
+def compute_pc(
+    conjunction: Conjunction, method: MethodChoice = "auto", **options: Any
+) -> PcResult:
     """Probability of collision of a conjunction.
 
     Parameters
@@ -98,6 +94,9 @@ def compute_pc(conjunction: Conjunction, method: MethodChoice = "auto") -> PcRes
     method
         ``"foster"``, ``"elrod"`` or ``"auto"`` (currently Foster, the most
         accurate 2-D method).
+    **options
+        Passed to the method: ``rtol`` for :func:`~keepout.pc.foster.foster`,
+        ``order`` for :func:`~keepout.pc.elrod.elrod`.
 
     Returns
     -------
@@ -110,16 +109,21 @@ def compute_pc(conjunction: Conjunction, method: MethodChoice = "auto") -> PcRes
     ------
     ValueError
         If ``method`` is unknown.
+    TypeError
+        If an option is not accepted by the method.
     """
-    if method not in get_args(MethodChoice):
+    if method not in _METHODS:
         raise ValueError(
-            f"unknown Pc method {method!r}; expected one of {get_args(MethodChoice)}"
+            f"unknown Pc method {method!r}; expected one of {tuple(_METHODS)}"
         )
-    plane, radius = conjunction.plane, conjunction.hard_body_radius
-    result = elrod(plane, radius) if method == "elrod" else foster(plane, radius)
-    return PcResult(
-        result.value,
-        result.method,
-        conjunction.diagnostics + applicability(conjunction) + result.diagnostics,
-        {**result.details, "encounter_duration_s": encounter_duration(conjunction)},
+    result = _METHODS[method](
+        conjunction.plane, conjunction.hard_body_radius, **options
+    )
+    duration = encounter_duration(conjunction)
+    return dataclasses.replace(
+        result,
+        diagnostics=conjunction.diagnostics
+        + applicability(conjunction, duration)
+        + result.diagnostics,
+        details={**result.details, "encounter_duration_s": duration},
     )

@@ -3,18 +3,19 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 from astropy.time import Time
 
 from keepout import cdm
 from keepout._types import FloatArray, StateVector
 from keepout.conjunction import Conjunction
-from keepout.covariance import make_covariance
+from keepout.covariance import Covariance, make_covariance
 from keepout.errors import CaraFormatError
 from keepout.objects import ObjectState
 from keepout.sources import cara
@@ -63,14 +64,20 @@ def _matrix(rows: Sequence[Sequence[Any]], first_row: int) -> FloatArray:
     )
 
 
-def alfano_objects(
-    rows: Sequence[Sequence[Any]],
-) -> tuple[ObjectState, ObjectState, tuple[str, ...]]:
+def _gcrf_object(
+    name: str, r: npt.ArrayLike, v: npt.ArrayLike, covariance: Covariance
+) -> ObjectState:
+    """An object at :data:`ALFANO_EPOCH`."""
+    return ObjectState(name, StateVector(ALFANO_EPOCH, r, v, "GCRF"), covariance)
+
+
+def alfano_objects(rows: Sequence[Sequence[Any]]) -> tuple[ObjectState, ObjectState]:
     """Primary and secondary from the rows of a ``CaseN data at TCA.xls`` sheet.
 
     Layout (1-based rows): primary position 5, velocity 9, covariance 13-18;
     secondary position 23, velocity 27, covariance 31-36. ECI, m, m/s.
-    Covariances are repaired (symmetrised) if needed, with diagnostics.
+    Covariances are repaired (symmetrised) if needed; see
+    :attr:`~keepout.covariance.Covariance.repairs`.
 
     Raises
     ------
@@ -84,15 +91,18 @@ def alfano_objects(
         ]
     except (IndexError, ValueError) as exc:
         raise CaraFormatError(f"unexpected Alfano sheet layout: {exc}") from exc
-    objects: list[ObjectState] = []
-    diagnostics: list[str] = []
-    for name, (r, v, matrix) in zip(("PRIMARY", "SECONDARY"), pieces, strict=True):
-        covariance, found = make_covariance(matrix, "GCRF", ALFANO_EPOCH)
-        objects.append(
-            ObjectState(name, StateVector(ALFANO_EPOCH, r, v, "GCRF"), covariance)
-        )
-        diagnostics += [f"{name}: {message}" for message in found]
-    return objects[0], objects[1], tuple(diagnostics)
+    primary, secondary = (
+        _gcrf_object(name, r, v, make_covariance(matrix, "GCRF", ALFANO_EPOCH))
+        for name, (r, v, matrix) in zip(("PRIMARY", "SECONDARY"), pieces, strict=True)
+    )
+    return primary, secondary
+
+
+def _field(row: Mapping[str, Any], name: str) -> Any:
+    try:
+        return row[name]
+    except KeyError as exc:
+        raise CaraFormatError(f"CARA table has no column {name!r}") from exc
 
 
 def _float(value: Any) -> float:
@@ -108,24 +118,27 @@ def load_alfano_cases(cache: Path | None = None) -> list[ValidationCase]:
     Case 12 has zero relative velocity; CARA gives no 2-D value for it.
     """
     results = {
-        int(row["Case"]): row
+        int(_float(_field(row, "Case"))): row
         for row in cara.load_csv(cara.fetch(cara.ALFANO_2009_RESULTS, cache=cache))
     }
     cases: list[ValidationCase] = []
     for number, file in enumerate(cara.ALFANO_2009_TCA, start=1):
-        reference = _float(results[number]["CARA_Pc2D"])
+        if number not in results:
+            raise CaraFormatError(f"Alfano results have no row for case {number}")
+        result = results[number]
+        reference = _float(_field(result, "CARA_Pc2D"))
         if math.isnan(reference):
             continue
         rows = cara.load_xls_rows(cara.fetch(file, cache=cache))
-        primary, secondary, diagnostics = alfano_objects(rows)
-        radius = _float(results[number]["HBR"])
+        primary, secondary = alfano_objects(rows)
+        radius = _float(_field(result, "HBR"))
         cases.append(
             ValidationCase(
                 "Alfano (2009)",
                 str(number),
-                Conjunction(primary, secondary, radius, diagnostics),
+                Conjunction(primary, secondary, radius),
                 reference,
-                paper=_float(results[number]["A09_PcLinear100"]),
+                paper=_float(_field(result, "A09_PcLinear100")),
             )
         )
     return cases
@@ -141,17 +154,19 @@ def load_pc_method_cases(cache: Path | None = None) -> list[ValidationCase]:
     table = cara.load_xlsx(cara.fetch(cara.PC_METHOD_TABLE, cache=cache))
     cases: list[ValidationCase] = []
     for row in table:
-        conjunction_id = str(row["Conjunction_ID"])
+        conjunction_id = str(_field(row, "Conjunction_ID"))
+        if conjunction_id not in cara.PC_METHOD_CDMS:
+            raise CaraFormatError(f"no pinned CDM for conjunction {conjunction_id}")
         path = cara.fetch(cara.PC_METHOD_CDMS[conjunction_id], cache=cache)
         conjunction = Conjunction.from_cdm(
-            cdm.load(path), hard_body_radius=_float(row["HBR_m"])
+            cdm.load(path), hard_body_radius=_float(_field(row, "HBR_m"))
         )
         cases.append(
             ValidationCase(
                 "CARA Pc method test set",
                 conjunction_id,
                 conjunction,
-                _float(row["Pc2D"]),
+                _float(_field(row, "Pc2D")),
             )
         )
     return cases
@@ -203,28 +218,25 @@ def similar_to_3d_case() -> ValidationCase:
             [1.509562687000000e03, 7.372938617000000e03, -1.492509430000000e02],
         ),
     )
-    objects: list[ObjectState] = []
-    for name, (r, v), position in zip(
-        ("PRIMARY", "SECONDARY"), states, position_covariances, strict=True
-    ):
-        # Only the position block enters 2-D Pc; velocity variances are nominal.
-        matrix = np.zeros((6, 6))
-        matrix[:3, :3] = position
-        matrix[3:, 3:] = 1e-6 * np.eye(3)
-        covariance, _ = make_covariance(matrix, "GCRF", ALFANO_EPOCH)
-        objects.append(
-            ObjectState(name, StateVector(ALFANO_EPOCH, r, v, "GCRF"), covariance)
+    primary, secondary = (
+        _gcrf_object(
+            name, r, v, Covariance.from_position(position, "GCRF", ALFANO_EPOCH)
         )
+        for name, (r, v), position in zip(
+            ("PRIMARY", "SECONDARY"), states, position_covariances, strict=True
+        )
+    )
     return ValidationCase(
         "CARA unit tests",
         "Elrod testSimilarTo3D",
-        Conjunction(objects[0], objects[1], 20.0),
+        Conjunction(primary, secondary, 20.0),
         1.0281653e-02,
     )
 
 
 def load_all(cache: Path | None = None) -> list[ValidationCase]:
     """Every validation case, downloading CARA files as needed."""
+    cara.prefetch(cara.MANIFEST, cache=cache)
     return [
         *load_alfano_cases(cache),
         *load_pc_method_cases(cache),

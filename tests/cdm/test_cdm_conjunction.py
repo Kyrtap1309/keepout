@@ -29,5 +29,5 @@ def test_cdm_without_hbr_needs_an_explicit_radius() -> None:
 def test_covariance_repairs_become_conjunction_diagnostics() -> None:
     cdm = minimal_cdm(segment1=replace(segment_fields(1), "CT_R", 1e6))
     conjunction = Conjunction.from_cdm(cdm, hard_body_radius=10.0)
-    assert len(conjunction.diagnostics) == 1
-    assert conjunction.diagnostics[0].startswith("OBJECT1: clipped")
+    (diagnostic,) = conjunction.diagnostics
+    assert diagnostic.startswith("primary (10001): clipped 1 negative eigenvalue")

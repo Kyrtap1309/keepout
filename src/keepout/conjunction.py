@@ -3,16 +3,18 @@ hard-body radius."""
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
-import numpy as np
 from astropy.time import Time
 
-from keepout.cdm.model import Cdm
+from keepout._types import require_positive
 from keepout.covariance import Policy
 from keepout.encounter import EncounterPlane, encounter_plane
 from keepout.objects import ObjectState
+
+if TYPE_CHECKING:
+    from keepout.cdm.model import Cdm
 
 
 def combined_hard_body_radius(
@@ -40,18 +42,16 @@ def combined_hard_body_radius(
     """
     if explicit is not None:
         return explicit
-    radii = (primary.hard_body_radius, secondary.hard_body_radius)
-    if radii[0] is None or radii[1] is None:
+    first, second = primary.hard_body_radius, secondary.hard_body_radius
+    if first is None or second is None:
         missing = [
-            obj.object_id
-            for obj, radius in zip((primary, secondary), radii, strict=True)
-            if radius is None
+            o.object_id for o in (primary, secondary) if o.hard_body_radius is None
         ]
         raise ValueError(
             f"no hard-body radius for {', '.join(missing)}: pass "
             "hard_body_radius= (combined, in metres) or give HBR for both objects"
         )
-    return radii[0] + radii[1]
+    return first + second
 
 
 @dataclass(frozen=True, eq=False)
@@ -67,9 +67,6 @@ class Conjunction:
     hard_body_radius
         Combined hard-body radius [m]: the radius of a sphere around the
         primary that the secondary's centre must enter for a collision.
-    diagnostics
-        Messages from building the objects (e.g. covariance repairs); every
-        Pc result for this conjunction repeats them.
 
     Raises
     ------
@@ -82,17 +79,12 @@ class Conjunction:
     primary: ObjectState
     secondary: ObjectState
     hard_body_radius: float
-    diagnostics: tuple[str, ...] = ()
     plane: EncounterPlane = field(init=False)
 
     def __post_init__(self) -> None:
         radius = float(self.hard_body_radius)
-        if not (math.isfinite(radius) and radius > 0.0):
-            raise ValueError(
-                f"hard_body_radius must be finite and > 0, got {self.hard_body_radius}"
-            )
+        require_positive(radius, "hard_body_radius")
         object.__setattr__(self, "hard_body_radius", radius)
-        object.__setattr__(self, "diagnostics", tuple(self.diagnostics))
         object.__setattr__(self, "plane", encounter_plane(self.primary, self.secondary))
 
     @classmethod
@@ -120,9 +112,9 @@ class Conjunction:
         ValueError
             If no radius is given and an object has no ``HBR``.
         """
-        primary, secondary, diagnostics = message.object_states(policy=policy)
+        primary, secondary = message.object_states(policy=policy)
         radius = combined_hard_body_radius(primary, secondary, hard_body_radius)
-        return cls(primary, secondary, radius, diagnostics)
+        return cls(primary, secondary, radius)
 
     @property
     def tca(self) -> Time:
@@ -137,4 +129,16 @@ class Conjunction:
     @property
     def relative_speed(self) -> float:
         """Relative speed [m/s]."""
-        return float(np.linalg.norm(self.plane.relative_velocity))
+        return self.plane.relative_speed
+
+    @property
+    def diagnostics(self) -> tuple[str, ...]:
+        """Covariance repairs of both objects, labelled with role and id.
+
+        Every Pc result for this conjunction repeats them.
+        """
+        return tuple(
+            f"{role} ({item.object_id}): {repair}"
+            for role, item in (("primary", self.primary), ("secondary", self.secondary))
+            for repair in item.covariance.repairs
+        )

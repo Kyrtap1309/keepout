@@ -53,6 +53,10 @@ class CdmParseError(KeepoutError):
         self.path = path
 
 
+class CdmWriteError(KeepoutError):
+    """A Conjunction Data Message cannot be written in the requested format."""
+
+
 class CovarianceError(KeepoutError):
     """A covariance matrix is malformed, asymmetric or not positive semi-definite."""
 

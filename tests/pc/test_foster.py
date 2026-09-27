@@ -1,10 +1,11 @@
 import math
 
 import pytest
-from pc_builders import head_on
+from builders import head_on
+from pc_builders import ANISOTROPIC, PlaneCase
 from reference_pc import isotropic_pc, principal_axes_pc
 
-from keepout.pc.foster import foster
+from keepout.pc.foster import MIN_RTOL, foster
 
 
 @pytest.mark.parametrize(
@@ -32,11 +33,13 @@ def test_zero_miss_isotropic_has_a_closed_form() -> None:
     assert foster(conjunction.plane, 5.0).value == pytest.approx(expected, rel=1e-10)
 
 
-def test_far_miss_underflows_to_exactly_zero() -> None:
-    conjunction = head_on(1e5, 10.0, 10.0, 5.0)
+def test_far_miss_underflows_to_exactly_zero_without_integrating() -> None:
+    # 5e3 sigma along the wide axis: the 12-sigma band misses the hard body.
+    conjunction = head_on(1e5, 20.0, 10.0, 5.0)
     result = foster(conjunction.plane, 5.0)
     assert result.value == 0.0
     assert result.diagnostics == ()
+    assert result.details == {"error_estimate": 0.0, "evaluations": 0.0}
 
 
 def test_huge_hard_body_gives_certain_collision() -> None:
@@ -46,15 +49,35 @@ def test_huge_hard_body_gives_certain_collision() -> None:
 
 def test_details_report_the_quadrature() -> None:
     conjunction = head_on(30.0, 10.0, 20.0, 5.0)
-    details = foster(conjunction.plane, 5.0).details
-    assert details["evaluations"] > 0
-    assert 0.0 <= details["error_estimate"] < 1e-12
+    result = foster(conjunction.plane, 5.0)
+    assert result.details["evaluations"] > 0
+    # QUADPACK's absolute error estimate must honour the relative tolerance.
+    assert 0.0 <= result.details["error_estimate"] <= 1e-10 * result.value
 
 
-@pytest.mark.parametrize(("radius", "rtol"), [(0.0, 1e-10), (5.0, 0.0), (-1.0, 1e-10)])
-def test_bad_arguments_are_rejected(radius: float, rtol: float) -> None:
+def test_quadrature_trouble_is_reported() -> None:
+    # A line-like covariance at the smallest tolerance QUADPACK accepts:
+    # round-off stops it from reaching the tolerance, and it says so.
+    conjunction = head_on(3.0, 1e-3, 50.0, 10.0)
+    result = foster(conjunction.plane, 10.0, rtol=MIN_RTOL * 1.1)
+    (message,) = result.diagnostics
+    assert message.startswith("Foster quadrature: The occurrence of roundoff error")
+    assert "\n" not in message
+
+
+@pytest.mark.parametrize(
+    ("radius", "rtol", "message"),
+    [
+        (0.0, 1e-10, "hard_body_radius must be finite and > 0"),
+        (-1.0, 1e-10, "hard_body_radius must be finite and > 0"),
+        (5.0, 0.0, "rtol must be >="),
+        (5.0, 1e-16, "rtol must be >="),
+        (5.0, float("nan"), "rtol must be >="),
+    ],
+)
+def test_bad_arguments_are_rejected(radius: float, rtol: float, message: str) -> None:
     conjunction = head_on(30.0, 10.0, 20.0, 5.0)
-    with pytest.raises(ValueError, match="must be finite and > 0"):
+    with pytest.raises(ValueError, match=message):
         foster(conjunction.plane, radius, rtol=rtol)
 
 
@@ -73,4 +96,11 @@ def test_line_like_covariance_is_integrated_accurately(
     conjunction = head_on(miss, sigma_narrow, sigma_wide, radius)
     expected = principal_axes_pc(0.0, miss, sigma_wide, sigma_narrow, radius)
     result = foster(conjunction.plane, radius)
+    assert result.value == pytest.approx(expected, rel=1e-8)
+
+
+@pytest.mark.parametrize("case", ANISOTROPIC, ids=str)
+def test_correlated_off_axis_covariance_matches_the_oracle(case: PlaneCase) -> None:
+    result = foster(case.plane(), case.radius)
+    expected = principal_axes_pc(case.mu, case.mv, case.su, case.sv, case.radius)
     assert result.value == pytest.approx(expected, rel=1e-8)

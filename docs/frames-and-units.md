@@ -11,7 +11,7 @@ days; the readers convert on input and the writers convert back on output.
 | CDM `REF_FRAME` | Treatment in keepout |
 |-----------------|----------------------|
 | `GCRF` | used as is |
-| `EME2000` | treated as GCRF. The two differ by the ~20 mas frame bias (≈0.7 m at 7000 km); a rotation common to both objects does not change Pc. |
+| `EME2000` | rotated to GCRF by the IAU 2006 frame bias (about 23 mas, ≈0.8 m at 7000 km), so a CDM whose objects use different frames stays consistent. |
 | `ITRF` | converted to GCRF with astropy (ITRS → GCRS), including the Earth-rotation term ω × r of the velocity |
 
 Any other frame is rejected with `GeometryError`.
@@ -55,7 +55,10 @@ A `Covariance` must be symmetric (to 1e-9 of its largest entry) and positive
 semi-definite (no eigenvalue below −1e-10 of its largest entry). Operational
 CDMs often violate this, so `CdmObject.covariance()` and `Cdm.object_states()`
 default to `policy="repair"`: the matrix is symmetrised and negative
-eigenvalues are clipped to zero, and each change is returned as a diagnostic.
+eigenvalues are clipped to zero, and each change is recorded in
+`Covariance.repairs`. `Conjunction.diagnostics` lists both objects' repairs
+(e.g. `primary (12345): clipped 1 negative eigenvalue(s) ...`), and every Pc
+result repeats them.
 `policy="raise"` raises `CovarianceError` instead.
 
 ## CDM versions

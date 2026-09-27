@@ -41,6 +41,10 @@ class EncounterPlane:
         Secondary minus primary position, GCRF [m].
     relative_velocity
         Secondary minus primary velocity, GCRF [m/s].
+    relative_speed
+        Length of ``relative_velocity`` [m/s].
+    combined_covariance
+        Sum of both objects' 3x3 position covariances, GCRF [m^2].
     basis
         2x3 matrix whose rows are the plane axes ``x`` and ``z`` in GCRF.
     """
@@ -50,12 +54,27 @@ class EncounterPlane:
     covariance: FloatArray
     relative_position: FloatArray
     relative_velocity: FloatArray
+    relative_speed: float
+    combined_covariance: FloatArray
     basis: FloatArray
 
     @property
     def miss_distance(self) -> float:
         """Length of the miss vector [m]."""
         return float(np.linalg.norm(self.miss_vector))
+
+    @property
+    def direction(self) -> FloatArray:
+        """Unit relative velocity: the normal of the plane."""
+        return self.relative_velocity / self.relative_speed
+
+    @property
+    def closest_approach_offset(self) -> float:
+        """Relative-position component along the relative velocity [m].
+
+        Zero when the states are at the straight-line closest approach.
+        """
+        return float(self.relative_position @ self.direction)
 
 
 def _perpendicular(unit: FloatArray) -> FloatArray:
@@ -106,5 +125,7 @@ def encounter_plane(primary: ObjectState, secondary: ObjectState) -> EncounterPl
         covariance=0.5 * (projected + projected.T),
         relative_position=r,
         relative_velocity=v,
+        relative_speed=speed,
+        combined_covariance=combined,
         basis=basis,
     )

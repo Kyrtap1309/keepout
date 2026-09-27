@@ -4,25 +4,27 @@
   ``R = r/|r|``, ``N = (r x v)/|r x v|``, ``T = N x R``.
 * ITRF is converted to GCRF with astropy (ITRS -> GCRS), which includes the
   Earth-rotation term of the velocity.
-* EME2000 is treated as GCRF: the two differ by the ~20 mas frame bias, a
-  rotation common to both objects of a conjunction, which does not change Pc.
+* EME2000 is rotated to GCRF by the IAU 2006 frame bias (about 23 mas, ~0.8 m
+  at 7000 km), so objects given in different frames stay consistent.
 """
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import astropy.units as u
+import erfa
 import numpy as np
 import numpy.typing as npt
-from astropy.coordinates import (
-    GCRS,
-    ITRS,
-    CartesianDifferential,
-    CartesianRepresentation,
-)
-from scipy.linalg import block_diag
+from astropy.time import Time
 
 from keepout._types import FloatArray, StateVector
 from keepout.errors import GeometryError
+
+_J2000_JD = 2451545.0
+# GCRS -> mean J2000 (EME2000) frame bias; constant, so any date gives it.
+FRAME_BIAS: FloatArray = np.asarray(erfa.bp06(_J2000_JD, 0.0)[0], dtype=np.float64)
+"""Rotation from GCRF to EME2000 (``x_eme2000 = FRAME_BIAS @ x_gcrf``)."""
 
 
 def rtn_rotation(r: npt.ArrayLike, v: npt.ArrayLike) -> FloatArray:
@@ -61,8 +63,11 @@ def rtn_rotation(r: npt.ArrayLike, v: npt.ArrayLike) -> FloatArray:
     return np.stack([radial, transverse, normal])
 
 
-def _six_by_six(rotation: FloatArray) -> FloatArray:
-    return np.asarray(block_diag(rotation, rotation), dtype=np.float64)
+def _rotate_covariance(covariance: npt.ArrayLike, rotation: FloatArray) -> FloatArray:
+    """``M C M^T`` with ``M`` applying ``rotation`` to position and velocity."""
+    six = np.zeros((6, 6))
+    six[:3, :3] = six[3:, 3:] = rotation
+    return six @ np.asarray(covariance, dtype=np.float64) @ six.T
 
 
 def rtn_to_inertial_covariance(
@@ -83,8 +88,7 @@ def rtn_to_inertial_covariance(
     v
         Inertial velocity defining the RTN axes [m/s].
     """
-    rotation = _six_by_six(rtn_rotation(r, v))
-    return rotation.T @ np.asarray(covariance, dtype=np.float64) @ rotation
+    return _rotate_covariance(covariance, rtn_rotation(r, v).T)
 
 
 def inertial_to_rtn_covariance(
@@ -101,8 +105,66 @@ def inertial_to_rtn_covariance(
     v
         Inertial velocity defining the RTN axes [m/s].
     """
-    rotation = _six_by_six(rtn_rotation(r, v))
-    return rotation @ np.asarray(covariance, dtype=np.float64) @ rotation.T
+    return _rotate_covariance(covariance, rtn_rotation(r, v))
+
+
+def _itrf_to_gcrf(states: Sequence[StateVector]) -> list[StateVector]:
+    """Convert ITRF states with one astropy transformation for all of them."""
+    # Imported here: astropy.coordinates is slow to import and only ITRF needs it.
+    from astropy.coordinates import (
+        GCRS,
+        ITRS,
+        CartesianDifferential,
+        CartesianRepresentation,
+    )
+
+    epochs = Time([state.epoch for state in states])
+    representation = CartesianRepresentation(
+        np.stack([state.r for state in states], axis=1) * u.m,
+        differentials=CartesianDifferential(
+            np.stack([state.v for state in states], axis=1) * u.m / u.s
+        ),
+    )
+    cartesian = (
+        ITRS(representation, obstime=epochs)
+        .transform_to(GCRS(obstime=epochs))
+        .cartesian
+    )
+    positions = cartesian.xyz.to_value(u.m)
+    velocities = cartesian.differentials["s"].d_xyz.to_value(u.m / u.s)
+    return [
+        StateVector(state.epoch, positions[:, i], velocities[:, i], "GCRF")
+        for i, state in enumerate(states)
+    ]
+
+
+def to_gcrf_all(states: Sequence[StateVector]) -> list[StateVector]:
+    """Express several state vectors in GCRF, converting ITRF ones together.
+
+    Parameters
+    ----------
+    states
+        States in GCRF, EME2000 or ITRF.
+
+    Returns
+    -------
+    list of StateVector
+        GCRF states in the same order; GCRF inputs are returned as they are.
+    """
+    converted: list[StateVector] = []
+    for state in states:
+        if state.frame == "EME2000":
+            state = StateVector(
+                state.epoch, FRAME_BIAS.T @ state.r, FRAME_BIAS.T @ state.v, "GCRF"
+            )
+        converted.append(state)
+    itrf = [i for i, state in enumerate(converted) if state.frame == "ITRF"]
+    if itrf:
+        for i, state in zip(
+            itrf, _itrf_to_gcrf([converted[i] for i in itrf]), strict=True
+        ):
+            converted[i] = state
+    return converted
 
 
 def to_gcrf(state: StateVector) -> StateVector:
@@ -118,20 +180,4 @@ def to_gcrf(state: StateVector) -> StateVector:
     StateVector
         ``state`` itself if already GCRF; otherwise a new GCRF state.
     """
-    if state.frame == "GCRF":
-        return state
-    if state.frame == "EME2000":
-        return StateVector(state.epoch, state.r, state.v, "GCRF")
-    representation = CartesianRepresentation(
-        state.r * u.m, differentials=CartesianDifferential(state.v * u.m / u.s)
-    )
-    gcrs = ITRS(representation, obstime=state.epoch).transform_to(
-        GCRS(obstime=state.epoch)
-    )
-    cartesian = gcrs.cartesian
-    return StateVector(
-        state.epoch,
-        cartesian.xyz.to_value(u.m),
-        cartesian.differentials["s"].d_xyz.to_value(u.m / u.s),
-        "GCRF",
-    )
+    return to_gcrf_all([state])[0]

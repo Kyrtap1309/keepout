@@ -1,18 +1,17 @@
+import dataclasses
 from pathlib import Path
 
 import numpy as np
 import pytest
-from cdm_builders import DATA, assert_equivalent, cdms
+from builders import EARTH_ROTATION_RATE
+from cdm_builders import B1_KVN as B1
+from cdm_builders import TRACSS, assert_equivalent, cdms, minimal_cdm
 from hypothesis import given, settings
 
-from keepout.cdm import Cdm, kvn
+from keepout.cdm import Cdm, Field, Section, kvn
 from keepout.cdm.keywords import format_epoch
 from keepout.encounter import encounter_plane
-from keepout.errors import CdmParseError, CovarianceError
-
-B1 = DATA / "b1_example.kvn"
-TRACSS = DATA / "tracss_v2.kvn"
-EARTH_ROTATION_RATE = 7.292115146706979e-5  # rad/s
+from keepout.errors import CdmParseError, CdmWriteError, CovarianceError
 
 
 def mutate(old: str, new: str) -> str:
@@ -51,14 +50,16 @@ def test_reads_b1_example() -> None:
 
 
 def test_b1_example_geometry() -> None:
-    primary, secondary, diagnostics = kvn.load(B1).object_states()
-    assert diagnostics == ()
+    primary, secondary = kvn.load(B1).object_states()
     plane = encounter_plane(primary, secondary)
     relative = secondary.state.r - primary.state.r
     assert plane.miss_distance == pytest.approx(
         float(np.linalg.norm(relative)), abs=0.01
     )
-    assert plane.miss_distance == pytest.approx(715.8, abs=1.0)
+    # Independent check: the message's own RTN relative position (given to
+    # 0.1 m; the states are 0.5 m off closest approach).
+    reported = np.linalg.norm([27.4, -70.2, 711.8])
+    assert plane.miss_distance == pytest.approx(reported, abs=0.1)
 
 
 def test_reads_tracss_cdm_version_2() -> None:
@@ -80,8 +81,8 @@ def test_reads_tracss_cdm_version_2() -> None:
 
 
 def test_tracss_itrf_states_are_converted_to_gcrf() -> None:
-    primary, _, diagnostics = kvn.load(TRACSS).object_states()
-    assert diagnostics == ()
+    primary, _ = kvn.load(TRACSS).object_states()
+    assert primary.covariance.repairs == ()
     r = np.array([6778137.0, 0.0, 0.0])
     v = np.array([0.0, 5900.0, 4400.0])
     inertial = v + np.cross([0.0, 0.0, EARTH_ROTATION_RATE], r)
@@ -205,8 +206,8 @@ def test_non_psd_covariance_parses_and_is_repaired() -> None:
     cdm = kvn.loads(mutate("-8.579E+00", "-8.579E+04"))
     with pytest.raises(CovarianceError):
         cdm.object1.covariance(policy="raise")
-    _, _, diagnostics = cdm.object_states()
-    assert diagnostics[0].startswith("OBJECT1: clipped")
+    first, _ = cdm.object_states()
+    assert first.covariance.repairs[0].startswith("clipped")
 
 
 def test_file_round_trip_with_bom(tmp_path: Path) -> None:
@@ -216,3 +217,45 @@ def test_file_round_trip_with_bom(tmp_path: Path) -> None:
     target = tmp_path / "out.kvn"
     kvn.dump(cdm, target)
     assert_equivalent(kvn.load(target), cdm)
+
+
+def test_comments_before_tca_and_object_open_the_new_section() -> None:
+    text = mutate("TCA ", "COMMENT screening option A\nTCA ")
+    text = text.replace(
+        "OBJECT                         = OBJECT2",
+        "COMMENT about object 2\nOBJECT                         = OBJECT2",
+    )
+    cdm = kvn.loads(text)
+    assert cdm.relative.comments == ("screening option A",)
+    assert cdm.segments[1].comments == ("about object 2",)
+    assert "screening option A" not in cdm.header.comments
+    assert "about object 2" not in cdm.segments[0].comments
+
+
+def test_trailing_comments_stay_in_the_last_section() -> None:
+    cdm = kvn.loads(B1.read_text(encoding="utf-8") + "COMMENT the end\n")
+    assert cdm.segments[1].comments[-1] == "the end"
+
+
+def test_multi_line_comment_becomes_one_comment_line_each() -> None:
+    base = minimal_cdm()
+    relative = Section(
+        "relative", (Field("COMMENT", "line one\nline two"), *base.relative.fields)
+    )
+    text = kvn.dumps(dataclasses.replace(base, relative=relative))
+    assert "COMMENT line one\nCOMMENT line two\n" in text
+    assert kvn.loads(text).relative.comments == ("line one", "line two")
+
+
+def test_multi_line_value_cannot_be_written() -> None:
+    base = minimal_cdm()
+    header = Section("header", (*base.header.fields, Field("X_NOTE", "a\nb")))
+    with pytest.raises(CdmWriteError, match="X_NOTE: KVN cannot hold a multi-line"):
+        kvn.dumps(dataclasses.replace(base, header=header))
+
+
+def test_keyword_must_start_with_a_letter() -> None:
+    text = mutate("MESSAGE_ID ", "1ABC = x\nMESSAGE_ID ")
+    with pytest.raises(CdmParseError, match="expected 'KEYWORD = value'") as info:
+        kvn.loads(text)
+    assert info.value.line == line_of(text, "1ABC")

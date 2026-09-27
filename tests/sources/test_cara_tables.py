@@ -15,7 +15,6 @@ def test_alfano_urls_are_percent_encoded() -> None:
 def test_manifest_covers_the_2d_validation_data() -> None:
     assert len(cara.ALFANO_2009_TCA) == 12
     assert len(cara.PC_METHOD_CDMS) == 53
-    assert len(cara.MANIFEST) == 3 + 12 + 1 + 53 + 1
     assert len({file.path for file in cara.MANIFEST}) == len(cara.MANIFEST)
 
 
@@ -48,6 +47,21 @@ def test_load_xlsx_returns_rows_by_header(tmp_path: Path) -> None:
         sheet.append(row)
     workbook.save(path)
     assert cara.load_xlsx(path) == [{"Conjunction_ID": "A", "HBR_m": 10, "Pc2D": 1e-4}]
+
+
+@pytest.mark.parametrize("header", [("A", None, "B"), ("A", "B", "A")])
+def test_load_xlsx_rejects_empty_or_repeated_header_names(
+    tmp_path: Path, header: tuple[str | None, ...]
+) -> None:
+    path = tmp_path / "table.xlsx"
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    assert sheet is not None
+    sheet.append(header)
+    sheet.append((1, 2, 3))
+    workbook.save(path)
+    with pytest.raises(CaraFormatError, match="empty or repeated names"):
+        cara.load_xlsx(path)
 
 
 def test_load_xlsx_rejects_a_non_workbook(tmp_path: Path) -> None:

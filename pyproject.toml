@@ -39,13 +39,10 @@ select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "N", "PT", "NPY"]
 # Exception names follow the spec (SourceUnavailable, ChecksumMismatch, ...).
 ignore = ["N818"]
 
-[tool.ruff.lint.per-file-ignores]
-# One SHA-256 per line; the digests cannot be wrapped.
-"src/keepout/sources/_cara_pc_cdms.py" = ["E501"]
-
 [tool.mypy]
 strict = true
-files = ["src", "tests"]
+files = ["src", "tests", "tools"]
+mypy_path = ["tools"]
 
 [[tool.mypy.overrides]]
 module = ["scipy.*", "astropy.*", "erfa.*", "xlrd.*", "openpyxl.*"]
@@ -53,6 +50,7 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["tools"]
 addopts = ["-ra", "--strict-markers", "-m", "not validation"]
 markers = [
     "validation: needs NASA CARA reference data (downloads on first run)",
@@ -69,13 +67,13 @@ show_missing = true
 [dependency-groups]
 dev = [
     "hypothesis>=6.168.1",
+    "keepout[validation]",
     "mkdocs>=1.6,<2",
     "mkdocs-material>=9.7.7",
     "mkdocstrings[python]>=1.0.6",
     "mypy>=2.3.1",
-    "openpyxl>=3.1.5",
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
     "ruff>=0.16.8",
-    "xlrd>=2.0.2",
+    "xmlschema>=4.3.2",
 ]

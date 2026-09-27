@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Entry point for validating unqualified CDM 1.0 messages: the <cdm> root
+     element exactly as ndmxml-2.0.0-master-2.0.xsd declares it, importing only
+     the CDM and common modules of NDM/XML 2.0.0 (copied unchanged from
+     https://sanaregistry.org/r/ndmxml_unqualified/). -->
+<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+            xmlns:ndm="urn:ccsds:schema:ndmxml"
+            elementFormDefault="unqualified"
+            attributeFormDefault="unqualified">
+   <xsd:import namespace="urn:ccsds:schema:ndmxml"
+               schemaLocation="./ndmxml-2.0.0-cdm-1.0.xsd"/>
+   <xsd:element name="cdm" type="ndm:cdmType"/>
+</xsd:schema>

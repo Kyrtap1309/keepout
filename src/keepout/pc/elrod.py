@@ -16,12 +16,13 @@ along ``u`` and doubles until two orders agree to :data:`ELROD_RTOL`.
 from __future__ import annotations
 
 import math
+from functools import lru_cache
 
 import numpy as np
 
 from keepout._types import FloatArray
 from keepout.encounter import EncounterPlane
-from keepout.pc._plane import PlaneGaussian, plane_gaussian, require_positive
+from keepout.pc._plane import PlaneGaussian, plane_gaussian
 from keepout.pc.result import PcResult
 
 START_ORDER = 64
@@ -34,10 +35,13 @@ ELROD_RTOL = 1e-10
 """Relative agreement of two successive orders that ends adaptive mode."""
 
 
+@lru_cache(maxsize=16)
 def _nodes(order: int) -> tuple[FloatArray, FloatArray]:
-    """Gauss-Chebyshev (second kind) nodes and weights on ``[-1, 1]``."""
+    """Gauss-Chebyshev (second kind) nodes and weights on ``[-1, 1]``, read-only."""
     angles = np.arange(1, order + 1) * (math.pi / (order + 1))
-    return np.cos(angles), (math.pi / (order + 1)) * np.sin(angles) ** 2
+    nodes, weights = np.cos(angles), (math.pi / (order + 1)) * np.sin(angles) ** 2
+    nodes.flags.writeable = weights.flags.writeable = False
+    return nodes, weights
 
 
 def _sum(gaussian: PlaneGaussian, order: int) -> float:
@@ -82,10 +86,11 @@ def elrod(
     ------
     ValueError
         If ``hard_body_radius`` is not finite and positive, or ``order`` < 1.
+    GeometryError
+        If the miss vector is not finite.
     CovarianceError
-        If the plane covariance has no positive eigenvalue.
+        If the plane covariance is not finite or has no positive eigenvalue.
     """
-    require_positive(hard_body_radius, "hard_body_radius")
     if order is not None and order < 1:
         raise ValueError(f"order must be >= 1, got {order}")
     gaussian = plane_gaussian(plane.miss_vector, plane.covariance, hard_body_radius)
@@ -99,20 +104,17 @@ def elrod(
             )
         value = _sum(gaussian, order)
     else:
-        order = min(resolving, MAX_ORDER)
+        # Start below MAX_ORDER so that at least two orders are compared.
+        order = min(resolving, MAX_ORDER // 2)
         value = _sum(gaussian, order)
-        converged = False
         while order < MAX_ORDER:
             order *= 2
             previous, value = value, _sum(gaussian, order)
             if abs(value - previous) <= ELROD_RTOL * abs(value):
-                converged = True
                 break
-        if not converged:
+        else:
             diagnostics.append(
                 f"Elrod quadrature did not converge by order {order}; "
                 "use method='foster'"
             )
-    return PcResult(
-        min(max(value, 0.0), 1.0), "elrod", tuple(diagnostics), {"order": float(order)}
-    )
+    return PcResult.clamped(value, "elrod", tuple(diagnostics), {"order": float(order)})

@@ -12,20 +12,41 @@ only the band where the density is not negligible is integrated.
 from __future__ import annotations
 
 import math
+import sys
 
-import numpy as np
 from scipy import integrate
 
 from keepout.encounter import EncounterPlane
-from keepout.pc._plane import PlaneGaussian, plane_gaussian, require_positive
+from keepout.pc._plane import PlaneGaussian, plane_gaussian
 from keepout.pc.result import PcResult
 
 FOSTER_RTOL = 1e-10
 """Default relative tolerance of the adaptive quadrature."""
 
+MIN_RTOL = 50.0 * sys.float_info.epsilon
+"""Smallest relative tolerance QUADPACK accepts."""
+
 STEP_SIGMAS = 10.0
 """Half-width, in narrow-axis standard deviations, of the chord-mass step
 around ``h = |mv|`` whose ends are given to the quadrature as breakpoints."""
+
+TAIL_SIGMAS = 12.0
+"""Half-width, in standard deviations, of the band along the wide axis that
+is integrated; outside it the density is below exp(-72) of its peak."""
+
+
+def _band(gaussian: PlaneGaussian) -> tuple[float, float] | None:
+    """Angles ``theta`` (``u = R sin(theta)``) of the part of the circle where
+    the density along ``u`` matters.
+
+    Returns ``None`` if the band misses the circle (Pc underflows to 0).
+    """
+    radius = gaussian.radius
+    low = max(gaussian.mu - TAIL_SIGMAS * gaussian.su, -radius)
+    high = min(gaussian.mu + TAIL_SIGMAS * gaussian.su, radius)
+    if low >= high:
+        return None
+    return math.asin(low / radius), math.asin(high / radius)
 
 
 def _chord_steps(gaussian: PlaneGaussian, low: float, high: float) -> list[float]:
@@ -68,29 +89,31 @@ def foster(
     Raises
     ------
     ValueError
-        If ``hard_body_radius`` is not finite and positive, or ``rtol`` is not
-        positive.
+        If ``hard_body_radius`` is not finite and positive, or ``rtol`` is
+        below :data:`MIN_RTOL`.
+    GeometryError
+        If the miss vector is not finite.
     CovarianceError
-        If the plane covariance has no positive eigenvalue.
+        If the plane covariance is not finite or has no positive eigenvalue.
     """
-    require_positive(hard_body_radius, "hard_body_radius")
-    require_positive(rtol, "rtol")
+    if not rtol >= MIN_RTOL:
+        raise ValueError(f"rtol must be >= {MIN_RTOL:.3g}, got {rtol}")
     gaussian = plane_gaussian(plane.miss_vector, plane.covariance, hard_body_radius)
     diagnostics = list(gaussian.diagnostics)
-    band = gaussian.band()
+    band = _band(gaussian)
     if band is None:
-        return PcResult(0.0, "foster", tuple(diagnostics), {"error_estimate": 0.0})
-    radius = hard_body_radius
-    low = math.asin(band[0] / radius)
-    high = math.asin(band[1] / radius)
+        details = {"error_estimate": 0.0, "evaluations": 0.0}
+        return PcResult(0.0, "foster", tuple(diagnostics), details)
+    low, high = band
+    radius = gaussian.radius
 
     def integrand(theta: float) -> float:
         # u = R sin(theta), du = R cos(theta) dtheta, half-chord = R cos(theta).
-        half_chord = np.array([radius * math.cos(theta)])
-        density = gaussian.density_u(np.array([radius * math.sin(theta)]))
-        return float((half_chord * density * gaussian.chord_mass(half_chord))[0])
+        half_chord = radius * math.cos(theta)
+        density = gaussian.density_u_at(radius * math.sin(theta))
+        return half_chord * density * gaussian.chord_mass_at(half_chord)
 
-    output = integrate.quad(
+    value, error, info, *message = integrate.quad(
         integrand,
         low,
         high,
@@ -100,11 +123,10 @@ def foster(
         limit=200,
         full_output=1,
     )
-    value, error, info = output[0], output[1], output[2]
-    if len(output) > 3:
-        diagnostics.append(f"Foster quadrature: {str(output[3]).splitlines()[0]}")
-    return PcResult(
-        min(max(value, 0.0), 1.0),
+    if message:
+        diagnostics.append(f"Foster quadrature: {' '.join(str(message[0]).split())}")
+    return PcResult.clamped(
+        value,
         "foster",
         tuple(diagnostics),
         {"error_estimate": float(error), "evaluations": float(info["neval"])},

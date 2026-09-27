@@ -46,3 +46,14 @@ class PcResult:
         object.__setattr__(self, "value", float(self.value))
         object.__setattr__(self, "diagnostics", tuple(self.diagnostics))
         object.__setattr__(self, "details", MappingProxyType(dict(self.details)))
+
+    @classmethod
+    def clamped(
+        cls,
+        value: float,
+        method: Method,
+        diagnostics: tuple[str, ...] = (),
+        details: Mapping[str, float] | None = None,
+    ) -> PcResult:
+        """A result with ``value`` clipped to ``[0, 1]`` (quadrature round-off)."""
+        return cls(min(max(value, 0.0), 1.0), method, diagnostics, details or {})

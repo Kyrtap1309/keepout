@@ -1,14 +1,17 @@
+import dataclasses
+
 import numpy as np
 import pytest
-from pc_builders import EPOCH, LEO_R, LEO_V, head_on, object_state
+from builders import EPOCH, LEO_R, LEO_V, head_on, object_state
 
 from keepout.conjunction import Conjunction, combined_hard_body_radius
+from keepout.covariance import make_covariance
 from keepout.errors import GeometryError
 from keepout.objects import ObjectState
 
 
 def with_radius(obj: ObjectState, radius: float | None) -> ObjectState:
-    return ObjectState(obj.object_id, obj.state, obj.covariance, radius)
+    return dataclasses.replace(obj, hard_body_radius=radius)
 
 
 def test_conjunction_exposes_encounter_geometry() -> None:
@@ -53,3 +56,16 @@ def test_missing_radius_is_an_error_not_a_default() -> None:
     primary = with_radius(base.primary, 3.0)
     with pytest.raises(ValueError, match="no hard-body radius for SEC"):
         combined_hard_body_radius(primary, base.secondary)
+
+
+def test_diagnostics_label_each_objects_covariance_repairs() -> None:
+    base = head_on(miss=30.0, sigma_x=10.0, sigma_z=20.0, radius=5.0)
+    assert base.diagnostics == ()
+    negative = np.diag([1.0, 1.0, 1.0, 1.0, 1.0, -1.0])
+    secondary = ObjectState(
+        "99", base.secondary.state, make_covariance(negative, "GCRF", EPOCH)
+    )
+    conjunction = Conjunction(base.primary, secondary, 5.0)
+    assert conjunction.diagnostics == (
+        "secondary (99): clipped 1 negative eigenvalue(s) to zero (most negative -1)",
+    )

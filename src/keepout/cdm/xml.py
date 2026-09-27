@@ -2,9 +2,11 @@
 
 The reader flattens grouping elements, so it accepts CCSDS 508.0-B-1 messages
 with or without the ``ndm:`` namespace (Technical Corrigendum 2) and CDM 2.0
-groups such as ``physicalParameters`` and ``userDefinedParameters``. DOCTYPE
-declarations are rejected: CDMs never need them, and refusing them rules out
-entity-expansion attacks. No XSD validation is performed.
+groups such as ``physicalParameters`` and ``userDefinedParameters``.
+``<USER_DEFINED parameter="NAME">`` becomes the keyword ``USER_DEFINED_NAME``,
+as in KVN. DOCTYPE declarations are rejected: CDMs never need them, and
+refusing them rules out entity-expansion attacks. No XSD validation is
+performed.
 """
 
 from __future__ import annotations
@@ -13,11 +15,13 @@ from collections.abc import Iterator, Sequence
 from pathlib import Path
 from xml.etree import ElementTree
 
+from keepout.cdm._io import read_text, write_text
 from keepout.cdm.keywords import KEYWORDS, SectionKind
 from keepout.cdm.model import (
     COMMENT,
     USER_DEFINED_PREFIX,
     Cdm,
+    DuplicateKeyword,
     Field,
     Section,
     format_field,
@@ -30,6 +34,18 @@ _XSI = "http://www.w3.org/2001/XMLSchema-instance"
 _SCHEMA_1_0 = (
     "https://sanaregistry.org/r/ndmxml_unqualified/ndmxml-2.0.0-master-2.0.xsd"
 )
+_USER_DEFINED = "USER_DEFINED"
+_USER_GROUP = ("data", "userDefinedParameters")
+_GROUPS = frozenset(
+    {
+        name
+        for table in KEYWORDS.values()
+        for spec in table.values()
+        for name in spec.group
+    }
+    | {"physicalParameters", *_USER_GROUP}
+)
+"""Grouping elements; they are structure even when empty."""
 
 
 def _local(tag: str) -> str:
@@ -49,32 +65,52 @@ def _leaves(
     element: ElementTree.Element, path: str
 ) -> Iterator[tuple[ElementTree.Element, str]]:
     for child in element:
-        child_path = f"{path}/{_local(child.tag)}"
-        if len(child):
+        name = _local(child.tag)
+        child_path = f"{path}/{name}"
+        if len(child) or name in _GROUPS:
             yield from _leaves(child, child_path)
         else:
             yield child, child_path
 
 
-def _fields(
-    element: ElementTree.Element, kind: SectionKind, path: str
-) -> tuple[Field, ...]:
-    fields: list[Field] = []
-    seen: set[str] = set()
+def _keyword(leaf: ElementTree.Element, path: str) -> str:
+    keyword = _local(leaf.tag)
+    if keyword != _USER_DEFINED:
+        return keyword
+    parameter = leaf.get("parameter")
+    if not parameter:
+        raise CdmParseError("USER_DEFINED has no parameter attribute", path=path)
+    return USER_DEFINED_PREFIX + parameter
+
+
+def _section(
+    kind: SectionKind,
+    element: ElementTree.Element,
+    path: str,
+    leading: Sequence[Field] = (),
+) -> Section:
+    fields = list(leading)
+    paths = [path] * len(fields)
     for leaf, leaf_path in _leaves(element, path):
-        keyword = _local(leaf.tag)
+        keyword = _keyword(leaf, leaf_path)
         text = (leaf.text or "").strip()
-        if keyword == COMMENT:
-            fields.append(Field(COMMENT, text))
-            continue
-        if keyword in seen:
-            raise CdmParseError("duplicate keyword", path=leaf_path, keyword=keyword)
-        seen.add(keyword)
         try:
-            fields.append(parse_field(kind, keyword, text, leaf.get("units")))
+            fields.append(
+                Field(COMMENT, text)
+                if keyword == COMMENT
+                else parse_field(kind, keyword, text, leaf.get("units"))
+            )
         except ValueError as exc:
             raise CdmParseError(str(exc), path=leaf_path, keyword=keyword) from exc
-    return tuple(fields)
+        paths.append(leaf_path)
+    try:
+        return Section(kind, tuple(fields))
+    except DuplicateKeyword as exc:
+        raise CdmParseError(
+            "duplicate keyword", path=paths[exc.index], keyword=exc.keyword
+        ) from exc
+    except ValueError as exc:
+        raise CdmParseError(str(exc), path=path) from exc
 
 
 def loads(text: str) -> Cdm:
@@ -109,21 +145,16 @@ def loads(text: str) -> Cdm:
         raise CdmParseError(
             f"expected 2 <segment> elements, found {len(segments)}", path="cdm/body"
         )
-    header_fields = (
-        Field("CCSDS_CDM_VERS", version),
-        *_fields(header, "header", "cdm/header"),
-    )
     first, second = (
-        Section("segment", _fields(segment, "segment", f"cdm/body/segment[{index}]"))
+        _section("segment", segment, f"cdm/body/segment[{index}]")
         for index, segment in enumerate(segments, start=1)
     )
     try:
         return Cdm(
-            Section("header", header_fields),
-            Section(
-                "relative",
-                _fields(relative, "relative", "cdm/body/relativeMetadataData"),
+            _section(
+                "header", header, "cdm/header", [Field("CCSDS_CDM_VERS", version)]
             ),
+            _section("relative", relative, "cdm/body/relativeMetadataData"),
             (first, second),
         )
     except ValueError as exc:
@@ -137,18 +168,19 @@ def _groups(
 
     Known keywords use the table; ``USER_DEFINED_*`` go to
     ``userDefinedParameters``; other unknown keywords stay in the group of the
-    field before them; comments take the group of the field after them.
+    field before them; comments take the group of the field after them
+    (trailing comments the group of the last field).
     """
     table = KEYWORDS[kind]
-    default: tuple[str, ...] = ("metadata",) if kind == "segment" else ()
     physical = (
         "physicalParameters" if version.startswith("2") else "additionalParameters"
     )
-    resolved: list[tuple[str, ...] | None] = []
-    previous = default
+    group: tuple[str, ...] = ("metadata",) if kind == "segment" else ()
+    groups: list[tuple[str, ...]] = []
+    comments = 0
     for field in fields:
         if field.keyword == COMMENT:
-            resolved.append(None)
+            comments += 1
             continue
         spec = table.get(field.keyword)
         if spec is not None:
@@ -157,18 +189,22 @@ def _groups(
                 for name in spec.group
             )
         elif kind == "segment" and field.keyword.startswith(USER_DEFINED_PREFIX):
-            group = ("data", "userDefinedParameters")
-        else:
-            group = previous
-        resolved.append(group)
-        previous = group
-    # Comments join the next field's group; trailing comments the last one.
-    upcoming = previous
-    groups: list[tuple[str, ...]] = []
-    for candidate in reversed(resolved):
-        upcoming = candidate if candidate is not None else upcoming
-        groups.append(upcoming)
-    return groups[::-1]
+            group = _USER_GROUP
+        groups.extend([group] * (comments + 1))
+        comments = 0
+    groups.extend([group] * comments)
+    return groups
+
+
+def _insert_comment(element: ElementTree.Element, text: str) -> None:
+    """Add a comment after the element's leading comments: NDM/XML allows
+    ``COMMENT`` only at the start of an element."""
+    position = next(
+        (i for i, child in enumerate(element) if child.tag != COMMENT), len(element)
+    )
+    comment = ElementTree.Element(COMMENT)
+    comment.text = text
+    element.insert(position, comment)
 
 
 def _write(
@@ -187,11 +223,17 @@ def _write(
         for name in group[depth:]:
             names.append(name)
             elements.append(ElementTree.SubElement(elements[-1], name))
-        element = ElementTree.SubElement(elements[-1], field.keyword)
         if field.keyword == COMMENT:
-            element.text = str(field.value)
+            _insert_comment(elements[-1], str(field.value))
             continue
         text, unit = format_field(kind, field)
+        if field.keyword.startswith(USER_DEFINED_PREFIX) and group == _USER_GROUP:
+            parameter = field.keyword.removeprefix(USER_DEFINED_PREFIX)
+            element = ElementTree.SubElement(
+                elements[-1], _USER_DEFINED, {"parameter": parameter}
+            )
+        else:
+            element = ElementTree.SubElement(elements[-1], field.keyword)
         element.text = text
         if unit is not None:
             element.set("units", unit)
@@ -202,7 +244,8 @@ def dumps(cdm: Cdm) -> str:
 
     Version 1.0 messages use the CCSDS 508.0-B-1 groups and schema location;
     version 2.0 messages use ``physicalParameters`` and
-    ``userDefinedParameters``.
+    ``userDefinedParameters``. Comments are moved to the start of their
+    element, where the schema allows them.
 
     Parameters
     ----------
@@ -236,7 +279,7 @@ def load(path: str | Path) -> Cdm:
     path
         File to read.
     """
-    return loads(Path(path).read_text(encoding="utf-8-sig"))
+    return loads(read_text(path))
 
 
 def dump(cdm: Cdm, path: str | Path) -> None:
@@ -249,4 +292,4 @@ def dump(cdm: Cdm, path: str | Path) -> None:
     path
         File to write.
     """
-    Path(path).write_text(dumps(cdm), encoding="utf-8")
+    write_text(path, dumps(cdm))

@@ -1,89 +1,26 @@
-"""Builders and Hypothesis strategies for Pc tests."""
+"""Hypothesis strategies for Pc tests."""
+
+import dataclasses
+import math
+from dataclasses import dataclass
 
 import numpy as np
-import numpy.typing as npt
-from astropy.time import Time
+from builders import LEO_R, LEO_V, head_on, object_state, planar, position_covariances
 from hypothesis import assume
 from hypothesis import strategies as st
 from hypothesis.extra.numpy import arrays
-from scipy.spatial.transform import Rotation
 
-from keepout._types import FloatArray, StateVector
+from keepout._types import FloatArray
 from keepout.conjunction import Conjunction
-from keepout.covariance import Covariance
-from keepout.objects import ObjectState
+from keepout.encounter import EncounterPlane
 
-EPOCH = Time("2010-03-13T22:37:52.618", scale="utc")
-LEO_R = np.array([7000e3, 0.0, 0.0])
-LEO_V = np.array([0.0, 7546.0, 0.0])
-
-
-def object_state(
-    r: npt.ArrayLike,
-    v: npt.ArrayLike,
-    position_covariance: npt.ArrayLike,
-    object_id: str = "TEST",
-) -> ObjectState:
-    """A GCRF object state with the given 3x3 position covariance [m^2]."""
-    matrix = np.zeros((6, 6))
-    matrix[:3, :3] = position_covariance
-    matrix[3:, 3:] = 1e-4 * np.eye(3)
-    return ObjectState(
-        object_id, StateVector(EPOCH, r, v, "GCRF"), Covariance(matrix, "GCRF", EPOCH)
-    )
-
-
-def head_on(miss: float, sigma_x: float, sigma_z: float, radius: float) -> Conjunction:
-    """LEO head-on encounter with the miss along GCRF x.
-
-    The secondary is ``miss`` metres radially above the primary and flies
-    against it; the plane axes are GCRF x and -y-ish, the plane covariance is
-    ``diag(sigma_x^2, sigma_z^2)`` (all of it on the primary).
-    """
-    primary = object_state(LEO_R, LEO_V, np.diag([sigma_x**2, 1.0, sigma_z**2]))
-    secondary = object_state(
-        LEO_R + np.array([miss, 0.0, 0.0]),
-        -LEO_V,
-        np.diag([1e-12, 1e-12, 1e-12]),
-        "SEC",
-    )
-    return Conjunction(primary, secondary, radius)
-
-
-def rotate(obj: ObjectState, rotation: FloatArray) -> ObjectState:
-    """The same object with state and covariance rotated by ``rotation``."""
-    block = np.zeros((6, 6))
-    block[:3, :3] = block[3:, 3:] = rotation
-    state = obj.state
-    return ObjectState(
-        obj.object_id,
-        StateVector(state.epoch, rotation @ state.r, rotation @ state.v, "GCRF"),
-        Covariance(block @ obj.covariance.matrix @ block.T, "GCRF", state.epoch),
-        obj.hard_body_radius,
-    )
-
-
-@st.composite
-def rotations(draw: st.DrawFn) -> FloatArray:
-    """Proper rotation matrices from random quaternions."""
-    quaternion = draw(arrays(np.float64, (4,), elements=st.floats(-1.0, 1.0)))
-    assume(float(np.linalg.norm(quaternion)) > 0.1)
-    matrix: FloatArray = Rotation.from_quat(quaternion, scalar_first=True).as_matrix()
-    return matrix
-
-
-@st.composite
-def position_covariances(draw: st.DrawFn) -> FloatArray:
-    """Random positive-definite 3x3 covariances, sigmas roughly 1 m to 1 km."""
-    root: FloatArray = draw(
-        arrays(np.float64, (3, 3), elements=st.floats(-300.0, 300.0))
-    )
-    return root @ root.T + np.eye(3)
+_BASE_PLANE = head_on(1.0, 1.0, 1.0, 1.0).plane
 
 
 @st.composite
 def conjunctions(draw: st.DrawFn) -> Conjunction:
-    """Random LEO conjunctions at TCA: miss up to 2 km, 50 m/s to 15 km/s."""
+    """Random LEO conjunctions at TCA in any orientation: miss up to 2 km,
+    relative speed 50 m/s to 15 km/s, full 3x3 covariances."""
     direction = draw(arrays(np.float64, (3,), elements=st.floats(-1.0, 1.0)))
     assume(float(np.linalg.norm(direction)) > 0.1)
     speed = draw(st.floats(50.0, 15000.0))
@@ -92,9 +29,92 @@ def conjunctions(draw: st.DrawFn) -> Conjunction:
     # Put the secondary exactly at closest approach: no offset along v.
     unit = relative_velocity / speed
     offset = offset - float(offset @ unit) * unit
-    primary = object_state(LEO_R, LEO_V, draw(position_covariances()), "PRI")
+    primary = object_state(
+        LEO_R, LEO_V, draw(position_covariances(300.0)), object_id="PRI"
+    )
     secondary = object_state(
-        LEO_R + offset, LEO_V + relative_velocity, draw(position_covariances()), "SEC"
+        LEO_R + offset,
+        LEO_V + relative_velocity,
+        draw(position_covariances(300.0)),
+        object_id="SEC",
     )
     radius = draw(st.floats(1.0, 50.0))
     return Conjunction(primary, secondary, radius)
+
+
+@dataclass(frozen=True)
+class PlaneCase:
+    """An encounter-plane Gaussian given by its principal axes.
+
+    The covariance is ``diag(su^2, sv^2)`` rotated by ``angle``; the miss is
+    ``(mu, mv)`` in those axes. Knowing the principal axes lets tests use
+    :func:`reference_pc.principal_axes_pc` as an independent oracle.
+    """
+
+    mu: float
+    mv: float
+    su: float
+    sv: float
+    angle: float
+    radius: float
+
+    @property
+    def rotation(self) -> FloatArray:
+        c, s = math.cos(self.angle), math.sin(self.angle)
+        return np.array([[c, -s], [s, c]])
+
+    @property
+    def miss(self) -> FloatArray:
+        miss: FloatArray = self.rotation @ np.array([self.mu, self.mv])
+        return miss
+
+    @property
+    def covariance(self) -> FloatArray:
+        return self.rotation @ np.diag([self.su**2, self.sv**2]) @ self.rotation.T
+
+    def plane(self, scale: float = 1.0) -> EncounterPlane:
+        """The exact plane, every length multiplied by ``scale``.
+
+        Built directly rather than from states: differencing two ~7000 km
+        positions would blur sub-micrometre misses by ~1e-9 m.
+        """
+        return dataclasses.replace(
+            _BASE_PLANE,
+            miss_vector=scale * self.miss,
+            covariance=scale**2 * self.covariance,
+        )
+
+    def conjunction(self) -> Conjunction:
+        """The case as a LEO conjunction (plane rebuilt from the states)."""
+        return planar(self.miss, self.covariance, self.radius)
+
+
+ANISOTROPIC = (
+    PlaneCase(3.0, 4.0, 20.0, 5.0, 0.3, 10.0),
+    PlaneCase(-40.0, 2.0, 30.0, 1.0, 1.1, 5.0),
+    PlaneCase(0.0, 0.0, 100.0, 0.1, 2.0, 20.0),
+    PlaneCase(250.0, -30.0, 500.0, 50.0, 0.7, 15.0),
+    PlaneCase(5.0, 0.5, 1.0, 0.2, 2.9, 3.0),  # covariance smaller than the body
+    PlaneCase(0.0, 25.0, 1000.0, 10.0, 0.0, 10.0),  # Pc ~ 1e-6, aspect 100:1
+)
+"""Correlated, off-axis plane Gaussians for checks against the oracle."""
+
+
+@st.composite
+def plane_cases(draw: st.DrawFn) -> PlaneCase:
+    """Plane Gaussians from round to line-like (aspect up to 1e4), any
+    orientation, miss within 6 sigma, hard body 0.1x to 10x the wide sigma.
+
+    Sigmas are drawn on a log scale and the miss in sigma units, so most
+    draws have a Pc well above zero.
+    """
+    su = 10.0 ** draw(st.floats(-1.0, 3.0))
+    sv = su * 10.0 ** draw(st.floats(-4.0, 0.0))
+    return PlaneCase(
+        mu=su * draw(st.floats(-6.0, 6.0)),
+        mv=sv * draw(st.floats(-6.0, 6.0)),
+        su=su,
+        sv=sv,
+        angle=draw(st.floats(0.0, math.pi)),
+        radius=su * 10.0 ** draw(st.floats(-1.0, 1.0)),
+    )

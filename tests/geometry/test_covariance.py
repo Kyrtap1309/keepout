@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from geometry_builders import EPOCH
+from builders import DIAGONAL_COVARIANCE, EPOCH
 from hypothesis import given
 from hypothesis import strategies as st
 from hypothesis.extra.numpy import arrays
@@ -9,7 +9,7 @@ from keepout._types import FloatArray, StateVector
 from keepout.covariance import Covariance, make_covariance, problems, repair
 from keepout.errors import CovarianceError, GeometryError
 
-VALID = np.diag([100.0, 400.0, 25.0, 1e-2, 4e-2, 1e-2])
+VALID = DIAGONAL_COVARIANCE
 STATE = StateVector(EPOCH, [7000e3, 100.0, 50.0], [10.0, 7500.0, 1000.0], "GCRF")
 
 
@@ -58,8 +58,8 @@ def test_raise_policy_rejects_invalid_matrix() -> None:
 
 
 def test_make_covariance_repairs_with_diagnostic() -> None:
-    covariance, diagnostics = make_covariance(with_entry(5, 5, -1.0), "RTN", EPOCH)
-    assert diagnostics == (
+    covariance = make_covariance(with_entry(5, 5, -1.0), "RTN", EPOCH)
+    assert covariance.repairs == (
         "clipped 1 negative eigenvalue(s) to zero (most negative -1)",
     )
     assert covariance.matrix[5, 5] == pytest.approx(0.0, abs=1e-12)
@@ -67,16 +67,35 @@ def test_make_covariance_repairs_with_diagnostic() -> None:
 
 
 def test_make_covariance_symmetrises_with_diagnostic() -> None:
-    covariance, diagnostics = make_covariance(with_entry(0, 1, 1.0), "RTN", EPOCH)
-    assert diagnostics == ("symmetrised covariance (max asymmetry 1)",)
+    covariance = make_covariance(with_entry(0, 1, 1.0), "RTN", EPOCH)
+    assert covariance.repairs == ("symmetrised covariance (max asymmetry 1)",)
     assert covariance.matrix[0, 1] == pytest.approx(0.5, rel=1e-12)
     assert covariance.matrix[1, 0] == pytest.approx(0.5, rel=1e-12)
 
 
 def test_valid_matrix_is_not_touched_by_repair_policy() -> None:
-    covariance, diagnostics = make_covariance(VALID, "RTN", EPOCH)
-    assert diagnostics == ()
+    covariance = make_covariance(VALID, "RTN", EPOCH)
+    assert covariance.repairs == ()
     np.testing.assert_array_equal(covariance.matrix, VALID)
+
+
+def test_make_covariance_rejects_an_unknown_frame() -> None:
+    with pytest.raises(ValueError, match="unsupported covariance frame 'ECEF'"):
+        make_covariance(VALID, "ECEF", EPOCH)  # type: ignore[arg-type]
+
+
+def test_repairs_survive_frame_changes() -> None:
+    covariance = make_covariance(with_entry(0, 1, 1.0), "RTN", EPOCH)
+    gcrf = covariance.in_gcrf(STATE)
+    assert gcrf.repairs == covariance.repairs
+    assert gcrf.in_rtn(STATE).repairs == covariance.repairs
+
+
+def test_rotated_covariance_is_frozen_and_symmetric() -> None:
+    gcrf = Covariance(VALID, "RTN", EPOCH).in_gcrf(STATE)
+    np.testing.assert_array_equal(gcrf.matrix, gcrf.matrix.T)
+    with pytest.raises(ValueError, match="read-only"):
+        gcrf.matrix[0, 0] = 1.0
 
 
 def test_unknown_policy_is_rejected() -> None:
@@ -108,3 +127,14 @@ def test_frame_change_needs_a_gcrf_state() -> None:
     state = StateVector(EPOCH, STATE.r, STATE.v, "EME2000")
     with pytest.raises(GeometryError, match="GCRF state"):
         Covariance(VALID, "RTN", EPOCH).in_gcrf(state)
+
+
+def test_position_only_covariance_has_a_zero_velocity_block() -> None:
+    covariance = Covariance.from_position(4.0 * np.eye(3), "GCRF", EPOCH)
+    np.testing.assert_array_equal(covariance.position, 4.0 * np.eye(3))
+    np.testing.assert_array_equal(covariance.matrix[3:, :], np.zeros((3, 6)))
+
+
+def test_position_only_covariance_must_be_3x3() -> None:
+    with pytest.raises(CovarianceError, match="must be 3x3"):
+        Covariance.from_position(np.eye(6), "GCRF", EPOCH)

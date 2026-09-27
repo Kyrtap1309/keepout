@@ -4,6 +4,7 @@ from keepout.cdm.keywords import (
     REQUIRED,
     SEGMENT,
     Keyword,
+    covariance_entries,
     covariance_names,
     format_epoch,
     format_value,
@@ -59,7 +60,12 @@ def test_parse_float_converts_to_si() -> None:
     [
         (SEGMENT["X"], "1.5", "m", r"unit \[m\] does not match expected \[km\]"),
         (SEGMENT["X"], "abc", "km", "invalid number 'abc'"),
-        (SEGMENT["X"], "nan", "km", "non-finite number 'nan'"),
+        (SEGMENT["X"], "nan", "km", "invalid number 'nan'"),
+        (SEGMENT["X"], "inf", "km", "invalid number 'inf'"),
+        (SEGMENT["X"], "1_0.5", "km", "invalid number '1_0.5'"),
+        (SEGMENT["X"], "1e999", "km", "number out of range '1e999'"),
+        (SEGMENT["OBS_USED"], "1_06", None, "invalid integer '1_06'"),
+        (SEGMENT["OBS_USED"], "\u0661\u0662", None, "invalid integer"),
         (SEGMENT["X"], "", "km", "empty value"),
         (SEGMENT["OBS_USED"], "1.5", None, "invalid integer '1.5'"),
         (SEGMENT["WEIGHTED_RMS"], "1.0", "m", r"takes no unit"),
@@ -116,3 +122,24 @@ def test_format_value() -> None:
         "2010-03-13T22:37:52.618",
         None,
     )
+
+
+@pytest.mark.parametrize(
+    ("text", "value"),
+    [("+1.5", 1.5), (".5", 0.5), ("5.", 5.0), ("1E+05", 1e5), ("-2.5e-3", -2.5e-3)],
+)
+def test_ccsds_real_forms_are_accepted(text: str, value: float) -> None:
+    assert parse_value(SEGMENT["WEIGHTED_RMS"], text, None) == value
+
+
+def test_covariance_entries_follow_the_lower_triangle() -> None:
+    entries = covariance_entries(3)
+    assert entries == (
+        ("CR_R", 0, 0),
+        ("CT_R", 1, 0),
+        ("CT_T", 1, 1),
+        ("CN_R", 2, 0),
+        ("CN_T", 2, 1),
+        ("CN_N", 2, 2),
+    )
+    assert covariance_names(3) == tuple(name for name, _, _ in entries)
