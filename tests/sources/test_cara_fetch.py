@@ -42,9 +42,8 @@ def test_url_is_pinned_to_commit() -> None:
 
 
 def test_manifest_entries_are_well_formed() -> None:
-    assert len(cara.MANIFEST) == 3
     for entry in cara.MANIFEST:
-        assert entry.path.startswith("DistributedMatlab/")
+        assert entry.path.startswith(("DistributedMatlab/", "DataFiles/"))
         assert re.fullmatch(r"[0-9a-f]{64}", entry.sha256)
 
 

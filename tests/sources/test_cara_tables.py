@@ -1,0 +1,64 @@
+from pathlib import Path
+
+import openpyxl
+import pytest
+
+from keepout.errors import CaraFormatError
+from keepout.sources import cara
+
+
+def test_alfano_urls_are_percent_encoded() -> None:
+    url = cara.ALFANO_2009_TCA[0].url
+    assert url.endswith("/Alfano_2009_Test_Cases/Case1%20data%20at%20TCA.xls")
+
+
+def test_manifest_covers_the_2d_validation_data() -> None:
+    assert len(cara.ALFANO_2009_TCA) == 12
+    assert len(cara.PC_METHOD_CDMS) == 53
+    assert len(cara.MANIFEST) == 3 + 12 + 1 + 53 + 1
+    assert len({file.path for file in cara.MANIFEST}) == len(cara.MANIFEST)
+
+
+def test_load_csv_returns_rows_by_header(tmp_path: Path) -> None:
+    path = tmp_path / "table.csv"
+    path.write_text("Case,HBR\n1,15\n2,4\n", encoding="utf-8")
+    assert cara.load_csv(path) == [
+        {"Case": "1", "HBR": "15"},
+        {"Case": "2", "HBR": "4"},
+    ]
+
+
+def test_load_csv_rejects_an_empty_file(tmp_path: Path) -> None:
+    path = tmp_path / "empty.csv"
+    path.write_text("", encoding="utf-8")
+    with pytest.raises(CaraFormatError, match="no header row"):
+        cara.load_csv(path)
+
+
+def test_load_xlsx_returns_rows_by_header(tmp_path: Path) -> None:
+    path = tmp_path / "table.xlsx"
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    assert sheet is not None
+    for row in (
+        ("Conjunction_ID", "HBR_m", "Pc2D"),
+        ("A", 10, 1e-4),
+        (None, None, None),
+    ):
+        sheet.append(row)
+    workbook.save(path)
+    assert cara.load_xlsx(path) == [{"Conjunction_ID": "A", "HBR_m": 10, "Pc2D": 1e-4}]
+
+
+def test_load_xlsx_rejects_a_non_workbook(tmp_path: Path) -> None:
+    path = tmp_path / "bad.xlsx"
+    path.write_bytes(b"not a zip file")
+    with pytest.raises(CaraFormatError, match=r"bad\.xlsx: not a readable \.xlsx"):
+        cara.load_xlsx(path)
+
+
+def test_load_xls_rejects_a_non_workbook(tmp_path: Path) -> None:
+    path = tmp_path / "bad.xls"
+    path.write_bytes(b"not an xls file" * 100)
+    with pytest.raises(CaraFormatError, match=r"bad\.xls: not a readable \.xls"):
+        cara.load_xls_rows(path)

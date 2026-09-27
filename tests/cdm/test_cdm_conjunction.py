@@ -1,0 +1,33 @@
+import pytest
+from cdm_builders import minimal_cdm, replace, segment_fields
+
+from keepout.cdm.model import Field
+from keepout.conjunction import Conjunction
+
+
+def with_hbr(index: int, radius: float) -> list[Field]:
+    return [*segment_fields(index), Field("HBR", radius)]
+
+
+def test_radius_comes_from_both_objects_hbr() -> None:
+    cdm = minimal_cdm(segment1=with_hbr(1, 5.0), segment2=with_hbr(2, 2.5))
+    conjunction = Conjunction.from_cdm(cdm)
+    assert conjunction.hard_body_radius == 7.5
+    assert conjunction.primary.object_id == "10001"
+
+
+def test_explicit_radius_overrides_hbr() -> None:
+    cdm = minimal_cdm(segment1=with_hbr(1, 5.0), segment2=with_hbr(2, 2.5))
+    assert Conjunction.from_cdm(cdm, hard_body_radius=20.0).hard_body_radius == 20.0
+
+
+def test_cdm_without_hbr_needs_an_explicit_radius() -> None:
+    with pytest.raises(ValueError, match="no hard-body radius for 10001, 10002"):
+        Conjunction.from_cdm(minimal_cdm())
+
+
+def test_covariance_repairs_become_conjunction_diagnostics() -> None:
+    cdm = minimal_cdm(segment1=replace(segment_fields(1), "CT_R", 1e6))
+    conjunction = Conjunction.from_cdm(cdm, hard_body_radius=10.0)
+    assert len(conjunction.diagnostics) == 1
+    assert conjunction.diagnostics[0].startswith("OBJECT1: clipped")

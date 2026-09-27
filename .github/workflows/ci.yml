@@ -38,9 +38,10 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.cache/keepout
-          key: cara-${{ hashFiles('src/keepout/sources/cara.py') }}
+          key: cara-${{ hashFiles('src/keepout/sources/cara.py', 'src/keepout/sources/_cara_pc_cdms.py') }}
       - run: uv sync --locked
       - run: uv run pytest -m validation -v
+      - run: uv run python -m keepout.validation --check
 
   docs:
     runs-on: ubuntu-latest
