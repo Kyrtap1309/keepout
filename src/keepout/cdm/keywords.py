@@ -15,7 +15,7 @@ import re
 import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Literal, TypeAlias
+from typing import Literal, TypeAlias, assert_never
 
 import numpy as np
 from astropy.time import Time
@@ -348,19 +348,23 @@ def parse_value(keyword: Keyword, text: str, unit: str | None) -> FieldValue:
         return text
     if not text:
         raise ValueError("empty value")
-    if keyword.kind == "time":
-        return parse_epoch(text)
     # CCSDS numbers only: Python's int()/float() also take "1_0", "inf", ...
-    if keyword.kind == "int":
-        if not _INTEGER.match(text):
-            raise ValueError(f"invalid integer {text!r}")
-        return int(text)
-    if not _REAL.match(text):
-        raise ValueError(f"invalid number {text!r}")
-    number = float(text)
-    if not math.isfinite(number):
-        raise ValueError(f"number out of range {text!r}")
-    return number * keyword.scale
+    match keyword.kind:
+        case "time":
+            return parse_epoch(text)
+        case "int":
+            if not _INTEGER.match(text):
+                raise ValueError(f"invalid integer {text!r}")
+            return int(text)
+        case "float":
+            if not _REAL.match(text):
+                raise ValueError(f"invalid number {text!r}")
+            number = float(text)
+            if not math.isfinite(number):
+                raise ValueError(f"number out of range {text!r}")
+            return number * keyword.scale
+        case _:
+            assert_never(keyword.kind)
 
 
 def format_value(keyword: Keyword, value: FieldValue) -> tuple[str, str | None]:
@@ -373,11 +377,15 @@ def format_value(keyword: Keyword, value: FieldValue) -> tuple[str, str | None]:
     value
         Stored (SI) value.
     """
-    if keyword.kind == "time":
-        return format_epoch(value), None
-    if keyword.kind == "float":
-        return _shortest(float(value), keyword.scale).upper(), keyword.unit
-    return str(value), None
+    match keyword.kind:
+        case "time":
+            return format_epoch(value), None
+        case "float":
+            return _shortest(float(value), keyword.scale).upper(), keyword.unit
+        case "str" | "int":
+            return str(value), None
+        case _:
+            assert_never(keyword.kind)
 
 
 def _shortest(value: float, scale: float) -> str:

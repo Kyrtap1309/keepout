@@ -32,9 +32,10 @@ from keepout.validation.criteria import (
 )
 from keepout.validation.legacy import legacy_objects
 
-ALFANO_EPOCH = Time("2000-01-01T00:00:00", scale="utc")
-"""Nominal epoch for the Alfano cases; their states are inertial vectors at
-TCA with no calendar date; no Pc depends on it."""
+NOMINAL_EPOCH = Time("2000-01-01T00:00:00", scale="utc")
+"""Nominal epoch of the cases whose states have no calendar date (the Alfano
+sheets and CARA's inline unit-test cases): inertial vectors at TCA; no Pc
+depends on it."""
 
 TWO_D_METHODS: tuple[Method, ...] = ("foster", "elrod")
 
@@ -121,8 +122,8 @@ def _matrix(rows: Sequence[Sequence[Any]], first_row: int) -> FloatArray:
 def _gcrf_object(
     name: str, r: npt.ArrayLike, v: npt.ArrayLike, covariance: Covariance
 ) -> ObjectState:
-    """An object at :data:`ALFANO_EPOCH`."""
-    return ObjectState(name, StateVector(ALFANO_EPOCH, r, v, "GCRF"), covariance)
+    """An object at :data:`NOMINAL_EPOCH`."""
+    return ObjectState(name, StateVector(NOMINAL_EPOCH, r, v, "GCRF"), covariance)
 
 
 def alfano_objects(rows: Sequence[Sequence[Any]]) -> tuple[ObjectState, ObjectState]:
@@ -146,7 +147,7 @@ def alfano_objects(rows: Sequence[Sequence[Any]]) -> tuple[ObjectState, ObjectSt
     except (IndexError, ValueError) as exc:
         raise CaraFormatError(f"unexpected Alfano sheet layout: {exc}") from exc
     primary, secondary = (
-        _gcrf_object(name, r, v, make_covariance(matrix, "GCRF", ALFANO_EPOCH))
+        _gcrf_object(name, r, v, make_covariance(matrix, "GCRF", NOMINAL_EPOCH))
         for name, (r, v, matrix) in zip(("PRIMARY", "SECONDARY"), pieces, strict=True)
     )
     return primary, secondary
@@ -245,7 +246,7 @@ def load_non_pd_case(cache: Path | None = None) -> ValidationCase:
     )
 
 
-def similar_to_3d_case() -> ValidationCase:
+def elrod_similar_to_3d_case() -> ValidationCase:
     """Inline case ``testSimilarTo3D`` of CARA's ``PcElrod_UnitTest.m``.
 
     Numbers transcribed from ``DistributedMatlab/ProbabilityOfCollision/
@@ -276,7 +277,7 @@ def similar_to_3d_case() -> ValidationCase:
     )
     primary, secondary = (
         _gcrf_object(
-            name, r, v, Covariance.from_position(position, "GCRF", ALFANO_EPOCH)
+            name, r, v, Covariance.from_position(position, "GCRF", NOMINAL_EPOCH)
         )
         for name, (r, v), position in zip(
             ("PRIMARY", "SECONDARY"), states, position_covariances, strict=True
@@ -426,7 +427,7 @@ def load_pc_method_monte_carlo_cases(
 def hall_similar_to_2d_case() -> ValidationCase:
     """Inline case ``testSimilarTo2D`` of CARA's ``Pc3D_Hall_UnitTest.m``.
 
-    The states of Elrod's ``testSimilarTo3D`` (:func:`similar_to_3d_case`)
+    The states of Elrod's ``testSimilarTo3D`` (:func:`elrod_similar_to_3d_case`)
     with full 6x6 covariances, transcribed from
     ``DistributedMatlab/ProbabilityOfCollision/UnitTests/Pc3D_Hall_UnitTest.m``
     lines 131-145 at the pinned commit (ECI, m, m/s, HBR 20 m); the
@@ -534,13 +535,13 @@ def hall_similar_to_2d_case() -> ValidationCase:
             ],
         ],
     )
-    two_d = similar_to_3d_case().conjunction
+    two_d = elrod_similar_to_3d_case().conjunction
     primary, secondary = (
         _gcrf_object(
             item.object_id,
             item.state.r,
             item.state.v,
-            make_covariance(matrix, "GCRF", ALFANO_EPOCH),
+            make_covariance(matrix, "GCRF", NOMINAL_EPOCH),
         )
         for item, matrix in zip(
             (two_d.primary, two_d.secondary), covariances, strict=True
@@ -653,14 +654,14 @@ def load_all(cache: Path | None = None) -> list[ValidationCase]:
         *load_pc_method_cases(cache),
         *load_pc_method_3d_cases(cache),
         load_non_pd_case(cache),
-        similar_to_3d_case(),
+        elrod_similar_to_3d_case(),
         hall_similar_to_2d_case(),
         *load_hall_2d3d_cases(cache),
         *load_max_pc_cases(cache),
     ]
 
 
-def load_monte_carlo(cache: Path | None = None) -> list[ValidationCase]:
+def load_monte_carlo_cases(cache: Path | None = None) -> list[ValidationCase]:
     """The Monte Carlo validation cases (minutes to hours of computing)."""
     cara.prefetch(cara.MANIFEST, cache=cache)
     return [

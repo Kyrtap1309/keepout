@@ -3,7 +3,8 @@
 The 2-D integral over the hard-body circle is reduced exactly to a 1-D
 integral along the wide principal axis ``u``:
 
-    Pc = integral over u of  N(u; mu, su) * P(|v - mv| within chord at u) du
+    Pc = integral over u of N(u; miss_u, sigma_u)
+                            * P(|v - miss_v| within chord at u) du
 
 With ``u = R sin(theta)`` the integrand is smooth at the circle's edge, and
 only the band where the density is not negligible is integrated.
@@ -28,7 +29,7 @@ MIN_RTOL = 50.0 * sys.float_info.epsilon
 
 STEP_SIGMAS = 10.0
 """Half-width, in narrow-axis standard deviations, of the chord-mass step
-around ``h = |mv|`` whose ends are given to the quadrature as breakpoints."""
+around ``h = |miss_v|`` whose ends are given to the quadrature as breakpoints."""
 
 BREAKPOINT_GAP = 1e-6
 """Breakpoints closer than this fraction of the band to its ends are dropped."""
@@ -36,6 +37,9 @@ BREAKPOINT_GAP = 1e-6
 TAIL_SIGMAS = 12.0
 """Half-width, in standard deviations, of the band along the wide axis that
 is integrated; outside it the density is below exp(-72) of its peak."""
+
+QUAD_LIMIT = 200
+"""Largest number of QUADPACK subintervals."""
 
 
 def _band(gaussian: PlaneGaussian) -> tuple[float, float] | None:
@@ -45,8 +49,8 @@ def _band(gaussian: PlaneGaussian) -> tuple[float, float] | None:
     Returns ``None`` if the band misses the circle (Pc underflows to 0).
     """
     radius = gaussian.radius
-    low = max(gaussian.mu - TAIL_SIGMAS * gaussian.su, -radius)
-    high = min(gaussian.mu + TAIL_SIGMAS * gaussian.su, radius)
+    low = max(gaussian.miss_u - TAIL_SIGMAS * gaussian.sigma_u, -radius)
+    high = min(gaussian.miss_u + TAIL_SIGMAS * gaussian.sigma_u, radius)
     if low >= high:
         return None
     return math.asin(low / radius), math.asin(high / radius)
@@ -56,20 +60,20 @@ def _chord_steps(gaussian: PlaneGaussian, low: float, high: float) -> list[float
     """Angles in ``(low, high)`` where the chord mass rises from 0 to 1.
 
     With a narrow axis much thinner than the circle, ``M(h)`` is a step at
-    ``h = |mv|``, i.e. ``theta = +-acos(|mv| / R)``, which adaptive
+    ``h = |miss_v|``, i.e. ``theta = +-acos(|miss_v| / R)``, which adaptive
     quadrature can step over; the step's centre and ends become breakpoints.
     """
     radius = gaussian.radius
     points: set[float] = set()
     for k in (-STEP_SIGMAS, 0.0, STEP_SIGMAS):
-        half_chord = abs(gaussian.mv) + k * gaussian.sv
+        half_chord = abs(gaussian.miss_v) + k * gaussian.sigma_v
         if 0.0 < half_chord < radius:
             angle = math.acos(half_chord / radius)
             points.update(p for p in (-angle, angle) if low < p < high)
-    # A breakpoint a hair from an end of the band (``h = |mv|`` with a tiny
-    # ``mv``, or ``h = 10 sv`` with ``10 sv ~ R``) leaves QUADPACK a sliver
-    # interval, which it reports as bad integrand behaviour; the step it marks
-    # is then at the end itself, so it is dropped.
+    # A breakpoint a hair from an end of the band (``h = |miss_v|`` with a
+    # tiny ``miss_v``, or ``h = 10 sigma_v`` with ``10 sigma_v ~ R``) leaves
+    # QUADPACK a sliver interval, which it reports as bad integrand behaviour;
+    # the step it marks is then at the end itself, so it is dropped.
     gap = BREAKPOINT_GAP * (high - low)
     return [p for p in sorted(points) if p - low > gap and high - p > gap]
 
@@ -130,7 +134,7 @@ def foster(
         points=_chord_steps(gaussian, low, high) or None,
         epsabs=0.0,
         epsrel=rtol,
-        limit=200,
+        limit=QUAD_LIMIT,
         full_output=1,
     )
     if message:

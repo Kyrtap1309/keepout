@@ -13,13 +13,14 @@ from __future__ import annotations
 import argparse
 import sys
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TypeAlias
 
 from keepout.pc.result import Method
 from keepout.sources.cara import CARA_COMMIT
-from keepout.validation.cases import ValidationCase, load_all, load_monte_carlo
+from keepout.validation.cases import ValidationCase, load_all, load_monte_carlo_cases
 from keepout.validation.evaluation import Outcome, evaluate
 
 REPO = Path(__file__).resolve().parents[1]
@@ -156,68 +157,103 @@ def _criteria(members: Sequence[Outcome]) -> list[str]:
     return list(dict.fromkeys(o.case.criterion.describe() for o in members))
 
 
+Cells: TypeAlias = Callable[[ValidationCase, Mapping[Method, Outcome]], list[str]]
+"""The cells of one column group for a case, given its outcomes by method."""
+
+
+@dataclass(frozen=True)
+class _Columns:
+    """Adjacent table columns: their titles and how to fill them for a case."""
+
+    titles: tuple[str, ...]
+    cells: Cells
+
+
+def _method_columns(method: Method) -> _Columns:
+    monte_carlo = method == "montecarlo"
+    titles: tuple[str, ...] = (METHOD_TITLES[method], "error")
+    if monte_carlo:
+        titles += ("keepout interval", "trials")
+
+    def cells(_: ValidationCase, outcomes: Mapping[Method, Outcome]) -> list[str]:
+        found = outcomes.get(method)
+        if found is None:
+            return ["-"] * len(titles)
+        values = [f"{found.value:.9e}", f"{_error(found)} {_mark(found.passed)}"]
+        if monte_carlo:
+            details = found.result.details
+            values += [
+                f"[{details['ci_low']:.4e}, {details['ci_high']:.4e}]",
+                f"{details['samples']:.0f}",
+            ]
+        return values
+
+    return _Columns(titles, cells)
+
+
+def _paper_cells(case: ValidationCase, outcomes: Mapping[Method, Outcome]) -> list[str]:
+    found = outcomes.get(PAPER_METHOD)
+    if case.paper is None or found is None:
+        return ["-", "-"]
+    error = abs(found.value - case.paper) / case.paper
+    return [f"{case.paper:.9e}", f"{error:.1e} {_mark(error <= PAPER_TOLERANCE)}"]
+
+
 def _suite_table(members: Sequence[Outcome]) -> list[str]:
-    methods: list[Method] = list(dict.fromkeys(o.method for o in members))
     cases: dict[str, ValidationCase] = {}
     by_case: defaultdict[str, dict[Method, Outcome]] = defaultdict(dict)
     for outcome in members:
         cases[outcome.case.case_id] = outcome.case
         by_case[outcome.case.case_id][outcome.method] = outcome
     every = list(cases.values())
-    with_paper = any(c.paper is not None for c in every)
-    with_interval = any(c.interval is not None for c in every)
-    informative = next((c.informative[0] for c in every if c.informative), None)
-    mixed = len(_criteria(members)) > 1
-    header = "| Case | HBR [m] | CARA Pc |"
-    if with_interval:
-        header += " CARA 95% interval |"
-    for method in methods:
-        header += f" {METHOD_TITLES[method]} | error |"
-        if method == "montecarlo":
-            header += " keepout interval | trials |"
-    if with_paper:
-        header += " Alfano paper | vs paper |"
-    if informative:
-        header += f" {informative} |"
-    if mixed:
-        header += " Criterion |"
-    lines = [header, "|" + "---|" * header.count(" |")]
-    for case_id, case in cases.items():
-        row = (
-            f"| {case_id} | {case.conjunction.hard_body_radius:g} "
-            f"| {case.reference:.9e} |"
+    columns = [
+        _Columns(
+            ("Case", "HBR [m]", "CARA Pc"),
+            lambda case, _: [
+                case.case_id,
+                f"{case.conjunction.hard_body_radius:g}",
+                f"{case.reference:.9e}",
+            ],
         )
-        if with_interval:
-            low, high = case.interval if case.interval else (0.0, 0.0)
-            row += f" [{low:.4e}, {high:.4e}] |" if case.interval else " - |"
-        for method in methods:
-            found = by_case[case_id].get(method)
-            if found is None:
-                row += " - | - |" + (" - | - |" if method == "montecarlo" else "")
-                continue
-            row += f" {found.value:.9e} | {_error(found)} {_mark(found.passed)} |"
-            if method == "montecarlo":
-                details = found.result.details
-                row += (
-                    f" [{details['ci_low']:.4e}, {details['ci_high']:.4e}] "
-                    f"| {details['samples']:.0f} |"
-                )
-        if with_paper:
-            paper_outcome = by_case[case_id].get(PAPER_METHOD)
-            if case.paper is not None and paper_outcome is not None:
-                paper_error = abs(paper_outcome.value - case.paper) / case.paper
-                row += (
-                    f" {case.paper:.9e} | {paper_error:.1e} "
-                    f"{_mark(paper_error <= PAPER_TOLERANCE)} |"
-                )
-            else:
-                row += " - | - |"
-        if informative:
-            row += f" {case.informative[1]:.9e} |" if case.informative else " - |"
-        if mixed:
-            row += f" {case.criterion.describe()} |"
-        lines.append(row)
+    ]
+    if any(c.interval is not None for c in every):
+        columns.append(
+            _Columns(
+                ("CARA 95% interval",),
+                lambda case, _: [
+                    f"[{case.interval[0]:.4e}, {case.interval[1]:.4e}]"
+                    if case.interval
+                    else "-"
+                ],
+            )
+        )
+    columns += [_method_columns(m) for m in dict.fromkeys(o.method for o in members)]
+    if any(c.paper is not None for c in every):
+        columns.append(_Columns(("Alfano paper", "vs paper"), _paper_cells))
+    informative = next((c.informative[0] for c in every if c.informative), None)
+    if informative:
+        columns.append(
+            _Columns(
+                (informative,),
+                lambda case, _: [
+                    f"{case.informative[1]:.9e}" if case.informative else "-"
+                ],
+            )
+        )
+    if len(_criteria(members)) > 1:
+        columns.append(
+            _Columns(("Criterion",), lambda case, _: [case.criterion.describe()])
+        )
+    titles = [title for group in columns for title in group.titles]
+    lines = [_row(titles), "|" + "---|" * len(titles)]
+    for case_id, case in cases.items():
+        outcomes = by_case[case_id]
+        lines.append(_row([cell for g in columns for cell in g.cells(case, outcomes)]))
     return lines
+
+
+def _row(cells: Sequence[str]) -> str:
+    return "| " + " | ".join(cells) + " |"
 
 
 def render_page(outcomes: Sequence[Outcome], report: Report = MAIN) -> str:
@@ -293,7 +329,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     report = MONTE_CARLO if args.monte_carlo else MAIN
-    cases = load_monte_carlo() if args.monte_carlo else load_all()
+    cases = load_monte_carlo_cases() if args.monte_carlo else load_all()
     outcomes = evaluate(cases)
     page = args.page if args.page is not None else report.page
     status = 0

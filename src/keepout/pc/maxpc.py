@@ -47,6 +47,12 @@ optima are flat and Foster's quadrature is accurate to about
 :data:`~keepout.pc.foster.FOSTER_RTOL` (1e-10), so a smaller gain is noise;
 keeping the seed then keeps its exact added variance or scale factor."""
 
+SEARCH_XATOL = 1e-9
+"""Convergence of the bounded searches, in decades of the searched variable."""
+
+SEED_SCALE_FLOOR = 1e-300
+"""Smallest dilution seed scale: keeps its logarithm finite for a zero miss."""
+
 DILUTION_TOLERANCE = 1e-3
 """Relative excess of the maximum over the nominal Pc that marks a
 conjunction as diluted (as in CARA's ``PcDilution``)."""
@@ -78,7 +84,7 @@ def _search_log_max(pc: Callable[[float], float], centre: float) -> tuple[float,
         lambda x: -pc(10.0**x),
         bounds=(centre - SEARCH_DECADES, centre + SEARCH_DECADES),
         method="bounded",
-        options={"xatol": 1e-9},
+        options={"xatol": SEARCH_XATOL},
     )
     return 10.0 ** float(search.x), -float(search.fun)
 
@@ -212,7 +218,7 @@ def dilution(plane: EncounterPlane, hard_body_radius: float) -> PcResult:
         inside = _INSIDE.format(miss=miss, radius=hard_body_radius)
         return PcResult(1.0, "dilution", (note, inside), details)
     gaussian = plane_gaussian(plane.miss_vector, plane.covariance, hard_body_radius)
-    seed_scale = max(gaussian.mahalanobis2 / 2.0, 1e-300)
+    seed_scale = max(gaussian.mahalanobis2 / 2.0, SEED_SCALE_FLOOR)
 
     def pc(scale: float) -> float:
         return _foster_with(plane, scale * plane.covariance, hard_body_radius)

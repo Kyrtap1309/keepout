@@ -69,6 +69,11 @@ QUAD_RTOL = 1e-6
 """Default relative agreement of two Gauss-Legendre orders."""
 
 MAX_BREAKPOINTS = 50
+"""Largest number of local maxima a segment is split at."""
+
+_ROUNDING_SLACK = 1e-9
+"""Relative slack on grid gaps: a grid already at its refinement spacing
+gains no node from rounding."""
 
 
 @dataclass(frozen=True)
@@ -267,8 +272,7 @@ def _refine(
     grow by the same factor.
     """
     significant = values > RATE_FLOOR * float(values.max())
-    # Rounding slack: a grid already at its refinement spacing gains no node.
-    ratios = np.diff(times) / fine[:-1] * (1.0 - 1e-9)
+    ratios = np.diff(times) / fine[:-1] * (1.0 - _ROUNDING_SLACK)
     gaps = [
         (k, math.ceil(float(ratios[k])) - 1)
         for k in range(times.size - 1)

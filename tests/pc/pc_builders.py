@@ -46,15 +46,15 @@ def conjunctions(draw: st.DrawFn) -> Conjunction:
 class PlaneCase:
     """An encounter-plane Gaussian given by its principal axes.
 
-    The covariance is ``diag(su^2, sv^2)`` rotated by ``angle``; the miss is
-    ``(mu, mv)`` in those axes. Knowing the principal axes lets tests use
+    The covariance is ``diag(sigma_u^2, sigma_v^2)`` rotated by ``angle``; the miss is
+    ``(miss_u, miss_v)`` in those axes. Knowing the principal axes lets tests use
     :func:`reference_pc.principal_axes_pc` as an independent oracle.
     """
 
-    mu: float
-    mv: float
-    su: float
-    sv: float
+    miss_u: float
+    miss_v: float
+    sigma_u: float
+    sigma_v: float
     angle: float
     radius: float
 
@@ -65,12 +65,16 @@ class PlaneCase:
 
     @property
     def miss(self) -> FloatArray:
-        miss: FloatArray = self.rotation @ np.array([self.mu, self.mv])
+        miss: FloatArray = self.rotation @ np.array([self.miss_u, self.miss_v])
         return miss
 
     @property
     def covariance(self) -> FloatArray:
-        return self.rotation @ np.diag([self.su**2, self.sv**2]) @ self.rotation.T
+        return (
+            self.rotation
+            @ np.diag([self.sigma_u**2, self.sigma_v**2])
+            @ self.rotation.T
+        )
 
     def plane(self, scale: float = 1.0) -> EncounterPlane:
         """The exact plane, every length multiplied by ``scale``.
@@ -108,13 +112,13 @@ def plane_cases(draw: st.DrawFn) -> PlaneCase:
     Sigmas are drawn on a log scale and the miss in sigma units, so most
     draws have a Pc well above zero.
     """
-    su = 10.0 ** draw(st.floats(-1.0, 3.0))
-    sv = su * 10.0 ** draw(st.floats(-4.0, 0.0))
+    sigma_u = 10.0 ** draw(st.floats(-1.0, 3.0))
+    sigma_v = sigma_u * 10.0 ** draw(st.floats(-4.0, 0.0))
     return PlaneCase(
-        mu=su * draw(st.floats(-6.0, 6.0)),
-        mv=sv * draw(st.floats(-6.0, 6.0)),
-        su=su,
-        sv=sv,
+        miss_u=sigma_u * draw(st.floats(-6.0, 6.0)),
+        miss_v=sigma_v * draw(st.floats(-6.0, 6.0)),
+        sigma_u=sigma_u,
+        sigma_v=sigma_v,
         angle=draw(st.floats(0.0, math.pi)),
-        radius=su * 10.0 ** draw(st.floats(-1.0, 1.0)),
+        radius=sigma_u * 10.0 ** draw(st.floats(-1.0, 1.0)),
     )

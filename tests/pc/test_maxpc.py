@@ -30,7 +30,7 @@ def test_frisbee_is_the_maximum_over_added_covariances(case: PlaneCase) -> None:
     assert result.method == "frisbee"
     assert "upper bound" in result.diagnostics[0]
     rng = np.random.default_rng(7)
-    scale = max(case.su, plane.miss_distance, 1.0)
+    scale = max(case.sigma_u, plane.miss_distance, 1.0)
     for _ in range(200):
         factor = rng.normal(size=(2, 2)) * scale * rng.uniform(0.0, 3.0)
         added = factor @ factor.T

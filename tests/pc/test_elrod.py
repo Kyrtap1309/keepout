@@ -67,6 +67,8 @@ def test_order_must_be_positive(order: int) -> None:
 @pytest.mark.parametrize("case", ANISOTROPIC, ids=str)
 def test_correlated_off_axis_covariance_matches_the_oracle(case: PlaneCase) -> None:
     result = elrod(case.plane(), case.radius)
-    expected = principal_axes_pc(case.mu, case.mv, case.su, case.sv, case.radius)
+    expected = principal_axes_pc(
+        case.miss_u, case.miss_v, case.sigma_u, case.sigma_v, case.radius
+    )
     assert result.value == pytest.approx(expected, rel=1e-8)
     assert result.diagnostics == ()

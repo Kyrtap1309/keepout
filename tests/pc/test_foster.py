@@ -102,7 +102,9 @@ def test_line_like_covariance_is_integrated_accurately(
 @pytest.mark.parametrize("case", ANISOTROPIC, ids=str)
 def test_correlated_off_axis_covariance_matches_the_oracle(case: PlaneCase) -> None:
     result = foster(case.plane(), case.radius)
-    expected = principal_axes_pc(case.mu, case.mv, case.su, case.sv, case.radius)
+    expected = principal_axes_pc(
+        case.miss_u, case.miss_v, case.sigma_u, case.sigma_v, case.radius
+    )
     assert result.value == pytest.approx(expected, rel=1e-8)
 
 
@@ -126,5 +128,7 @@ def test_a_breakpoint_at_the_edge_of_the_band_leaves_no_sliver() -> None:
     ],
 )
 def test_chord_steps_at_the_circle_edge_match_the_oracle(case: PlaneCase) -> None:
-    expected = principal_axes_pc(case.mu, case.mv, case.su, case.sv, case.radius)
+    expected = principal_axes_pc(
+        case.miss_u, case.miss_v, case.sigma_u, case.sigma_v, case.radius
+    )
     assert foster(case.plane(), case.radius).value == pytest.approx(expected, rel=1e-10)

@@ -131,8 +131,10 @@ def to_equinoctial(
     chi = w[..., 0] / denominator
     psi = -w[..., 1] / denominator
     f, g = _basis(chi, psi, fr)
-    e = ((v2 - mu / rn)[..., None] * r - np.sum(r * v, -1)[..., None] * v) / mu
-    af, ag = np.sum(e * f, -1), np.sum(e * g, -1)
+    eccentricity = (
+        (v2 - mu / rn)[..., None] * r - np.sum(r * v, -1)[..., None] * v
+    ) / mu
+    af, ag = np.sum(eccentricity * f, -1), np.sum(eccentricity * g, -1)
     big_x, big_y = np.sum(r * f, -1), np.sum(r * g, -1)
     root = np.sqrt(1.0 - af * af - ag * ag)
     b = 1.0 / (1.0 + root)
@@ -168,8 +170,8 @@ def to_cartesian(
     GeometryError
         If Kepler's equation does not converge (e.g. NaN elements).
     """
-    e = np.asarray(elements)
-    n, af, ag, chi, psi, lam = (e[..., k] for k in range(6))
+    array = np.asarray(elements)
+    n, af, ag, chi, psi, lam = (array[..., k] for k in range(6))
     a = (mu / (n * n)) ** (1.0 / 3.0)
     # Kepler's equation in equinoctial form: lam = F + ag cos F - af sin F,
     # i.e. E - e sin E = M with F = E + varpi, lam = M + varpi. Reducing lam
@@ -224,9 +226,9 @@ def propagate(elements: npt.ArrayLike, dt: npt.ArrayLike) -> Any:
     dt
         Time step [s], a scalar or shape ``(m,)``.
     """
-    e = np.array(elements, dtype=np.result_type(np.asarray(elements), float))
-    e[..., 5] = e[..., 5] + e[..., 0] * np.asarray(dt)
-    return e
+    propagated = np.array(elements, dtype=np.result_type(np.asarray(elements), float))
+    propagated[..., 5] = propagated[..., 5] + propagated[..., 0] * np.asarray(dt)
+    return propagated
 
 
 def wrap_angle(angle: Any) -> Any:

@@ -23,6 +23,7 @@ from astropy.time import Time
 
 from keepout._types import FloatArray, symmetric_part
 from keepout.errors import GeometryError
+from keepout.frames import PARALLEL_RTOL
 from keepout.objects import ObjectState, require_same_epoch
 
 Role: TypeAlias = Literal["primary", "secondary"]
@@ -125,7 +126,7 @@ def encounter_plane(primary: ObjectState, secondary: ObjectState) -> EncounterPl
     y = v / speed
     r_perp = r - float(r @ y) * y
     r_perp_norm = float(np.linalg.norm(r_perp))
-    if r_perp_norm > 1e-12 * max(float(np.linalg.norm(r)), 1.0):
+    if r_perp_norm > PARALLEL_RTOL * max(float(np.linalg.norm(r)), 1.0):
         x = r_perp / r_perp_norm
     else:
         x = _perpendicular(y)

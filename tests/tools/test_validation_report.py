@@ -110,7 +110,7 @@ def test_monte_carlo_rows_show_both_intervals_and_the_trials() -> None:
 def test_monte_carlo_mode_writes_its_own_page_and_block(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(report, "load_monte_carlo", lambda: [])
+    monkeypatch.setattr(report, "load_monte_carlo_cases", lambda: [])
     monkeypatch.setattr(report, "evaluate", lambda cases: [monte_carlo_outcome()])
     readme = tmp_path / "README.md"
     readme.write_text(

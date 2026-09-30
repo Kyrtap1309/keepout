@@ -14,6 +14,7 @@ from keepout.validation.cases import (
     MC_MIN_PC,
     MC_SAMPLES,
     alfano_objects,
+    elrod_similar_to_3d_case,
     hall_similar_to_2d_case,
     load_alfano_3d_cases,
     load_alfano_cases,
@@ -24,7 +25,6 @@ from keepout.validation.cases import (
     load_pc_method_cases,
     load_pc_method_monte_carlo_cases,
     monte_carlo_options,
-    similar_to_3d_case,
 )
 from keepout.validation.criteria import HALL, HALL_PC_SET
 
@@ -69,7 +69,7 @@ def test_alfano_sheet_with_the_wrong_layout_is_rejected() -> None:
 
 
 def test_transcribed_similar_to_3d_case_is_well_formed() -> None:
-    case = similar_to_3d_case()
+    case = elrod_similar_to_3d_case()
     assert case.conjunction.hard_body_radius == 20.0
     assert case.reference == 1.0281653e-02
     assert case.conjunction.diagnostics == ()
@@ -231,7 +231,7 @@ def test_pc_method_3d_and_monte_carlo_cases(monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_transcribed_hall_similar_to_2d_case_is_well_formed() -> None:
     case = hall_similar_to_2d_case()
-    two_d = similar_to_3d_case().conjunction
+    two_d = elrod_similar_to_3d_case().conjunction
     assert case.reference == 1.0289973e-02
     assert case.conjunction.diagnostics == ()
     np.testing.assert_array_equal(

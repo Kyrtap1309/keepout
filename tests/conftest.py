@@ -1,4 +1,10 @@
-"""Test-suite configuration: astropy must not reach the network."""
+"""Test-suite configuration: astropy must not reach the network.
+
+Layout: ``geometry/`` tests the top-level domain modules (state, objects,
+covariance, frames, orbits, equinoctial, encounter, conjunction); the other
+directories mirror the ``keepout`` subpackages (``cdm``, ``pc``, ``sources``,
+``validation``) and ``tools``.
+"""
 
 from collections.abc import Iterator
 

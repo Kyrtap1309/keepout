@@ -33,6 +33,10 @@ PHI_RESOLUTION = 0.25
 MIN_PHI, MAX_PHI = 64, 16384
 """Bounds on the number of phi nodes."""
 
+_MIN_SIGMA = 1e-12
+"""Standard deviation [m] below which the phi spacing no longer shrinks (a
+degenerate axis would otherwise ask for infinitely many nodes)."""
+
 
 @lru_cache(maxsize=8)
 def gauss_legendre(order: int) -> tuple[FloatArray, FloatArray]:
@@ -104,7 +108,7 @@ def sphere_rule_principal(
     theta_weight = np.concatenate([0.5 * (b - a) * w for a, b in panels]) * np.sin(
         theta
     )
-    spacing = phi_resolution * max(float(sigmas[1]), 1e-12) / radius
+    spacing = phi_resolution * max(float(sigmas[1]), _MIN_SIGMA) / radius
     count = int(min(MAX_PHI, max(MIN_PHI, math.ceil(2.0 * math.pi / spacing))))
     phi = (np.arange(count) + 0.5) * (2.0 * math.pi / count)
     sin_theta = np.sin(theta)[:, None]

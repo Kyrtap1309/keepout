@@ -27,6 +27,10 @@ _J2000_JD = 2451545.0
 FRAME_BIAS: FloatArray = np.asarray(erfa.bp06(_J2000_JD, 0.0)[0], dtype=np.float64)
 """Rotation from GCRF to EME2000 (``x_eme2000 = FRAME_BIAS @ x_gcrf``)."""
 
+PARALLEL_RTOL = 1e-12
+"""Relative size below which a vector's component perpendicular to another
+is taken as zero: position and velocity are then parallel."""
+
 
 def rtn_rotation(r: npt.ArrayLike, v: npt.ArrayLike) -> FloatArray:
     """Rotation matrix from an inertial frame to RTN.
@@ -54,7 +58,8 @@ def rtn_rotation(r: npt.ArrayLike, v: npt.ArrayLike) -> FloatArray:
     angular_momentum = np.cross(position, velocity)
     r_norm = float(np.linalg.norm(position))
     h_norm = float(np.linalg.norm(angular_momentum))
-    if r_norm == 0.0 or h_norm <= 1e-12 * r_norm * float(np.linalg.norm(velocity)):
+    speed = float(np.linalg.norm(velocity))
+    if r_norm == 0.0 or h_norm <= PARALLEL_RTOL * r_norm * speed:
         raise GeometryError(
             "RTN frame is undefined: position is zero or parallel to velocity"
         )

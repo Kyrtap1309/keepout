@@ -23,26 +23,27 @@ def isotropic_pc(miss: float, sigma: float, radius: float) -> float:
 
 
 def principal_axes_pc(
-    mu: float, mv: float, su: float, sv: float, radius: float
+    miss_u: float, miss_v: float, sigma_u: float, sigma_v: float, radius: float
 ) -> float:
     """Pc for a plane Gaussian given in its principal axes, by brute force.
 
-    Integrates ``N(v; mv, sv) * P(|u - mu| < h(v))`` over the **narrow** axis
-    ``v`` (keepout integrates over the wide axis ``u``), with ``v = R sin(phi)``
-    so the chord ``h = R cos(phi)`` has no square-root end point, breakpoints
-    across the narrow density, and ``scipy.stats.norm`` rather than keepout's
-    erf/erfc helpers.
+    Integrates ``N(v; miss_v, sigma_v) * P(|u - miss_u| < h(v))`` over the **narrow**
+    axis ``v`` (keepout integrates over the wide axis ``u``), with ``v = R sin(phi)`` so
+    the chord ``h = R cos(phi)`` has no square-root end point, breakpoints across the
+    narrow density, and ``scipy.stats.norm`` rather than keepout's erf/erfc helpers.
     """
 
     def integrand(phi: float) -> float:
         v, half_chord = radius * math.sin(phi), radius * math.cos(phi)
-        mass = stats.norm.cdf(half_chord, mu, su) - stats.norm.cdf(-half_chord, mu, su)
-        return float(stats.norm.pdf(v, mv, sv) * mass * half_chord)
+        mass = stats.norm.cdf(half_chord, miss_u, sigma_u) - stats.norm.cdf(
+            -half_chord, miss_u, sigma_u
+        )
+        return float(stats.norm.pdf(v, miss_v, sigma_v) * mass * half_chord)
 
     steps = [
-        math.asin((mv + k * sv) / radius)
+        math.asin((miss_v + k * sigma_v) / radius)
         for k in range(-12, 13, 2)
-        if -radius < mv + k * sv < radius
+        if -radius < miss_v + k * sigma_v < radius
     ]
     # Round-off can stop QUADPACK short of epsrel for tiny Pc; the test's own
     # comparison (rtol 1e-7) is the judge, so its warning is not shown.

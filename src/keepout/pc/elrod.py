@@ -55,8 +55,8 @@ def _sum(gaussian: PlaneGaussian, order: int) -> float:
 
 
 def _resolving_order(gaussian: PlaneGaussian) -> int:
-    """Order whose node spacing near the centre (~ pi R / n) is below su / 2."""
-    needed = 2.0 * math.pi * gaussian.radius / gaussian.su
+    """Order whose node spacing near the centre (~ pi R / n) is below sigma_u / 2."""
+    needed = 2.0 * math.pi * gaussian.radius / gaussian.sigma_u
     if needed <= START_ORDER:
         return START_ORDER
     return 1 << math.ceil(math.log2(needed))

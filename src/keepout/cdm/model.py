@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from functools import cached_property
+from typing import assert_never
 
 import numpy as np
 from astropy.time import Time
@@ -123,13 +124,17 @@ def format_field(kind: SectionKind, field: Field) -> tuple[str, str | None]:
 
 
 def _matches(value: object, kind: ValueKind) -> bool:
-    if kind == "time":
-        return isinstance(value, Time) and bool(value.isscalar)
-    if kind == "int":
-        return isinstance(value, int) and not isinstance(value, bool)
-    if kind == "float":
-        return isinstance(value, float)
-    return isinstance(value, str)
+    match kind:
+        case "time":
+            return isinstance(value, Time) and bool(value.isscalar)
+        case "int":
+            return isinstance(value, int) and not isinstance(value, bool)
+        case "float":
+            return isinstance(value, float)
+        case "str":
+            return isinstance(value, str)
+        case _:
+            assert_never(kind)
 
 
 @dataclass(frozen=True)
@@ -389,9 +394,23 @@ class CdmObject:
         policy
             Covariance policy, as in :meth:`covariance`.
         """
-        return self._at(to_gcrf(self.state()), policy)
+        return self.object_state_at(to_gcrf(self.state()), policy=policy)
 
-    def _at(self, state: StateVector, policy: Policy) -> ObjectState:
+    def object_state_at(
+        self, state: StateVector, *, policy: Policy = "repair"
+    ) -> ObjectState:
+        """:meth:`object_state` with the GCRF state already converted.
+
+        :meth:`Cdm.object_states` uses it to convert both objects' ITRF
+        states in one transformation (:func:`keepout.frames.to_gcrf_all`).
+
+        Parameters
+        ----------
+        state
+            This object's state in GCRF; defines the RTN axes.
+        policy
+            Covariance policy, as in :meth:`covariance`.
+        """
         matrix = self.covariance_rtn[:6, :6]
         covariance = (
             make_covariance(matrix, "RTN", self.tca, policy=policy).in_gcrf(state)
@@ -520,4 +539,7 @@ class Cdm:
         """
         objects = (self.object1, self.object2)
         first, second = to_gcrf_all([item.state() for item in objects])
-        return objects[0]._at(first, policy), objects[1]._at(second, policy)
+        return (
+            objects[0].object_state_at(first, policy=policy),
+            objects[1].object_state_at(second, policy=policy),
+        )

@@ -4,39 +4,22 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import NamedTuple
+from functools import cached_property
 
 from keepout.pc import compute_pc
 from keepout.pc.result import Method, PcResult
 from keepout.validation.cases import ValidationCase
+from keepout.validation.criteria import Verdict
 
-
-class Verdict(NamedTuple):
-    """How far a value is from a case's reference, and whether that passes."""
-
-    error: float
-    """Relative error if ``relative``, else absolute error."""
-    relative: bool
-    passed: bool
+__all__ = ["Outcome", "Verdict", "evaluate", "judge"]
 
 
 def judge(case: ValidationCase, result: PcResult) -> Verdict:
     """Compare a result with the case's reference under the case's criterion."""
-    criterion, reference = case.criterion, case.reference
-    difference = abs(result.value - reference)
-    if criterion.interval:
-        low, high = result.details["ci_low"], result.details["ci_high"]
-        error = difference / reference if reference > 0.0 else difference
-        return Verdict(error, reference > 0.0, low <= reference <= high)
-    if (
-        criterion.relative is not None
-        and reference >= criterion.small
-        and reference > 0
-    ):
-        error = difference / reference
-        return Verdict(error, True, error <= criterion.relative)
-    bound = criterion.absolute if criterion.absolute is not None else 0.0
-    return Verdict(difference, False, difference <= bound)
+    interval = None
+    if case.criterion.interval:
+        interval = (result.details["ci_low"], result.details["ci_high"])
+    return case.criterion.judge(result.value, case.reference, interval)
 
 
 @dataclass(frozen=True, eq=False)
@@ -64,7 +47,7 @@ class Outcome:
         """keepout's Pc."""
         return self.result.value
 
-    @property
+    @cached_property
     def verdict(self) -> Verdict:
         """Error against the reference and pass/fail."""
         return judge(self.case, self.result)

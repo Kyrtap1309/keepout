@@ -65,6 +65,10 @@ _SQRT_PI = math.sqrt(math.pi)
 _SQRT_2 = math.sqrt(2.0)
 _SQRT_2PI = math.sqrt(2.0 * math.pi)
 
+_TINY_VARIANCE = 1e-300
+"""Floor [m^2/s^2] of the conditional radial-velocity variance, which divides
+the mean radial velocity in the flux."""
+
 Gaussians: TypeAlias = tuple[FloatArray, FloatArray, FloatArray, FloatArray]
 """Mean and covariance of both objects' states at one time: ``x1, p1, x2, p2``."""
 
@@ -299,7 +303,9 @@ class CollisionRate:
         mahalanobis = np.einsum("ij,jk,ik->i", offset, a_inverse, offset)
         density = np.exp(-0.5 * mahalanobis - 0.5 * log_det) / (2.0 * math.pi) ** 1.5
         sigma = np.sqrt(
-            np.maximum(np.einsum("ij,jk,ik->i", nodes, conditional, nodes), 1e-300)
+            np.maximum(
+                np.einsum("ij,jk,ik->i", nodes, conditional, nodes), _TINY_VARIANCE
+            )
         )
         x = np.einsum("ij,ij->i", nodes, v_mean + offset @ gain.T) / (_SQRT_2 * sigma)
         flux = sigma / _SQRT_2PI * (np.exp(-x * x) - _SQRT_PI * x * special.erfc(x))

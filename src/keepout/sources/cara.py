@@ -30,6 +30,9 @@ from keepout.errors import CaraFormatError, ChecksumMismatch, SourceUnavailable
 CARA_REPO = "nasa/CARA_Analysis_Tools"
 CARA_COMMIT = "1c78beb1f7aefc384886c3be1d09e4681acb5d37"
 
+DOWNLOAD_TIMEOUT = 60.0
+"""Seconds :func:`http_download` waits for the server."""
+
 Downloader: TypeAlias = Callable[[str], bytes]
 
 
@@ -171,7 +174,7 @@ def http_download(url: str) -> bytes:
         On any network or HTTP error.
     """
     try:
-        with urllib.request.urlopen(url, timeout=60) as response:
+        with urllib.request.urlopen(url, timeout=DOWNLOAD_TIMEOUT) as response:
             body: bytes = response.read()
             return body
     except (OSError, http.client.HTTPException) as exc:
