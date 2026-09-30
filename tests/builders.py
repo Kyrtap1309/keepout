@@ -13,6 +13,7 @@ from keepout.conjunction import Conjunction
 from keepout.covariance import Covariance
 from keepout.objects import ObjectState
 from keepout.validation.cases import ValidationCase
+from keepout.validation.criteria import TWO_D, Criterion
 
 EPOCH = Time("2010-03-13T22:37:52.618", scale="utc")
 
@@ -27,6 +28,12 @@ EARTH_ROTATION_RATE = 7.292115146706979e-5
 
 DIAGONAL_COVARIANCE = np.diag([100.0, 400.0, 25.0, 1e-2, 4e-2, 1e-2])
 """A valid 6x6 covariance [m, m/s]: sigmas 10, 20, 5 m and 0.1, 0.2, 0.1 m/s."""
+
+
+def known(covariance: Covariance | None) -> Covariance:
+    """The covariance, which the test knows is given."""
+    assert covariance is not None
+    return covariance
 
 
 def object_state(
@@ -77,13 +84,20 @@ def case_with_reference(
     case_id: str = "case",
     absolute_tolerance: float | None = None,
 ) -> ValidationCase:
-    """A validation case whose own Pc underflows to 0 (miss 100 sigma)."""
+    """A 2-D validation case whose own Pc underflows to 0 (miss 100 sigma).
+
+    ``absolute_tolerance`` replaces the default 2-D criterion by an absolute
+    bound.
+    """
+    criterion = (
+        TWO_D if absolute_tolerance is None else Criterion(absolute=absolute_tolerance)
+    )
     return ValidationCase(
         "test",
         case_id,
         head_on(1000.0, 10.0, 10.0, 5.0),
         reference,
-        absolute_tolerance=absolute_tolerance,
+        criterion=criterion,
     )
 
 
@@ -95,7 +109,7 @@ def rotate(obj: ObjectState, rotation: FloatArray) -> ObjectState:
     return ObjectState(
         obj.object_id,
         StateVector(state.epoch, rotation @ state.r, rotation @ state.v, "GCRF"),
-        Covariance(block @ obj.covariance.matrix @ block.T, "GCRF", state.epoch),
+        Covariance(block @ known(obj.covariance).matrix @ block.T, "GCRF", state.epoch),
         obj.hard_body_radius,
     )
 
@@ -119,3 +133,24 @@ def position_covariances(draw: st.DrawFn, scale: float = 100.0) -> FloatArray:
         arrays(np.float64, (3, 3), elements=st.floats(-scale, scale))
     )
     return root @ root.T + np.eye(3)
+
+
+def shifted_back(conjunction: Conjunction, dt: float) -> Conjunction:
+    """The conjunction with both states moved back by ``v dt`` along a line.
+
+    Its straight-line closest approach is then ``dt`` seconds after the
+    states' epoch; the covariances are unchanged.
+    """
+
+    def move(item: ObjectState) -> ObjectState:
+        state = item.state
+        moved = StateVector(state.epoch, state.r - state.v * dt, state.v, state.frame)
+        return ObjectState(
+            item.object_id, moved, item.covariance, item.hard_body_radius
+        )
+
+    return Conjunction(
+        move(conjunction.primary),
+        move(conjunction.secondary),
+        conjunction.hard_body_radius,
+    )

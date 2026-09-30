@@ -369,8 +369,20 @@ class CdmObject:
             self.covariance_rtn[:6, :6], "RTN", self.tca, policy=policy
         )
 
+    @property
+    def has_covariance(self) -> bool:
+        """False if every 6x6 covariance entry is zero.
+
+        Operators send an all-zero covariance when they have none; it means
+        "unknown", not "perfectly known".
+        """
+        return bool(np.any(self.covariance_rtn[:6, :6]))
+
     def object_state(self, *, policy: Policy = "repair") -> ObjectState:
         """GCRF object state with covariance; RTN axes from the GCRF state.
+
+        The covariance is ``None`` when the CDM gives an all-zero matrix
+        (see :attr:`has_covariance`).
 
         Parameters
         ----------
@@ -380,7 +392,11 @@ class CdmObject:
         return self._at(to_gcrf(self.state()), policy)
 
     def _at(self, state: StateVector, policy: Policy) -> ObjectState:
-        covariance = self.covariance(policy=policy).in_gcrf(state)
+        covariance = (
+            self.covariance(policy=policy).in_gcrf(state)
+            if self.has_covariance
+            else None
+        )
         return ObjectState(self.designator, state, covariance, self.hbr)
 
 

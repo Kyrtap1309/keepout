@@ -1,25 +1,14 @@
-"""Run validation cases and judge them against the spec tolerances."""
+"""Run validation cases and judge them against their criteria."""
 
 from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import NamedTuple, get_args
+from typing import NamedTuple
 
 from keepout.pc import compute_pc
 from keepout.pc.result import Method, PcResult
 from keepout.validation.cases import ValidationCase
-
-RELATIVE_TOLERANCE = 1e-6
-"""Spec section 5: 2-D methods, relative error where the reference >= 1e-10."""
-
-ABSOLUTE_TOLERANCE = 1e-15
-"""Spec section 5: 2-D methods, absolute error where the reference < 1e-10."""
-
-SMALL_PC = 1e-10
-"""Reference Pc below which the absolute criterion applies."""
-
-METHODS: tuple[Method, ...] = get_args(Method)
 
 
 class Verdict(NamedTuple):
@@ -31,15 +20,23 @@ class Verdict(NamedTuple):
     passed: bool
 
 
-def judge(case: ValidationCase, value: float) -> Verdict:
-    """Compare one value with the case's reference under its criterion."""
-    difference = abs(value - case.reference)
-    if case.absolute_tolerance is not None:
-        return Verdict(difference, False, difference <= case.absolute_tolerance)
-    if case.reference >= SMALL_PC:
-        error = difference / case.reference
-        return Verdict(error, True, error <= RELATIVE_TOLERANCE)
-    return Verdict(difference, False, difference <= ABSOLUTE_TOLERANCE)
+def judge(case: ValidationCase, result: PcResult) -> Verdict:
+    """Compare a result with the case's reference under the case's criterion."""
+    criterion, reference = case.criterion, case.reference
+    difference = abs(result.value - reference)
+    if criterion.interval:
+        low, high = result.details["ci_low"], result.details["ci_high"]
+        error = difference / reference if reference > 0.0 else difference
+        return Verdict(error, reference > 0.0, low <= reference <= high)
+    if (
+        criterion.relative is not None
+        and reference >= criterion.small
+        and reference > 0
+    ):
+        error = difference / reference
+        return Verdict(error, True, error <= (criterion.relative or 0.0))
+    bound = criterion.absolute if criterion.absolute is not None else 0.0
+    return Verdict(difference, False, difference <= bound)
 
 
 @dataclass(frozen=True, eq=False)
@@ -70,7 +67,7 @@ class Outcome:
     @property
     def verdict(self) -> Verdict:
         """Error against the reference and pass/fail."""
-        return judge(self.case, self.value)
+        return judge(self.case, self.result)
 
     @property
     def passed(self) -> bool:
@@ -79,9 +76,9 @@ class Outcome:
 
 
 def evaluate(cases: Iterable[ValidationCase]) -> list[Outcome]:
-    """Run every method on every case."""
+    """Run each case's methods on it."""
     return [
-        Outcome(case, compute_pc(case.conjunction, method))
+        Outcome(case, compute_pc(case.conjunction, method, **case.options))
         for case in cases
-        for method in METHODS
+        for method in case.methods
     ]

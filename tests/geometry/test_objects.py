@@ -40,3 +40,8 @@ def test_object_state_needs_matching_epochs() -> None:
 def test_object_state_rejects_bad_hard_body_radius(radius: float) -> None:
     with pytest.raises(ValueError, match="hard_body_radius"):
         ObjectState("A", GCRF_STATE, GCRF_COVARIANCE, radius)
+
+
+def test_covariance_may_be_unknown() -> None:
+    state = ObjectState("A", GCRF_STATE, None, 5.0)
+    assert state.covariance is None

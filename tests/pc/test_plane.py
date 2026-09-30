@@ -1,10 +1,16 @@
+import dataclasses
 import math
+from collections.abc import Callable
 
 import numpy as np
 import pytest
+from builders import head_on
 
+from keepout.encounter import EncounterPlane
 from keepout.errors import CovarianceError, GeometryError
-from keepout.pc._plane import SIGMA_FLOOR, plane_gaussian
+from keepout.pc import elrod, foster
+from keepout.pc._plane import SIGMA_FLOOR, plane_gaussian, require_known_covariance
+from keepout.pc.result import PcResult
 
 
 def test_principal_axes_put_the_wide_axis_first() -> None:
@@ -64,3 +70,22 @@ def test_scalar_and_array_evaluations_agree() -> None:
         [gaussian.density_u_at(u) for u in half_chords],
         rtol=1e-14,
     )
+
+
+def test_an_unknown_covariance_is_refused_by_name() -> None:
+    require_known_covariance((), "foster")
+    with pytest.raises(
+        CovarianceError, match="foster needs both covariances; unknown: secondary"
+    ):
+        require_known_covariance(("secondary",), "foster")
+
+
+@pytest.mark.parametrize("method", [foster, elrod])
+def test_two_d_methods_refuse_a_plane_with_an_unknown_covariance(
+    method: Callable[[EncounterPlane, float], PcResult],
+) -> None:
+    plane = dataclasses.replace(
+        head_on(30.0, 10.0, 20.0, 5.0).plane, unknown_covariance=("primary",)
+    )
+    with pytest.raises(CovarianceError, match="unknown: primary"):
+        method(plane, 5.0)

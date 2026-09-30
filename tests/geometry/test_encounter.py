@@ -14,9 +14,10 @@ from hypothesis import assume, given
 from hypothesis import strategies as st
 from hypothesis.extra.numpy import arrays
 
-from keepout._types import FloatArray
+from keepout._types import FloatArray, StateVector
 from keepout.encounter import encounter_plane
 from keepout.errors import GeometryError
+from keepout.objects import ObjectState
 
 offsets = arrays(np.float64, (3,), elements=st.floats(-1e4, 1e4))
 relative_velocities = arrays(np.float64, (3,), elements=st.floats(-2e4, 2e4))
@@ -131,3 +132,17 @@ def test_swapping_objects_preserves_the_geometry(
     assert backward_mahalanobis == pytest.approx(
         forward_mahalanobis, rel=1e-9, abs=1e-12
     )
+
+
+def test_unknown_covariance_contributes_nothing() -> None:
+    known_object = object_state(LEO_R, LEO_V, np.diag([4.0, 9.0, 16.0]))
+    offset = np.array([0.0, 0.0, 30.0])
+    unknown = ObjectState(
+        "SEC", StateVector(EPOCH, LEO_R + offset, -LEO_V, "GCRF"), None
+    )
+    plane = encounter_plane(known_object, unknown)
+    assert plane.unknown_covariance == ("secondary",)
+    np.testing.assert_array_equal(plane.combined_covariance, np.diag([4.0, 9.0, 16.0]))
+    both = encounter_plane(ObjectState("PRI", known_object.state, None), unknown)
+    assert both.unknown_covariance == ("primary", "secondary")
+    np.testing.assert_array_equal(both.covariance, np.zeros((2, 2)))

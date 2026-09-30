@@ -61,5 +61,9 @@ class CovarianceError(KeepoutError):
     """A covariance matrix is malformed, asymmetric or not positive semi-definite."""
 
 
+class PcConvergenceError(KeepoutError):
+    """A probability-of-collision method did not converge; no value is returned."""
+
+
 class GeometryError(KeepoutError):
     """A reference frame or encounter geometry cannot be computed."""

@@ -104,3 +104,27 @@ def test_correlated_off_axis_covariance_matches_the_oracle(case: PlaneCase) -> N
     result = foster(case.plane(), case.radius)
     expected = principal_axes_pc(case.mu, case.mv, case.su, case.sv, case.radius)
     assert result.value == pytest.approx(expected, rel=1e-8)
+
+
+def test_a_breakpoint_at_the_edge_of_the_band_leaves_no_sliver() -> None:
+    # Ten narrow-axis sigmas equal the radius: the chord-step breakpoints
+    # fall at theta ~ 0, where they once left QUADPACK a sliver interval.
+    case = PlaneCase(2.0, 0.0, 1.0, 10**-1.5, 1.0, 10**-0.5)
+    unscaled = foster(case.plane(), case.radius)
+    scaled = foster(case.plane(3.0), 3.0 * case.radius)
+    assert scaled.diagnostics == ()
+    assert scaled.value == pytest.approx(unscaled.value, rel=1e-10)
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        # Found by Hypothesis; the brute-force oracle once missed both by
+        # ~1e-7 and ~1e-4 (checked against 30-digit mpmath quadrature).
+        PlaneCase(0.0, 2.802844261399889e-08, 1.0, 0.01, 0.0, 1.0),
+        PlaneCase(0.0, 2.9999999999999996, 1.0, 1.0, 0.0, 1.0),
+    ],
+)
+def test_chord_steps_at_the_circle_edge_match_the_oracle(case: PlaneCase) -> None:
+    expected = principal_axes_pc(case.mu, case.mv, case.su, case.sv, case.radius)
+    assert foster(case.plane(), case.radius).value == pytest.approx(expected, rel=1e-10)

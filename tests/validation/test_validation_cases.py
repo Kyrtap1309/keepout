@@ -4,17 +4,29 @@ from typing import Any
 
 import numpy as np
 import pytest
-from builders import DIAGONAL_COVARIANCE
+from builders import DIAGONAL_COVARIANCE, LEO_R, LEO_V, known, object_state
 
 from keepout.errors import CaraFormatError
+from keepout.objects import ObjectState
 from keepout.sources import cara
+from keepout.validation import cases as cases_module
 from keepout.validation.cases import (
+    MC_MIN_PC,
+    MC_SAMPLES,
     alfano_objects,
+    hall_similar_to_2d_case,
+    load_alfano_3d_cases,
     load_alfano_cases,
+    load_alfano_monte_carlo_cases,
+    load_max_pc_cases,
     load_non_pd_case,
+    load_pc_method_3d_cases,
     load_pc_method_cases,
+    load_pc_method_monte_carlo_cases,
+    monte_carlo_options,
     similar_to_3d_case,
 )
+from keepout.validation.criteria import HALL, HALL_PC_SET
 
 B1_KVN = Path(__file__).parents[1] / "cdm" / "data" / "b1_example.kvn"
 
@@ -38,14 +50,16 @@ def test_alfano_sheet_gives_both_objects() -> None:
     primary, secondary = alfano_objects(alfano_rows())
     np.testing.assert_array_equal(primary.state.r, [7000e3, 0.0, 0.0])
     np.testing.assert_array_equal(secondary.state.v, [0.0, 0.0, 7500.0])
-    assert primary.covariance.matrix[1, 1] == 400.0
-    assert primary.covariance.repairs == secondary.covariance.repairs == ()
+    assert known(primary.covariance).matrix[1, 1] == 400.0
+    assert (
+        known(primary.covariance).repairs == known(secondary.covariance).repairs == ()
+    )
 
 
 def test_alfano_asymmetric_covariance_is_repaired_with_a_diagnostic() -> None:
     primary, secondary = alfano_objects(alfano_rows(asymmetry=1e-3))
     for item in (primary, secondary):
-        (repair,) = item.covariance.repairs
+        (repair,) = known(item.covariance).repairs
         assert repair.startswith("symmetrised covariance")
 
 
@@ -130,4 +144,123 @@ def test_non_pd_case_uses_cara_reference_and_tolerance(
     monkeypatch.setattr(cara, "fetch", lambda file, cache=None: B1_KVN)
     case = load_non_pd_case()
     assert case.conjunction.hard_body_radius == 20.0
-    assert (case.reference, case.absolute_tolerance) == (0.0, 1e-10)
+    assert (case.reference, case.criterion.absolute) == (0.0, 1e-10)
+
+
+def offline_alfano_3d(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Serve 12 Alfano cases with 3-D and Monte Carlo references and windows."""
+    results = [
+        {
+            "Case": n,
+            "HBR": 10.0,
+            "CARA_Pc3D": 1e-3 * n,
+            "CARA_PcMC": 2e-3 * n,
+            "CARA_PcMCLo95": 1e-3 * n,
+            "CARA_PcMCHi95": 3e-3 * n,
+        }
+        for n in range(1, 13)
+    ]
+    windows = [{"CaseNumber": n, "A09_FinalTime_s": 100.0 * n} for n in range(1, 13)]
+    monkeypatch.setattr(cara, "fetch", lambda file, cache=None: Path(file.path))
+    monkeypatch.setattr(cara, "load_csv", lambda path: results)
+    monkeypatch.setattr(cara, "load_xlsx", lambda path: windows)
+    monkeypatch.setattr(cara, "load_xls_rows", lambda path: alfano_rows())
+
+
+def test_alfano_3d_cases_use_the_supplementary_windows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    offline_alfano_3d(monkeypatch)
+    cases = load_alfano_3d_cases()
+    assert [c.case_id for c in cases] == [str(n) for n in range(1, 13)]
+    ninth = cases[8]
+    assert ninth.methods == ("hall",)
+    assert ninth.criterion is HALL
+    assert ninth.reference == pytest.approx(9e-3)
+    assert ninth.options["window"] == (-900.0, 900.0)
+
+
+def test_alfano_monte_carlo_cases_carry_the_cara_interval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    offline_alfano_3d(monkeypatch)
+    first = load_alfano_monte_carlo_cases()[0]
+    assert first.methods == ("montecarlo",)
+    assert first.monte_carlo
+    assert first.interval == (1e-3, 3e-3)
+    assert first.options["window"] == (-100.0, 100.0)
+    assert first.options["samples"] == 200_000  # 400 / 2e-3
+
+
+def test_monte_carlo_options_are_bounded_and_reproducible() -> None:
+    assert monte_carlo_options("s", "1", 0.5)["samples"] == MC_SAMPLES[0]
+    assert monte_carlo_options("s", "1", 1e-5)["samples"] == MC_SAMPLES[1]
+    assert monte_carlo_options("s", "1", 1e-3) == monte_carlo_options("s", "1", 1e-3)
+    assert monte_carlo_options("s", "1", 1e-3) != monte_carlo_options("s", "2", 1e-3)
+
+
+def test_alfano_tables_must_cover_every_case(monkeypatch: pytest.MonkeyPatch) -> None:
+    offline_alfano_3d(monkeypatch)
+    monkeypatch.setattr(cara, "load_xlsx", lambda path: [])
+    with pytest.raises(CaraFormatError, match="no row for case 1"):
+        load_alfano_3d_cases()
+
+
+def test_pc_method_3d_and_monte_carlo_cases(monkeypatch: pytest.MonkeyPatch) -> None:
+    row = {
+        "Conjunction_ID": "A",
+        "HBR_m": 20.0,
+        "Nc3D": 2e-4,
+        "Pc3DCoppola": 1e-20,
+        "PcSDMC": 3e-4,
+        "PcSDMCLo": 2e-4,
+        "PcSDMCHi": 4e-4,
+    }
+    rare = {**row, "Conjunction_ID": "B", "PcSDMC": 0.5 * MC_MIN_PC}
+    monkeypatch.setattr(cara, "PC_METHOD_CDMS", {"A": B1_KVN, "B": B1_KVN})
+    monkeypatch.setattr(cara, "fetch", lambda file, cache=None: B1_KVN)
+    monkeypatch.setattr(cara, "load_xlsx", lambda path: [row, rare])
+    three_d = load_pc_method_3d_cases()
+    assert [c.case_id for c in three_d] == ["A", "B"]
+    assert three_d[0].criterion is HALL_PC_SET
+    assert three_d[0].informative == ("Coppola 3-D Pc", 1e-20)
+    (only,) = load_pc_method_monte_carlo_cases()
+    assert only.case_id == "A"
+    assert only.interval == (2e-4, 4e-4)
+
+
+def test_transcribed_hall_similar_to_2d_case_is_well_formed() -> None:
+    case = hall_similar_to_2d_case()
+    two_d = similar_to_3d_case().conjunction
+    assert case.reference == 1.0289973e-02
+    assert case.conjunction.diagnostics == ()
+    np.testing.assert_array_equal(
+        case.conjunction.primary.state.r, two_d.primary.state.r
+    )
+    np.testing.assert_allclose(
+        known(case.conjunction.secondary.covariance).position,
+        known(two_d.secondary.covariance).position,
+    )
+
+
+def test_max_pc_cases_follow_cara_unit_tests(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[tuple[bool, bool]] = []
+
+    def objects(
+        path: Path, *, known: tuple[bool, bool] = (True, True)
+    ) -> tuple[ObjectState, ObjectState]:
+        seen.append(known)
+        primary = object_state(LEO_R, LEO_V, np.eye(3))
+        secondary = object_state(LEO_R + np.array([30.0, 0, 0]), -LEO_V, np.eye(3))
+        return primary, (
+            secondary if known[1] else ObjectState("S", secondary.state, None)
+        )
+
+    monkeypatch.setattr(cara, "fetch", lambda file, cache=None: Path(file.path))
+    monkeypatch.setattr(cases_module, "legacy_objects", objects)
+    found = load_max_pc_cases()
+    assert [c.methods for c in found] == [("frisbee",)] * 2 + [("dilution",)] * 4
+    assert seen[0] == (True, False)
+    assert found[0].criterion.absolute == 5e-7
+    assert found[2].criterion.relative == 5e-3
+    assert found[0].conjunction.unknown_covariance == ("secondary",)

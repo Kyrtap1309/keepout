@@ -5,3 +5,5 @@
 ::: keepout.objects
 
 ::: keepout.orbits
+
+::: keepout.equinoctial

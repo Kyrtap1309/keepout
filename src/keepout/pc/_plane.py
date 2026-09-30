@@ -16,6 +16,7 @@ import numpy as np
 from scipy import special
 
 from keepout._types import FloatArray, require_positive
+from keepout.encounter import Role
 from keepout.errors import CovarianceError, GeometryError
 
 _SQRT_2 = math.sqrt(2.0)
@@ -86,6 +87,23 @@ class PlaneGaussian:
         if upper <= 0.0:
             return 0.5 * (math.erfc(-upper) - math.erfc(-lower))
         return 0.5 * (math.erf(upper) - math.erf(lower))
+
+
+def require_known_covariance(unknown: tuple[Role, ...], method: str) -> None:
+    """Raise :class:`CovarianceError` if a covariance is unknown.
+
+    Parameters
+    ----------
+    unknown
+        Objects whose covariance is unknown.
+    method
+        Method name, for the message.
+    """
+    if unknown:
+        raise CovarianceError(
+            f"{method} needs both covariances; unknown: {', '.join(unknown)} "
+            "(use method='auto', 'frisbee' or 'alfano' for a maximum Pc)"
+        )
 
 
 def plane_gaussian(

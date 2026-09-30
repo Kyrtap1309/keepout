@@ -49,6 +49,33 @@ def test_load_xlsx_returns_rows_by_header(tmp_path: Path) -> None:
     assert cara.load_xlsx(path) == [{"Conjunction_ID": "A", "HBR_m": 10, "Pc2D": 1e-4}]
 
 
+def workbook_with(path: Path, *rows: tuple[object, ...]) -> Path:
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    assert sheet is not None
+    for row in rows:
+        sheet.append(row)
+    workbook.save(path)
+    return path
+
+
+def test_load_xlsx_ignores_empty_cells_after_the_header(tmp_path: Path) -> None:
+    # CARA's Alfano09_CARA_Supplementary_Data.xlsx has two empty columns.
+    path = workbook_with(
+        tmp_path / "t.xlsx", ("Case", "Time", None, None), (1, 21600, None, None), (2,)
+    )
+    assert cara.load_xlsx(path) == [
+        {"Case": 1, "Time": 21600},
+        {"Case": 2, "Time": None},
+    ]
+
+
+def test_load_xlsx_rejects_values_past_the_header(tmp_path: Path) -> None:
+    path = workbook_with(tmp_path / "t.xlsx", ("Case", "Time"), (1, 2, 3))
+    with pytest.raises(CaraFormatError, match="row 2 has values past the header"):
+        cara.load_xlsx(path)
+
+
 @pytest.mark.parametrize("header", [("A", None, "B"), ("A", "B", "A")])
 def test_load_xlsx_rejects_empty_or_repeated_header_names(
     tmp_path: Path, header: tuple[str | None, ...]

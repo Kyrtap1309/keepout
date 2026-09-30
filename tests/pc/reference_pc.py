@@ -1,6 +1,7 @@
 """Independent reference Pc for isotropic covariance (Rice distribution)."""
 
 import math
+import warnings
 
 from scipy import integrate, special, stats
 
@@ -26,29 +27,34 @@ def principal_axes_pc(
 ) -> float:
     """Pc for a plane Gaussian given in its principal axes, by brute force.
 
-    Integrates ``N(u; mu, su) * P(|v| < h(u))`` over ``u`` directly, with
-    breakpoints where the chord mass steps (``h(u) = |mv|``), using
-    ``scipy.stats.norm`` rather than keepout's erf/erfc helpers.
+    Integrates ``N(v; mv, sv) * P(|u - mu| < h(v))`` over the **narrow** axis
+    ``v`` (keepout integrates over the wide axis ``u``), with ``v = R sin(phi)``
+    so the chord ``h = R cos(phi)`` has no square-root end point, breakpoints
+    across the narrow density, and ``scipy.stats.norm`` rather than keepout's
+    erf/erfc helpers.
     """
 
-    def integrand(u: float) -> float:
-        half_chord = math.sqrt(max(radius * radius - u * u, 0.0))
-        mass = stats.norm.cdf(half_chord, mv, sv) - stats.norm.cdf(-half_chord, mv, sv)
-        return float(stats.norm.pdf(u, mu, su) * mass)
+    def integrand(phi: float) -> float:
+        v, half_chord = radius * math.sin(phi), radius * math.cos(phi)
+        mass = stats.norm.cdf(half_chord, mu, su) - stats.norm.cdf(-half_chord, mu, su)
+        return float(stats.norm.pdf(v, mv, sv) * mass * half_chord)
 
     steps = [
-        edge * math.sqrt(radius * radius - (abs(mv) + k * sv) ** 2)
-        for k in (-10.0, 0.0, 10.0)
-        for edge in (-1.0, 1.0)
-        if 0.0 < abs(mv) + k * sv < radius
+        math.asin((mv + k * sv) / radius)
+        for k in range(-12, 13, 2)
+        if -radius < mv + k * sv < radius
     ]
-    value, _ = integrate.quad(
-        integrand,
-        -radius,
-        radius,
-        points=sorted(steps),
-        epsabs=0.0,
-        epsrel=1e-12,
-        limit=500,
-    )
+    # Round-off can stop QUADPACK short of epsrel for tiny Pc; the test's own
+    # comparison (rtol 1e-7) is the judge, so its warning is not shown.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", integrate.IntegrationWarning)
+        value, _ = integrate.quad(
+            integrand,
+            -0.5 * math.pi,
+            0.5 * math.pi,
+            points=sorted(steps) or None,
+            epsabs=0.0,
+            epsrel=1e-10,
+            limit=500,
+        )
     return float(value)

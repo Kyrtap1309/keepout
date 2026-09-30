@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from builders import DIAGONAL_COVARIANCE
+from builders import DIAGONAL_COVARIANCE, known
 from cdm_builders import (
     TCA,
     minimal_cdm,
@@ -142,12 +142,16 @@ def test_covariance_policies() -> None:
 
 def test_object_states() -> None:
     primary, secondary = minimal_cdm().object_states()
-    assert primary.covariance.repairs == secondary.covariance.repairs == ()
+    assert (
+        known(primary.covariance).repairs == known(secondary.covariance).repairs == ()
+    )
     assert primary.object_id == "10001"
     assert primary.state.frame == "GCRF"
-    assert primary.covariance.frame == "GCRF"
+    assert known(primary.covariance).frame == "GCRF"
     np.testing.assert_allclose(
-        primary.covariance.in_rtn(primary.state).matrix, DIAGONAL_COVARIANCE, atol=1e-9
+        known(primary.covariance).in_rtn(primary.state).matrix,
+        DIAGONAL_COVARIANCE,
+        atol=1e-9,
     )
     # r = (0, 0, 500), v = (0, -7500, 7500): half of r lies along v.
     plane = encounter_plane(primary, secondary)
@@ -157,10 +161,10 @@ def test_object_states() -> None:
 def test_object_state_carries_its_covariance_repairs() -> None:
     cdm = minimal_cdm(segment1=replace(segment_fields(1), "CT_R", 1e6))
     first, second = cdm.object_states()
-    (repair,) = first.covariance.repairs
+    (repair,) = known(first.covariance).repairs
     assert repair.startswith("clipped 1 negative eigenvalue")
-    assert second.covariance.repairs == ()
-    assert cdm.object1.object_state().covariance.repairs == (repair,)
+    assert known(second.covariance).repairs == ()
+    assert known(cdm.object1.object_state().covariance).repairs == (repair,)
 
 
 def test_objects_in_different_frames_share_one_inertial_frame() -> None:
@@ -186,3 +190,15 @@ def test_hbr_and_user_defined() -> None:
     assert cdm.object1.user_defined == {"USER_DEFINED_RUN_ID": "abc"}
     primary, _ = cdm.object_states()
     assert primary.hard_body_radius == 5.0
+
+
+def test_all_zero_covariance_means_unknown() -> None:
+    fields = segment_fields(2)
+    for name in covariance_names(6):
+        fields = replace(fields, name, 0.0)
+    cdm = minimal_cdm(segment2=fields)
+    assert cdm.object1.has_covariance
+    assert not cdm.object2.has_covariance
+    primary, secondary = cdm.object_states()
+    assert primary.covariance is not None
+    assert secondary.covariance is None

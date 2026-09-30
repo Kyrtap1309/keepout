@@ -22,7 +22,7 @@ import numpy as np
 
 from keepout._types import FloatArray
 from keepout.encounter import EncounterPlane
-from keepout.pc._plane import PlaneGaussian, plane_gaussian
+from keepout.pc._plane import PlaneGaussian, plane_gaussian, require_known_covariance
 from keepout.pc.result import PcResult
 
 START_ORDER = 64
@@ -89,10 +89,12 @@ def elrod(
     GeometryError
         If the miss vector is not finite.
     CovarianceError
-        If the plane covariance is not finite or has no positive eigenvalue.
+        If a covariance is unknown, or the plane covariance is not finite or
+        has no positive eigenvalue.
     """
     if order is not None and order < 1:
         raise ValueError(f"order must be >= 1, got {order}")
+    require_known_covariance(plane.unknown_covariance, "elrod")
     gaussian = plane_gaussian(plane.miss_vector, plane.covariance, hard_body_radius)
     diagnostics = list(gaussian.diagnostics)
     resolving = _resolving_order(gaussian)

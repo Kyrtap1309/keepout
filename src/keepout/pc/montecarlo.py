@@ -1,0 +1,283 @@
+"""Monte Carlo Pc with a Clopper-Pearson confidence interval.
+
+Each trial draws both objects' TCA states from their Gaussians in equinoctial
+elements (see :mod:`keepout.pc._orbit`), moves them by two-body motion and
+counts a collision when the relative distance first drops below the combined
+hard-body radius inside the window. Trials already overlapping at the window
+start are not collisions in the window (only entries count, as in Hall 2021
+and CARA's two-body Monte Carlo).
+
+Time is only searched inside the encounter segments of the 3D-Nc rate scan:
+outside them the collision rate is below 1e-16 of its peak. Within a segment
+the distance is checked on the scan grid, and wherever a lower bound on a
+trial's distance between two grid points is below the radius, its closest
+approach is refined by Newton's method on ``r.v = 0`` (slope
+``d(r.v)/dt = v.v + r.a``, ``a`` the two-body relative acceleration).
+"""
+
+from __future__ import annotations
+
+import numpy as np
+import numpy.typing as npt
+from scipy import stats
+
+from keepout._types import FloatArray
+from keepout.conjunction import Conjunction
+from keepout.orbits import EARTH_MU
+from keepout.pc._orbit import OrbitUncertainty
+from keepout.pc._timeline import RateScan
+from keepout.pc.hall3d import check_fallbacks, collision_rate, encounter_scan
+from keepout.pc.result import PcResult
+
+MC_RTOL = 0.1
+"""Default target: half-width of the confidence interval relative to Pc."""
+
+MC_MAX_SAMPLES = 10_000_000
+"""Default budget of trials when stopping on ``rtol``."""
+
+MC_CONFIDENCE = 0.99
+
+MC_BATCH = 50_000
+"""Trials per batch: memory stays O(batch) whatever the sample count."""
+
+NEWTON_STEPS = 12
+
+SPEED_MARGIN = 1.5
+"""Factor on the larger grid-point relative speed bounding the speed in between."""
+
+
+def clopper_pearson(hits: int, trials: int, confidence: float) -> tuple[float, float]:
+    """Exact binomial confidence interval for ``hits / trials``."""
+    alpha = 1.0 - confidence
+    low = float(stats.beta.ppf(alpha / 2.0, hits, trials - hits + 1)) if hits else 0.0
+    high = (
+        float(stats.beta.ppf(1.0 - alpha / 2.0, hits + 1, trials - hits))
+        if hits < trials
+        else 1.0
+    )
+    return low, high
+
+
+class _Trials:
+    """A batch of sampled element pairs and their relative motion."""
+
+    def __init__(
+        self,
+        primary: OrbitUncertainty,
+        secondary: OrbitUncertainty,
+        first: FloatArray,
+        second: FloatArray,
+    ) -> None:
+        self.primary, self.secondary = primary, secondary
+        self.first, self.second = first, second
+
+    def relative(
+        self, t: float | FloatArray, rows: slice | npt.NDArray[np.intp] = slice(None)
+    ) -> tuple[FloatArray, FloatArray, FloatArray]:
+        """Relative position, velocity and acceleration at ``t``."""
+        one = self.primary.cartesian(self.first[rows], t)
+        two = self.secondary.cartesian(self.second[rows], t)
+        acceleration = [
+            -EARTH_MU * s[:, :3] / np.linalg.norm(s[:, :3], axis=1)[:, None] ** 3
+            for s in (one, two)
+        ]
+        return (
+            two[:, :3] - one[:, :3],
+            two[:, 3:] - one[:, 3:],
+            acceleration[1] - acceleration[0],
+        )
+
+    def closest_below(
+        self, rows: npt.NDArray[np.intp], start: float, end: float, radius: float
+    ) -> npt.NDArray[np.bool_]:
+        """Whether each trial in ``rows`` gets within ``radius`` in the interval.
+
+        The distance is tested at every Newton iterate, not only the last, so
+        an iteration that has not converged cannot lose a hit it passed.
+        """
+        t = np.full(rows.size, 0.5 * (start + end))
+        below: npt.NDArray[np.bool_] = np.zeros(rows.size, dtype=bool)
+        for _ in range(NEWTON_STEPS):
+            r, v, a = self.relative(t, rows)
+            below |= np.linalg.norm(r, axis=1) < radius
+            f = np.einsum("ij,ij->i", r, v)
+            slope = np.einsum("ij,ij->i", v, v) + np.einsum("ij,ij->i", r, a)
+            step = np.where(
+                slope > 0.0,
+                -f / np.where(slope > 0.0, slope, 1.0),
+                np.where(f > 0.0, start - t, end - t) * 0.5,
+            )
+            t = np.clip(t + step, start, end)
+        r, _, _ = self.relative(t, rows)
+        below |= np.linalg.norm(r, axis=1) < radius
+        return below
+
+
+def _collisions(
+    trials: _Trials, found: RateScan, radius: float, count: int
+) -> tuple[int, int]:
+    """Collisions (entries) and trials already inside at the window start."""
+    r, _, _ = trials.relative(found.times[0])
+    inside = np.linalg.norm(r, axis=1) < radius
+    hit = np.zeros(count, dtype=bool)
+    for lo, hi in found.segments:
+        previous: tuple[FloatArray, FloatArray] | None = None
+        for k in range(lo, hi + 1):
+            t = float(found.times[k])
+            r, v, _ = trials.relative(t)
+            distance, speed = np.linalg.norm(r, axis=1), np.linalg.norm(v, axis=1)
+            hit |= distance < radius
+            if previous is not None:
+                gap = t - float(found.times[k - 1])
+                bound = 0.5 * (
+                    previous[0]
+                    + distance
+                    - SPEED_MARGIN * np.maximum(previous[1], speed) * gap
+                )
+                rows = np.flatnonzero((bound < radius) & ~hit)
+                if rows.size:
+                    below = trials.closest_below(
+                        rows, float(found.times[k - 1]), t, radius
+                    )
+                    hit[rows[below]] = True
+            previous = (distance, speed)
+    return int(np.count_nonzero(hit & ~inside)), int(np.count_nonzero(inside))
+
+
+def _percent(fraction: float) -> str:
+    """``fraction`` as a percentage with its significant digits (99.5%)."""
+    return f"{100.0 * fraction:.10g}%"
+
+
+def _no_encounter(found: RateScan, confidence: float) -> PcResult:
+    """The result when the rate scan finds no encounter: no trial is run."""
+    start, end = found.window
+    note = (
+        f"no encounter: the collision rate is negligible over the whole window "
+        f"[{start:.6g}, {end:.6g}] s, so no trial can collide there; no trials "
+        "were run"
+    )
+    details = {
+        "ci_low": 0.0,
+        "ci_high": 0.0,
+        "confidence": confidence,
+        "samples": 0.0,
+        "hits": 0.0,
+        "inside_at_start": 0.0,
+        "window_start_s": start,
+        "window_end_s": end,
+    }
+    return PcResult(0.0, "montecarlo", (note,), details)
+
+
+def montecarlo(
+    conjunction: Conjunction,
+    *,
+    window: tuple[float, float] | None = None,
+    samples: int | None = None,
+    rtol: float = MC_RTOL,
+    max_samples: int = MC_MAX_SAMPLES,
+    confidence: float = MC_CONFIDENCE,
+    seed: int | None = None,
+) -> PcResult:
+    """Monte Carlo Pc with two-body motion and equinoctial sampling.
+
+    Parameters
+    ----------
+    conjunction
+        The conjunction; both covariances must be known and both orbits
+        elliptic.
+    window
+        Window ``(start, end)`` [s from TCA]; ``None`` sizes it as
+        :func:`~keepout.pc.hall3d.hall3d` does.
+    samples
+        Exact number of trials. ``None`` (default) runs batches until the
+        confidence interval's half-width is at most ``rtol`` times the
+        estimate, or ``max_samples`` is reached.
+    rtol
+        Target relative half-width of the confidence interval.
+    max_samples
+        Budget of trials when stopping on ``rtol``.
+    confidence
+        Confidence level of the Clopper-Pearson interval.
+    seed
+        Seed of the random generator; results are reproducible with a seed.
+
+    Returns
+    -------
+    PcResult
+        ``value`` = collisions / trials. ``details``: ``"ci_low"``,
+        ``"ci_high"``, ``"confidence"``, ``"samples"``, ``"hits"``,
+        ``"inside_at_start"`` (fraction of trials overlapping at the window
+        start, not counted), ``"window_start_s"``, ``"window_end_s"``. If
+        the rate scan finds no encounter in the window, no trial is run:
+        ``value``, ``"samples"`` and the interval are 0, with a diagnostic.
+
+    Raises
+    ------
+    CovarianceError
+        If a covariance is unknown.
+    GeometryError
+        If an orbit is not elliptic.
+    PcConvergenceError
+        If the 3D-Nc rate that locates the encounters cannot be computed or
+        scanned (see :func:`~keepout.pc.hall3d.encounter_scan`), or its
+        peak-overlap iteration failed inside an encounter segment (see
+        :func:`~keepout.pc.hall3d.check_fallbacks`).
+    ValueError
+        If an argument is out of range.
+    """
+    if samples is not None and samples < 1:
+        raise ValueError(f"samples must be >= 1, got {samples}")
+    if not (rtol > 0.0 and max_samples >= 1 and 0.0 < confidence < 1.0):
+        raise ValueError("need rtol > 0, max_samples >= 1 and 0 < confidence < 1")
+    rate = collision_rate(conjunction)
+    found = encounter_scan(conjunction, rate, window)
+    # A peak-overlap failure inside a segment could have narrowed the
+    # segments searched; the same rule as Hall's applies.
+    check_fallbacks(rate.fallbacks, found, found.peak)
+    if not found.segments:
+        return _no_encounter(found, confidence)
+    rng = np.random.default_rng(seed)
+    budget = samples if samples is not None else max_samples
+    hits = inside = done = 0
+    low, high = 0.0, 1.0
+    while done < budget:
+        count = min(MC_BATCH, budget - done)
+        trials = _Trials(
+            rate.primary,
+            rate.secondary,
+            rate.primary.sample(rng, count),
+            rate.secondary.sample(rng, count),
+        )
+        new_hits, new_inside = _collisions(
+            trials, found, conjunction.hard_body_radius, count
+        )
+        hits, inside, done = hits + new_hits, inside + new_inside, done + count
+        low, high = clopper_pearson(hits, done, confidence)
+        if samples is None and hits and 0.5 * (high - low) <= rtol * hits / done:
+            break
+    value = hits / done
+    diagnostics: list[str] = []
+    if samples is None and not (hits and 0.5 * (high - low) <= rtol * value):
+        diagnostics.append(
+            f"Monte Carlo stopped at {done} trials with {hits} collisions: the "
+            f"{_percent(confidence)} interval [{low:.3g}, {high:.3g}] is wider than "
+            f"rtol = {rtol:g}"
+        )
+    if inside:
+        diagnostics.append(
+            f"{inside / done:.3g} of the trials already overlap at the window "
+            "start; only entries into the hard body count"
+        )
+    details = {
+        "ci_low": low,
+        "ci_high": high,
+        "confidence": confidence,
+        "samples": float(done),
+        "hits": float(hits),
+        "inside_at_start": inside / done,
+        "window_start_s": found.window[0],
+        "window_end_s": found.window[1],
+    }
+    return PcResult(value, "montecarlo", tuple(diagnostics), details)

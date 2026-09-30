@@ -38,10 +38,12 @@ mean, so small probabilities keep their relative precision.
 
 | Method | How | Default accuracy |
 |---|---|---|
-| `foster` | Adaptive Gauss-Kronrod quadrature (QUADPACK) of the 1-D integral with `u = R sin(theta)`, over the band within 12 sigma of the mean, with breakpoints where a thin narrow axis makes the chord mass a step | relative tolerance 1e-10 |
+| `foster` | Adaptive Gauss-Kronrod quadrature (QUADPACK) of the 1-D integral with `u = R sin(theta)`, over the band within 12 sigma of the mean (outside it the density is below `exp(-72)` of its peak; a circle entirely outside gives exactly 0, where Elrod may still return e.g. 3e-58), with breakpoints where a thin narrow axis makes the chord mass a step | relative tolerance 1e-10 |
 | `elrod` | Gauss-Chebyshev quadrature (second kind) of the same integral; the order starts where the nodes resolve the Gaussian and doubles until two orders agree to 1e-10 | relative 1e-10 between orders |
 
-`compute_pc(conjunction, "auto")` uses Foster. Both methods agree with the
+`compute_pc(conjunction, "auto")` uses Foster when the 2-D assumptions hold
+(see [3-D, Monte Carlo and maximum Pc](pc-3d.md) for the other cases). Both
+methods agree with the
 NASA CARA reference values to better than 1e-7 relative; see the
 [validation report](validation.md).
 
@@ -52,7 +54,10 @@ the encounter duration as the time the secondary needs to cross five standard
 deviations of the combined covariance along the relative velocity (plus the
 HBR) on each side, and warns
 when it exceeds 1% of the primary's orbital period. A 3-D method may then give
-a different Pc (Alfano 2009, cases 1, 2, 4 and 8).
+a different Pc (Alfano 2009, cases 1, 2, 4 and 8); `compute_pc` in `auto` mode
+then uses [Hall's 3D-Nc](pc-3d.md) if both covariances are known and both
+orbits are elliptic, and otherwise stays on Foster (or, with a covariance
+unknown, uses a maximum Pc).
 
 ## Degenerate covariances
 

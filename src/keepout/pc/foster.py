@@ -17,7 +17,7 @@ import sys
 from scipy import integrate
 
 from keepout.encounter import EncounterPlane
-from keepout.pc._plane import PlaneGaussian, plane_gaussian
+from keepout.pc._plane import PlaneGaussian, plane_gaussian, require_known_covariance
 from keepout.pc.result import PcResult
 
 FOSTER_RTOL = 1e-10
@@ -29,6 +29,9 @@ MIN_RTOL = 50.0 * sys.float_info.epsilon
 STEP_SIGMAS = 10.0
 """Half-width, in narrow-axis standard deviations, of the chord-mass step
 around ``h = |mv|`` whose ends are given to the quadrature as breakpoints."""
+
+BREAKPOINT_GAP = 1e-6
+"""Breakpoints closer than this fraction of the band to its ends are dropped."""
 
 TAIL_SIGMAS = 12.0
 """Half-width, in standard deviations, of the band along the wide axis that
@@ -63,7 +66,12 @@ def _chord_steps(gaussian: PlaneGaussian, low: float, high: float) -> list[float
         if 0.0 < half_chord < radius:
             angle = math.acos(half_chord / radius)
             points.update(p for p in (-angle, angle) if low < p < high)
-    return sorted(points)
+    # A breakpoint a hair from an end of the band (``h = |mv|`` with a tiny
+    # ``mv``, or ``h = 10 sv`` with ``10 sv ~ R``) leaves QUADPACK a sliver
+    # interval, which it reports as bad integrand behaviour; the step it marks
+    # is then at the end itself, so it is dropped.
+    gap = BREAKPOINT_GAP * (high - low)
+    return [p for p in sorted(points) if p - low > gap and high - p > gap]
 
 
 def foster(
@@ -94,10 +102,12 @@ def foster(
     GeometryError
         If the miss vector is not finite.
     CovarianceError
-        If the plane covariance is not finite or has no positive eigenvalue.
+        If a covariance is unknown, or the plane covariance is not finite or
+        has no positive eigenvalue.
     """
     if not rtol >= MIN_RTOL:
         raise ValueError(f"rtol must be >= {MIN_RTOL:.3g}, got {rtol}")
+    require_known_covariance(plane.unknown_covariance, "foster")
     gaussian = plane_gaussian(plane.miss_vector, plane.covariance, hard_body_radius)
     diagnostics = list(gaussian.diagnostics)
     band = _band(gaussian)

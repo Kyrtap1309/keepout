@@ -3,15 +3,17 @@ hard-body radius."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from functools import cached_property
 from typing import TYPE_CHECKING
 
+import numpy as np
 from astropy.time import Time
 
 from keepout._types import require_positive
 from keepout.covariance import Policy
-from keepout.encounter import EncounterPlane, encounter_plane
-from keepout.objects import ObjectState
+from keepout.encounter import EncounterPlane, Role, encounter_plane
+from keepout.objects import ObjectState, require_same_epoch
 
 if TYPE_CHECKING:
     from keepout.cdm.model import Cdm
@@ -71,7 +73,7 @@ class Conjunction:
     Raises
     ------
     GeometryError
-        If the epochs differ or the relative velocity is zero.
+        If the epochs differ.
     ValueError
         If ``hard_body_radius`` is not finite and positive.
     """
@@ -79,13 +81,28 @@ class Conjunction:
     primary: ObjectState
     secondary: ObjectState
     hard_body_radius: float
-    plane: EncounterPlane = field(init=False)
 
     def __post_init__(self) -> None:
         radius = float(self.hard_body_radius)
         require_positive(radius, "hard_body_radius")
         object.__setattr__(self, "hard_body_radius", radius)
-        object.__setattr__(self, "plane", encounter_plane(self.primary, self.secondary))
+        require_same_epoch(
+            self.secondary.state.epoch,
+            self.primary.state.epoch,
+            "primary and secondary",
+        )
+
+    @cached_property
+    def plane(self) -> EncounterPlane:
+        """The encounter plane (built on first use).
+
+        Raises
+        ------
+        GeometryError
+            If the relative velocity is zero: the plane, and 2-D Pc, are then
+            undefined (3-D and Monte Carlo Pc are not).
+        """
+        return encounter_plane(self.primary, self.secondary)
 
     @classmethod
     def from_cdm(
@@ -118,8 +135,8 @@ class Conjunction:
 
     @property
     def tca(self) -> Time:
-        """Time of closest approach."""
-        return self.plane.tca
+        """Time of closest approach (the primary's epoch)."""
+        return self.primary.state.epoch
 
     @property
     def miss_distance(self) -> float:
@@ -129,16 +146,30 @@ class Conjunction:
     @property
     def relative_speed(self) -> float:
         """Relative speed [m/s]."""
-        return self.plane.relative_speed
+        return float(np.linalg.norm(self.secondary.state.v - self.primary.state.v))
+
+    @property
+    def unknown_covariance(self) -> tuple[Role, ...]:
+        """Objects whose covariance is unknown."""
+        roles: tuple[tuple[Role, ObjectState], ...] = (
+            ("primary", self.primary),
+            ("secondary", self.secondary),
+        )
+        return tuple(role for role, item in roles if item.covariance is None)
 
     @property
     def diagnostics(self) -> tuple[str, ...]:
-        """Covariance repairs of both objects, labelled with role and id.
+        """Covariance repairs and unknown covariances, labelled with role and id.
 
         Every Pc result for this conjunction repeats them.
         """
-        return tuple(
-            f"{role} ({item.object_id}): {repair}"
-            for role, item in (("primary", self.primary), ("secondary", self.secondary))
-            for repair in item.covariance.repairs
-        )
+        found: list[str] = []
+        for role, item in (("primary", self.primary), ("secondary", self.secondary)):
+            if item.covariance is None:
+                found.append(f"{role} ({item.object_id}): covariance unknown")
+            else:
+                found += [
+                    f"{role} ({item.object_id}): {repair}"
+                    for repair in item.covariance.repairs
+                ]
+        return tuple(found)

@@ -8,8 +8,11 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Literal, TypeAlias
 
-Method: TypeAlias = Literal["foster", "elrod"]
-"""Pc methods implemented so far."""
+Method: TypeAlias = Literal[
+    "foster", "elrod", "hall", "montecarlo", "frisbee", "dilution", "alfano"
+]
+"""Pc methods: 2-D (``foster``, ``elrod``), 3-D (``hall``), Monte Carlo
+(``montecarlo``) and maximum Pc (``frisbee``, ``dilution``, ``alfano``)."""
 
 
 @dataclass(frozen=True, eq=False)
@@ -26,8 +29,9 @@ class PcResult:
         Human-readable warnings: covariance repairs, questionable 2-D
         assumptions, quadrature problems. Empty when there is nothing to report.
     details
-        Method-specific numbers, e.g. ``"order"`` (Elrod) or
-        ``"error_estimate"`` (Foster); stored read-only.
+        Method-specific numbers, e.g. ``"order"`` (Elrod),
+        ``"error_estimate"`` (Foster), ``"nc"`` (Hall) or ``"ci_low"`` and
+        ``"ci_high"`` (Monte Carlo); stored read-only.
 
     Raises
     ------

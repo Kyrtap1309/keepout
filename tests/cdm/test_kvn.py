@@ -3,7 +3,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from builders import EARTH_ROTATION_RATE
+from builders import EARTH_ROTATION_RATE, known
 from cdm_builders import B1_KVN as B1
 from cdm_builders import TRACSS, assert_equivalent, cdms, minimal_cdm
 from hypothesis import given, settings
@@ -82,7 +82,7 @@ def test_reads_tracss_cdm_version_2() -> None:
 
 def test_tracss_itrf_states_are_converted_to_gcrf() -> None:
     primary, _ = kvn.load(TRACSS).object_states()
-    assert primary.covariance.repairs == ()
+    assert known(primary.covariance).repairs == ()
     r = np.array([6778137.0, 0.0, 0.0])
     v = np.array([0.0, 5900.0, 4400.0])
     inertial = v + np.cross([0.0, 0.0, EARTH_ROTATION_RATE], r)
@@ -207,7 +207,7 @@ def test_non_psd_covariance_parses_and_is_repaired() -> None:
     with pytest.raises(CovarianceError):
         cdm.object1.covariance(policy="raise")
     first, _ = cdm.object_states()
-    assert first.covariance.repairs[0].startswith("clipped")
+    assert known(first.covariance).repairs[0].startswith("clipped")
 
 
 def test_file_round_trip_with_bom(tmp_path: Path) -> None:
