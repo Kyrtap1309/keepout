@@ -5,7 +5,6 @@ import numpy as np
 import pytest
 from builders import EPOCH, LEO_R, LEO_V, head_on, known, object_state, shifted_back
 
-from keepout._types import StateVector
 from keepout.conjunction import Conjunction
 from keepout.covariance import make_covariance
 from keepout.errors import CovarianceError, GeometryError, PcConvergenceError
@@ -21,6 +20,7 @@ from keepout.pc.api import (
     encounter_duration,
 )
 from keepout.pc.montecarlo import montecarlo
+from keepout.state import StateVector
 
 api = importlib.import_module("keepout.pc.api")
 
@@ -255,7 +255,7 @@ def test_options_reach_a_three_d_method() -> None:
 
 
 @pytest.mark.parametrize(
-    "method", ["foster", "elrod", "dilution", "hall", "montecarlo"]
+    "method", ["foster", "elrod", "dilution", "hall3d", "montecarlo"]
 )
 def test_methods_needing_both_covariances_refuse_an_unknown_one(
     method: MethodChoice,
@@ -269,7 +269,7 @@ def test_methods_needing_both_covariances_refuse_an_unknown_one(
 def test_auto_uses_hall_for_a_slow_encounter_and_keeps_the_2d_pc() -> None:
     conjunction = along_track_conjunction(1.5 * DURATION_LIMIT * LEO_PERIOD)
     result = compute_pc(conjunction)
-    assert result.method == "hall"
+    assert result.method == "hall3d"
     assert result.details["pc_2d"] == foster(conjunction.plane, 5.0).value
     assert result.diagnostics[0].startswith("2-D Pc assumptions questionable")
 
@@ -302,12 +302,12 @@ def test_auto_uses_hall_at_zero_relative_velocity(
 ) -> None:
     # Hall's accuracy at zero relative velocity is checked on Alfano case 12
     # (validation); here only the choice is.
-    monkeypatch.setattr(api, "hall3d", lambda c: PcResult(0.5, "hall", (), {}))
+    monkeypatch.setattr(api, "hall3d", lambda c: PcResult(0.5, "hall3d", (), {}))
     offset = np.array([0.0, 0.0, 10.0])
     primary = object_state(LEO_R, LEO_V, 25.0 * np.eye(3))
     secondary = object_state(LEO_R + offset, LEO_V, 25.0 * np.eye(3))
     result = compute_pc(Conjunction(primary, secondary, 5.0))
-    assert result.method == "hall"
+    assert result.method == "hall3d"
     assert result.diagnostics == ("relative velocity is zero: 2-D Pc is undefined",)
     assert "encounter_duration_s" not in result.details
 

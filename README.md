@@ -22,13 +22,13 @@ Every Pc method against every applicable CARA reference case
 |---|---|---|---|
 | Alfano (2009) | foster | 11 / 11 | 8.9e-08 |
 | Alfano (2009) | elrod | 11 / 11 | 8.9e-08 |
-| Alfano (2009), 3-D | hall | 12 / 12 | 5.5e-04 |
+| Alfano (2009), 3-D | hall3d | 12 / 12 | 5.5e-04 |
 | CARA Pc method test set | foster | 53 / 53 | 2.7e-08 |
 | CARA Pc method test set | elrod | 53 / 53 | 2.7e-08 |
-| CARA Pc method test set, 3-D | hall | 53 / 53 | 2.1e-03 |
+| CARA Pc method test set, 3-D | hall3d | 53 / 53 | 2.1e-03 |
 | CARA unit tests | foster | 3 / 3 | 3.7e-08 |
 | CARA unit tests | elrod | 3 / 3 | 3.7e-08 |
-| CARA unit tests | hall | 2 / 2 | 7.1e-04 |
+| CARA unit tests | hall3d | 2 / 2 | 7.1e-04 |
 | CARA unit tests, maximum Pc | frisbee | 2 / 2 | - |
 | CARA unit tests, maximum Pc | dilution | 4 / 4 | 1.0e-03 |
 <!-- validation-summary:end -->
@@ -58,13 +58,12 @@ print(plane.miss_distance, plane.covariance, primary.covariance.repairs)
 ## Probability of collision
 
 ```python
-from keepout.conjunction import Conjunction
-from keepout.pc import compute_pc
+from keepout import Conjunction, compute_pc
 
 conjunction = Conjunction.from_cdm(cdm, hard_body_radius=20.0)
 result = compute_pc(conjunction)  # picks Foster, Hall 3D-Nc or a maximum Pc
 print(result.method, result.value, result.diagnostics)
-print(compute_pc(conjunction, "hall").details["nc"])  # a method by name
+print(compute_pc(conjunction, "hall3d").details["nc"])  # a method by name
 mc = compute_pc(conjunction, "montecarlo", samples=100_000, seed=1)
 print(mc.value, mc.details["ci_low"], mc.details["ci_high"])
 ```

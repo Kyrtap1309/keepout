@@ -9,9 +9,10 @@ import numpy as np
 import numpy.typing as npt
 from astropy.time import Time
 
-from keepout._types import FloatArray, StateVector, symmetric_part
+from keepout._types import FloatArray, symmetric_part
 from keepout.errors import CovarianceError, GeometryError
 from keepout.frames import inertial_to_rtn_covariance, rtn_to_inertial_covariance
+from keepout.state import StateVector
 
 CovarianceFrame: TypeAlias = Literal["RTN", "GCRF"]
 """Frames a :class:`Covariance` can be expressed in."""

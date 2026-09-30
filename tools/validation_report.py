@@ -30,6 +30,17 @@ PAPER_TOLERANCE = 1e-3
 PAPER_METHOD: Method = "foster"
 """Method compared with Alfano's published values."""
 
+METHOD_TITLES: dict[Method, str] = {
+    "foster": "Foster",
+    "elrod": "Elrod",
+    "hall3d": "Hall 3D-Nc",
+    "montecarlo": "Monte Carlo",
+    "frisbee": "Frisbee",
+    "dilution": "Dilution",
+    "alfano": "Alfano",
+}
+"""Column titles of the methods in the case tables."""
+
 NOT_COMPARED = """\
 ## Not compared
 
@@ -161,7 +172,7 @@ def _suite_table(members: Sequence[Outcome]) -> list[str]:
     if with_interval:
         header += " CARA 95% interval |"
     for method in methods:
-        header += f" {method.capitalize()} | error |"
+        header += f" {METHOD_TITLES[method]} | error |"
         if method == "montecarlo":
             header += " keepout interval | trials |"
     if with_paper:

@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 from builders import EPOCH
 
-from keepout._types import StateVector
+from keepout.state import StateVector
 
 
 def test_state_vector_copies_and_freezes_arrays() -> None:

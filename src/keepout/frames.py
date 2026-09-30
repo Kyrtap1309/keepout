@@ -18,8 +18,9 @@ import numpy as np
 import numpy.typing as npt
 from astropy.time import Time
 
-from keepout._types import FloatArray, StateVector
+from keepout._types import FloatArray
 from keepout.errors import GeometryError
+from keepout.state import StateVector
 
 _J2000_JD = 2451545.0
 # GCRS -> mean J2000 (EME2000) frame bias; constant, so any date gives it.

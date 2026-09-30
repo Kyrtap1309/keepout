@@ -179,16 +179,16 @@ covariance (operators send zeros when they have none).
 
 `compute_pc(conjunction)` (`method="auto"`):
 
-1. zero relative velocity: `hall` (there is no encounter plane, so a
+1. zero relative velocity: `hall3d` (there is no encounter plane, so a
    `GeometryError` names the cause if a covariance is unknown or an orbit is
    not elliptic);
 2. both covariances unknown: `alfano`; one unknown: `frisbee`;
 3. a questionable 2-D assumption (encounter longer than 1% of an orbit, or
-   states off TCA), with elliptic orbits: `hall`, with the 2-D Pc kept in
+   states off TCA), with elliptic orbits: `hall3d`, with the 2-D Pc kept in
    `details["pc_2d"]`;
 4. otherwise `foster`.
 
-If `hall` raises `PcConvergenceError` after its encounter scan (the
+If `hall3d` raises `PcConvergenceError` after its encounter scan (the
 peak-overlap iteration failed where the rate matters, the rate cannot be
 computed at a quadrature node, or `Nc` is not finite), `auto` falls back to
 `montecarlo` with at most `AUTO_MC_SAMPLES` (1 000 000) trials and the fixed
@@ -211,7 +211,7 @@ so a duration warning is still valid (it then says "at least about").
 known.
 
 The choice costs time: the 2-D and maximum-Pc methods take milliseconds,
-`hall` about 1-60 s and the Monte Carlo fallback up to about a minute. For a
+`hall3d` about 1-60 s and the Monte Carlo fallback up to about a minute. For a
 batch of conjunctions, look at `result.method` or choose a method explicitly.
 
 ## Slow encounters: the methods compared

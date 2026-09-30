@@ -3,10 +3,10 @@ import numpy as np
 import pytest
 from builders import EPOCH, object_state
 
-from keepout._types import StateVector
 from keepout.covariance import Covariance
 from keepout.errors import GeometryError
 from keepout.objects import ObjectState
+from keepout.state import StateVector
 
 GCRF_STATE = StateVector(EPOCH, [7000e3, 0.0, 0.0], [0.0, 7500.0, 0.0], "GCRF")
 GCRF_COVARIANCE = Covariance(np.eye(6), "GCRF", EPOCH)

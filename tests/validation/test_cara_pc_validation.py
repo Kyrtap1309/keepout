@@ -29,7 +29,7 @@ def cases() -> list[ValidationCase]:
 def outcomes(cases: list[ValidationCase]) -> list[Outcome]:
     # Hall 3D-Nc takes minutes over every case; tools/validation_report.py
     # --check (same CI job) judges it. Here: 2-D and maximum Pc.
-    return evaluate(c for c in cases if "hall" not in c.methods)
+    return evaluate(c for c in cases if "hall3d" not in c.methods)
 
 
 def test_every_case_is_loaded(cases: list[ValidationCase]) -> None:

@@ -5,9 +5,10 @@ from hypothesis import given
 from hypothesis import strategies as st
 from hypothesis.extra.numpy import arrays
 
-from keepout._types import FloatArray, StateVector
+from keepout._types import FloatArray
 from keepout.covariance import Covariance, make_covariance, problems, repair
 from keepout.errors import CovarianceError, GeometryError
+from keepout.state import StateVector
 
 VALID = DIAGONAL_COVARIANCE
 STATE = StateVector(EPOCH, [7000e3, 100.0, 50.0], [10.0, 7500.0, 1000.0], "GCRF")

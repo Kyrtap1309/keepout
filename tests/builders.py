@@ -8,10 +8,11 @@ from hypothesis import strategies as st
 from hypothesis.extra.numpy import arrays
 from scipy.spatial.transform import Rotation
 
-from keepout._types import FloatArray, StateVector
+from keepout._types import FloatArray
 from keepout.conjunction import Conjunction
 from keepout.covariance import Covariance
 from keepout.objects import ObjectState
+from keepout.state import StateVector
 from keepout.validation.cases import ValidationCase
 from keepout.validation.criteria import TWO_D, Criterion
 

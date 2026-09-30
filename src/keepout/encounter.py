@@ -85,6 +85,11 @@ class EncounterPlane:
         return float(self.relative_position @ self.direction)
 
 
+def sigma_along(direction: FloatArray, covariance: FloatArray) -> float:
+    """Standard deviation of a position covariance along a unit vector [m]."""
+    return float(np.sqrt(max(float(direction @ covariance @ direction), 0.0)))
+
+
 def _perpendicular(unit: FloatArray) -> FloatArray:
     axis = np.zeros(3)
     axis[int(np.argmin(np.abs(unit)))] = 1.0

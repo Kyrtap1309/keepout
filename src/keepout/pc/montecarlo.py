@@ -28,8 +28,8 @@ from keepout._types import FloatArray
 from keepout.conjunction import Conjunction
 from keepout.orbits import EARTH_MU
 from keepout.pc._orbit import OrbitUncertainty
+from keepout.pc._rate import check_fallbacks, collision_rate, encounter_scan
 from keepout.pc._timeline import RateScan
-from keepout.pc.hall3d import check_fallbacks, collision_rate, encounter_scan
 from keepout.pc.result import PcResult
 
 MC_RTOL = 0.1
@@ -242,9 +242,9 @@ def montecarlo(
         If an orbit is not elliptic.
     PcConvergenceError
         If the 3D-Nc rate that locates the encounters cannot be computed or
-        scanned (see :func:`~keepout.pc.hall3d.encounter_scan`), or its
+        scanned (see :func:`~keepout.pc._rate.encounter_scan`), or its
         peak-overlap iteration failed inside an encounter segment (see
-        :func:`~keepout.pc.hall3d.check_fallbacks`).
+        :func:`~keepout.pc._rate.check_fallbacks`).
     ValueError
         If an argument is out of range.
     """
@@ -254,7 +254,7 @@ def montecarlo(
         raise ValueError(f"rtol must be finite and > 0, got {rtol}")
     if not (max_samples >= 1 and 0.0 < confidence < 1.0):
         raise ValueError("need max_samples >= 1 and 0 < confidence < 1")
-    rate = collision_rate(conjunction)
+    rate = collision_rate(conjunction, "montecarlo")
     found = encounter_scan(conjunction, rate, window)
     # A peak-overlap failure inside a segment could have narrowed the
     # segments searched; the same rule as Hall's applies.

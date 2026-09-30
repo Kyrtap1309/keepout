@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import dataclasses
-import math
 from collections.abc import Callable
 from typing import Any, Literal, TypeAlias
 
@@ -12,12 +11,25 @@ import numpy as np
 from keepout.conjunction import Conjunction
 from keepout.errors import GeometryError, PcConvergenceError
 from keepout.orbits import orbital_period
+from keepout.pc._duration import DURATION_LIMIT, SIGMA_EXTENT, encounter_duration
 from keepout.pc.elrod import elrod
 from keepout.pc.foster import foster
 from keepout.pc.hall3d import hall3d
 from keepout.pc.maxpc import alfano, dilution, frisbee
 from keepout.pc.montecarlo import montecarlo
 from keepout.pc.result import Method, PcResult
+
+__all__ = [
+    "AUTO_MC_SAMPLES",
+    "AUTO_MC_SEED",
+    "DURATION_LIMIT",
+    "SIGMA_EXTENT",
+    "TCA_OFFSET_LIMIT",
+    "MethodChoice",
+    "applicability",
+    "compute_pc",
+    "encounter_duration",
+]
 
 MethodChoice: TypeAlias = Literal["auto"] | Method
 """Methods :func:`compute_pc` accepts; ``"auto"`` picks one."""
@@ -28,18 +40,9 @@ _METHODS: dict[str, Callable[..., PcResult]] = {
     "frisbee": lambda c, **o: frisbee(c.plane, c.hard_body_radius, **o),
     "dilution": lambda c, **o: dilution(c.plane, c.hard_body_radius, **o),
     "alfano": lambda c, **o: alfano(c.plane, c.hard_body_radius, **o),
-    "hall": hall3d,
+    "hall3d": hall3d,
     "montecarlo": montecarlo,
 }
-
-SIGMA_EXTENT = 5.0
-"""Standard deviations of the combined position covariance along the
-relative velocity that the encounter is taken to span when estimating its
-duration."""
-
-DURATION_LIMIT = 0.01
-"""Largest encounter duration, as a fraction of the primary's orbital
-period, for which the 2-D (straight-line) model is considered sound."""
 
 TCA_OFFSET_LIMIT = 0.01
 """Largest relative-position component along the relative velocity, as a
@@ -51,20 +54,6 @@ AUTO_MC_SAMPLES = 1_000_000
 
 AUTO_MC_SEED = 0
 """Seed of ``auto``'s Monte Carlo fallback, so ``auto`` is reproducible."""
-
-
-def encounter_duration(conjunction: Conjunction) -> float:
-    """Time [s] the secondary needs to cross the combined uncertainty region.
-
-    ``2 (SIGMA_EXTENT * sigma_v + HBR) / |v_rel|``, with ``sigma_v`` the
-    standard deviation of the combined 3x3 position covariance along the
-    relative velocity: only that extent is crossed during the encounter.
-    """
-    plane = conjunction.plane
-    direction = plane.direction
-    variance = float(direction @ plane.combined_covariance @ direction)
-    extent = SIGMA_EXTENT * math.sqrt(max(variance, 0.0)) + conjunction.hard_body_radius
-    return 2.0 * extent / plane.relative_speed
 
 
 def applicability(conjunction: Conjunction, duration: float) -> tuple[str, ...]:
@@ -154,10 +143,7 @@ def _require_three_d(conjunction: Conjunction) -> None:
     both covariances and elliptic orbits.
     """
     reason = "no Pc method applies: the relative velocity is zero (no encounter plane)"
-    items = {"primary": conjunction.primary, "secondary": conjunction.secondary}
-    unknown = [
-        f"{role} ({items[role].object_id})" for role in conjunction.unknown_covariance
-    ]
+    unknown = [conjunction.label(role) for role in conjunction.unknown_covariance]
     if len(unknown) == 2:
         raise GeometryError(
             f"{reason} and the covariances of {' and '.join(unknown)} are unknown"
@@ -194,24 +180,24 @@ def compute_pc(
     method
         A method name, or ``"auto"`` (default), which picks:
 
-        1. ``"hall"`` if the relative velocity is zero (both covariances
+        1. ``"hall3d"`` if the relative velocity is zero (both covariances
            must then be known and both orbits elliptic);
         2. ``"alfano"`` if both covariances are unknown, ``"frisbee"`` if one
            is (maximum Pc: upper bounds);
-        3. ``"hall"`` if a 2-D assumption is questionable (see
+        3. ``"hall3d"`` if a 2-D assumption is questionable (see
            :func:`applicability`) and both orbits are elliptic, with the 2-D
            Pc kept in ``details["pc_2d"]``;
         4. ``"foster"`` otherwise.
 
-        When ``"hall"`` raises :class:`PcConvergenceError` after its
+        When ``"hall3d"`` raises :class:`PcConvergenceError` after its
         encounter scan (the peak-overlap iteration failed where the rate
         matters, the rate cannot be computed at a quadrature node, or Nc is
         not finite), ``"auto"`` falls back to ``"montecarlo"`` with at most
         ``AUTO_MC_SAMPLES`` trials and the seed ``AUTO_MC_SEED``, so
         ``"auto"`` is reproducible. A failure of the encounter scan itself
         is not covered: Monte Carlo runs the same scan
-        (:func:`~keepout.pc.hall3d.encounter_scan`) and re-raises it. The 2-D and
-        maximum-Pc methods take milliseconds; ``"hall"`` about 1-60 s and the
+        (:func:`~keepout.pc._rate.encounter_scan`) and re-raises it. The 2-D and
+        maximum-Pc methods take milliseconds; ``"hall3d"`` about 1-60 s and the
         Monte Carlo fallback up to about a minute.
     **options
         Passed to an explicitly chosen method (e.g. ``rtol``, ``order``,
@@ -243,7 +229,7 @@ def compute_pc(
         ``"auto"``, if the relative velocity is zero and a covariance is
         unknown or an orbit is not elliptic.
     PcConvergenceError
-        If ``"hall"`` was chosen explicitly and did not converge; if
+        If ``"hall3d"`` was chosen explicitly and did not converge; if
         ``"montecarlo"`` was chosen and its encounter scan failed; with
         ``"auto"``, if the encounter scan failed (its encounters need more
         detection points than allowed, the rate is significant where the

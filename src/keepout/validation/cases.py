@@ -15,13 +15,14 @@ import numpy.typing as npt
 from astropy.time import Time
 
 from keepout import cdm
-from keepout._types import FloatArray, StateVector
+from keepout._types import FloatArray
 from keepout.conjunction import Conjunction
 from keepout.covariance import Covariance, make_covariance
 from keepout.errors import CaraFormatError
 from keepout.objects import ObjectState
 from keepout.pc.result import Method
 from keepout.sources import cara
+from keepout.state import StateVector
 from keepout.validation.criteria import (
     HALL,
     HALL_PC_SET,
@@ -321,7 +322,7 @@ def load_alfano_3d_cases(cache: Path | None = None) -> list[ValidationCase]:
             str(number),
             conjunction,
             _float(_field(result, "CARA_Pc3D")),
-            methods=("hall",),
+            methods=("hall3d",),
             criterion=HALL,
             options={"window": (-window, window)},
         )
@@ -388,7 +389,7 @@ def load_pc_method_3d_cases(cache: Path | None = None) -> list[ValidationCase]:
             conjunction_id,
             conjunction,
             _float(_field(row, "Nc3D")),
-            methods=("hall",),
+            methods=("hall3d",),
             criterion=HALL_PC_SET,
             informative=("Coppola 3-D Pc", _float(_field(row, "Pc3DCoppola"))),
         )
@@ -550,7 +551,7 @@ def hall_similar_to_2d_case() -> ValidationCase:
         "Hall testSimilarTo2D",
         Conjunction(primary, secondary, 20.0),
         1.0289973e-02,
-        methods=("hall",),
+        methods=("hall3d",),
         criterion=HALL,
     )
 
@@ -578,7 +579,7 @@ def load_hall_2d3d_cases(cache: Path | None = None) -> list[ValidationCase]:
             "Hall test2D3DDisagreement (3-D)",
             conjunction,
             1.9271201e-05,
-            methods=("hall",),
+            methods=("hall3d",),
             criterion=HALL,
         ),
     ]

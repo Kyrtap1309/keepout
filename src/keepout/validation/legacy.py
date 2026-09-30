@@ -17,12 +17,12 @@ from pathlib import Path
 
 from astropy.time import Time
 
-from keepout._types import REF_FRAMES, StateVector
 from keepout.cdm.keywords import covariance_matrix
 from keepout.covariance import make_covariance
 from keepout.errors import CaraFormatError
 from keepout.frames import to_gcrf
 from keepout.objects import ObjectState
+from keepout.state import REF_FRAMES, StateVector
 
 _LINE = re.compile(r"^\s*([A-Z][A-Z0-9_]*)\s*=\s*(\S+)")
 _STATE = ("X", "Y", "Z", "X_DOT", "Y_DOT", "Z_DOT")

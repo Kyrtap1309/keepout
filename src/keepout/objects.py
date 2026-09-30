@@ -7,9 +7,9 @@ from dataclasses import dataclass
 
 from astropy.time import Time
 
-from keepout._types import StateVector
 from keepout.covariance import Covariance
 from keepout.errors import GeometryError
+from keepout.state import StateVector
 
 EPOCH_TOLERANCE_S = 1e-3
 """Largest epoch difference [s] treated as "the same epoch"."""

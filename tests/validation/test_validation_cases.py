@@ -174,7 +174,7 @@ def test_alfano_3d_cases_use_the_supplementary_windows(
     cases = load_alfano_3d_cases()
     assert [c.case_id for c in cases] == [str(n) for n in range(1, 13)]
     ninth = cases[8]
-    assert ninth.methods == ("hall",)
+    assert ninth.methods == ("hall3d",)
     assert ninth.criterion is HALL
     assert ninth.reference == pytest.approx(9e-3)
     assert ninth.options["window"] == (-900.0, 900.0)

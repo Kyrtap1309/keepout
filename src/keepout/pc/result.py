@@ -9,9 +9,9 @@ from types import MappingProxyType
 from typing import Literal, TypeAlias
 
 Method: TypeAlias = Literal[
-    "foster", "elrod", "hall", "montecarlo", "frisbee", "dilution", "alfano"
+    "foster", "elrod", "hall3d", "montecarlo", "frisbee", "dilution", "alfano"
 ]
-"""Pc methods: 2-D (``foster``, ``elrod``), 3-D (``hall``), Monte Carlo
+"""Pc methods: 2-D (``foster``, ``elrod``), 3-D (``hall3d``), Monte Carlo
 (``montecarlo``) and maximum Pc (``frisbee``, ``dilution``, ``alfano``)."""
 
 

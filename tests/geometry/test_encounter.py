@@ -14,10 +14,11 @@ from hypothesis import assume, given
 from hypothesis import strategies as st
 from hypothesis.extra.numpy import arrays
 
-from keepout._types import FloatArray, StateVector
+from keepout._types import FloatArray
 from keepout.encounter import encounter_plane
 from keepout.errors import GeometryError
 from keepout.objects import ObjectState
+from keepout.state import StateVector
 
 offsets = arrays(np.float64, (3,), elements=st.floats(-1e4, 1e4))
 relative_velocities = arrays(np.float64, (3,), elements=st.floats(-2e4, 2e4))

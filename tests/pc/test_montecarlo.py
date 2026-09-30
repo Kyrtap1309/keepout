@@ -12,7 +12,7 @@ from keepout.objects import ObjectState
 from keepout.pc import foster, montecarlo
 from keepout.pc.montecarlo import _Trials, clopper_pearson
 
-hall3d_module = importlib.import_module("keepout.pc.hall3d")
+rate_module = importlib.import_module("keepout.pc._rate")
 montecarlo_module = importlib.import_module("keepout.pc.montecarlo")
 
 
@@ -90,7 +90,9 @@ def test_unknown_covariance_is_rejected() -> None:
     conjunction = Conjunction(
         ObjectState("P", base.primary.state, None), base.secondary, 5.0
     )
-    with pytest.raises(CovarianceError, match="unknown: primary"):
+    with pytest.raises(
+        CovarianceError, match="montecarlo needs both covariances; unknown: primary"
+    ):
         montecarlo(conjunction, samples=10)
 
 
@@ -116,12 +118,12 @@ def test_failed_iteration_inside_an_encounter_raises(
 ) -> None:
     # As in Hall: a fallback inside a segment could have narrowed the
     # segments searched, so the run stops instead.
-    real = hall3d_module._peak_overlap
+    real = rate_module._peak_overlap
 
     def failing(*args: Any) -> Any:
         return None if 4.2e-4 <= args[2] <= 5.0e-4 else real(*args)
 
-    monkeypatch.setattr(hall3d_module, "_peak_overlap", failing)
+    monkeypatch.setattr(rate_module, "_peak_overlap", failing)
     with pytest.raises(PcConvergenceError, match="inside an encounter segment"):
         montecarlo(head_on(30.0, 10.0, 20.0, 5.0), samples=1_000, seed=1)
 

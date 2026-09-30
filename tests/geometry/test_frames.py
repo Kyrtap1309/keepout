@@ -7,7 +7,7 @@ from hypothesis import assume, given
 from hypothesis import strategies as st
 from hypothesis.extra.numpy import arrays
 
-from keepout._types import FloatArray, StateVector
+from keepout._types import FloatArray
 from keepout.errors import GeometryError
 from keepout.frames import (
     FRAME_BIAS,
@@ -17,6 +17,7 @@ from keepout.frames import (
     to_gcrf,
     to_gcrf_all,
 )
+from keepout.state import StateVector
 
 MAS = np.pi / (180.0 * 3600.0 * 1000.0)
 

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 from astropy.time import Time
 
-from keepout._types import require_positive
+from keepout._types import FloatArray, require_positive
 from keepout.covariance import Policy
 from keepout.encounter import EncounterPlane, Role, encounter_plane
 from keepout.objects import ObjectState, require_same_epoch
@@ -144,18 +144,39 @@ class Conjunction:
         return self.plane.miss_distance
 
     @property
+    def objects(self) -> tuple[tuple[Role, ObjectState], tuple[Role, ObjectState]]:
+        """Both objects with their role, primary first."""
+        return ("primary", self.primary), ("secondary", self.secondary)
+
+    @property
+    def relative_position(self) -> FloatArray:
+        """Secondary minus primary position [m], in the states' frame."""
+        position: FloatArray = self.secondary.state.r - self.primary.state.r
+        return position
+
+    @property
+    def relative_velocity(self) -> FloatArray:
+        """Secondary minus primary velocity [m/s], in the states' frame.
+
+        Defined at zero relative speed too, unlike :attr:`plane`.
+        """
+        velocity: FloatArray = self.secondary.state.v - self.primary.state.v
+        return velocity
+
+    @property
     def relative_speed(self) -> float:
         """Relative speed [m/s]."""
-        return float(np.linalg.norm(self.secondary.state.v - self.primary.state.v))
+        return float(np.linalg.norm(self.relative_velocity))
+
+    def label(self, role: Role) -> str:
+        """``"primary (12345)"``: the role and object id, for messages."""
+        item = self.primary if role == "primary" else self.secondary
+        return f"{role} ({item.object_id})"
 
     @property
     def unknown_covariance(self) -> tuple[Role, ...]:
         """Objects whose covariance is unknown."""
-        roles: tuple[tuple[Role, ObjectState], ...] = (
-            ("primary", self.primary),
-            ("secondary", self.secondary),
-        )
-        return tuple(role for role, item in roles if item.covariance is None)
+        return tuple(role for role, item in self.objects if item.covariance is None)
 
     @property
     def diagnostics(self) -> tuple[str, ...]:
@@ -164,12 +185,10 @@ class Conjunction:
         Every Pc result for this conjunction repeats them.
         """
         found: list[str] = []
-        for role, item in (("primary", self.primary), ("secondary", self.secondary)):
+        for role, item in self.objects:
+            label = self.label(role)
             if item.covariance is None:
-                found.append(f"{role} ({item.object_id}): covariance unknown")
+                found.append(f"{label}: covariance unknown")
             else:
-                found += [
-                    f"{role} ({item.object_id}): {repair}"
-                    for repair in item.covariance.repairs
-                ]
+                found += [f"{label}: {repair}" for repair in item.covariance.repairs]
         return tuple(found)

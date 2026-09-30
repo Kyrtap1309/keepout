@@ -24,6 +24,7 @@ import numpy as np
 import numpy.typing as npt
 
 from keepout._types import FloatArray
+from keepout.encounter import sigma_along
 from keepout.errors import PcConvergenceError
 from keepout.pc._sphere import gauss_legendre
 
@@ -155,8 +156,7 @@ def straight_line_half_window(
     speed = float(np.linalg.norm(relative_velocity))
     if speed == 0.0:
         return math.inf
-    direction = relative_velocity / speed
-    sigma = math.sqrt(max(float(direction @ position_covariance @ direction), 0.0))
+    sigma = sigma_along(relative_velocity / speed, position_covariance)
     return (SIGMA_REACH * sigma + radius) / speed
 
 
@@ -248,7 +248,7 @@ def _detection_grids(
             f"{end:.6g}] s: detecting its possible encounters needs a scan "
             f"spacing of {finest:.3g} s, more than {MAX_SCAN_POINTS} points; "
             "pass a shorter window around the encounter, e.g. "
-            "compute_pc(conjunction, 'hall', window=(a, b)) (or 'montecarlo')"
+            "compute_pc(conjunction, 'hall3d', window=(a, b)) (or 'montecarlo')"
         )
     return [(np.linspace(a, b, count), fine) for a, b, count, fine in plan]
 

@@ -15,7 +15,7 @@ from functools import cached_property
 import numpy as np
 from astropy.time import Time
 
-from keepout._types import REF_FRAMES, FloatArray, StateVector
+from keepout._types import FloatArray
 from keepout.cdm.keywords import (
     KEYWORDS,
     REQUIRED,
@@ -31,6 +31,7 @@ from keepout.covariance import Covariance, Policy, make_covariance
 from keepout.errors import GeometryError
 from keepout.frames import to_gcrf, to_gcrf_all
 from keepout.objects import ObjectState
+from keepout.state import REF_FRAMES, StateVector
 
 COMMENT = "COMMENT"
 USER_DEFINED_PREFIX = "USER_DEFINED_"
