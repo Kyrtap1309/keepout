@@ -46,3 +46,24 @@ def test_centre_at_inverts_the_motion() -> None:
 def test_an_unknown_covariance_has_no_orbit_uncertainty() -> None:
     with pytest.raises(CovarianceError, match="covariance of X is unknown"):
         OrbitUncertainty.of(ObjectState("X", ALONG_TRACK.state, None))
+
+
+def test_batched_expansions_match_one_at_a_time() -> None:
+    orbit = OrbitUncertainty.of(
+        object_state(LEO_R, LEO_V, np.diag([100.0, 900.0, 25.0]), velocity_sigma=0.1)
+    )
+    rng = np.random.default_rng(7)
+    centres = orbit.sample(rng, 5)
+    times = np.array([-300.0, -1.0, 0.0, 2.5, 600.0])
+    means, covariances = orbit.expansions(centres, times)
+    for centre, t, mean, covariance in zip(
+        centres, times, means, covariances, strict=True
+    ):
+        one_mean, one_covariance = orbit.expansion(centre, float(t))
+        np.testing.assert_allclose(mean, one_mean, rtol=1e-12, atol=1e-9)
+        np.testing.assert_allclose(covariance, one_covariance, rtol=1e-10, atol=1e-12)
+    np.testing.assert_allclose(
+        orbit.centre_at(means, times),
+        [orbit.centre_at(m, float(t)) for m, t in zip(means, times, strict=True)],
+        rtol=1e-12,
+    )

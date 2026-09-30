@@ -1,7 +1,6 @@
 import importlib
 import math
 import re
-from collections.abc import Callable
 from typing import Any
 
 import numpy as np
@@ -15,6 +14,7 @@ from builders import (
     object_state,
     shifted_back,
 )
+from faults import Failure, failing_where, never_converges, not_converging, raising
 from scipy.spatial.transform import Rotation
 
 from keepout.conjunction import Conjunction
@@ -125,7 +125,7 @@ def test_zero_relative_velocity_is_supported() -> None:
 def test_failed_iteration_where_it_matters_raises(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(rate_module, "_peak_overlap", lambda *_: None)
+    monkeypatch.setattr(rate_module, "_iterate_overlap", never_converges)
     with pytest.raises(PcConvergenceError, match="did not converge"):
         hall3d(head_on(30.0, 10.0, 20.0, 5.0))
 
@@ -186,51 +186,18 @@ def test_window_without_an_encounter_is_reported() -> None:
     assert note.startswith("collision rate negligible over the whole window")
 
 
-Overlap = Callable[..., object]
-
-
-def failing_where(
-    when: Callable[[float], bool],
-    failure: Callable[[Overlap, tuple[object, ...]], object],
-) -> Overlap:
-    """``_peak_overlap`` that fails through ``failure`` at the times ``when``."""
-    real = rate_module._peak_overlap
-
-    def patched(*args: object) -> object:
-        t = args[2]
-        assert isinstance(t, float)
-        if when(t):
-            return failure(real, args)
-        return real(*args)
-
-    return patched
-
-
-def not_converging(real: Overlap, args: tuple[object, ...]) -> object:
-    """The real iteration cut to one step: its genuine non-convergence return."""
-    with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(rate_module, "OVERLAP_MAX_ITERATIONS", 1)
-        result = real(*args)
-    assert result is None
-    return result
-
-
-def raising(real: Overlap, args: tuple[object, ...]) -> object:
-    raise GeometryError("orbit is unbound")
-
-
 @pytest.mark.parametrize("failure", [not_converging, raising])
 def test_failure_inside_the_encounter_raises(
     monkeypatch: pytest.MonkeyPatch,
-    failure: Callable[[Overlap, tuple[object, ...]], object],
+    failure: Failure,
 ) -> None:
     # The rate peaks near -0.25 ms; at +0.42 to +0.50 ms it is 1e-16 to 1e-10
     # of its peak: inside the encounter segment, but a fallback there stays
     # below the relative tolerance of FALLBACK_TOLERANCE.
     monkeypatch.setattr(
         rate_module,
-        "_peak_overlap",
-        failing_where(lambda t: 4.2e-4 <= t <= 5.0e-4, failure),
+        "_iterate_overlap",
+        failing_where(lambda t: (t >= 4.2e-4) & (t <= 5.0e-4), failure),
     )
     with pytest.raises(PcConvergenceError, match="did not converge"):
         hall3d(head_on(30.0, 10.0, 20.0, 5.0))
@@ -239,11 +206,13 @@ def test_failure_inside_the_encounter_raises(
 @pytest.mark.parametrize("failure", [not_converging, raising])
 def test_failure_in_the_far_tail_is_allowed(
     monkeypatch: pytest.MonkeyPatch,
-    failure: Callable[[Overlap, tuple[object, ...]], object],
+    failure: Failure,
 ) -> None:
     conjunction = head_on(30.0, 10.0, 20.0, 5.0)
     monkeypatch.setattr(
-        rate_module, "_peak_overlap", failing_where(lambda t: abs(t) >= 3e-3, failure)
+        rate_module,
+        "_iterate_overlap",
+        failing_where(lambda t: np.abs(t) >= 3e-3, failure),
     )
     result = hall3d(conjunction, window=(-0.02, 0.02))
     assert result.details["fallbacks"] > 0
@@ -256,7 +225,7 @@ def test_failing_fallback_raises_a_convergence_error(
     def broken(*_: object) -> float:
         raise np.linalg.LinAlgError("Singular matrix")
 
-    monkeypatch.setattr(rate_module, "_peak_overlap", lambda *_: None)
+    monkeypatch.setattr(rate_module, "_iterate_overlap", never_converges)
     monkeypatch.setattr(rate_module.CollisionRate, "_rate", broken)
     with pytest.raises(PcConvergenceError, match="cannot be computed"):
         hall3d(head_on(30.0, 10.0, 20.0, 5.0))

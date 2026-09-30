@@ -46,7 +46,7 @@ from keepout.pc.result import PcResult
 
 QUIET_AGREEMENT = 1e-4
 """Time-integral agreement below which a missed ``rtol`` is not reported. It
-is per piece (the last two Gauss-Legendre orders of one piece of an
+is per piece (the last two Clenshaw-Curtis rules of one piece of an
 encounter segment, relative to the total Nc) and 10 times inside Hall's
 tightest validation criterion (1e-3 relative to CARA), so it cannot affect
 a result at that accuracy."""

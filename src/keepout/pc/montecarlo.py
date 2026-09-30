@@ -26,6 +26,7 @@ from scipy import special
 
 from keepout._types import FloatArray
 from keepout.conjunction import Conjunction
+from keepout.equinoctial import Orbits
 from keepout.orbits import EARTH_MU
 from keepout.pc._orbit import OrbitUncertainty
 from keepout.pc._rate import check_fallbacks, collision_rate, encounter_scan
@@ -79,15 +80,26 @@ class _Trials:
         first: FloatArray,
         second: FloatArray,
     ) -> None:
-        self.primary, self.secondary = primary, secondary
-        self.first, self.second = first, second
+        self.first = Orbits(first, primary.fr)
+        self.second = Orbits(second, secondary.fr)
+
+    def _states(
+        self, t: float | FloatArray, rows: slice | npt.NDArray[np.intp]
+    ) -> tuple[FloatArray, FloatArray]:
+        return self.first.cartesian(t, rows), self.second.cartesian(t, rows)
+
+    def motion(
+        self, t: float | FloatArray, rows: slice | npt.NDArray[np.intp] = slice(None)
+    ) -> tuple[FloatArray, FloatArray]:
+        """Relative position and velocity at ``t``."""
+        one, two = self._states(t, rows)
+        return two[:, :3] - one[:, :3], two[:, 3:] - one[:, 3:]
 
     def relative(
         self, t: float | FloatArray, rows: slice | npt.NDArray[np.intp] = slice(None)
     ) -> tuple[FloatArray, FloatArray, FloatArray]:
         """Relative position, velocity and acceleration at ``t``."""
-        one = self.primary.cartesian(self.first[rows], t)
-        two = self.secondary.cartesian(self.second[rows], t)
+        one, two = self._states(t, rows)
         acceleration = [
             -EARTH_MU * s[:, :3] / np.linalg.norm(s[:, :3], axis=1)[:, None] ** 3
             for s in (one, two)
@@ -126,14 +138,14 @@ class _Trials:
 
 def _collisions(trials: _Trials, found: RateScan, radius: float) -> tuple[int, int]:
     """Collisions (entries) and trials already inside at the window start."""
-    r, _, _ = trials.relative(found.times[0])
+    r, _ = trials.motion(found.times[0])
     inside = np.linalg.norm(r, axis=1) < radius
     hit = np.zeros_like(inside)
     for lo, hi in found.segments:
         previous: tuple[FloatArray, FloatArray] | None = None
         for k in range(lo, hi + 1):
             t = float(found.times[k])
-            r, v, _ = trials.relative(t)
+            r, v = trials.motion(t)
             distance, speed = np.linalg.norm(r, axis=1), np.linalg.norm(v, axis=1)
             hit |= distance < radius
             if previous is not None:

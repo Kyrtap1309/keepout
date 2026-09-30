@@ -6,7 +6,7 @@ fine enough that no encounter can fall between two nodes
 (:data:`DETECTION_SIGMAS`), which is then refined to an eighth of a crossing
 time around the nodes where the rate is significant. The stretches where the
 rate is not negligible become encounter segments, split at their local maxima
-and integrated by Gauss-Legendre rules of doubling order. Without an explicit
+and integrated by nested Clenshaw-Curtis rules of doubling order. Without an explicit
 window the half-width starts at the linear-motion bound and doubles until the
 rate at both edges is negligible, but the window never spans more than the
 shorter orbital period.
@@ -17,6 +17,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import lru_cache
 from itertools import pairwise
 from typing import TypeAlias
 
@@ -26,7 +27,6 @@ import numpy.typing as npt
 from keepout._types import FloatArray
 from keepout.encounter import sigma_along
 from keepout.errors import PcConvergenceError
-from keepout.pc._sphere import gauss_legendre
 
 RATE_FLOOR = 1e-16
 """Rate, relative to the peak, below which the rate is negligible."""
@@ -66,7 +66,7 @@ heuristic margin, not a bound. A missed encounter contributes at most
 ~``DETECTION_LEVEL`` of the Nc of the largest one."""
 
 QUAD_RTOL = 1e-6
-"""Default relative agreement of two Gauss-Legendre orders."""
+"""Default relative agreement of two Clenshaw-Curtis rules."""
 
 MAX_BREAKPOINTS = 50
 """Largest number of local maxima a segment is split at."""
@@ -110,7 +110,7 @@ class RateIntegral:
     peak
         Largest rate on the scan grid [1/s].
     agreement
-        Largest difference of the last two Gauss-Legendre orders of a piece
+        Largest difference of the last two Clenshaw-Curtis rules of a piece
         that never agreed to ``rtol``, relative to ``nc`` (0 if every piece
         agreed; infinite if ``nc`` is 0 or a piece had a single order).
     """
@@ -144,6 +144,9 @@ class Candidate:
     crossing: float
     width: float
 
+
+Rate: TypeAlias = Callable[[FloatArray], FloatArray]
+"""A collision rate [1/s] evaluated at an array of times [s from TCA]."""
 
 Screen: TypeAlias = Callable[[tuple[float, float]], list[Candidate]]
 """Candidate intervals of a window, in increasing time and disjoint."""
@@ -259,7 +262,7 @@ def _detection_grids(
 
 
 def _refine(
-    rate: Callable[[float], float],
+    rate: Rate,
     times: FloatArray,
     values: FloatArray,
     fine: FloatArray,
@@ -289,12 +292,12 @@ def _refine(
     extra = np.concatenate(added)
     merged = np.concatenate([times, extra])
     order = np.argsort(merged, kind="stable")
-    new_values = np.array([rate(float(t)) for t in extra])
+    new_values = rate(extra)
     return merged[order], np.concatenate([values, new_values])[order]
 
 
 def _detect(
-    rate: Callable[[float], float], window: tuple[float, float], screen: Screen
+    rate: Rate, window: tuple[float, float], screen: Screen
 ) -> tuple[FloatArray, FloatArray, FloatArray]:
     """The rate on the detection grid of ``window``.
 
@@ -323,7 +326,7 @@ def _detect(
         grids.append(np.array([end]))
         spacings.append(math.inf)
     times = np.concatenate(grids)
-    values = np.array([rate(float(t)) for t in times])
+    values = rate(times)
     fine = np.concatenate(
         [
             np.full(grid.size, spacing)
@@ -348,7 +351,7 @@ def _detect(
 
 
 def _segments(
-    rate: Callable[[float], float],
+    rate: Rate,
     times: FloatArray,
     values: FloatArray,
     fine: FloatArray,
@@ -366,15 +369,13 @@ def _segments(
     return RateScan(times, values, segments)
 
 
-def locate(
-    rate: Callable[[float], float], window: tuple[float, float], screen: Screen
-) -> RateScan:
+def locate(rate: Rate, window: tuple[float, float], screen: Screen) -> RateScan:
     """Scan ``rate`` over the screen's candidates in ``window``; find segments.
 
     A detection grid (see :data:`DETECTION_SIGMAS`) over the candidates finds
     every encounter; the grid is then refined to an eighth of a crossing time
     around the nodes where the rate is significant, to place the segment
-    bounds and the Gauss-Legendre breakpoints.
+    bounds and the quadrature breakpoints.
 
     Raises
     ------
@@ -386,7 +387,7 @@ def locate(
 
 
 def locate_auto(
-    rate: Callable[[float], float],
+    rate: Rate,
     half_width: float,
     limit: float,
     screen: Screen,
@@ -404,7 +405,7 @@ def locate_auto(
     Parameters
     ----------
     rate
-        Collision rate [1/s] as a function of time from TCA [s].
+        Collision rate [1/s] at an array of times from TCA [s].
     half_width
         Initial widening [s].
     limit
@@ -425,53 +426,87 @@ def locate_auto(
 
 
 START_ORDER = 32
-"""First Gauss-Legendre order of the time integral of one piece."""
+"""Intervals of the first Clenshaw-Curtis rule of the time integral of one
+piece (``START_ORDER + 1`` nodes)."""
 
 MAX_ORDER = 1024
-"""Largest Gauss-Legendre order of the time integral of one piece."""
+"""Intervals of the finest Clenshaw-Curtis rule of one piece."""
+
+STAGNATION_RTOL = 1e-4
+"""Relative difference of two rules below which a difference that no longer
+halves is taken as the rate's own noise (its sphere quadrature, ~1e-5 of the
+peak): doubling further would not reduce it."""
 
 
-def _gauss_legendre_integral(
-    rate: Callable[[float], float], start: float, end: float, rtol: float
+@lru_cache(maxsize=8)
+def clenshaw_curtis(order: int) -> tuple[FloatArray, FloatArray]:
+    """Read-only Clenshaw-Curtis nodes ``cos(k pi / order)`` and weights.
+
+    ``order`` is even; the rule has ``order + 1`` nodes on ``[-1, 1]``, from
+    ``+1`` down to ``-1``, and those of ``order / 2`` are its even-indexed
+    ones, so doubling the order reuses every value already computed.
+    """
+    angles = np.pi * np.arange(order + 1) / order
+    j = np.arange(1, order // 2 + 1)
+    b = np.where(j == order // 2, 1.0, 2.0)
+    sums = (b / (4.0 * j * j - 1.0)) @ np.cos(2.0 * np.outer(j, angles))
+    weights = np.where((angles == 0.0) | (angles == np.pi), 1.0, 2.0) / order
+    weights = weights * (1.0 - sums)
+    nodes = np.cos(angles)
+    nodes.flags.writeable = weights.flags.writeable = False
+    return nodes, weights
+
+
+def _nested_integral(
+    rate: Rate, start: float, end: float, rtol: float
 ) -> tuple[float, float]:
-    """Integral of ``rate`` over ``[start, end]`` by Gauss-Legendre rules.
+    """Integral of ``rate`` over ``[start, end]`` by nested Clenshaw-Curtis rules.
 
-    The order doubles from :data:`START_ORDER` until two orders agree to
-    ``rtol`` or :data:`MAX_ORDER` is reached. Unlike QUADPACK's error
-    estimate, the comparison is not upset by the ~1e-8 relative jitter of
-    the rate (its sphere rule is rebuilt at every time).
+    The order doubles from :data:`START_ORDER` until two rules agree to
+    ``rtol``, their difference stops halving below :data:`STAGNATION_RTOL`
+    (the rate's noise floor), or :data:`MAX_ORDER` is reached. Each doubling
+    evaluates the rate only at the new nodes.
 
     Returns
     -------
     tuple
-        The integral and the difference of the last two orders (infinite if
-        :data:`MAX_ORDER` allows a single order).
+        The integral and the difference of the last two rules (infinite if
+        :data:`MAX_ORDER` allows a single rule).
     """
     half, middle = 0.5 * (end - start), 0.5 * (end + start)
 
-    def rule(order: int) -> float:
-        nodes, weights = gauss_legendre(order)
-        values = np.array([rate(middle + half * float(x)) for x in nodes])
-        return half * float(weights @ values)
+    def at(nodes: FloatArray) -> FloatArray:
+        return rate(middle + half * nodes)
 
     order = START_ORDER
-    value, difference = rule(order), math.inf
+    values = at(clenshaw_curtis(order)[0])
+    value = half * float(clenshaw_curtis(order)[1] @ values)
+    difference = previous_difference = math.inf
     while order < MAX_ORDER:
         order *= 2
-        previous, value = value, rule(order)
-        difference = abs(value - previous)
+        nodes, weights = clenshaw_curtis(order)
+        merged = np.empty(order + 1)
+        merged[::2], merged[1::2] = values, at(nodes[1::2])
+        values = merged
+        previous, value = value, half * float(weights @ values)
+        previous_difference, difference = difference, abs(value - previous)
         if difference <= rtol * abs(value):
+            break
+        if (
+            difference <= STAGNATION_RTOL * abs(value)
+            and difference > 0.5 * previous_difference
+        ):
             break
     return value, difference
 
 
 def integrate_segments(
-    rate: Callable[[float], float], found: RateScan, *, rtol: float = QUAD_RTOL
+    rate: Rate, found: RateScan, *, rtol: float = QUAD_RTOL
 ) -> RateIntegral:
     """Integrate ``rate`` over the segments of a scan.
 
     Each segment is split at the local maxima of the scan and every piece is
-    integrated by Gauss-Legendre rules of doubling order.
+    integrated by nested Clenshaw-Curtis rules of doubling order.
     """
     segments: list[Segment] = []
     shortfalls: list[float] = []
@@ -484,8 +519,7 @@ def integrate_segments(
         ][:MAX_BREAKPOINTS]
         start, end = float(found.times[lo]), float(found.times[hi])
         pieces = [
-            _gauss_legendre_integral(rate, a, b, rtol)
-            for a, b in pairwise([start, *cuts, end])
+            _nested_integral(rate, a, b, rtol) for a, b in pairwise([start, *cuts, end])
         ]
         shortfalls += [d for v, d in pieces if not d <= rtol * abs(v)]
         segments.append(Segment(start, end, math.fsum(v for v, _ in pieces)))

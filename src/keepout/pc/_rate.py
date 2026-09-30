@@ -12,6 +12,7 @@ import math
 from typing import TypeAlias
 
 import numpy as np
+import numpy.typing as npt
 from scipy import special
 
 from keepout._types import FloatArray
@@ -74,59 +75,145 @@ Gaussians: TypeAlias = tuple[FloatArray, FloatArray, FloatArray, FloatArray]
 
 
 def _floored_inverse(matrix: FloatArray, floor: float) -> FloatArray:
-    """Inverse of a symmetric matrix with its eigenvalues raised to ``floor``.
+    """Inverse of symmetric matrices ``(..., n, n)`` with eigenvalues raised to
+    ``floor``.
 
     Built from the eigen-decomposition, so a tiny floored eigenvalue next to
     a huge one is not lost to rounding as it would be by inverting the
     reconstructed matrix.
     """
     values, vectors = np.linalg.eigh(matrix)
-    result: FloatArray = (vectors / np.maximum(values, floor)) @ vectors.T
+    scaled = vectors / np.maximum(values, floor)[..., None, :]
+    result: FloatArray = scaled @ np.swapaxes(vectors, -1, -2)
     return result
 
 
-def _peak_overlap(
+def _row(gaussians: Gaussians, index: int | slice) -> Gaussians:
+    x1, p1, x2, p2 = gaussians
+    return x1[index], p1[index], x2[index], p2[index]
+
+
+def _iterate_overlap(
     primary: OrbitUncertainty,
     secondary: OrbitUncertainty,
-    t: float,
+    times: FloatArray,
     floor: float,
     mean_centred: Gaussians,
-) -> Gaussians | None:
-    """Converged expansion-centre Gaussians of both objects at ``t``, or None.
-
-    ``floor`` is the smallest position variance used when inverting;
-    ``mean_centred`` (the expansion about the mean elements) is the first
-    iterate.
-    """
+) -> tuple[Gaussians, npt.NDArray[np.bool_]]:
+    """The peak-overlap iteration on a batch of times; may raise."""
+    result = tuple(a.copy() for a in mean_centred)
+    converged = np.zeros(times.size, dtype=bool)
+    rows = np.arange(times.size)
     x1, p1, x2, p2 = mean_centred
     previous: FloatArray | None = None
     for _ in range(OVERLAP_MAX_ITERATIONS):
-        inverse1, inverse2 = (_floored_inverse(p[:3, :3], floor) for p in (p1, p2))
+        inverse1 = _floored_inverse(p1[:, :3, :3], floor)
+        inverse2 = _floored_inverse(p2[:, :3, :3], floor)
         precision = inverse1 + inverse2
-        peak = np.linalg.solve(precision, inverse1 @ x1[:3] + inverse2 @ x2[:3])
+        rhs = np.einsum("mij,mj->mi", inverse1, x1[:, :3]) + np.einsum(
+            "mij,mj->mi", inverse2, x2[:, :3]
+        )
+        peak = np.linalg.solve(precision, rhs[..., None])[..., 0]
         if previous is not None:
             step = peak - previous
-            if float(step @ precision @ step) <= OVERLAP_TOLERANCE:
-                return x1, p1, x2, p2
+            done = np.einsum("mi,mij,mj->m", step, precision, step) <= OVERLAP_TOLERANCE
+            for target, source in zip(result, (x1, p1, x2, p2), strict=True):
+                target[rows[done]] = source[done]
+            converged[rows[done]] = True
+            keep = ~done
+            rows, peak = rows[keep], peak[keep]
+            x1, p1, x2, p2 = x1[keep], p1[keep], x2[keep], p2[keep]
+            inverse1, inverse2 = inverse1[keep], inverse2[keep]
+            if rows.size == 0:
+                break
         previous = peak
         centres = [
             orbit.centre_at(
-                np.concatenate([peak, x[3:] + p[3:, :3] @ inv @ (peak - x[:3])]), t
+                np.concatenate(
+                    [
+                        peak,
+                        x[:, 3:]
+                        + np.einsum(
+                            "mij,mjk,mk->mi", p[:, 3:, :3], inverse, peak - x[:, :3]
+                        ),
+                    ],
+                    axis=1,
+                ),
+                times[rows],
             )
-            for orbit, x, p, inv in (
+            for orbit, x, p, inverse in (
                 (primary, x1, p1, inverse1),
                 (secondary, x2, p2, inverse2),
             )
         ]
         (x1, p1), (x2, p2) = (
-            orbit.expansion(centre, t)
+            orbit.expansions(centre, times[rows])
             for orbit, centre in zip((primary, secondary), centres, strict=True)
         )
-    return None
+    x1, p1, x2, p2 = result
+    return (x1, p1, x2, p2), converged
+
+
+def _peak_overlap(
+    primary: OrbitUncertainty,
+    secondary: OrbitUncertainty,
+    times: FloatArray,
+    floor: float,
+    mean_centred: Gaussians,
+) -> tuple[Gaussians, npt.NDArray[np.bool_]]:
+    """Expansion-centre Gaussians of both objects at ``times`` (Hall 2021,
+    sec. VII.B), and where the iteration converged to finite values.
+
+    ``floor`` is the smallest position variance used when inverting;
+    ``mean_centred`` (the batched expansion about the mean elements) is the
+    first iterate and is returned where the iteration failed. If one time
+    makes the batch fail (a diverging iterate can leave the space of elliptic
+    orbits), the times are iterated one by one so the others still converge.
+    """
+    try:
+        gaussians, converged = _iterate_overlap(
+            primary, secondary, times, floor, mean_centred
+        )
+    except _ITERATION_ERRORS:
+        rows = [
+            _single_overlap(primary, secondary, times, floor, mean_centred, k)
+            for k in range(times.size)
+        ]
+        gaussians = tuple(np.stack([row[0][part] for row in rows]) for part in range(4))  # type: ignore[assignment]
+        converged = np.array([row[1] for row in rows], dtype=bool)
+    finite = np.all(
+        [np.isfinite(a).reshape(times.size, -1).all(axis=1) for a in gaussians], axis=0
+    )
+    return gaussians, converged & finite
+
+
+def _single_overlap(
+    primary: OrbitUncertainty,
+    secondary: OrbitUncertainty,
+    times: FloatArray,
+    floor: float,
+    mean_centred: Gaussians,
+    k: int,
+) -> tuple[Gaussians, bool]:
+    one = _row(mean_centred, slice(k, k + 1))
+    try:
+        gaussians, converged = _iterate_overlap(
+            primary, secondary, times[k : k + 1], floor, one
+        )
+    except _ITERATION_ERRORS:
+        return _row(one, 0), False
+    return _row(gaussians, 0), bool(converged[0])
+
+
+_ITERATION_ERRORS = (np.linalg.LinAlgError, ArithmeticError, ValueError, GeometryError)
+"""Failures of the peak-overlap iteration that fall back to the mean-centred
+expansion instead of stopping the computation."""
 
 
 class CollisionRate:
     """Hall's 3D-Nc collision rate ``Ncdot(t)`` [1/s] of a conjunction.
+
+    Called with an array of times [s from TCA], it returns the rate at each.
 
     Parameters
     ----------
@@ -148,35 +235,35 @@ class CollisionRate:
         self.fallbacks: list[tuple[float, float]] = []
         """Times [s] and rates where the peak-overlap iteration failed."""
 
-    def _mean_centred(self, t: float) -> Gaussians:
-        x1, p1 = self.primary.expansion(self.primary.elements, t)
-        x2, p2 = self.secondary.expansion(self.secondary.elements, t)
-        return x1, p1, x2, p2
+    def _negligible(self, gaussians: Gaussians) -> npt.NDArray[np.bool_]:
+        x1, p1, x2, p2 = gaussians
+        largest = np.linalg.eigvalsh(p1[:, :3, :3] + p2[:, :3, :3])[:, -1]
+        gap = np.maximum(
+            np.linalg.norm(x2[:, :3] - x1[:, :3], axis=1) - self.radius, 0.0
+        )
+        negligible: npt.NDArray[np.bool_] = gap * gap > NEGLIGIBLE_DISTANCE * largest
+        return negligible
 
-    def _negligible(
-        self, x1: FloatArray, p1: FloatArray, x2: FloatArray, p2: FloatArray
-    ) -> bool:
-        largest = float(np.linalg.eigvalsh(p1[:3, :3] + p2[:3, :3])[-1])
-        gap = max(float(np.linalg.norm(x2[:3] - x1[:3])) - self.radius, 0.0)
-        return gap * gap > NEGLIGIBLE_DISTANCE * largest
-
-    def __call__(self, t: float) -> float:
-        self.evaluations += 1
-        mean_centred = self._mean_centred(t)
-        if self._negligible(*mean_centred):
-            return 0.0
-        try:
-            converged = _peak_overlap(
-                self.primary, self.secondary, t, self.floor, mean_centred
-            )
-        except (np.linalg.LinAlgError, ArithmeticError, ValueError, GeometryError):
-            # A diverging iteration can leave the space of elliptic orbits.
-            converged = None
-        if converged is not None and all(np.all(np.isfinite(a)) for a in converged):
-            return self._checked_rate(t, converged)
-        value = self._checked_rate(t, mean_centred)
-        self.fallbacks.append((t, value))
-        return value
+    def __call__(self, t: FloatArray) -> FloatArray:
+        times = np.atleast_1d(np.asarray(t, dtype=np.float64))
+        self.evaluations += times.size
+        x1, p1 = self.primary.mean_expansions(times)
+        x2, p2 = self.secondary.mean_expansions(times)
+        values = np.zeros(times.size)
+        active = np.flatnonzero(~self._negligible((x1, p1, x2, p2)))
+        if active.size == 0:
+            return values
+        mean_centred = (x1[active], p1[active], x2[active], p2[active])
+        converged, ok = _peak_overlap(
+            self.primary, self.secondary, times[active], self.floor, mean_centred
+        )
+        for k, index in enumerate(active):
+            t_k = float(times[index])
+            source = converged if ok[k] else mean_centred
+            values[index] = self._checked_rate(t_k, _row(source, k))
+            if not ok[k]:
+                self.fallbacks.append((t_k, float(values[index])))
+        return values
 
     def _checked_rate(self, t: float, gaussians: Gaussians) -> float:
         """:meth:`_rate`, with a failure raised as :class:`PcConvergenceError`."""

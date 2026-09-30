@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable
-from typing import Any, Literal, TypeAlias
+from typing import Any, Literal, NamedTuple, TypeAlias
 
 import numpy as np
 import numpy.typing as npt
@@ -173,6 +173,36 @@ def to_cartesian(
     array = np.asarray(elements)
     n, af, ag, chi, psi, lam = (array[..., k] for k in range(6))
     a = (mu / (n * n)) ** (1.0 / 3.0)
+    shape = _Shape.of(af, ag)
+    f, g = _basis(chi, psi, fr)
+    return _state(n, a, af, ag, shape, _eccentric_longitude(lam, af, ag), f, g)
+
+
+class _Shape(NamedTuple):
+    """Coefficients of the in-plane state that depend on ``af`` and ``ag`` only."""
+
+    c_ag: Any
+    """``1 - ag^2 b``, with ``b = 1 / (1 + sqrt(1 - af^2 - ag^2))``."""
+    c_af: Any
+    """``1 - af^2 b``."""
+    cross: Any
+    """``af ag b``."""
+
+    @classmethod
+    def of(cls, af: Any, ag: Any) -> _Shape:
+        root = np.sqrt(1.0 - af * af - ag * ag)
+        b = 1.0 / (1.0 + root)
+        return cls(1.0 - ag * ag * b, 1.0 - af * af * b, af * ag * b)
+
+
+def _eccentric_longitude(lam: Any, af: Any, ag: Any) -> Any:
+    """Solve Kepler's equation for the eccentric longitude ``F``.
+
+    Raises
+    ------
+    GeometryError
+        If it does not converge (e.g. NaN elements).
+    """
     # Kepler's equation in equinoctial form: lam = F + ag cos F - af sin F,
     # i.e. E - e sin E = M with F = E + varpi, lam = M + varpi. Reducing lam
     # by a real multiple of 2 pi keeps the iterate small (absolute tolerance)
@@ -194,26 +224,75 @@ def to_cartesian(
             np.abs(residual) <= KEPLER_RESIDUAL_TOLERANCE
         )
         if np.all(converged):
-            break
-    else:
-        raise GeometryError(
-            "Kepler's equation did not converge in "
-            f"{KEPLER_MAX_ITERATIONS} iterations; the elements are not a "
-            "valid elliptic orbit"
-        )
-    root = np.sqrt(1.0 - af * af - ag * ag)
-    b = 1.0 / (1.0 + root)
+            return longitude
+    raise GeometryError(
+        "Kepler's equation did not converge in "
+        f"{KEPLER_MAX_ITERATIONS} iterations; the elements are not a "
+        "valid elliptic orbit"
+    )
+
+
+def _state(
+    n: Any, a: Any, af: Any, ag: Any, shape: _Shape, longitude: Any, f: Any, g: Any
+) -> Any:
+    """Cartesian state from the eccentric longitude and the orbit's constants."""
     cos_f, sin_f = np.cos(longitude), np.sin(longitude)
-    big_x = a * ((1.0 - ag * ag * b) * cos_f + af * ag * b * sin_f - af)
-    big_y = a * ((1.0 - af * af * b) * sin_f + af * ag * b * cos_f - ag)
+    big_x = a * (shape.c_ag * cos_f + shape.cross * sin_f - af)
+    big_y = a * (shape.c_af * sin_f + shape.cross * cos_f - ag)
     radius = a * (1.0 - af * cos_f - ag * sin_f)
     rate = n * a * a / radius
-    big_xd = rate * (af * ag * b * cos_f - (1.0 - ag * ag * b) * sin_f)
-    big_yd = rate * ((1.0 - af * af * b) * cos_f - af * ag * b * sin_f)
-    f, g = _basis(chi, psi, fr)
+    big_xd = rate * (shape.cross * cos_f - shape.c_ag * sin_f)
+    big_yd = rate * (shape.c_af * cos_f - shape.cross * sin_f)
     position = big_x[..., None] * f + big_y[..., None] * g
     velocity = big_xd[..., None] * f + big_yd[..., None] * g
     return np.concatenate([position, velocity], -1)
+
+
+class Orbits:
+    """Real elliptic orbits, prepared for evaluation at many times.
+
+    Everything but the mean longitude is constant along two-body motion, so
+    it is computed once; :meth:`cartesian` then only solves Kepler's
+    equation. The states equal ``to_cartesian(propagate(elements, t), fr)``.
+
+    Parameters
+    ----------
+    elements
+        Real equinoctial elements at TCA, shape ``(m, 6)``.
+    fr
+        Retrograde factor.
+    mu
+        Gravitational parameter [m^3/s^2].
+    """
+
+    def __init__(
+        self, elements: FloatArray, fr: RetrogradeFactor, mu: float = EARTH_MU
+    ) -> None:
+        self.elements = np.asarray(elements, dtype=np.float64)
+        n, af, ag, chi, psi = (self.elements[:, k] for k in range(5))
+        self._n, self._af, self._ag = n, af, ag
+        self._a = (mu / (n * n)) ** (1.0 / 3.0)
+        self._shape = _Shape.of(af, ag)
+        self._f, self._g = _basis(chi, psi, fr)
+
+    def cartesian(
+        self, t: float | FloatArray, rows: slice | npt.NDArray[np.intp] = slice(None)
+    ) -> FloatArray:
+        """States ``(k, 6)`` of the orbits ``rows`` at ``t`` [s from TCA]."""
+        n, af, ag = self._n[rows], self._af[rows], self._ag[rows]
+        lam = self.elements[rows, 5] + n * np.asarray(t)
+        shape = _Shape(*(c[rows] for c in self._shape))
+        state: FloatArray = _state(
+            n,
+            self._a[rows],
+            af,
+            ag,
+            shape,
+            _eccentric_longitude(lam, af, ag),
+            self._f[rows],
+            self._g[rows],
+        )
+        return state
 
 
 def propagate(elements: npt.ArrayLike, dt: npt.ArrayLike) -> Any:

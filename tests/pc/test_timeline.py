@@ -1,5 +1,4 @@
 import math
-from collections.abc import Callable
 
 import numpy as np
 import pytest
@@ -11,6 +10,7 @@ from keepout.pc._timeline import (
     MAX_REFINED_POINTS,
     MIN_SCAN_POINTS,
     Candidate,
+    Rate,
     Screen,
     integrate_segments,
     locate,
@@ -21,8 +21,8 @@ from keepout.pc._timeline import (
 TAU, CROSSING, WINDOW = 1.0, 0.1, (-5000.0, 5000.0)
 
 
-def bump(centre: float, tau: float = TAU) -> Callable[[float], float]:
-    return lambda t: math.exp(-0.5 * ((t - centre) / tau) ** 2)
+def bump(centre: float, tau: float = TAU) -> Rate:
+    return lambda t: np.exp(-0.5 * ((t - centre) / tau) ** 2)
 
 
 def whole_window(width: float = TAU) -> Screen:

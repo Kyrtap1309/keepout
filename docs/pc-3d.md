@@ -84,9 +84,11 @@ fine enough that no encounter whose peak exceeds 1e-8 of the largest falls
 between two nodes; the grid is then refined to an eighth of a straight-line
 crossing time, but only around the nodes where the rate is significant.
 Stretches where the rate exceeds 1e-16 of its peak become encounter segments,
-split at their maxima and integrated by Gauss-Legendre rules whose order
-doubles until two agree to `rtol` (1e-6 by default; it must be finite and
-positive). Without an explicit `window`, the window covers TCA and the
+split at their maxima and integrated by nested Clenshaw-Curtis rules (each
+doubling reuses the previous nodes) whose order doubles until two agree to
+`rtol` (1e-6 by default; it must be finite and positive), or until their
+difference, already below 1e-4, stops halving: the rate itself is only
+resolved to about 1e-5 by its sphere quadrature. Without an explicit `window`, the window covers TCA and the
 straight-line closest approach of the states, widened by the straight-line
 bound, which doubles until the rate at the edges is negligible; the window is
 never wider than the shorter orbital period, so the next revolution's

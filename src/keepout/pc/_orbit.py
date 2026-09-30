@@ -103,11 +103,15 @@ class OrbitUncertainty:
         mean = state + jacobian @ offset
         return mean, symmetric_part(jacobian @ self.covariance @ jacobian.T)
 
-    def mean_expansions(self, t: FloatArray) -> tuple[FloatArray, FloatArray]:
-        """Mean-centred :meth:`expansion` at many times at once.
+    def expansions(
+        self, centres: FloatArray, t: FloatArray
+    ) -> tuple[FloatArray, FloatArray]:
+        """:meth:`expansion` at many times at once, each about its own centre.
 
         Parameters
         ----------
+        centres
+            TCA elements to linearise about, shape ``(m, 6)``.
         t
             Times [s from TCA], shape ``(m,)``.
 
@@ -117,16 +121,27 @@ class OrbitUncertainty:
             Mean states ``(m, 6)`` and covariances ``(m, 6, 6)``.
         """
         times = np.asarray(t, dtype=np.float64).ravel()
-        # The complex-step Jacobian of every time in one vectorised call.
-        shifted = self.elements + 1j * COMPLEX_STEP * np.eye(6)
-        rows = np.broadcast_to(shifted, (times.size, 6, 6)).reshape(-1, 6)
+        centres = np.asarray(centres, dtype=np.float64).reshape(times.size, 6)
+        # The complex-step Jacobians of every time in one vectorised call.
+        shifted = centres[:, None, :] + 1j * COMPLEX_STEP * np.eye(6)
         value = np.asarray(
-            to_cartesian(propagate(rows, np.repeat(times, 6)), self.fr)
+            to_cartesian(
+                propagate(shifted.reshape(-1, 6), np.repeat(times, 6)), self.fr
+            )
         ).reshape(times.size, 6, 6)
         jacobian = np.imag(value).transpose(0, 2, 1) / COMPLEX_STEP
-        mean: FloatArray = np.real(value[:, 0, :])
+        offset = self.elements - centres
+        offset[:, 5] = wrap_angle(offset[:, 5])
+        mean: FloatArray = np.real(value[:, 0, :]) + np.einsum(
+            "mij,mj->mi", jacobian, offset
+        )
         covariance = jacobian @ self.covariance @ jacobian.transpose(0, 2, 1)
         return mean, symmetric_part(covariance)
+
+    def mean_expansions(self, t: FloatArray) -> tuple[FloatArray, FloatArray]:
+        """Mean-centred :meth:`expansions` at times ``t`` ``(m,)``."""
+        times = np.asarray(t, dtype=np.float64).ravel()
+        return self.expansions(np.broadcast_to(self.elements, (times.size, 6)), times)
 
     @property
     def max_acceleration(self) -> float:
@@ -136,10 +151,18 @@ class OrbitUncertainty:
         perigee = semi_major * (1.0 - math.hypot(af, ag))
         return float(EARTH_MU / (perigee * perigee))
 
-    def centre_at(self, state: FloatArray, t: float) -> FloatArray:
-        """TCA elements of the orbit through the Cartesian ``state`` at ``t``."""
+    def centre_at(self, state: FloatArray, t: float | FloatArray) -> FloatArray:
+        """TCA elements of the orbits through the Cartesian states at ``t``.
+
+        ``state`` is ``(6,)`` or ``(m, 6)`` with ``t`` a scalar or ``(m,)``.
+
+        Raises
+        ------
+        GeometryError
+            If an orbit is not elliptic.
+        """
         elements = np.asarray(to_equinoctial(state, self.fr), dtype=np.float64)
-        result: FloatArray = propagate(elements, -t)
+        result: FloatArray = propagate(elements, -np.asarray(t))
         return result
 
     def sample(self, rng: np.random.Generator, count: int) -> FloatArray:

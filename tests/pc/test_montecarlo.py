@@ -4,6 +4,7 @@ from typing import Any
 import numpy as np
 import pytest
 from builders import DRIFT_WINDOW, LEO_R, LEO_V, drifting, head_on, object_state
+from faults import failing_where, not_converging
 from scipy import stats
 
 from keepout.conjunction import Conjunction
@@ -129,12 +130,8 @@ def test_failed_iteration_inside_an_encounter_raises(
 ) -> None:
     # As in Hall: a fallback inside a segment could have narrowed the
     # segments searched, so the run stops instead.
-    real = rate_module._peak_overlap
-
-    def failing(*args: Any) -> Any:
-        return None if 4.2e-4 <= args[2] <= 5.0e-4 else real(*args)
-
-    monkeypatch.setattr(rate_module, "_peak_overlap", failing)
+    failing = failing_where(lambda t: (t >= 4.2e-4) & (t <= 5.0e-4), not_converging)
+    monkeypatch.setattr(rate_module, "_iterate_overlap", failing)
     with pytest.raises(PcConvergenceError, match="inside an encounter segment"):
         montecarlo(head_on(30.0, 10.0, 20.0, 5.0), samples=1_000, seed=1)
 
