@@ -11,6 +11,7 @@ import csv
 import hashlib
 import http.client
 import os
+import re
 import tempfile
 import urllib.error
 import urllib.parse
@@ -60,17 +61,37 @@ MANIFEST_FILE = "cara_manifest.sha256"
 """Every CARA file keepout uses, one ``<sha256>  <path>`` per line."""
 
 
-def _read_manifest() -> dict[str, str]:
-    """Path -> SHA-256 from ``cara_manifest.sha256`` (``sha256sum`` format)."""
-    text = resources.files(__package__).joinpath(MANIFEST_FILE).read_text("utf-8")
+_MANIFEST_LINE = re.compile(r"(?P<digest>[0-9a-f]{64}) [ *](?P<path>\S.*)")
+"""``sha256sum`` output: digest, space, text (space) or binary (``*``) mode, path."""
+
+
+def _parse_manifest(text: str) -> dict[str, str]:
+    """Path -> SHA-256 from ``sha256sum`` output; blank lines are skipped.
+
+    Raises
+    ------
+    ValueError
+        If a line is not ``sha256sum`` output, or a path is listed twice.
+    """
     digests: dict[str, str] = {}
-    for line in text.splitlines():
-        digest, _, path = line.partition("  ")
-        digests[path] = digest
+    for number, line in enumerate(text.splitlines(), start=1):
+        if not line.strip():
+            continue
+        match = _MANIFEST_LINE.fullmatch(line)
+        if match is None:
+            raise ValueError(
+                f"manifest line {number} is not sha256sum output: {line!r}"
+            )
+        path = match.group("path")
+        if path in digests:
+            raise ValueError(f"manifest line {number} repeats {path!r}")
+        digests[path] = match.group("digest")
     return digests
 
 
-_SHA256 = _read_manifest()
+_SHA256 = _parse_manifest(
+    resources.files(__package__).joinpath(MANIFEST_FILE).read_text("utf-8")
+)
 
 
 def _file(path: str) -> CaraFile:

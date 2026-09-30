@@ -66,6 +66,9 @@ def test_reads_tracss_cdm_version_2() -> None:
     cdm = kvn.load(TRACSS)
     assert cdm.version == "2.0"
     assert cdm.header.extras == {"CLASSIFICATION": "UNCLASSIFIED"}
+    # TraCSS puts CONJUNCTION_ID in the header, before TCA.
+    assert cdm.conjunction_id == "dd8c054b-6bea-48fb-a245-6cb23331b156"
+    assert cdm.relative.get("CONJUNCTION_ID") is None
     first = cdm.object1
     assert first.ref_frame == "ITRF"
     assert first.hbr == 5.0
@@ -171,6 +174,15 @@ def test_missing_required_keyword() -> None:
     with pytest.raises(
         CdmParseError,
         match=r"OBJECT2 section is missing required keyword\(s\): CNDOT_NDOT",
+    ):
+        kvn.loads(text)
+
+
+def test_empty_required_value_is_rejected() -> None:
+    text = mutate("= JSPOC\n", "=\n")
+    with pytest.raises(
+        CdmParseError,
+        match=r"header section is missing required keyword\(s\): ORIGINATOR",
     ):
         kvn.loads(text)
 

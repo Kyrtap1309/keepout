@@ -34,7 +34,9 @@ CDM covariances are given in each object's RTN frame. For ITRF messages keepout
 builds RTN from the state **after** conversion to GCRF (assumption: the
 originator's RTN is inertial). The 6×6 covariance is rotated with the same
 matrix for position and velocity; the rotation rate of the RTN frame is
-neglected, which affects only velocity terms and not Pc.
+neglected. That changes only the velocity terms: 2-D Pc (position block
+only) is unaffected, while 3-D and Monte Carlo Pc use the velocity block and
+are validated against CARA with this convention.
 
 ## Encounter plane
 
@@ -51,14 +53,20 @@ any unit vector perpendicular to v — Pc does not depend on that choice.
 
 ## Covariance validation and repair
 
-A `Covariance` must be symmetric (to 1e-9 of its largest entry) and positive
-semi-definite (no eigenvalue below −1e-10 of its largest entry). Operational
-CDMs often violate this, so `CdmObject.covariance()` and `Cdm.object_states()`
-default to `policy="repair"`: the matrix is symmetrised and negative
-eigenvalues are clipped to zero, and each change is recorded in
-`Covariance.repairs`. `Conjunction.diagnostics` lists both objects' repairs
-(e.g. `primary (12345): clipped 1 negative eigenvalue(s) ...`), and every Pc
-result repeats them.
+A `Covariance` must be symmetric and positive semi-definite. Both are judged
+on the correlation matrix `D⁻¹ C D⁻¹`, `D = diag(sqrt|Cᵢᵢ|)`, so that every
+block is checked at its own scale (a mm/s velocity variance next to a km
+position variance): `Cᵢⱼ` and `Cⱼᵢ` may differ by 1e-9 of `sqrt|Cᵢᵢ Cⱼⱼ|`,
+and no correlation-matrix eigenvalue may be below −1e-10. Operational CDMs
+often violate this, so `CdmObject.covariance()` and `Cdm.object_states()`
+default to `policy="repair"`: the matrix is symmetrised, and a negative
+eigenvalue is clipped to zero where it lies. If the 3×3 position block is
+itself invalid, its eigenvalues are clipped; otherwise only the velocity
+covariance conditional on position (`V − B P⁺ Bᵀ`) is, so a defect in the
+velocity terms never changes the position block or 2-D Pc. Each change is
+recorded in `Covariance.repairs`. `Conjunction.diagnostics` lists both
+objects' repairs (e.g. `primary (12345): clipped 1 negative position-block
+eigenvalue(s) ...`), and every Pc result repeats them.
 `policy="raise"` raises `CovarianceError` instead.
 
 ## CDM versions

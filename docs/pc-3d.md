@@ -86,9 +86,11 @@ crossing time, but only around the nodes where the rate is significant.
 Stretches where the rate exceeds 1e-16 of its peak become encounter segments,
 split at their maxima and integrated by Gauss-Legendre rules whose order
 doubles until two agree to `rtol` (1e-6 by default; it must be finite and
-positive). Without an explicit `window`, a symmetric window starts at the
-straight-line bound and doubles until the rate at its edges is negligible, up
-to half the shorter orbital period. `hall3d` raises `PcConvergenceError`
+positive). Without an explicit `window`, the window covers TCA and the
+straight-line closest approach of the states, widened by the straight-line
+bound, which doubles until the rate at the edges is negligible; the window is
+never wider than the shorter orbital period, so the next revolution's
+encounter is not counted twice. `hall3d` raises `PcConvergenceError`
 naming the window only when detecting its encounters would need more than
 20 001 grid points; pass a shorter window then.
 

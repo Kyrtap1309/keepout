@@ -29,7 +29,45 @@ def test_valid_covariance_is_frozen() -> None:
 
 def test_zero_covariance_is_valid() -> None:
     assert problems(np.zeros((6, 6))) == ()
-    Covariance(np.zeros((6, 6)), "GCRF", EPOCH)
+
+
+def test_a_small_block_is_checked_at_its_own_scale() -> None:
+    # 10 km position sigmas must not hide a negative velocity variance.
+    matrix = np.diag([1e8, 1e8, 1e8, 1e-4, 1e-4, -1e-3])
+    (problem,) = problems(matrix)
+    assert problem.startswith("not positive semi-definite")
+    fixed = make_covariance(matrix, "RTN", EPOCH).matrix
+    assert np.linalg.eigvalsh(fixed)[0] >= 0.0
+    np.testing.assert_allclose(np.diag(fixed)[:5], np.diag(matrix)[:5])
+
+
+def test_a_velocity_defect_leaves_the_position_block_unchanged() -> None:
+    # Position-velocity correlation 1.5 along x: the velocity covariance
+    # conditional on position is negative there, the position block is fine.
+    matrix = VALID.copy()
+    matrix[0, 3] = matrix[3, 0] = 1.5 * np.sqrt(VALID[0, 0] * VALID[3, 3])
+    fixed, repairs = repair(matrix)
+    (note,) = repairs
+    assert note.startswith("clipped 1 negative eigenvalue(s) of the velocity")
+    np.testing.assert_array_equal(fixed[:3, :3], matrix[:3, :3])
+    np.testing.assert_allclose(fixed[3:, :3], matrix[3:, :3], rtol=1e-12)
+    assert problems(fixed) == ()
+
+
+def test_an_invalid_position_block_is_repaired_first() -> None:
+    matrix = VALID.copy()
+    matrix[0, 1] = matrix[1, 0] = 1.2 * np.sqrt(VALID[0, 0] * VALID[1, 1])
+    fixed, repairs = repair(matrix)
+    assert repairs[0].startswith("clipped 1 negative position-block eigenvalue")
+    assert problems(fixed) == ()
+    np.testing.assert_allclose(fixed[3:, 3:], matrix[3:, 3:], rtol=1e-12)
+
+
+def test_a_small_block_is_checked_for_symmetry_at_its_own_scale() -> None:
+    matrix = np.diag([1e8, 1e8, 1e8, 1e-4, 1e-4, 1e-4])
+    matrix[3, 4] = 1e-5  # correlation 0.1 on one side only
+    (problem,) = problems(matrix)
+    assert problem.startswith("not symmetric")
 
 
 @pytest.mark.parametrize(
@@ -60,7 +98,8 @@ def test_raise_policy_rejects_invalid_matrix() -> None:
 def test_make_covariance_repairs_with_diagnostic() -> None:
     covariance = make_covariance(with_entry(5, 5, -1.0), "RTN", EPOCH)
     assert covariance.repairs == (
-        "clipped 1 negative eigenvalue(s) to zero (most negative -1)",
+        "clipped 1 negative eigenvalue(s) of the velocity covariance conditional "
+        "on position to zero (most negative -1 in correlation units)",
     )
     assert covariance.matrix[5, 5] == pytest.approx(0.0, abs=1e-12)
     np.testing.assert_allclose(np.diag(covariance.matrix)[:5], np.diag(VALID)[:5])
@@ -68,7 +107,10 @@ def test_make_covariance_repairs_with_diagnostic() -> None:
 
 def test_make_covariance_symmetrises_with_diagnostic() -> None:
     covariance = make_covariance(with_entry(0, 1, 1.0), "RTN", EPOCH)
-    assert covariance.repairs == ("symmetrised covariance (max asymmetry 1)",)
+    # 1 m^2 against sigmas of 10 m and 20 m.
+    assert covariance.repairs == (
+        "symmetrised covariance (max relative asymmetry 0.005)",
+    )
     assert covariance.matrix[0, 1] == pytest.approx(0.5, rel=1e-12)
     assert covariance.matrix[1, 0] == pytest.approx(0.5, rel=1e-12)
 
@@ -104,11 +146,35 @@ def test_unknown_policy_is_rejected() -> None:
         make_covariance(VALID, "RTN", EPOCH, policy="ignore")  # type: ignore[arg-type]
 
 
-@given(arrays(np.float64, (6, 6), elements=st.floats(min_value=-1e3, max_value=1e3)))
-def test_repair_always_yields_a_valid_covariance(matrix: FloatArray) -> None:
-    fixed, _ = repair(matrix)
+@given(
+    arrays(np.float64, (6, 6), elements=st.floats(min_value=-1e3, max_value=1e3)),
+    arrays(np.float64, 6, elements=st.floats(min_value=-6.0, max_value=4.0)),
+)
+def test_repair_always_yields_a_valid_covariance(
+    matrix: FloatArray, log_scales: FloatArray
+) -> None:
+    # Scales spread as in real CDMs (mm/s velocities next to km positions).
+    scales = 10.0**log_scales
+    scaled = matrix * np.outer(scales, scales)
+    fixed, _ = repair(scaled)
     assert problems(fixed) == ()
     Covariance(fixed, "RTN", EPOCH)
+
+
+@given(
+    arrays(np.float64, (6, 6), elements=st.floats(min_value=-1.0, max_value=1.0)),
+    arrays(np.float64, 6, elements=st.floats(min_value=-6.0, max_value=4.0)),
+)
+def test_repair_leaves_a_valid_covariance_unchanged(
+    factor: FloatArray, log_scales: FloatArray
+) -> None:
+    scales = 10.0**log_scales
+    matrix = (factor @ factor.T + np.eye(6)) * np.outer(scales, scales)
+    fixed, repairs = repair(matrix)
+    assert repairs == ()
+    # Compared in correlation units, the scale the check works in.
+    outer = np.outer(scales, scales)
+    np.testing.assert_allclose(fixed / outer, matrix / outer, rtol=0.0, atol=1e-12)
 
 
 def test_frame_round_trip() -> None:

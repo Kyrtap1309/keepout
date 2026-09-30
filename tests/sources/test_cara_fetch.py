@@ -199,3 +199,22 @@ def test_http_download_wraps_connection_reset(
     monkeypatch.setattr(urllib.request, "urlopen", reset)
     with pytest.raises(SourceUnavailable, match="reset by peer"):
         cara.http_download("https://example.invalid/x")
+
+
+def test_manifest_reads_text_and_binary_sha256sum_lines() -> None:
+    digest = "0" * 64
+    text = f"{digest}  a/one.txt\n\n{'f' * 64} *b/two.xls\n"
+    assert cara._parse_manifest(text) == {"a/one.txt": digest, "b/two.xls": "f" * 64}
+
+
+@pytest.mark.parametrize(
+    ("text", "message"),
+    [
+        ("not a digest  path\n", "line 1 is not sha256sum output"),
+        (f"{'0' * 64}  \n", "line 1 is not sha256sum output"),
+        (f"{'0' * 64}  p\n{'1' * 64}  p\n", "line 2 repeats 'p'"),
+    ],
+)
+def test_malformed_manifest_is_rejected(text: str, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        cara._parse_manifest(text)

@@ -36,7 +36,7 @@ from keepout.conjunction import Conjunction
 from keepout.errors import GeometryError, PcConvergenceError
 from keepout.pc._orbit import OrbitUncertainty
 from keepout.pc._plane import require_known_covariance
-from keepout.pc._sphere import sphere_rule
+from keepout.pc._sphere import sphere_rule_principal
 from keepout.pc._timeline import (
     QUAD_RTOL,
     RATE_FLOOR,
@@ -97,10 +97,15 @@ Gaussians: TypeAlias = tuple[FloatArray, FloatArray, FloatArray, FloatArray]
 """Mean and covariance of both objects' states at one time: ``x1, p1, x2, p2``."""
 
 
-def _floored(matrix: FloatArray, floor: float) -> FloatArray:
-    """A symmetric matrix with its eigenvalues raised to at least ``floor``."""
+def _floored_inverse(matrix: FloatArray, floor: float) -> FloatArray:
+    """Inverse of a symmetric matrix with its eigenvalues raised to ``floor``.
+
+    Built from the eigen-decomposition, so a tiny floored eigenvalue next to
+    a huge one is not lost to rounding as it would be by inverting the
+    reconstructed matrix.
+    """
     values, vectors = np.linalg.eigh(matrix)
-    result: FloatArray = (vectors * np.maximum(values, floor)) @ vectors.T
+    result: FloatArray = (vectors / np.maximum(values, floor)) @ vectors.T
     return result
 
 
@@ -120,9 +125,7 @@ def _peak_overlap(
     x1, p1, x2, p2 = mean_centred
     previous: FloatArray | None = None
     for _ in range(OVERLAP_MAX_ITERATIONS):
-        inverse1, inverse2 = (
-            np.linalg.inv(_floored(p[:3, :3], floor)) for p in (p1, p2)
-        )
+        inverse1, inverse2 = (_floored_inverse(p[:3, :3], floor) for p in (p1, p2))
         precision = inverse1 + inverse2
         peak = np.linalg.solve(precision, inverse1 @ x1[:3] + inverse2 @ x2[:3])
         if previous is not None:
@@ -312,15 +315,16 @@ class CollisionRate:
         values, vectors = np.linalg.eigh(covariance[:3, :3])
         if values[0] < self.floor:
             self.floored = min(self.floored, float(values[0]))
-        a = (vectors * np.maximum(values, self.floor)) @ vectors.T
+        # The floored position covariance A, used through its eigen-decomposition.
+        floored = np.maximum(values, self.floor)
+        a_inverse = (vectors / floored) @ vectors.T
+        log_det = float(np.sum(np.log(floored)))
         b, c = covariance[3:, :3], covariance[3:, 3:]
-        a_inverse = np.linalg.inv(a)
         gain = b @ a_inverse
         conditional = c - gain @ b.T
-        nodes, weights = sphere_rule(a, r_mean, self.radius)
+        nodes, weights = sphere_rule_principal(floored, vectors, r_mean, self.radius)
         offset = self.radius * nodes - r_mean
         mahalanobis = np.einsum("ij,jk,ik->i", offset, a_inverse, offset)
-        _, log_det = np.linalg.slogdet(a)
         density = np.exp(-0.5 * mahalanobis - 0.5 * log_det) / (2.0 * math.pi) ** 1.5
         sigma = np.sqrt(
             np.maximum(np.einsum("ij,jk,ik->i", nodes, conditional, nodes), 1e-300)
@@ -354,8 +358,9 @@ def encounter_scan(
     approach of the states, ``t* = -(r . v) / |v|^2``, widened on both sides
     by the straight-line half-window of :func:`straight_line_half_window`, doubled
     until the rate at the edges is negligible (or, while the rate is 0
-    everywhere scanned, until an encounter appears), by at most half the
-    shorter orbital period. ``t*`` is clipped to that half period.
+    everywhere scanned, until an encounter appears). ``t*`` is clipped to
+    half the shorter orbital period ``P`` and the window is never wider than
+    ``P``, so no encounter of the next revolution is counted twice.
 
     Raises
     ------
@@ -374,9 +379,12 @@ def encounter_scan(
         rate.primary.position_covariance + rate.secondary.position_covariance,
         conjunction.hard_body_radius,
     )
-    limit = 0.5 * min(rate.primary.period, rate.secondary.period)
-    closest = min(max(straight_line_closest_time(conjunction), -limit), limit)
+    period = min(rate.primary.period, rate.secondary.period)
+    closest = min(
+        max(straight_line_closest_time(conjunction), -0.5 * period), 0.5 * period
+    )
     centre = (min(0.0, closest), max(0.0, closest))
+    limit = 0.5 * (period - (centre[1] - centre[0]))
     return locate_auto(rate, half, limit, rate.screen, centre)
 
 
@@ -424,8 +432,8 @@ def _diagnostics(
     if not window_given and integral.edge >= RATE_FLOOR:
         notes.append(
             f"the collision rate is {integral.edge:.1e} of its peak at the window "
-            "edge (half an orbital period): the encounter may be longer; pass "
-            "window="
+            "edge (the window spans an orbital period): the encounter may be "
+            "longer; pass window="
         )
     if integral.agreement > max(rtol, QUIET_AGREEMENT):
         notes.append(
@@ -484,8 +492,9 @@ def hall3d(
         velocity) and both orbits elliptic.
     window
         Integration window ``(start, end)`` [s from TCA]. ``None`` (default)
-        grows a symmetric window until the rate at its edges is negligible,
-        up to half the shorter orbital period.
+        grows a window about TCA and the straight-line closest approach until
+        the rate at its edges is negligible, up to one shorter orbital period
+        wide.
     rtol
         Relative tolerance of the time integral.
 

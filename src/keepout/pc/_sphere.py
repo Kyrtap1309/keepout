@@ -72,6 +72,25 @@ def sphere_rule(
         ``4 pi``).
     """
     values, axes = np.linalg.eigh(covariance)
+    return sphere_rule_principal(
+        values, axes, mean, radius, order=order, phi_resolution=phi_resolution
+    )
+
+
+def sphere_rule_principal(
+    values: FloatArray,
+    axes: FloatArray,
+    mean: FloatArray,
+    radius: float,
+    *,
+    order: int = PANEL_ORDER,
+    phi_resolution: float = PHI_RESOLUTION,
+) -> tuple[FloatArray, FloatArray]:
+    """:func:`sphere_rule` from the covariance's eigen-decomposition.
+
+    ``values`` ascending and ``axes`` their unit eigenvectors (columns), as
+    :func:`numpy.linalg.eigh` returns them.
+    """
     sigmas = np.sqrt(np.clip(values, 0.0, None))
     along = float(axes[:, 0] @ mean)
     breaks = {0.0, math.pi}

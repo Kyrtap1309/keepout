@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 import pytest
 from builders import EPOCH, LEO_R, LEO_V, head_on, object_state, shifted_back
+from scipy.spatial.transform import Rotation
 
 from keepout.conjunction import Conjunction
 from keepout.covariance import Covariance
@@ -431,3 +432,42 @@ def test_floored_combined_covariance_is_reported() -> None:
     two_d = foster(conjunction.plane, 5.0)
     assert two_d.diagnostics[0].endswith("raised to 2.5e-07 m^2")
     assert result.value == pytest.approx(two_d.value, rel=1e-3)
+
+
+def test_floored_inverse_keeps_a_tiny_axis_next_to_a_huge_one() -> None:
+    # 100 km along-track, and a perfectly known axis floored to 2 mm:
+    # rebuilding the floored matrix and inverting it would bury the floor in
+    # the rounding of the 1e10 m^2 eigenvalue (~1e-6 m^2).
+    rotation = Rotation.from_euler("xyz", [0.3, -0.7, 1.1]).as_matrix()
+    matrix = (rotation * np.array([0.0, 1e2, 1e10])) @ rotation.T
+    inverse = hall3d_module._floored_inverse(matrix, 4e-6)
+    narrow = rotation[:, 0]
+    assert narrow @ inverse @ narrow == pytest.approx(1.0 / 4e-6, rel=1e-6)
+
+
+@pytest.mark.parametrize("closest", [1e6, -1e6, 1234.5])
+def test_automatic_window_never_spans_more_than_one_period(
+    monkeypatch: pytest.MonkeyPatch, closest: float
+) -> None:
+    # A wider window would count the next revolution's encounter again.
+    captured: dict[str, Any] = {}
+
+    class Captured(Exception):
+        pass
+
+    def capture(
+        rate: Any, half: float, limit: float, screen: Any, centre: tuple[float, float]
+    ) -> Any:
+        captured.update(limit=limit, centre=centre)
+        raise Captured
+
+    monkeypatch.setattr(hall3d_module, "straight_line_closest_time", lambda _: closest)
+    monkeypatch.setattr(hall3d_module, "locate_auto", capture)
+    conjunction = head_on(30.0, 10.0, 20.0, 5.0)
+    rate = hall3d_module.collision_rate(conjunction)
+    with pytest.raises(Captured):
+        hall3d_module.encounter_scan(conjunction, rate, None)
+    period = min(rate.primary.period, rate.secondary.period)
+    start, end = captured["centre"]
+    assert start <= 0.0 <= end
+    assert end - start + 2.0 * captured["limit"] == pytest.approx(period)

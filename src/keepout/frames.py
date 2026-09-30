@@ -77,7 +77,9 @@ def rtn_to_inertial_covariance(
 
     Position and velocity blocks are rotated with the same matrix; the rotation
     rate of the RTN frame is neglected (standard conjunction-assessment
-    practice; it affects only velocity terms, not Pc).
+    practice). That changes only the velocity terms: 2-D Pc, which uses the
+    position block alone, is unaffected, while 3-D and Monte Carlo Pc use the
+    velocity block and are validated against CARA with this convention.
 
     Parameters
     ----------

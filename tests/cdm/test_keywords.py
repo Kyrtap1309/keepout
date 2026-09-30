@@ -1,4 +1,6 @@
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from keepout.cdm.keywords import (
     REQUIRED,
@@ -106,10 +108,62 @@ def test_ordinal_epoch_and_trailing_z() -> None:
     )
 
 
-@pytest.mark.parametrize("text", ["2010-13-40T00:00:00", "yesterday", "2010-03-13"])
+@pytest.mark.parametrize(
+    "text",
+    [
+        "2010-13-40T00:00:00",
+        "yesterday",
+        "2010-03-13",
+        "2021-02-29T00:00:00",
+        "2021-366T00:00:00",
+        "2020-01-01T23:59:60",
+        "2021-365T23:59:60",
+        "2020-01-01T23:59:61",
+        "2020-01-01T24:00:00",
+        "2020-01-01T12:60:00",
+    ],
+)
 def test_invalid_epochs(text: str) -> None:
     with pytest.raises(ValueError, match="invalid CCSDS epoch"):
         parse_epoch(text)
+
+
+@pytest.mark.parametrize(
+    ("text", "isot"),
+    [
+        ("2016-12-31T23:59:60.500", "2016-12-31T23:59:60.500"),
+        ("2016-366T23:59:60", "2016-12-31T23:59:60"),
+        ("2020-366T12:00:00", "2020-12-31T12:00:00"),
+    ],
+)
+def test_leap_seconds_and_leap_days_are_accepted(text: str, isot: str) -> None:
+    assert format_epoch(parse_epoch(text)) == isot
+
+
+@pytest.mark.parametrize(
+    ("keyword", "text"),
+    [("X", "-6535.677249"), ("RECOMMENDED_OD_SPAN", "7.88"), ("X_DOT", "-2.8886125")],
+)
+def test_scaled_values_are_written_as_given(keyword: str, text: str) -> None:
+    entry = SEGMENT[keyword]
+    value = parse_value(entry, text, entry.unit)
+    assert format_value(entry, value) == (text, entry.unit)
+
+
+@given(
+    st.sampled_from(["X", "X_DOT", "RECOMMENDED_OD_SPAN", "CR_R"]),
+    st.integers(min_value=-(10**12), max_value=10**12),
+    st.integers(min_value=0, max_value=9),
+)
+def test_writing_a_value_loses_nothing(
+    keyword: str, mantissa: int, places: int
+) -> None:
+    entry = SEGMENT[keyword]
+    text = f"{mantissa / 10**places:.{places}f}"
+    value = parse_value(entry, text, entry.unit)
+    written, _ = format_value(entry, value)
+    assert parse_value(entry, written, entry.unit) == value
+    assert float(written) == float(text)
 
 
 def test_format_value() -> None:

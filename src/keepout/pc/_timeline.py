@@ -8,8 +8,8 @@ time around the nodes where the rate is significant. The stretches where the
 rate is not negligible become encounter segments, split at their local maxima
 and integrated by Gauss-Legendre rules of doubling order. Without an explicit
 window the half-width starts at the linear-motion bound and doubles until the
-rate at both edges is negligible, but never beyond half the shorter orbital
-period.
+rate at both edges is negligible, but the window never spans more than the
+shorter orbital period.
 """
 
 from __future__ import annotations
@@ -404,7 +404,8 @@ def locate_auto(
     half_width
         Initial widening [s].
     limit
-        Largest widening [s] (half the shorter orbital period).
+        Largest widening [s] (the window then spans the shorter orbital
+        period).
     screen
         Candidate intervals of a window.
     centre

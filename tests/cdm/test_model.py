@@ -137,7 +137,9 @@ def test_covariance_policies() -> None:
         cdm.object1.covariance(policy="raise")
     covariance = cdm.object1.covariance()
     assert covariance.frame == "RTN"
-    assert covariance.repairs[0].startswith("clipped 1 negative eigenvalue")
+    assert covariance.repairs[0].startswith(
+        "clipped 1 negative position-block eigenvalue"
+    )
 
 
 def test_object_states() -> None:
@@ -162,7 +164,7 @@ def test_object_state_carries_its_covariance_repairs() -> None:
     cdm = minimal_cdm(segment1=replace(segment_fields(1), "CT_R", 1e6))
     first, second = cdm.object_states()
     (repair,) = known(first.covariance).repairs
-    assert repair.startswith("clipped 1 negative eigenvalue")
+    assert repair.startswith("clipped 1 negative position-block eigenvalue")
     assert known(second.covariance).repairs == ()
     assert known(cdm.object1.object_state().covariance).repairs == (repair,)
 

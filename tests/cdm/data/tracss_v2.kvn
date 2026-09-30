@@ -4,6 +4,7 @@ CREATION_DATE                  = 2025-06-01T12:00:00.000
 ORIGINATOR                     = TRACSS
 MESSAGE_FOR                    = SATELLITE A
 MESSAGE_ID                     = TRACSS-TEST-0001
+CONJUNCTION_ID                 = dd8c054b-6bea-48fb-a245-6cb23331b156
 COMMENT keepout test fixture modelled on the TraCSS CDM specification v2.1
 TCA                            = 2025-06-02T08:15:30.123456
 MISS_DISTANCE                  = 412.5 [m]

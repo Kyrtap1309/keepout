@@ -5,7 +5,8 @@ elements (see :mod:`keepout.pc._orbit`), moves them by two-body motion and
 counts a collision when the relative distance first drops below the combined
 hard-body radius inside the window. Trials already overlapping at the window
 start are not collisions in the window (only entries count, as in Hall 2021
-and CARA's two-body Monte Carlo).
+and CARA's two-body Monte Carlo); such a trial is not counted even if it
+leaves and enters again later. Their fraction is reported.
 
 Time is only searched inside the encounter segments of the 3D-Nc rate scan:
 outside them the collision rate is below 1e-16 of its peak. Within a segment

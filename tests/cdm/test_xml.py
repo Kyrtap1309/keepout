@@ -74,6 +74,8 @@ def test_version_2_uses_cdm_2_groups() -> None:
     assert root.find("body/segment/data/physicalParameters") is not None
     assert root.find(".//additionalParameters") is None
     assert root.findtext("header/CLASSIFICATION") == "UNCLASSIFIED"
+    conjunction_id = "dd8c054b-6bea-48fb-a245-6cb23331b156"
+    assert root.findtext("header/CONJUNCTION_ID") == conjunction_id
 
 
 def test_user_defined_parameters_use_the_parameter_attribute() -> None:

@@ -55,9 +55,13 @@ def test_non_pd_covariance_is_repaired_and_reported(
     cases: list[ValidationCase],
 ) -> None:
     (case,) = [c for c in cases if c.case_id == "non-PD covariance CDM"]
-    (diagnostic,) = case.conjunction.diagnostics
-    assert diagnostic.startswith("secondary (")
-    assert "clipped" in diagnostic
+    position, velocity = case.conjunction.diagnostics
+    assert position.startswith("secondary (")
+    assert "clipped 1 negative position-block eigenvalue" in position
+    # Clipping the position block leaves the conditional velocity covariance
+    # slightly negative too; it is repaired and reported as well.
+    assert velocity.startswith("secondary (")
+    assert "velocity covariance conditional on position" in velocity
 
 
 def test_slow_alfano_encounters_carry_the_2d_warning(outcomes: list[Outcome]) -> None:

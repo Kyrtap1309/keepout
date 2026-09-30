@@ -211,8 +211,8 @@ class Section:
         }
 
     def missing(self) -> tuple[str, ...]:
-        """Required keywords absent from this section."""
-        return tuple(k for k in REQUIRED[self.kind] if self.get(k) is None)
+        """Required keywords absent from this section or given no value."""
+        return tuple(k for k in REQUIRED[self.kind] if self.get(k) in (None, ""))
 
 
 def _text(section: Section, keyword: str) -> str:
@@ -471,6 +471,11 @@ class Cdm:
     def message_id(self) -> str:
         """``MESSAGE_ID``."""
         return _text(self.header, "MESSAGE_ID")
+
+    @property
+    def conjunction_id(self) -> str | None:
+        """``CONJUNCTION_ID`` (CDM 2.0), shared by every CDM of one event."""
+        return _optional_text(self.header, "CONJUNCTION_ID")
 
     @property
     def message_for(self) -> str | None:

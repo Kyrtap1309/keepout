@@ -82,7 +82,7 @@ def test_covariance_repairs_come_first_labelled_by_object() -> None:
     )
     result = compute_pc(Conjunction(repaired, base.secondary, 5.0))
     assert result.diagnostics == (
-        "primary (12345): symmetrised covariance (max asymmetry 1)",
+        "primary (12345): symmetrised covariance (max relative asymmetry 0.1)",
     )
 
 
