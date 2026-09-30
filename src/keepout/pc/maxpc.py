@@ -30,7 +30,7 @@ from collections.abc import Callable
 import numpy as np
 from scipy import optimize, special
 
-from keepout._types import require_positive
+from keepout._types import FloatArray, require_positive
 from keepout.encounter import EncounterPlane
 from keepout.pc._plane import plane_gaussian, require_known_covariance
 from keepout.pc.foster import foster
@@ -62,7 +62,7 @@ _EDGE = (
 )
 
 
-def _foster_with(plane: EncounterPlane, covariance: np.ndarray, radius: float) -> float:
+def _foster_with(plane: EncounterPlane, covariance: FloatArray, radius: float) -> float:
     return foster(
         dataclasses.replace(plane, covariance=covariance, unknown_covariance=()),
         radius,
@@ -133,7 +133,7 @@ def frisbee(plane: EncounterPlane, hard_body_radius: float) -> PcResult:
             f"{plane.unknown_covariance or 'none'}"
         )
     gaussian = plane_gaussian(plane.miss_vector, plane.covariance, hard_body_radius)
-    k2 = (gaussian.mu / gaussian.su) ** 2 + (gaussian.mv / gaussian.sv) ** 2
+    k2 = gaussian.mahalanobis2
     miss = plane.miss_distance
     diagnostics = [
         f"maximum Pc over the unknown {plane.unknown_covariance[0]} covariance "
@@ -212,8 +212,7 @@ def dilution(plane: EncounterPlane, hard_body_radius: float) -> PcResult:
         inside = _INSIDE.format(miss=miss, radius=hard_body_radius)
         return PcResult(1.0, "dilution", (note, inside), details)
     gaussian = plane_gaussian(plane.miss_vector, plane.covariance, hard_body_radius)
-    k2 = (gaussian.mu / gaussian.su) ** 2 + (gaussian.mv / gaussian.sv) ** 2
-    seed_scale = max(k2 / 2.0, 1e-300)
+    seed_scale = max(gaussian.mahalanobis2 / 2.0, 1e-300)
 
     def pc(scale: float) -> float:
         return _foster_with(plane, scale * plane.covariance, hard_body_radius)

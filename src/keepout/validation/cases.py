@@ -170,10 +170,7 @@ def load_alfano_cases(cache: Path | None = None) -> list[ValidationCase]:
 
     Case 12 has zero relative velocity; CARA gives no 2-D value for it.
     """
-    results = {
-        int(_float(_field(row, "Case"))): row
-        for row in cara.load_csv(cara.fetch(cara.ALFANO_2009_RESULTS, cache=cache))
-    }
+    results = _alfano_results(cache)
     cases: list[ValidationCase] = []
     for number, file in enumerate(cara.ALFANO_2009_TCA, start=1):
         if number not in results:
@@ -182,19 +179,34 @@ def load_alfano_cases(cache: Path | None = None) -> list[ValidationCase]:
         reference = _float(_field(result, "CARA_Pc2D"))
         if math.isnan(reference):
             continue
-        rows = cara.load_xls_rows(cara.fetch(file, cache=cache))
-        primary, secondary = alfano_objects(rows)
-        radius = _float(_field(result, "HBR"))
         cases.append(
             ValidationCase(
                 "Alfano (2009)",
                 str(number),
-                Conjunction(primary, secondary, radius),
+                _alfano_conjunction(file, result, cache),
                 reference,
                 paper=_float(_field(result, "A09_PcLinear100")),
             )
         )
     return cases
+
+
+def _alfano_results(cache: Path | None) -> dict[int, Mapping[str, Any]]:
+    """CARA's Alfano (2009) results table, by case number."""
+    return {
+        int(_float(_field(row, "Case"))): row
+        for row in cara.load_csv(cara.fetch(cara.ALFANO_2009_RESULTS, cache=cache))
+    }
+
+
+def _alfano_conjunction(
+    file: cara.CaraFile, result: Mapping[str, Any], cache: Path | None
+) -> Conjunction:
+    """The conjunction of one Alfano case, with the HBR of its results row."""
+    primary, secondary = alfano_objects(
+        cara.load_xls_rows(cara.fetch(file, cache=cache))
+    )
+    return Conjunction(primary, secondary, _float(_field(result, "HBR")))
 
 
 def load_pc_method_cases(cache: Path | None = None) -> list[ValidationCase]:
@@ -204,25 +216,15 @@ def load_pc_method_cases(cache: Path | None = None) -> list[ValidationCase]:
     integrating. keepout projects the relative position onto the encounter
     plane, which is the same straight-line closest approach.
     """
-    table = cara.load_xlsx(cara.fetch(cara.PC_METHOD_TABLE, cache=cache))
-    cases: list[ValidationCase] = []
-    for row in table:
-        conjunction_id = str(_field(row, "Conjunction_ID"))
-        if conjunction_id not in cara.PC_METHOD_CDMS:
-            raise CaraFormatError(f"no pinned CDM for conjunction {conjunction_id}")
-        path = cara.fetch(cara.PC_METHOD_CDMS[conjunction_id], cache=cache)
-        conjunction = Conjunction.from_cdm(
-            cdm.load(path), hard_body_radius=_float(_field(row, "HBR_m"))
+    return [
+        ValidationCase(
+            "CARA Pc method test set",
+            conjunction_id,
+            conjunction,
+            _float(_field(row, "Pc2D")),
         )
-        cases.append(
-            ValidationCase(
-                "CARA Pc method test set",
-                conjunction_id,
-                conjunction,
-                _float(_field(row, "Pc2D")),
-            )
-        )
-    return cases
+        for conjunction_id, conjunction, row in _pc_method_rows(cache)
+    ]
 
 
 def load_non_pd_case(cache: Path | None = None) -> ValidationCase:
@@ -291,10 +293,7 @@ def _alfano_inputs(
     cache: Path | None,
 ) -> list[tuple[int, Conjunction, Mapping[str, Any], float]]:
     """Every Alfano case: number, conjunction, results row and window [s]."""
-    results = {
-        int(_float(_field(row, "Case"))): row
-        for row in cara.load_csv(cara.fetch(cara.ALFANO_2009_RESULTS, cache=cache))
-    }
+    results = _alfano_results(cache)
     windows = {
         int(_float(_field(row, "CaseNumber"))): _float(_field(row, "A09_FinalTime_s"))
         for row in cara.load_xlsx(cara.fetch(cara.ALFANO_2009_SUPPLEMENT, cache=cache))
@@ -304,11 +303,7 @@ def _alfano_inputs(
         if number not in results or number not in windows:
             raise CaraFormatError(f"Alfano tables have no row for case {number}")
         result = results[number]
-        primary, secondary = alfano_objects(
-            cara.load_xls_rows(cara.fetch(file, cache=cache))
-        )
-        radius = _float(_field(result, "HBR"))
-        conjunction = Conjunction(primary, secondary, radius)
+        conjunction = _alfano_conjunction(file, result, cache)
         inputs.append((number, conjunction, result, windows[number]))
     return inputs
 
@@ -366,6 +361,7 @@ def load_alfano_monte_carlo_cases(cache: Path | None = None) -> list[ValidationC
 def _pc_method_rows(
     cache: Path | None,
 ) -> list[tuple[str, Conjunction, Mapping[str, Any]]]:
+    """Every CARA Pc method test conjunction: ID, conjunction and table row."""
     table = cara.load_xlsx(cara.fetch(cara.PC_METHOD_TABLE, cache=cache))
     rows: list[tuple[str, Conjunction, Mapping[str, Any]]] = []
     for row in table:

@@ -13,6 +13,7 @@ from keepout.pc import foster, montecarlo
 from keepout.pc.montecarlo import _Trials, clopper_pearson
 
 hall3d_module = importlib.import_module("keepout.pc.hall3d")
+montecarlo_module = importlib.import_module("keepout.pc.montecarlo")
 
 
 def test_clopper_pearson_matches_the_beta_quantiles() -> None:
@@ -39,14 +40,25 @@ def test_a_seed_makes_the_run_reproducible() -> None:
     conjunction = head_on(8.0, 10.0, 20.0, 5.0)
     first = montecarlo(conjunction, samples=5_000, seed=3)
     second = montecarlo(conjunction, samples=5_000, seed=3)
+    other = montecarlo(conjunction, samples=5_000, seed=4)
     assert first.value == second.value
+    assert first.details == second.details
+    assert first.diagnostics == second.diagnostics
+    assert other.details["hits"] != first.details["hits"]
 
 
-def test_stops_when_the_interval_is_narrow_enough() -> None:
+def test_stops_when_the_interval_is_narrow_enough(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Small batches: the stopping rule is checked between several of them.
+    monkeypatch.setattr(montecarlo_module, "MC_BATCH", 2_000)
     conjunction = head_on(8.0, 10.0, 20.0, 5.0)
-    result = montecarlo(conjunction, rtol=0.2, seed=5)
+    result = montecarlo(conjunction, rtol=0.2, max_samples=100_000, seed=5)
     half = 0.5 * (result.details["ci_high"] - result.details["ci_low"])
     assert half <= 0.2 * result.value
+    assert 2_000 < result.details["samples"] < 100_000
+    expected = foster(conjunction.plane, 5.0).value
+    assert result.details["ci_low"] <= expected <= result.details["ci_high"]
     assert result.diagnostics == ()
 
 

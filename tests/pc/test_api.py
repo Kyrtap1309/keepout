@@ -24,6 +24,10 @@ from keepout.pc.montecarlo import montecarlo
 
 api = importlib.import_module("keepout.pc.api")
 
+_period = orbital_period(StateVector(EPOCH, LEO_R, LEO_V, "GCRF"))
+assert _period is not None
+LEO_PERIOD: float = _period
+
 
 def test_auto_uses_foster() -> None:
     conjunction = head_on(30.0, 10.0, 20.0, 5.0)
@@ -99,11 +103,9 @@ def along_track_conjunction(duration: float) -> Conjunction:
 
 @pytest.mark.parametrize(("fraction", "warns"), [(0.99, False), (1.01, True)])
 def test_duration_warning_starts_at_the_limit(fraction: float, warns: bool) -> None:
-    period = orbital_period(StateVector(EPOCH, LEO_R, LEO_V, "GCRF"))
-    assert period is not None
-    conjunction = along_track_conjunction(fraction * DURATION_LIMIT * period)
+    conjunction = along_track_conjunction(fraction * DURATION_LIMIT * LEO_PERIOD)
     assert encounter_duration(conjunction) == pytest.approx(
-        fraction * DURATION_LIMIT * period, rel=1e-9
+        fraction * DURATION_LIMIT * LEO_PERIOD, rel=1e-9
     )
     diagnostics = compute_pc(conjunction).diagnostics
     assert (
@@ -206,9 +208,7 @@ def test_frisbee_can_be_chosen() -> None:
 def test_maximum_pc_keeps_a_duration_warning(method: MethodChoice) -> None:
     # The duration from the known covariance alone is a lower bound: when it
     # already exceeds the limit, the warning holds.
-    period = orbital_period(StateVector(EPOCH, LEO_R, LEO_V, "GCRF"))
-    assert period is not None
-    slow = along_track_conjunction(1.5 * DURATION_LIMIT * period)
+    slow = along_track_conjunction(1.5 * DURATION_LIMIT * LEO_PERIOD)
     conjunction = Conjunction(slow.primary, without_covariance(slow.secondary), 5.0)
     result = compute_pc(conjunction, method)
     assert result.method == "frisbee"
@@ -254,18 +254,20 @@ def test_options_reach_a_three_d_method() -> None:
     assert result.value == montecarlo(conjunction, samples=2_000, seed=1).value
 
 
-def test_methods_needing_both_covariances_refuse_an_unknown_one() -> None:
+@pytest.mark.parametrize(
+    "method", ["foster", "elrod", "dilution", "hall", "montecarlo"]
+)
+def test_methods_needing_both_covariances_refuse_an_unknown_one(
+    method: MethodChoice,
+) -> None:
     base = head_on(300.0, 100.0, 200.0, 5.0)
     conjunction = Conjunction(base.primary, without_covariance(base.secondary), 5.0)
-    for method in ("foster", "elrod", "dilution", "hall", "montecarlo"):
-        with pytest.raises(CovarianceError, match="needs both covariances"):
-            compute_pc(conjunction, method)
+    with pytest.raises(CovarianceError, match="needs both covariances"):
+        compute_pc(conjunction, method)
 
 
 def test_auto_uses_hall_for_a_slow_encounter_and_keeps_the_2d_pc() -> None:
-    period = orbital_period(StateVector(EPOCH, LEO_R, LEO_V, "GCRF"))
-    assert period is not None
-    conjunction = along_track_conjunction(1.5 * DURATION_LIMIT * period)
+    conjunction = along_track_conjunction(1.5 * DURATION_LIMIT * LEO_PERIOD)
     result = compute_pc(conjunction)
     assert result.method == "hall"
     assert result.details["pc_2d"] == foster(conjunction.plane, 5.0).value
@@ -286,9 +288,7 @@ def test_auto_falls_back_to_monte_carlo(monkeypatch: pytest.MonkeyPatch) -> None
 
     monkeypatch.setattr(api, "hall3d", fail)
     monkeypatch.setattr(api, "montecarlo", run)
-    period = orbital_period(StateVector(EPOCH, LEO_R, LEO_V, "GCRF"))
-    assert period is not None
-    result = compute_pc(along_track_conjunction(1.5 * DURATION_LIMIT * period))
+    result = compute_pc(along_track_conjunction(1.5 * DURATION_LIMIT * LEO_PERIOD))
     assert result.method == "montecarlo"
     assert result.diagnostics[-1].endswith(
         "; Monte Carlo used instead (seed 0, at most 1,000,000 trials)"

@@ -51,6 +51,11 @@ class PlaneGaussian:
     radius: float
     diagnostics: tuple[str, ...] = ()
 
+    @property
+    def mahalanobis2(self) -> float:
+        """Squared Mahalanobis distance of the miss vector, ``K^2``."""
+        return (self.mu / self.su) ** 2 + (self.mv / self.sv) ** 2
+
     def density_u(self, u: FloatArray) -> FloatArray:
         """1-D Gaussian density along ``u`` [1/m]."""
         z = (u - self.mu) / self.su

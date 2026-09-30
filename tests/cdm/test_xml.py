@@ -184,6 +184,7 @@ def test_duplicate_keyword() -> None:
     with pytest.raises(CdmParseError, match="duplicate keyword") as info:
         xml.loads(text)
     assert info.value.keyword == "MISS_DISTANCE"
+    assert info.value.path == "cdm/body/relativeMetadataData/MISS_DISTANCE"
 
 
 def test_missing_required_keyword() -> None:

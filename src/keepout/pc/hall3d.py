@@ -26,11 +26,12 @@ diagnostic says so.
 from __future__ import annotations
 
 import math
+from typing import TypeAlias
 
 import numpy as np
 from scipy import special
 
-from keepout._types import FloatArray
+from keepout._types import FloatArray, require_positive
 from keepout.conjunction import Conjunction
 from keepout.errors import GeometryError, PcConvergenceError
 from keepout.pc._orbit import OrbitUncertainty
@@ -42,11 +43,11 @@ from keepout.pc._timeline import (
     Candidate,
     RateIntegral,
     RateScan,
-    crossing_scales,
     integrate_segments,
     locate,
     locate_auto,
     regions,
+    straight_line_half_window,
 )
 from keepout.pc.result import PcResult
 
@@ -92,6 +93,9 @@ _SQRT_PI = math.sqrt(math.pi)
 _SQRT_2 = math.sqrt(2.0)
 _SQRT_2PI = math.sqrt(2.0 * math.pi)
 
+Gaussians: TypeAlias = tuple[FloatArray, FloatArray, FloatArray, FloatArray]
+"""Mean and covariance of both objects' states at one time: ``x1, p1, x2, p2``."""
+
 
 def _floored(matrix: FloatArray, floor: float) -> FloatArray:
     """A symmetric matrix with its eigenvalues raised to at least ``floor``."""
@@ -101,27 +105,29 @@ def _floored(matrix: FloatArray, floor: float) -> FloatArray:
 
 
 def _peak_overlap(
-    primary: OrbitUncertainty, secondary: OrbitUncertainty, t: float, floor: float
-) -> tuple[FloatArray, FloatArray, FloatArray, FloatArray] | None:
+    primary: OrbitUncertainty,
+    secondary: OrbitUncertainty,
+    t: float,
+    floor: float,
+    mean_centred: Gaussians,
+) -> Gaussians | None:
     """Converged expansion-centre Gaussians of both objects at ``t``, or None.
 
-    ``floor`` is the smallest position variance used when inverting.
+    ``floor`` is the smallest position variance used when inverting;
+    ``mean_centred`` (the expansion about the mean elements) is the first
+    iterate.
     """
-    centres = [primary.elements.copy(), secondary.elements.copy()]
+    x1, p1, x2, p2 = mean_centred
     previous: FloatArray | None = None
     for _ in range(OVERLAP_MAX_ITERATIONS):
-        (x1, p1), (x2, p2) = (
-            orbit.expansion(centre, t)
-            for orbit, centre in zip((primary, secondary), centres, strict=True)
-        )
         inverse1, inverse2 = (
             np.linalg.inv(_floored(p[:3, :3], floor)) for p in (p1, p2)
         )
-        joint = np.linalg.inv(inverse1 + inverse2)
-        peak = joint @ (inverse1 @ x1[:3] + inverse2 @ x2[:3])
+        precision = inverse1 + inverse2
+        peak = np.linalg.solve(precision, inverse1 @ x1[:3] + inverse2 @ x2[:3])
         if previous is not None:
             step = peak - previous
-            if float(step @ np.linalg.solve(joint, step)) <= OVERLAP_TOLERANCE:
+            if float(step @ precision @ step) <= OVERLAP_TOLERANCE:
                 return x1, p1, x2, p2
         previous = peak
         centres = [
@@ -133,6 +139,10 @@ def _peak_overlap(
                 (secondary, x2, p2, inverse2),
             )
         ]
+        (x1, p1), (x2, p2) = (
+            orbit.expansion(centre, t)
+            for orbit, centre in zip((primary, secondary), centres, strict=True)
+        )
     return None
 
 
@@ -159,9 +169,7 @@ class CollisionRate:
         self.fallbacks: list[tuple[float, float]] = []
         """Times [s] and rates where the peak-overlap iteration failed."""
 
-    def _mean_centred(
-        self, t: float
-    ) -> tuple[FloatArray, FloatArray, FloatArray, FloatArray]:
+    def _mean_centred(self, t: float) -> Gaussians:
         x1, p1 = self.primary.expansion(self.primary.elements, t)
         x2, p2 = self.secondary.expansion(self.secondary.elements, t)
         return x1, p1, x2, p2
@@ -179,7 +187,9 @@ class CollisionRate:
         if self._negligible(*mean_centred):
             return 0.0
         try:
-            converged = _peak_overlap(self.primary, self.secondary, t, self.floor)
+            converged = _peak_overlap(
+                self.primary, self.secondary, t, self.floor, mean_centred
+            )
         except (np.linalg.LinAlgError, ArithmeticError, ValueError, GeometryError):
             # A diverging iteration can leave the space of elliptic orbits.
             converged = None
@@ -189,9 +199,7 @@ class CollisionRate:
         self.fallbacks.append((t, value))
         return value
 
-    def _checked_rate(
-        self, t: float, gaussians: tuple[FloatArray, FloatArray, FloatArray, FloatArray]
-    ) -> float:
+    def _checked_rate(self, t: float, gaussians: Gaussians) -> float:
         """:meth:`_rate`, with a failure raised as :class:`PcConvergenceError`."""
         try:
             value = self._rate(*gaussians)
@@ -223,12 +231,12 @@ class CollisionRate:
         a = p1[:, :3, :3] + p2[:, :3, :3]
         gap = np.maximum(np.linalg.norm(dr, axis=1) - self.radius, 0.0)
         speed = np.linalg.norm(dv, axis=1)
-        largest = np.linalg.eigvalsh(a)[:, -1]
+        values, vectors = np.linalg.eigh(a)
+        largest = values[:, -1]
         direction = dv / np.where(speed > 0.0, speed, 1.0)[:, None]
         sigma = np.sqrt(
             np.maximum(np.einsum("ij,ijk,ik->i", direction, a, direction), 0.0)
         )
-        values, vectors = np.linalg.eigh(a)
         along = np.einsum("ij,ijk->ik", direction, vectors)
         precision = np.einsum(
             "ik,ik->i", along * along, 1.0 / np.maximum(values, self.floor)
@@ -260,7 +268,7 @@ class CollisionRate:
         span = end - start
         middle = np.array([0.5 * (start + end)])
         _, speed, largest, _, _ = self._screen_cells(middle)
-        reach = math.sqrt(NEGLIGIBLE_DISTANCE * float(largest[0])) + self.radius
+        reach = _reach(float(largest[0]), self.radius)
         natural = reach / float(speed[0]) if speed[0] > 0.0 else math.inf
         longest = SCREEN_PERIOD_FRACTION * min(
             self.primary.period, self.secondary.period
@@ -322,6 +330,11 @@ class CollisionRate:
         return self.radius**2 * float(np.sum(weights * density * flux))
 
 
+def _reach(largest_variance: float, radius: float) -> float:
+    """Distance [m] beyond which :meth:`CollisionRate._negligible` holds."""
+    return math.sqrt(NEGLIGIBLE_DISTANCE * largest_variance) + radius
+
+
 def collision_rate(conjunction: Conjunction) -> CollisionRate:
     """The 3D-Nc collision rate of a conjunction with both covariances known."""
     require_known_covariance(conjunction.unknown_covariance, "hall")
@@ -339,7 +352,7 @@ def encounter_scan(
 
     The automatic window covers TCA (t = 0) and the straight-line closest
     approach of the states, ``t* = -(r . v) / |v|^2``, widened on both sides
-    by the straight-line half-window of :func:`crossing_scales`, doubled
+    by the straight-line half-window of :func:`straight_line_half_window`, doubled
     until the rate at the edges is negligible (or, while the rate is 0
     everywhere scanned, until an encounter appears), by at most half the
     shorter orbital period. ``t*`` is clipped to that half period.
@@ -356,7 +369,7 @@ def encounter_scan(
         if not (math.isfinite(start) and math.isfinite(end) and start < end):
             raise ValueError(f"window must be finite with start < end, got {window}")
         return locate(rate, (start, end), rate.screen)
-    half, _ = crossing_scales(
+    half = straight_line_half_window(
         _relative_velocity(conjunction),
         rate.primary.position_covariance + rate.secondary.position_covariance,
         conjunction.hard_body_radius,
@@ -422,9 +435,7 @@ def _diagnostics(
     return notes
 
 
-def check_fallbacks(
-    fallbacks: list[tuple[float, float]], found: RateScan, peak: float
-) -> None:
+def check_fallbacks(fallbacks: list[tuple[float, float]], found: RateScan) -> None:
     """Raise if the peak-overlap iteration failed where the rate may matter.
 
     A failure inside an encounter segment, or within one grid step of it, is
@@ -435,7 +446,7 @@ def check_fallbacks(
     a failure is fatal only if the mean-centred rate exceeds
     :data:`FALLBACK_TOLERANCE` of the peak.
     """
-    times = found.times
+    times, peak = found.times, found.peak
     zones = [
         (
             float(times[lo] - (times[lo + 1] - times[lo])),
@@ -502,12 +513,11 @@ def hall3d(
         If ``window`` is not finite with ``start < end``, or ``rtol`` is not
         finite and positive.
     """
-    if not (math.isfinite(rtol) and rtol > 0.0):
-        raise ValueError(f"rtol must be finite and positive, got {rtol}")
+    require_positive(rtol, "rtol")
     rate = collision_rate(conjunction)
     found = encounter_scan(conjunction, rate, window)
     integral = integrate_segments(rate, found, rtol=rtol)
-    check_fallbacks(rate.fallbacks, found, integral.peak)
+    check_fallbacks(rate.fallbacks, found)
     if not math.isfinite(integral.nc):
         raise PcConvergenceError(f"Hall 3D-Nc: Nc is not finite ({integral.nc})")
     details = {
@@ -572,11 +582,8 @@ def _entry_notes(
             covariance = (
                 rate.primary.position_covariance + rate.secondary.position_covariance
             )
-            reach = (
-                math.sqrt(
-                    NEGLIGIBLE_DISTANCE * float(np.linalg.eigvalsh(covariance)[-1])
-                )
-                + conjunction.hard_body_radius
+            reach = _reach(
+                float(np.linalg.eigvalsh(covariance)[-1]), conjunction.hard_body_radius
             )
             miss = conjunction.plane.miss_distance
             if miss <= reach:

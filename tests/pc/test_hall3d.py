@@ -67,14 +67,17 @@ def test_swapping_the_objects_changes_nothing() -> None:
     assert hall3d(swapped).value == pytest.approx(hall3d(base).value, rel=1e-8)
 
 
-def test_explicit_window_is_used_and_checked() -> None:
+def test_explicit_window_is_used() -> None:
     conjunction = head_on(30.0, 10.0, 20.0, 5.0)
     result = hall3d(conjunction, window=(-0.002, 0.002))
     window = (result.details["window_start_s"], result.details["window_end_s"])
     assert window == (-0.002, 0.002)
-    for bad in ((1.0, -1.0), (0.0, math.inf)):
-        with pytest.raises(ValueError, match="window"):
-            hall3d(conjunction, window=bad)
+
+
+@pytest.mark.parametrize("bad", [(1.0, -1.0), (0.0, math.inf)])
+def test_invalid_window_is_rejected(bad: tuple[float, float]) -> None:
+    with pytest.raises(ValueError, match="window"):
+        hall3d(head_on(30.0, 10.0, 20.0, 5.0), window=bad)
 
 
 def test_unknown_covariance_is_rejected() -> None:
@@ -124,12 +127,11 @@ def test_failed_iteration_where_it_matters_raises(
 
 def test_several_encounters_and_nc_above_one_are_reported() -> None:
     integral = RateIntegral(
-        1.5,
-        (Segment(-10.0, -5.0, 0.9), Segment(5.0, 10.0, 0.6)),
-        (-20.0, 20.0),
-        0.0,
-        1.0,
-        1.0,
+        nc=1.5,
+        segments=(Segment(-10.0, -5.0, 0.9), Segment(5.0, 10.0, 0.6)),
+        window=(-20.0, 20.0),
+        edge=0.0,
+        peak=1.0,
     )
     notes = hall3d_module._diagnostics(integral, window_given=True)
     assert notes[0].startswith("expected number of collisions Nc = 1.5 exceeds 1")
@@ -138,7 +140,11 @@ def test_several_encounters_and_nc_above_one_are_reported() -> None:
 
 def test_rate_at_the_edge_of_an_automatic_window_is_reported() -> None:
     integral = RateIntegral(
-        0.1, (Segment(-10.0, 10.0, 0.1),), (-10.0, 10.0), 1e-3, 1.0, 1.0
+        nc=0.1,
+        segments=(Segment(-10.0, 10.0, 0.1),),
+        window=(-10.0, 10.0),
+        edge=1e-3,
+        peak=1.0,
     )
     (note,) = hall3d_module._diagnostics(integral, window_given=False)
     assert "pass window=" in note
@@ -161,10 +167,11 @@ def test_long_explicit_window_resolves_the_encounter(
 
 def test_unresolvable_window_raises() -> None:
     # Days of head-on passes, each 0.4 ms long: more scan points than allowed.
-    with pytest.raises(PcConvergenceError, match="cannot resolve the collision rate"):
+    with pytest.raises(
+        PcConvergenceError, match="cannot resolve the collision rate"
+    ) as info:
         hall3d(head_on(30.0, 10.0, 20.0, 5.0), window=(-1e5, 1e5))
-    with pytest.raises(PcConvergenceError, match=re.escape("'hall', window=(a, b)")):
-        hall3d(head_on(30.0, 10.0, 20.0, 5.0), window=(-1e5, 1e5))
+    assert "'hall', window=(a, b)" in str(info.value)
 
 
 def test_window_without_an_encounter_is_reported() -> None:
@@ -358,12 +365,10 @@ def test_states_before_closest_approach_find_the_encounter(dt: float) -> None:
     # automatic window must cover it, not only t = 0.
     conjunction = shifted_back(head_on(30.0, 10.0, 20.0, 5.0), dt)
     expected = foster(conjunction.plane, 5.0).value
-    result = hall3d(conjunction)
-    assert result.value == pytest.approx(expected, rel=1e-4)
-    assert result.details["window_end_s"] > dt
     auto = compute_pc(conjunction)
     assert auto.method == "hall"
     assert auto.value == pytest.approx(expected, rel=1e-4)
+    assert auto.details["window_end_s"] > dt
 
 
 def test_an_encounter_beyond_the_initial_window_is_searched_for(

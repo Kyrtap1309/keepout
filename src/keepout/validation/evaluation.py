@@ -34,7 +34,7 @@ def judge(case: ValidationCase, result: PcResult) -> Verdict:
         and reference > 0
     ):
         error = difference / reference
-        return Verdict(error, True, error <= (criterion.relative or 0.0))
+        return Verdict(error, True, error <= criterion.relative)
     bound = criterion.absolute if criterion.absolute is not None else 0.0
     return Verdict(difference, False, difference <= bound)
 

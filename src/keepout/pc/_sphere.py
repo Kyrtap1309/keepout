@@ -34,8 +34,9 @@ MIN_PHI, MAX_PHI = 64, 16384
 """Bounds on the number of phi nodes."""
 
 
-@lru_cache(maxsize=4)
-def _gauss_legendre(order: int) -> tuple[FloatArray, FloatArray]:
+@lru_cache(maxsize=8)
+def gauss_legendre(order: int) -> tuple[FloatArray, FloatArray]:
+    """Read-only Gauss-Legendre nodes and weights on ``[-1, 1]``."""
     nodes, weights = np.polynomial.legendre.leggauss(order)
     nodes.flags.writeable = weights.flags.writeable = False
     return nodes, weights
@@ -79,7 +80,7 @@ def sphere_rule(
             cosine = (along + sign * width * sigmas[0]) / radius
             breaks.add(math.acos(min(1.0, max(-1.0, cosine))))
     panels = list(pairwise(sorted(breaks)))
-    x, w = _gauss_legendre(order)
+    x, w = gauss_legendre(order)
     theta = np.concatenate([0.5 * (b - a) * x + 0.5 * (a + b) for a, b in panels])
     theta_weight = np.concatenate([0.5 * (b - a) * w for a, b in panels]) * np.sin(
         theta

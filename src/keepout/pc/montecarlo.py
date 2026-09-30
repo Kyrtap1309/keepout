@@ -17,9 +17,11 @@ approach is refined by Newton's method on ``r.v = 0`` (slope
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import numpy.typing as npt
-from scipy import stats
+from scipy import special
 
 from keepout._types import FloatArray
 from keepout.conjunction import Conjunction
@@ -49,13 +51,21 @@ SPEED_MARGIN = 1.5
 def clopper_pearson(hits: int, trials: int, confidence: float) -> tuple[float, float]:
     """Exact binomial confidence interval for ``hits / trials``."""
     alpha = 1.0 - confidence
-    low = float(stats.beta.ppf(alpha / 2.0, hits, trials - hits + 1)) if hits else 0.0
+    # betaincinv(a, b, q) is the q-quantile of Beta(a, b).
+    low = (
+        float(special.betaincinv(hits, trials - hits + 1, alpha / 2.0)) if hits else 0.0
+    )
     high = (
-        float(stats.beta.ppf(1.0 - alpha / 2.0, hits + 1, trials - hits))
+        float(special.betaincinv(hits + 1, trials - hits, 1.0 - alpha / 2.0))
         if hits < trials
         else 1.0
     )
     return low, high
+
+
+def _converged(hits: int, trials: int, low: float, high: float, rtol: float) -> bool:
+    """Whether the interval's half-width is at most ``rtol`` of the estimate."""
+    return hits > 0 and 0.5 * (high - low) <= rtol * hits / trials
 
 
 class _Trials:
@@ -113,13 +123,11 @@ class _Trials:
         return below
 
 
-def _collisions(
-    trials: _Trials, found: RateScan, radius: float, count: int
-) -> tuple[int, int]:
+def _collisions(trials: _Trials, found: RateScan, radius: float) -> tuple[int, int]:
     """Collisions (entries) and trials already inside at the window start."""
     r, _, _ = trials.relative(found.times[0])
     inside = np.linalg.norm(r, axis=1) < radius
-    hit = np.zeros(count, dtype=bool)
+    hit = np.zeros_like(inside)
     for lo, hi in found.segments:
         previous: tuple[FloatArray, FloatArray] | None = None
         for k in range(lo, hi + 1):
@@ -149,6 +157,27 @@ def _percent(fraction: float) -> str:
     return f"{100.0 * fraction:.10g}%"
 
 
+def _details(
+    found: RateScan,
+    confidence: float,
+    interval: tuple[float, float],
+    trials: int,
+    hits: int,
+    inside: int,
+) -> dict[str, float]:
+    """The ``details`` of a Monte Carlo result."""
+    return {
+        "ci_low": interval[0],
+        "ci_high": interval[1],
+        "confidence": confidence,
+        "samples": float(trials),
+        "hits": float(hits),
+        "inside_at_start": inside / trials if trials else 0.0,
+        "window_start_s": found.window[0],
+        "window_end_s": found.window[1],
+    }
+
+
 def _no_encounter(found: RateScan, confidence: float) -> PcResult:
     """The result when the rate scan finds no encounter: no trial is run."""
     start, end = found.window
@@ -157,16 +186,7 @@ def _no_encounter(found: RateScan, confidence: float) -> PcResult:
         f"[{start:.6g}, {end:.6g}] s, so no trial can collide there; no trials "
         "were run"
     )
-    details = {
-        "ci_low": 0.0,
-        "ci_high": 0.0,
-        "confidence": confidence,
-        "samples": 0.0,
-        "hits": 0.0,
-        "inside_at_start": 0.0,
-        "window_start_s": start,
-        "window_end_s": end,
-    }
+    details = _details(found, confidence, (0.0, 0.0), 0, 0, 0)
     return PcResult(0.0, "montecarlo", (note,), details)
 
 
@@ -229,19 +249,22 @@ def montecarlo(
     """
     if samples is not None and samples < 1:
         raise ValueError(f"samples must be >= 1, got {samples}")
-    if not (rtol > 0.0 and max_samples >= 1 and 0.0 < confidence < 1.0):
-        raise ValueError("need rtol > 0, max_samples >= 1 and 0 < confidence < 1")
+    if not (math.isfinite(rtol) and rtol > 0.0):
+        raise ValueError(f"rtol must be finite and > 0, got {rtol}")
+    if not (max_samples >= 1 and 0.0 < confidence < 1.0):
+        raise ValueError("need max_samples >= 1 and 0 < confidence < 1")
     rate = collision_rate(conjunction)
     found = encounter_scan(conjunction, rate, window)
     # A peak-overlap failure inside a segment could have narrowed the
     # segments searched; the same rule as Hall's applies.
-    check_fallbacks(rate.fallbacks, found, found.peak)
+    check_fallbacks(rate.fallbacks, found)
     if not found.segments:
         return _no_encounter(found, confidence)
     rng = np.random.default_rng(seed)
     budget = samples if samples is not None else max_samples
     hits = inside = done = 0
     low, high = 0.0, 1.0
+    converged = False
     while done < budget:
         count = min(MC_BATCH, budget - done)
         trials = _Trials(
@@ -250,16 +273,14 @@ def montecarlo(
             rate.primary.sample(rng, count),
             rate.secondary.sample(rng, count),
         )
-        new_hits, new_inside = _collisions(
-            trials, found, conjunction.hard_body_radius, count
-        )
+        new_hits, new_inside = _collisions(trials, found, conjunction.hard_body_radius)
         hits, inside, done = hits + new_hits, inside + new_inside, done + count
         low, high = clopper_pearson(hits, done, confidence)
-        if samples is None and hits and 0.5 * (high - low) <= rtol * hits / done:
+        converged = _converged(hits, done, low, high, rtol)
+        if samples is None and converged:
             break
-    value = hits / done
     diagnostics: list[str] = []
-    if samples is None and not (hits and 0.5 * (high - low) <= rtol * value):
+    if samples is None and not converged:
         diagnostics.append(
             f"Monte Carlo stopped at {done} trials with {hits} collisions: the "
             f"{_percent(confidence)} interval [{low:.3g}, {high:.3g}] is wider than "
@@ -270,14 +291,5 @@ def montecarlo(
             f"{inside / done:.3g} of the trials already overlap at the window "
             "start; only entries into the hard body count"
         )
-    details = {
-        "ci_low": low,
-        "ci_high": high,
-        "confidence": confidence,
-        "samples": float(done),
-        "hits": float(hits),
-        "inside_at_start": inside / done,
-        "window_start_s": found.window[0],
-        "window_end_s": found.window[1],
-    }
-    return PcResult(value, "montecarlo", tuple(diagnostics), details)
+    details = _details(found, confidence, (low, high), done, hits, inside)
+    return PcResult(hits / done, "montecarlo", tuple(diagnostics), details)

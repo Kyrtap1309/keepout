@@ -21,7 +21,7 @@ from typing import Literal, TypeAlias
 import numpy as np
 from astropy.time import Time
 
-from keepout._types import FloatArray
+from keepout._types import FloatArray, symmetric_part
 from keepout.errors import GeometryError
 from keepout.objects import ObjectState, require_same_epoch
 
@@ -140,7 +140,7 @@ def encounter_plane(primary: ObjectState, secondary: ObjectState) -> EncounterPl
     return EncounterPlane(
         tca=primary.state.epoch,
         miss_vector=basis @ r,
-        covariance=0.5 * (projected + projected.T),
+        covariance=symmetric_part(projected),
         relative_position=r,
         relative_velocity=v,
         relative_speed=speed,

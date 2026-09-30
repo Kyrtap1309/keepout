@@ -22,7 +22,7 @@ from keepout.cdm.keywords import (
     FieldValue,
     SectionKind,
     ValueKind,
-    covariance_entries,
+    covariance_matrix,
     covariance_names,
     format_value,
     parse_value,
@@ -334,11 +334,10 @@ class CdmObject:
     @property
     def covariance_rtn(self) -> FloatArray:
         """Full symmetric RTN covariance as given (6x6 to 9x9), unvalidated."""
-        dimension = covariance_dimension(self.section)
-        matrix = np.zeros((dimension, dimension))
-        for name, row, column in covariance_entries(dimension):
-            matrix[row, column] = matrix[column, row] = _number(self.section, name)
-        return matrix
+        return covariance_matrix(
+            covariance_dimension(self.section),
+            lambda name: _number(self.section, name),
+        )
 
     def state(self) -> StateVector:
         """State vector at TCA in ``ref_frame``.
@@ -392,9 +391,10 @@ class CdmObject:
         return self._at(to_gcrf(self.state()), policy)
 
     def _at(self, state: StateVector, policy: Policy) -> ObjectState:
+        matrix = self.covariance_rtn[:6, :6]
         covariance = (
-            self.covariance(policy=policy).in_gcrf(state)
-            if self.has_covariance
+            make_covariance(matrix, "RTN", self.tca, policy=policy).in_gcrf(state)
+            if np.any(matrix)
             else None
         )
         return ObjectState(self.designator, state, covariance, self.hbr)

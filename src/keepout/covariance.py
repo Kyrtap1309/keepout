@@ -9,7 +9,7 @@ import numpy as np
 import numpy.typing as npt
 from astropy.time import Time
 
-from keepout._types import FloatArray, StateVector
+from keepout._types import FloatArray, StateVector, symmetric_part
 from keepout.errors import CovarianceError, GeometryError
 from keepout.frames import inertial_to_rtn_covariance, rtn_to_inertial_covariance
 
@@ -43,7 +43,7 @@ def _inspect(array: FloatArray) -> tuple[float, float, FloatArray, FloatArray]:
     """Scale, asymmetry, and eigen-decomposition of the symmetric part."""
     scale = float(np.max(np.abs(array)))
     asymmetry = float(np.max(np.abs(array - array.T)))
-    eigenvalues, eigenvectors = np.linalg.eigh(0.5 * (array + array.T))
+    eigenvalues, eigenvectors = np.linalg.eigh(symmetric_part(array))
     return scale, asymmetry, eigenvalues, eigenvectors
 
 
@@ -106,7 +106,7 @@ def repair(matrix: npt.ArrayLike) -> tuple[FloatArray, tuple[str, ...]]:
             f"to zero (most negative {float(eigenvalues[0]):.3g})"
         )
     fixed = (eigenvectors * np.clip(eigenvalues, 0.0, None)) @ eigenvectors.T
-    return 0.5 * (fixed + fixed.T), tuple(diagnostics)
+    return symmetric_part(fixed), tuple(diagnostics)
 
 
 def _require_gcrf(state: StateVector) -> None:
@@ -118,7 +118,7 @@ def _require_gcrf(state: StateVector) -> None:
 
 
 def _frozen(array: FloatArray) -> FloatArray:
-    symmetric = 0.5 * (array + array.T)
+    symmetric = symmetric_part(array)
     symmetric.flags.writeable = False
     return symmetric
 

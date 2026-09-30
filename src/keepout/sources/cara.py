@@ -22,14 +22,14 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, TypeAlias
 
 from keepout.errors import CaraFormatError, ChecksumMismatch, SourceUnavailable
 
 CARA_REPO = "nasa/CARA_Analysis_Tools"
 CARA_COMMIT = "1c78beb1f7aefc384886c3be1d09e4681acb5d37"
 
-Downloader = Callable[[str], bytes]
+Downloader: TypeAlias = Callable[[str], bytes]
 
 
 @dataclass(frozen=True)
@@ -223,10 +223,8 @@ def prefetch(
         As :func:`fetch`, for the first file that fails.
     """
     with ThreadPoolExecutor(max_workers=PREFETCH_WORKERS) as pool:
-        for _ in pool.map(
-            lambda file: fetch(file, cache=cache, download=download), files
-        ):
-            pass
+        # Consuming the results re-raises the first failure.
+        list(pool.map(lambda file: fetch(file, cache=cache, download=download), files))
 
 
 def load_csv(path: Path) -> list[dict[str, str]]:

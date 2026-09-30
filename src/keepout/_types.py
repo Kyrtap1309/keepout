@@ -19,6 +19,12 @@ RefFrame: TypeAlias = Literal["GCRF", "EME2000", "ITRF"]
 REF_FRAMES: tuple[RefFrame, ...] = get_args(RefFrame)
 
 
+def symmetric_part(matrix: FloatArray) -> FloatArray:
+    """``(M + M^T) / 2`` of a matrix or a stack of matrices ``(..., n, n)``."""
+    result: FloatArray = 0.5 * (matrix + np.swapaxes(matrix, -1, -2))
+    return result
+
+
 def as_vector(value: npt.ArrayLike, name: str) -> FloatArray:
     """Return a read-only, finite float64 copy of a 3-vector.
 

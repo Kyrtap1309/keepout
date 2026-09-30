@@ -14,9 +14,11 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from keepout._types import FloatArray
+from keepout._types import FloatArray, symmetric_part
 from keepout.equinoctial import (
+    COMPLEX_STEP,
     RetrogradeFactor,
+    complex_step,
     complex_step_jacobian,
     propagate,
     retrograde_factor,
@@ -27,15 +29,6 @@ from keepout.equinoctial import (
 from keepout.errors import CovarianceError
 from keepout.objects import ObjectState
 from keepout.orbits import EARTH_MU
-
-_COMPLEX_STEP = 1e-30
-"""Imaginary step of :meth:`OrbitUncertainty.mean_expansions` (as in
-:func:`~keepout.equinoctial.complex_step_jacobian`)."""
-
-
-def _symmetric(matrix: FloatArray) -> FloatArray:
-    result: FloatArray = 0.5 * (matrix + matrix.T)
-    return result
 
 
 @dataclass(frozen=True, eq=False)
@@ -79,7 +72,9 @@ class OrbitUncertainty:
         to_elements = np.linalg.inv(
             complex_step_jacobian(lambda e: to_cartesian(e, fr), elements)
         )
-        covariance = _symmetric(to_elements @ item.covariance.matrix @ to_elements.T)
+        covariance = symmetric_part(
+            to_elements @ item.covariance.matrix @ to_elements.T
+        )
         return cls(elements, covariance, fr, item.covariance.position)
 
     def cartesian(self, elements: FloatArray, t: float | FloatArray) -> FloatArray:
@@ -100,13 +95,13 @@ class OrbitUncertainty:
         tuple
             Mean state ``X`` (6,) and covariance ``P`` (6x6) at ``t``.
         """
-        jacobian = complex_step_jacobian(
+        state, jacobian = complex_step(
             lambda e: to_cartesian(propagate(e, t), self.fr), centre
         )
         offset = self.elements - centre
         offset[5] = wrap_angle(offset[5])
-        mean = self.cartesian(centre, t) + jacobian @ offset
-        return mean, _symmetric(jacobian @ self.covariance @ jacobian.T)
+        mean = state + jacobian @ offset
+        return mean, symmetric_part(jacobian @ self.covariance @ jacobian.T)
 
     def mean_expansions(self, t: FloatArray) -> tuple[FloatArray, FloatArray]:
         """Mean-centred :meth:`expansion` at many times at once.
@@ -123,16 +118,15 @@ class OrbitUncertainty:
         """
         times = np.asarray(t, dtype=np.float64).ravel()
         # The complex-step Jacobian of every time in one vectorised call.
-        shifted = self.elements + 1j * _COMPLEX_STEP * np.eye(6)
+        shifted = self.elements + 1j * COMPLEX_STEP * np.eye(6)
         rows = np.broadcast_to(shifted, (times.size, 6, 6)).reshape(-1, 6)
         value = np.asarray(
             to_cartesian(propagate(rows, np.repeat(times, 6)), self.fr)
         ).reshape(times.size, 6, 6)
-        jacobian = np.imag(value).transpose(0, 2, 1) / _COMPLEX_STEP
+        jacobian = np.imag(value).transpose(0, 2, 1) / COMPLEX_STEP
         mean: FloatArray = np.real(value[:, 0, :])
         covariance = jacobian @ self.covariance @ jacobian.transpose(0, 2, 1)
-        symmetric: FloatArray = 0.5 * (covariance + covariance.transpose(0, 2, 1))
-        return mean, symmetric
+        return mean, symmetric_part(covariance)
 
     @property
     def max_acceleration(self) -> float:

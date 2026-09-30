@@ -17,14 +17,15 @@ from __future__ import annotations
 import math
 from collections.abc import Callable
 from dataclasses import dataclass
-from functools import lru_cache
 from itertools import pairwise
+from typing import TypeAlias
 
 import numpy as np
 import numpy.typing as npt
 
 from keepout._types import FloatArray
 from keepout.errors import PcConvergenceError
+from keepout.pc._sphere import gauss_legendre
 
 RATE_FLOOR = 1e-16
 """Rate, relative to the peak, below which the rate is negligible."""
@@ -100,8 +101,6 @@ class RateIntegral:
         Integration window [s from TCA].
     edge
         Largest rate at the window edges, relative to the peak.
-    step
-        Largest scan-grid spacing inside the segments [s].
     peak
         Largest rate on the scan grid [1/s].
     agreement
@@ -114,7 +113,6 @@ class RateIntegral:
     segments: tuple[Segment, ...]
     window: tuple[float, float]
     edge: float
-    step: float
     peak: float
     agreement: float = 0.0
 
@@ -141,26 +139,25 @@ class Candidate:
     width: float
 
 
-Screen = Callable[[tuple[float, float]], list[Candidate]]
+Screen: TypeAlias = Callable[[tuple[float, float]], list[Candidate]]
 """Candidate intervals of a window, in increasing time and disjoint."""
 
 
-def crossing_scales(
+def straight_line_half_window(
     relative_velocity: FloatArray, position_covariance: FloatArray, radius: float
-) -> tuple[float, float]:
-    """Half-window and crossing time of a straight-line encounter [s].
+) -> float:
+    """Half-window of a straight-line encounter [s].
 
     With ``sigma_v`` the combined position standard deviation along the
     relative velocity, the rate is negligible beyond
-    ``(SIGMA_REACH sigma_v + R) / |v|`` and one crossing takes about
-    ``(sigma_v + R) / |v|``. Both are infinite for zero relative velocity.
+    ``(SIGMA_REACH sigma_v + R) / |v|``; infinite for zero relative velocity.
     """
     speed = float(np.linalg.norm(relative_velocity))
     if speed == 0.0:
-        return math.inf, math.inf
+        return math.inf
     direction = relative_velocity / speed
     sigma = math.sqrt(max(float(direction @ position_covariance @ direction), 0.0))
-    return (SIGMA_REACH * sigma + radius) / speed, (sigma + radius) / speed
+    return (SIGMA_REACH * sigma + radius) / speed
 
 
 def regions(significant: npt.NDArray[np.bool_]) -> list[tuple[int, int]]:
@@ -202,15 +199,6 @@ class RateScan:
         return float(self.times[0]), float(self.times[-1])
 
     @property
-    def step(self) -> float:
-        """Largest grid spacing inside the segments [s] (the window if none)."""
-        if not self.segments:
-            return self.window[1] - self.window[0]
-        return max(
-            float(np.max(np.diff(self.times[lo : hi + 1]))) for lo, hi in self.segments
-        )
-
-    @property
     def peak(self) -> float:
         """Largest rate on the grid [1/s]."""
         return float(self.values.max())
@@ -218,8 +206,13 @@ class RateScan:
     @property
     def edge(self) -> float:
         """Largest rate at the window edges, relative to the peak (0 if none)."""
-        peak = self.peak
-        return float(max(self.values[0], self.values[-1])) / peak if peak > 0 else 0.0
+        return _edge(self.values)
+
+
+def _edge(values: FloatArray) -> float:
+    """Largest of the first and last value, relative to the largest (0 if none)."""
+    peak = float(values.max())
+    return float(max(values[0], values[-1])) / peak if peak > 0.0 else 0.0
 
 
 def _detection_grids(
@@ -421,22 +414,16 @@ def locate_auto(
     half = min(half_width, limit)
     while True:
         times, values, fine = _detect(rate, (a - half, b + half), screen)
-        peak = float(values.max())
-        edge = float(max(values[0], values[-1])) / peak if peak > 0.0 else 0.0
-        if (peak > 0.0 and edge < RATE_FLOOR) or half >= limit:
+        if (values.max() > 0.0 and _edge(values) < RATE_FLOOR) or half >= limit:
             return _segments(rate, times, values, fine)
         half = min(2.0 * half, limit)
 
 
 START_ORDER = 32
+"""First Gauss-Legendre order of the time integral of one piece."""
+
 MAX_ORDER = 1024
-
-
-@lru_cache(maxsize=8)
-def _gauss_legendre(order: int) -> tuple[FloatArray, FloatArray]:
-    nodes, weights = np.polynomial.legendre.leggauss(order)
-    nodes.flags.writeable = weights.flags.writeable = False
-    return nodes, weights
+"""Largest Gauss-Legendre order of the time integral of one piece."""
 
 
 def _gauss_legendre_integral(
@@ -458,7 +445,7 @@ def _gauss_legendre_integral(
     half, middle = 0.5 * (end - start), 0.5 * (end + start)
 
     def rule(order: int) -> float:
-        nodes, weights = _gauss_legendre(order)
+        nodes, weights = gauss_legendre(order)
         values = np.array([rate(middle + half * float(x)) for x in nodes])
         return half * float(weights @ values)
 
@@ -501,11 +488,5 @@ def integrate_segments(
     worst = max(shortfalls, default=0.0)
     agreement = worst / abs(total) if total != 0.0 else (math.inf if worst else 0.0)
     return RateIntegral(
-        total,
-        tuple(segments),
-        found.window,
-        found.edge,
-        found.step,
-        found.peak,
-        agreement,
+        total, tuple(segments), found.window, found.edge, found.peak, agreement
     )

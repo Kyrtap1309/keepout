@@ -12,13 +12,13 @@ the rest. It is for validation only; operational CDMs go through
 from __future__ import annotations
 
 import re
+from functools import partial
 from pathlib import Path
 
-import numpy as np
 from astropy.time import Time
 
 from keepout._types import REF_FRAMES, StateVector
-from keepout.cdm.keywords import covariance_entries
+from keepout.cdm.keywords import covariance_matrix
 from keepout.covariance import make_covariance
 from keepout.errors import CaraFormatError
 from keepout.frames import to_gcrf
@@ -83,9 +83,7 @@ def legacy_objects(
         state = to_gcrf(StateVector(tca, values[:3], values[3:], frame))
         covariance = None
         if use:
-            matrix = np.zeros((6, 6))
-            for name, row, column in covariance_entries(6):
-                matrix[row, column] = matrix[column, row] = _number(fields, name, path)
+            matrix = covariance_matrix(6, partial(_number, fields, path=path))
             covariance = make_covariance(matrix, "RTN", tca).in_gcrf(state)
         designator = fields.get("OBJECT_DESIGNATOR", "?")
         objects.append(ObjectState(designator, state, covariance))

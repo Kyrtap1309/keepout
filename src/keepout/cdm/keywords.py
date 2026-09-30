@@ -11,11 +11,14 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal, TypeAlias
 
 import numpy as np
 from astropy.time import Time
+
+from keepout._types import FloatArray
 
 ValueKind: TypeAlias = Literal["str", "int", "float", "time"]
 SectionKind: TypeAlias = Literal["header", "relative", "segment"]
@@ -101,6 +104,22 @@ def covariance_entries(dimension: int) -> tuple[tuple[str, int, int], ...]:
         (f"C{COVARIANCE_AXES[row]}_{COVARIANCE_AXES[column]}", int(row), int(column))
         for row, column in zip(rows, columns, strict=True)
     )
+
+
+def covariance_matrix(dimension: int, value_of: Callable[[str], float]) -> FloatArray:
+    """Symmetric covariance of the leading block from its lower-triangle keywords.
+
+    Parameters
+    ----------
+    dimension
+        Block size, as in :func:`covariance_entries`.
+    value_of
+        Value of a covariance keyword.
+    """
+    matrix = np.zeros((dimension, dimension))
+    for name, row, column in covariance_entries(dimension):
+        matrix[row, column] = matrix[column, row] = value_of(name)
+    return matrix
 
 
 def covariance_names(dimension: int) -> tuple[str, ...]:

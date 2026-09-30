@@ -41,6 +41,9 @@ is already at rounding level; one more step from there is final."""
 
 KEPLER_MAX_ITERATIONS = 60
 
+COMPLEX_STEP = 1e-30
+"""Default imaginary step of :func:`complex_step_jacobian`."""
+
 SINGULARITY_TOLERANCE = 1e-12
 """Smallest accepted ``|h| / (|r| |v|)`` and ``1 + fr w_z`` (both vanish at a
 singularity of the elements)."""
@@ -179,6 +182,7 @@ def to_cartesian(
     e_real = np.hypot(np.real(af), np.real(ag))
     varpi = np.arctan2(np.real(ag), np.real(af))
     longitude = lam + 0.85 * e_real * np.sign(np.sin(np.real(lam) - varpi))
+    # Promote to complex when the elements are (a complex-step derivative).
     longitude = longitude + 0.0 * af
     for _ in range(KEPLER_MAX_ITERATIONS):
         residual = longitude + ag * np.cos(longitude) - af * np.sin(longitude) - lam
@@ -230,8 +234,28 @@ def wrap_angle(angle: Any) -> Any:
     return (angle + math.pi) % (2.0 * math.pi) - math.pi
 
 
+def complex_step(
+    function: Callable[[Any], Any], x: npt.ArrayLike, step: float = COMPLEX_STEP
+) -> tuple[FloatArray, FloatArray]:
+    """Value and Jacobian of a real-analytic vector function by the complex step.
+
+    As :func:`complex_step_jacobian`, which see; the value ``f(x)`` is the
+    real part of the same evaluation (exact to ``O(h^2)``).
+    """
+    point = np.asarray(x, dtype=np.float64)
+    value = function(point + 1j * step * np.eye(point.size))
+    if not np.iscomplexobj(value):
+        raise TypeError(
+            "complex_step_jacobian needs a function that keeps complex input "
+            "complex; it returned a real array, which would give a zero Jacobian"
+        )
+    real: FloatArray = np.real(value[0])
+    jacobian: FloatArray = np.imag(value).T / step
+    return real, jacobian
+
+
 def complex_step_jacobian(
-    function: Callable[[Any], Any], x: npt.ArrayLike, step: float = 1e-30
+    function: Callable[[Any], Any], x: npt.ArrayLike, step: float = COMPLEX_STEP
 ) -> FloatArray:
     """Jacobian of a real-analytic vector function by the complex step.
 
@@ -248,13 +272,4 @@ def complex_step_jacobian(
     step
         Imaginary step ``h``.
     """
-    point = np.asarray(x, dtype=np.float64)
-    shifted = point + 1j * step * np.eye(point.size)
-    value = function(shifted)
-    if not np.iscomplexobj(value):
-        raise TypeError(
-            "complex_step_jacobian needs a function that keeps complex input "
-            "complex; it returned a real array, which would give a zero Jacobian"
-        )
-    jacobian: FloatArray = np.imag(value).T / step
-    return jacobian
+    return complex_step(function, x, step)[1]
