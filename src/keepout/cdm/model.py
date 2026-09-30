@@ -11,18 +11,19 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from functools import cached_property
+from typing import assert_never
 
 import numpy as np
 from astropy.time import Time
 
-from keepout._types import REF_FRAMES, FloatArray, StateVector
+from keepout._types import FloatArray
 from keepout.cdm.keywords import (
     KEYWORDS,
     REQUIRED,
     FieldValue,
     SectionKind,
     ValueKind,
-    covariance_entries,
+    covariance_matrix,
     covariance_names,
     format_value,
     parse_value,
@@ -31,6 +32,7 @@ from keepout.covariance import Covariance, Policy, make_covariance
 from keepout.errors import GeometryError
 from keepout.frames import to_gcrf, to_gcrf_all
 from keepout.objects import ObjectState
+from keepout.state import REF_FRAMES, StateVector
 
 COMMENT = "COMMENT"
 USER_DEFINED_PREFIX = "USER_DEFINED_"
@@ -122,13 +124,17 @@ def format_field(kind: SectionKind, field: Field) -> tuple[str, str | None]:
 
 
 def _matches(value: object, kind: ValueKind) -> bool:
-    if kind == "time":
-        return isinstance(value, Time) and bool(value.isscalar)
-    if kind == "int":
-        return isinstance(value, int) and not isinstance(value, bool)
-    if kind == "float":
-        return isinstance(value, float)
-    return isinstance(value, str)
+    match kind:
+        case "time":
+            return isinstance(value, Time) and bool(value.isscalar)
+        case "int":
+            return isinstance(value, int) and not isinstance(value, bool)
+        case "float":
+            return isinstance(value, float)
+        case "str":
+            return isinstance(value, str)
+        case _:
+            assert_never(kind)
 
 
 @dataclass(frozen=True)
@@ -211,8 +217,8 @@ class Section:
         }
 
     def missing(self) -> tuple[str, ...]:
-        """Required keywords absent from this section."""
-        return tuple(k for k in REQUIRED[self.kind] if self.get(k) is None)
+        """Required keywords absent from this section or given no value."""
+        return tuple(k for k in REQUIRED[self.kind] if self.get(k) in (None, ""))
 
 
 def _text(section: Section, keyword: str) -> str:
@@ -334,11 +340,10 @@ class CdmObject:
     @property
     def covariance_rtn(self) -> FloatArray:
         """Full symmetric RTN covariance as given (6x6 to 9x9), unvalidated."""
-        dimension = covariance_dimension(self.section)
-        matrix = np.zeros((dimension, dimension))
-        for name, row, column in covariance_entries(dimension):
-            matrix[row, column] = matrix[column, row] = _number(self.section, name)
-        return matrix
+        return covariance_matrix(
+            covariance_dimension(self.section),
+            lambda name: _number(self.section, name),
+        )
 
     def state(self) -> StateVector:
         """State vector at TCA in ``ref_frame``.
@@ -369,18 +374,49 @@ class CdmObject:
             self.covariance_rtn[:6, :6], "RTN", self.tca, policy=policy
         )
 
+    @property
+    def has_covariance(self) -> bool:
+        """False if every 6x6 covariance entry is zero.
+
+        Operators send an all-zero covariance when they have none; it means
+        "unknown", not "perfectly known".
+        """
+        return bool(np.any(self.covariance_rtn[:6, :6]))
+
     def object_state(self, *, policy: Policy = "repair") -> ObjectState:
         """GCRF object state with covariance; RTN axes from the GCRF state.
+
+        The covariance is ``None`` when the CDM gives an all-zero matrix
+        (see :attr:`has_covariance`).
 
         Parameters
         ----------
         policy
             Covariance policy, as in :meth:`covariance`.
         """
-        return self._at(to_gcrf(self.state()), policy)
+        return self.object_state_at(to_gcrf(self.state()), policy=policy)
 
-    def _at(self, state: StateVector, policy: Policy) -> ObjectState:
-        covariance = self.covariance(policy=policy).in_gcrf(state)
+    def object_state_at(
+        self, state: StateVector, *, policy: Policy = "repair"
+    ) -> ObjectState:
+        """:meth:`object_state` with the GCRF state already converted.
+
+        :meth:`Cdm.object_states` uses it to convert both objects' ITRF
+        states in one transformation (:func:`keepout.frames.to_gcrf_all`).
+
+        Parameters
+        ----------
+        state
+            This object's state in GCRF; defines the RTN axes.
+        policy
+            Covariance policy, as in :meth:`covariance`.
+        """
+        matrix = self.covariance_rtn[:6, :6]
+        covariance = (
+            make_covariance(matrix, "RTN", self.tca, policy=policy).in_gcrf(state)
+            if np.any(matrix)
+            else None
+        )
         return ObjectState(self.designator, state, covariance, self.hbr)
 
 
@@ -457,6 +493,11 @@ class Cdm:
         return _text(self.header, "MESSAGE_ID")
 
     @property
+    def conjunction_id(self) -> str | None:
+        """``CONJUNCTION_ID`` (CDM 2.0), shared by every CDM of one event."""
+        return _optional_text(self.header, "CONJUNCTION_ID")
+
+    @property
     def message_for(self) -> str | None:
         """``MESSAGE_FOR``, if given."""
         return _optional_text(self.header, "MESSAGE_FOR")
@@ -498,4 +539,7 @@ class Cdm:
         """
         objects = (self.object1, self.object2)
         first, second = to_gcrf_all([item.state() for item in objects])
-        return objects[0]._at(first, policy), objects[1]._at(second, policy)
+        return (
+            objects[0].object_state_at(first, policy=policy),
+            objects[1].object_state_at(second, policy=policy),
+        )

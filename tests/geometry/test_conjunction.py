@@ -30,11 +30,13 @@ def test_radius_must_be_finite_and_positive(radius: float) -> None:
         head_on(miss=30.0, sigma_x=10.0, sigma_z=20.0, radius=radius)
 
 
-def test_zero_relative_velocity_is_rejected() -> None:
+def test_zero_relative_velocity_has_no_encounter_plane() -> None:
     primary = object_state(LEO_R, LEO_V, np.eye(3))
     secondary = object_state(LEO_R + np.array([10.0, 0.0, 0.0]), LEO_V, np.eye(3))
+    conjunction = Conjunction(primary, secondary, 5.0)
+    assert conjunction.relative_speed == 0.0
     with pytest.raises(GeometryError, match="relative velocity is zero"):
-        Conjunction(primary, secondary, 5.0)
+        _ = conjunction.plane
 
 
 def test_explicit_radius_wins() -> None:
@@ -67,5 +69,14 @@ def test_diagnostics_label_each_objects_covariance_repairs() -> None:
     )
     conjunction = Conjunction(base.primary, secondary, 5.0)
     assert conjunction.diagnostics == (
-        "secondary (99): clipped 1 negative eigenvalue(s) to zero (most negative -1)",
+        "secondary (99): clipped 1 negative eigenvalue(s) of the velocity "
+        "covariance conditional on position to zero (most negative -1 in "
+        "correlation units)",
     )
+
+
+def test_unknown_covariance_is_reported() -> None:
+    base = head_on(30.0, 10.0, 20.0, 5.0)
+    secondary = ObjectState("99999", base.secondary.state, None)
+    conjunction = Conjunction(base.primary, secondary, 5.0)
+    assert conjunction.diagnostics == ("secondary (99999): covariance unknown",)

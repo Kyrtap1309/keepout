@@ -9,9 +9,10 @@ import numpy as np
 import numpy.typing as npt
 from astropy.time import Time
 
-from keepout._types import FloatArray, StateVector
+from keepout._types import FloatArray, symmetric_part
 from keepout.errors import CovarianceError, GeometryError
 from keepout.frames import inertial_to_rtn_covariance, rtn_to_inertial_covariance
+from keepout.state import StateVector
 
 CovarianceFrame: TypeAlias = Literal["RTN", "GCRF"]
 """Frames a :class:`Covariance` can be expressed in."""
@@ -24,10 +25,42 @@ Policy: TypeAlias = Literal["raise", "repair"]
 POLICIES: tuple[Policy, ...] = get_args(Policy)
 
 SYMMETRY_RTOL = 1e-9
-"""Allowed asymmetry, relative to the largest absolute entry."""
+"""Allowed asymmetry of ``C[i, j]``, relative to ``sqrt(|C[i, i] C[j, j]|)``."""
 
 PSD_RTOL = 1e-10
-"""Allowed negative eigenvalue, relative to the largest absolute entry."""
+"""Allowed negative eigenvalue of the correlation matrix ``D^-1 C D^-1``.
+
+``D = diag(sqrt|C[i, i]|)`` (1 where a variance is negligible, see
+:data:`NEGLIGIBLE_VARIANCE`), so each block is judged at its own scale: a
+velocity variance of 1e-4 m^2/s^2 is checked as strictly as a position
+variance of 1e8 m^2."""
+
+NEGLIGIBLE_VARIANCE = 1e-200
+"""Variance, relative to the largest absolute entry, below which it is taken
+as 0 when forming the correlation matrix. Dividing by its square root would
+otherwise overflow; real covariances span far less (a mm/s velocity next to
+a 10 km position is 1e-16)."""
+
+
+RANK_RTOL = 1e-8
+"""Position-block correlation eigenvalue below which :func:`repair` treats
+the direction as unknown: velocity correlations along it are dropped rather
+than divided by a vanishing variance."""
+
+_SMALLEST_NORMAL = float(np.finfo(np.float64).tiny)
+
+
+def _eigh(matrix: FloatArray) -> tuple[FloatArray, FloatArray]:
+    """:func:`numpy.linalg.eigh` of a matrix with entries of any finite size.
+
+    Eigenvalues scale with the matrix, so it is decomposed at unit scale;
+    LAPACK could otherwise overflow on correlations far outside [-1, 1].
+    """
+    size = float(np.max(np.abs(matrix)))
+    if size == 0.0:
+        return np.linalg.eigh(matrix)
+    values, vectors = np.linalg.eigh(matrix / size)
+    return values * size, vectors
 
 
 def _as_matrix(matrix: npt.ArrayLike) -> FloatArray:
@@ -39,22 +72,27 @@ def _as_matrix(matrix: npt.ArrayLike) -> FloatArray:
     return array
 
 
-def _inspect(array: FloatArray) -> tuple[float, float, FloatArray, FloatArray]:
-    """Scale, asymmetry, and eigen-decomposition of the symmetric part."""
-    scale = float(np.max(np.abs(array)))
-    asymmetry = float(np.max(np.abs(array - array.T)))
-    eigenvalues, eigenvectors = np.linalg.eigh(0.5 * (array + array.T))
-    return scale, asymmetry, eigenvalues, eigenvectors
+def _inspect(array: FloatArray) -> tuple[FloatArray, float, FloatArray, FloatArray]:
+    """Standard deviations ``D``, relative asymmetry, and the eigen-decomposition
+    of the symmetric part of the correlation matrix ``D^-1 C D^-1``."""
+    variances = np.abs(np.diag(array))
+    floor = max(_SMALLEST_NORMAL, NEGLIGIBLE_VARIANCE * float(np.max(np.abs(array))))
+    deviations = np.where(variances >= floor, np.sqrt(variances), 1.0)
+    scaled = array / np.outer(deviations, deviations)
+    asymmetry = float(np.max(np.abs(scaled - scaled.T)))
+    eigenvalues, eigenvectors = _eigh(symmetric_part(scaled))
+    return deviations, asymmetry, eigenvalues, eigenvectors
 
 
 def _problems(array: FloatArray) -> tuple[str, ...]:
-    scale, asymmetry, eigenvalues, _ = _inspect(array)
+    _, asymmetry, eigenvalues, _ = _inspect(array)
     found: list[str] = []
-    if asymmetry > SYMMETRY_RTOL * scale:
-        found.append(f"not symmetric (max asymmetry {asymmetry:.3g})")
-    if eigenvalues[0] < -PSD_RTOL * scale:
+    if asymmetry > SYMMETRY_RTOL:
+        found.append(f"not symmetric (max relative asymmetry {asymmetry:.3g})")
+    if eigenvalues[0] < -PSD_RTOL:
         found.append(
-            f"not positive semi-definite (min eigenvalue {eigenvalues[0]:.3g})"
+            "not positive semi-definite (min correlation-matrix eigenvalue "
+            f"{eigenvalues[0]:.3g})"
         )
     return tuple(found)
 
@@ -81,8 +119,77 @@ def problems(matrix: npt.ArrayLike) -> tuple[str, ...]:
     return _problems(_as_matrix(matrix))
 
 
+def _clipped(block: FloatArray) -> tuple[FloatArray, int, float]:
+    """A symmetric block with its negative eigenvalues set to 0.
+
+    Returns the block, how many eigenvalues were below ``-PSD_RTOL`` and the
+    most negative one.
+    """
+    values, vectors = _eigh(block)
+    result: FloatArray = (vectors * np.clip(values, 0.0, None)) @ vectors.T
+    return result, int(np.count_nonzero(values < -PSD_RTOL)), float(values[0])
+
+
+def _repaired_correlation(scaled: FloatArray) -> tuple[FloatArray, list[str]]:
+    """Make a symmetric correlation matrix positive semi-definite, minimally.
+
+    The position block ``P`` is repaired only if it is itself invalid. The
+    velocity block is then rebuilt from the conditional velocity covariance
+    ``S = V - B P^+ B^T`` (the Schur complement, which is what the 3-D
+    methods use), with the negative eigenvalues of ``S`` clipped. A valid
+    position block, and with it 2-D Pc, is therefore never changed by a
+    defect in the velocity terms.
+    """
+    position, cross, velocity = scaled[:3, :3], scaled[3:, :3], scaled[3:, 3:]
+    notes: list[str] = []
+    position, count, lowest = _clipped(position)
+    if count:
+        notes.append(
+            f"clipped {count} negative position-block eigenvalue(s) to zero "
+            f"(most negative {lowest:.3g} in correlation units)"
+        )
+    # B P^+ B^T over the directions the position block resolves; velocity
+    # correlations along the others have nothing to condition on.
+    values, vectors = _eigh(position)
+    resolved = values > RANK_RTOL * max(float(values[-1]), 1.0)
+    known, variances = vectors[:, resolved], values[resolved]
+    cross = cross @ known @ known.T
+    explained = (cross @ known / variances) @ (known.T @ cross.T)
+    conditional, count, lowest = _clipped(symmetric_part(velocity - explained))
+    if count:
+        notes.append(
+            f"clipped {count} negative eigenvalue(s) of the velocity covariance "
+            f"conditional on position to zero (most negative {lowest:.3g} in "
+            "correlation units)"
+        )
+    repaired = np.block(
+        [[position, cross.T], [cross, symmetric_part(conditional + explained)]]
+    )
+    return repaired, notes
+
+
+def _structured_repair(
+    correlation: FloatArray, scale: FloatArray
+) -> tuple[FloatArray, list[str]] | None:
+    """:func:`_repaired_correlation` in covariance units, or None if it fails."""
+    try:
+        with np.errstate(over="ignore", invalid="ignore"):
+            repaired, notes = _repaired_correlation(correlation)
+            fixed = symmetric_part(repaired * scale)
+        valid = bool(np.all(np.isfinite(fixed))) and not _problems(fixed)
+    except np.linalg.LinAlgError:
+        return None
+    return (fixed, notes) if valid else None
+
+
 def repair(matrix: npt.ArrayLike) -> tuple[FloatArray, tuple[str, ...]]:
-    """Symmetrise a matrix and clip its negative eigenvalues to zero.
+    """Symmetrise a matrix and make it positive semi-definite.
+
+    Both are judged on the correlation matrix (see :data:`PSD_RTOL`), so a
+    small block is repaired at its own scale. A negative eigenvalue is
+    removed where it lies: in the position block if that block is invalid,
+    otherwise in the velocity covariance conditional on position, leaving
+    the position block (and 2-D Pc) unchanged.
 
     Parameters
     ----------
@@ -95,18 +202,33 @@ def repair(matrix: npt.ArrayLike) -> tuple[FloatArray, tuple[str, ...]]:
         The repaired matrix and diagnostics describing what was changed (empty
         if the matrix was already valid).
     """
-    scale, asymmetry, eigenvalues, eigenvectors = _inspect(_as_matrix(matrix))
+    array = _as_matrix(matrix)
+    deviations, asymmetry, eigenvalues, _ = _inspect(array)
     diagnostics: list[str] = []
-    if asymmetry > SYMMETRY_RTOL * scale:
-        diagnostics.append(f"symmetrised covariance (max asymmetry {asymmetry:.3g})")
-    negative = eigenvalues < -PSD_RTOL * scale
-    if np.any(negative):
+    if asymmetry > SYMMETRY_RTOL:
         diagnostics.append(
-            f"clipped {int(np.count_nonzero(negative))} negative eigenvalue(s) "
-            f"to zero (most negative {float(eigenvalues[0]):.3g})"
+            f"symmetrised covariance (max relative asymmetry {asymmetry:.3g})"
         )
-    fixed = (eigenvectors * np.clip(eigenvalues, 0.0, None)) @ eigenvectors.T
-    return 0.5 * (fixed + fixed.T), tuple(diagnostics)
+    if eigenvalues[0] >= -PSD_RTOL:
+        return symmetric_part(array), tuple(diagnostics)
+    scale = np.outer(deviations, deviations)
+    correlation = symmetric_part(array / scale)
+    structured = _structured_repair(correlation, scale)
+    notes: list[str] = []
+    if structured is None:
+        # Correlations far outside [-1, 1] defeat the conditioning; clipping
+        # the whole correlation matrix always works.
+        clipped, _, _ = _clipped(correlation)
+        fixed = symmetric_part(clipped * scale)
+    else:
+        fixed, notes = structured
+    # Each block's own eigenvalues may be within tolerance while the matrix
+    # is not: the repair still ran, so it is still reported.
+    diagnostics += notes or [
+        f"made positive semi-definite (min correlation-matrix eigenvalue "
+        f"{float(eigenvalues[0]):.3g})"
+    ]
+    return fixed, tuple(diagnostics)
 
 
 def _require_gcrf(state: StateVector) -> None:
@@ -118,7 +240,7 @@ def _require_gcrf(state: StateVector) -> None:
 
 
 def _frozen(array: FloatArray) -> FloatArray:
-    symmetric = 0.5 * (array + array.T)
+    symmetric = symmetric_part(array)
     symmetric.flags.writeable = False
     return symmetric
 

@@ -42,14 +42,16 @@ def on_plane(
 
 def unfloored(case: PlaneCase) -> bool:
     """Neither plane sigma is raised to keepout's floor (the oracle has none)."""
-    return case.sv > 1e-3 * case.radius
+    return case.sigma_v > 1e-3 * case.radius
 
 
 @settings(max_examples=50)
 @given(plane_cases())
 def test_both_methods_match_the_independent_oracle(case: PlaneCase) -> None:
     assume(unfloored(case))
-    expected = principal_axes_pc(case.mu, case.mv, case.su, case.sv, case.radius)
+    expected = principal_axes_pc(
+        case.miss_u, case.miss_v, case.sigma_u, case.sigma_v, case.radius
+    )
     assume(expected > 1e-250)
     for method in METHODS:
         assert close(on_plane(case, method).value, expected, rtol=1e-7)
@@ -57,8 +59,10 @@ def test_both_methods_match_the_independent_oracle(case: PlaneCase) -> None:
 
 @given(plane_cases())
 def test_pc_is_bounded_by_the_peak_density(case: PlaneCase) -> None:
-    # Pc is at most pi R^2 times the largest plane density, 1 / (2 pi su sv).
-    bound = case.radius**2 / (2.0 * max(case.su, 1e-4 * case.radius) * case.sv)
+    # Pc is at most pi R^2 times the largest plane density, 1 / (2 pi sigma_u sigma_v).
+    bound = case.radius**2 / (
+        2.0 * max(case.sigma_u, 1e-4 * case.radius) * case.sigma_v
+    )
     for method in METHODS:
         value = on_plane(case, method).value
         assert 0.0 <= value <= bound * (1.0 + 1e-9)
@@ -73,7 +77,7 @@ def test_pc_does_not_depend_on_the_unit_of_length(
 
 @given(plane_cases())
 def test_mirrored_miss_gives_the_same_pc(case: PlaneCase) -> None:
-    mirrored = dataclasses.replace(case, mu=-case.mu, mv=-case.mv)
+    mirrored = dataclasses.replace(case, miss_u=-case.miss_u, miss_v=-case.miss_v)
     assert close(on_plane(mirrored).value, on_plane(case).value)
 
 
@@ -99,7 +103,10 @@ def test_pc_falls_as_the_miss_grows(
     # as the disk moves out along any fixed direction.
     nearer = on_plane(case, method).value
     farther = on_plane(
-        dataclasses.replace(case, mu=case.mu * factor, mv=case.mv * factor), method
+        dataclasses.replace(
+            case, miss_u=case.miss_u * factor, miss_v=case.miss_v * factor
+        ),
+        method,
     ).value
     assert farther <= nearer * (1.0 + 1e-9)
 
@@ -108,11 +115,11 @@ def test_pc_falls_as_the_miss_grows(
 def test_small_hard_body_sees_the_density_at_the_miss(
     case: PlaneCase, method: Method
 ) -> None:
-    # R -> 0: Pc -> pi R^2 f(miss), with a relative error of order (R/sv)^2.
-    small = dataclasses.replace(case, radius=1e-4 * case.sv)
-    density = math.exp(-0.5 * ((case.mu / case.su) ** 2 + (case.mv / case.sv) ** 2)) / (
-        2.0 * math.pi * case.su * case.sv
-    )
+    # R -> 0: Pc -> pi R^2 f(miss), with a relative error of order (R/sigma_v)^2.
+    small = dataclasses.replace(case, radius=1e-4 * case.sigma_v)
+    density = math.exp(
+        -0.5 * ((case.miss_u / case.sigma_u) ** 2 + (case.miss_v / case.sigma_v) ** 2)
+    ) / (2.0 * math.pi * case.sigma_u * case.sigma_v)
     expected = math.pi * small.radius**2 * density
     assume(expected > 1e-250)
     assert close(on_plane(small, method).value, expected, rtol=1e-6)
@@ -148,7 +155,9 @@ def test_foster_and_elrod_agree(case: PlaneCase) -> None:
 
 
 def test_plane_case_conjunction_has_the_same_plane() -> None:
-    case = PlaneCase(mu=3.0, mv=-4.0, su=20.0, sv=5.0, angle=0.3, radius=10.0)
+    case = PlaneCase(
+        miss_u=3.0, miss_v=-4.0, sigma_u=20.0, sigma_v=5.0, angle=0.3, radius=10.0
+    )
     plane = case.conjunction().plane
     assert math.isclose(plane.miss_distance, 5.0, rel_tol=1e-9)
     np.testing.assert_allclose(

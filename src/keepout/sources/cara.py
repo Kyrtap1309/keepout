@@ -11,6 +11,7 @@ import csv
 import hashlib
 import http.client
 import os
+import re
 import tempfile
 import urllib.error
 import urllib.parse
@@ -22,14 +23,17 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, TypeAlias
 
 from keepout.errors import CaraFormatError, ChecksumMismatch, SourceUnavailable
 
 CARA_REPO = "nasa/CARA_Analysis_Tools"
 CARA_COMMIT = "1c78beb1f7aefc384886c3be1d09e4681acb5d37"
 
-Downloader = Callable[[str], bytes]
+DOWNLOAD_TIMEOUT = 60.0
+"""Seconds :func:`http_download` waits for the server."""
+
+Downloader: TypeAlias = Callable[[str], bytes]
 
 
 @dataclass(frozen=True)
@@ -60,17 +64,37 @@ MANIFEST_FILE = "cara_manifest.sha256"
 """Every CARA file keepout uses, one ``<sha256>  <path>`` per line."""
 
 
-def _read_manifest() -> dict[str, str]:
-    """Path -> SHA-256 from ``cara_manifest.sha256`` (``sha256sum`` format)."""
-    text = resources.files(__package__).joinpath(MANIFEST_FILE).read_text("utf-8")
+_MANIFEST_LINE = re.compile(r"(?P<digest>[0-9a-f]{64}) [ *](?P<path>\S.*)")
+"""``sha256sum`` output: digest, space, text (space) or binary (``*``) mode, path."""
+
+
+def _parse_manifest(text: str) -> dict[str, str]:
+    """Path -> SHA-256 from ``sha256sum`` output; blank lines are skipped.
+
+    Raises
+    ------
+    ValueError
+        If a line is not ``sha256sum`` output, or a path is listed twice.
+    """
     digests: dict[str, str] = {}
-    for line in text.splitlines():
-        digest, _, path = line.partition("  ")
-        digests[path] = digest
+    for number, line in enumerate(text.splitlines(), start=1):
+        if not line.strip():
+            continue
+        match = _MANIFEST_LINE.fullmatch(line)
+        if match is None:
+            raise ValueError(
+                f"manifest line {number} is not sha256sum output: {line!r}"
+            )
+        path = match.group("path")
+        if path in digests:
+            raise ValueError(f"manifest line {number} repeats {path!r}")
+        digests[path] = match.group("digest")
     return digests
 
 
-_SHA256 = _read_manifest()
+_SHA256 = _parse_manifest(
+    resources.files(__package__).joinpath(MANIFEST_FILE).read_text("utf-8")
+)
 
 
 def _file(path: str) -> CaraFile:
@@ -102,6 +126,30 @@ PC_METHOD_CDMS: Mapping[str, CaraFile] = {
 NON_PD_CDM = _file("DataFiles/SampleCDMs/OmitronTestCase_Test07_NonPDCovariance.cdm")
 """A CDM whose secondary covariance is not positive semi-definite."""
 
+ALFANO_2009_SUPPLEMENT = _file(
+    "DistributedMatlab/ProbabilityOfCollision/Pc3D_Hall_Utils/"
+    "Input_AlfanoTestCases_Pc3D/Alfano09_CARA_Supplementary_Data.xlsx"
+)
+"""Alfano (2009) time bounds ``A09_FinalTime_s`` (the 3-D and Monte Carlo
+window is +- that, as in CARA's ``AlfanoTestCases_Pc3D.m``)."""
+
+HALL_3D_CDM = _file("DataFiles/SampleCDMs/OmitronTestCase_Test08_3DNc.cdm")
+"""A CDM whose 3-D Pc exceeds its 2-D Pc by 15 orders of magnitude."""
+
+FRISBEE_CDM = _file("DataFiles/SampleCDMs/FrisbeeMaxPcTestCase_Test01.cdm")
+"""The manufactured example of Frisbee (2015), used with one covariance."""
+
+DILUTION_CDMS: Mapping[str, CaraFile] = {
+    name: _file(f"DataFiles/SampleCDMs/OmitronTestCase_{name}.cdm")
+    for name in (
+        "Test01_HighPc",
+        "Test02_MaxRadialSigma",
+        "Test03_MaxIntrackSigma",
+        "Test05_MinMiss",
+    )
+}
+"""Omitron test CDMs of CARA's ``DilutionMaxPc_UnitTest.m``."""
+
 
 def cache_dir() -> Path:
     """Root cache directory for downloaded reference data.
@@ -126,7 +174,7 @@ def http_download(url: str) -> bytes:
         On any network or HTTP error.
     """
     try:
-        with urllib.request.urlopen(url, timeout=60) as response:
+        with urllib.request.urlopen(url, timeout=DOWNLOAD_TIMEOUT) as response:
             body: bytes = response.read()
             return body
     except (OSError, http.client.HTTPException) as exc:
@@ -199,10 +247,8 @@ def prefetch(
         As :func:`fetch`, for the first file that fails.
     """
     with ThreadPoolExecutor(max_workers=PREFETCH_WORKERS) as pool:
-        for _ in pool.map(
-            lambda file: fetch(file, cache=cache, download=download), files
-        ):
-            pass
+        # Consuming the results re-raises the first failure.
+        list(pool.map(lambda file: fetch(file, cache=cache, download=download), files))
 
 
 def load_csv(path: Path) -> list[dict[str, str]]:
@@ -223,13 +269,14 @@ def load_csv(path: Path) -> list[dict[str, str]]:
 def load_xlsx(path: Path) -> list[dict[str, Any]]:
     """Read the first sheet of an Excel 2007+ workbook, header in row 1.
 
-    Needs the ``validation`` extra (``openpyxl``).
+    Empty cells after the last header name, and rows with no value, are
+    ignored. Needs the ``validation`` extra (``openpyxl``).
 
     Raises
     ------
     CaraFormatError
-        If the file is not a readable workbook, or its header row is missing,
-        has an empty cell or repeats a name.
+        If the file is not a readable workbook, its header row is missing or
+        has an empty or repeated name, or a row has values past the header.
     """
     import openpyxl  # optional dependency (validation extra)
 
@@ -243,10 +290,21 @@ def load_xlsx(path: Path) -> list[dict[str, Any]]:
         workbook.close()
     if not rows or not any(rows[0]):
         raise CaraFormatError(f"{path}: no header row")
-    header = [str(name) for name in rows[0] if name not in (None, "")]
-    if len(header) != len(rows[0]) or len(set(header)) != len(header):
+    cells = list(rows[0])
+    while cells and cells[-1] in (None, ""):
+        cells.pop()
+    header = [str(name) for name in cells if name not in (None, "")]
+    if len(header) != len(cells) or len(set(header)) != len(header):
         raise CaraFormatError(f"{path}: header has empty or repeated names")
-    return [dict(zip(header, row, strict=True)) for row in rows[1:] if any(row)]
+    records: list[dict[str, Any]] = []
+    for number, row in enumerate(rows[1:], start=2):
+        if not any(value not in (None, "") for value in row):
+            continue
+        values = list(row) + [None] * (len(header) - len(row))
+        if any(value not in (None, "") for value in values[len(header) :]):
+            raise CaraFormatError(f"{path}: row {number} has values past the header")
+        records.append(dict(zip(header, values[: len(header)], strict=True)))
+    return records
 
 
 def load_xls_rows(path: Path) -> list[list[Any]]:

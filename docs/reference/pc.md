@@ -6,4 +6,10 @@
 
 ::: keepout.pc.elrod
 
+::: keepout.pc.hall3d
+
+::: keepout.pc.montecarlo
+
+::: keepout.pc.maxpc
+
 ::: keepout.pc.result

@@ -16,6 +16,7 @@ import numpy as np
 from scipy import special
 
 from keepout._types import FloatArray, require_positive
+from keepout.encounter import Role
 from keepout.errors import CovarianceError, GeometryError
 
 _SQRT_2 = math.sqrt(2.0)
@@ -33,41 +34,46 @@ class PlaneGaussian:
 
     Parameters
     ----------
-    mu, mv
+    miss_u, miss_v
         Miss components along the wide axis ``u`` and the narrow axis ``v`` [m].
-    su, sv
-        Standard deviations along ``u`` and ``v`` [m]; ``su >= sv > 0``.
+    sigma_u, sigma_v
+        Standard deviations along ``u`` and ``v`` [m]; ``sigma_u >= sigma_v > 0``.
     radius
         Hard-body radius [m].
     diagnostics
         Covariance floor messages, if any.
     """
 
-    mu: float
-    mv: float
-    su: float
-    sv: float
+    miss_u: float
+    miss_v: float
+    sigma_u: float
+    sigma_v: float
     radius: float
     diagnostics: tuple[str, ...] = ()
 
+    @property
+    def mahalanobis2(self) -> float:
+        """Squared Mahalanobis distance of the miss vector, ``K^2``."""
+        return (self.miss_u / self.sigma_u) ** 2 + (self.miss_v / self.sigma_v) ** 2
+
     def density_u(self, u: FloatArray) -> FloatArray:
         """1-D Gaussian density along ``u`` [1/m]."""
-        z = (u - self.mu) / self.su
-        density: FloatArray = np.exp(-0.5 * z * z) / (_SQRT_2PI * self.su)
+        z = (u - self.miss_u) / self.sigma_u
+        density: FloatArray = np.exp(-0.5 * z * z) / (_SQRT_2PI * self.sigma_u)
         return density
 
     def density_u_at(self, u: float) -> float:
         """:meth:`density_u` at one point (no NumPy overhead, for quadrature)."""
-        z = (u - self.mu) / self.su
-        return math.exp(-0.5 * z * z) / (_SQRT_2PI * self.su)
+        z = (u - self.miss_u) / self.sigma_u
+        return math.exp(-0.5 * z * z) / (_SQRT_2PI * self.sigma_u)
 
-    # P(-h < v < h) for v ~ N(mv, sv^2). The mass is symmetric in the sign of
-    # mv, so with mv >= 0 the lower limit is always <= 0; when the upper one
+    # P(-h < v < h) for v ~ N(miss_v, sigma_v^2). The mass is symmetric in the sign of
+    # miss_v, so with miss_v >= 0 the lower limit is always <= 0; when the upper one
     # is too, erfc of the far tail keeps tiny masses precise.
 
     def _limits(self, half_chord: FloatArray | float) -> tuple[Any, Any]:
-        scale = _SQRT_2 * self.sv
-        offset = abs(self.mv)
+        scale = _SQRT_2 * self.sigma_v
+        offset = abs(self.miss_v)
         return (half_chord - offset) / scale, (-half_chord - offset) / scale
 
     def chord_mass(self, half_chord: FloatArray) -> FloatArray:
@@ -86,6 +92,23 @@ class PlaneGaussian:
         if upper <= 0.0:
             return 0.5 * (math.erfc(-upper) - math.erfc(-lower))
         return 0.5 * (math.erf(upper) - math.erf(lower))
+
+
+def require_known_covariance(unknown: tuple[Role, ...], method: str) -> None:
+    """Raise :class:`CovarianceError` if a covariance is unknown.
+
+    Parameters
+    ----------
+    unknown
+        Objects whose covariance is unknown.
+    method
+        Method name, for the message.
+    """
+    if unknown:
+        raise CovarianceError(
+            f"{method} needs both covariances; unknown: {', '.join(unknown)} "
+            "(use method='auto', 'frisbee' or 'alfano' for a maximum Pc)"
+        )
 
 
 def plane_gaussian(
@@ -132,10 +155,10 @@ def plane_gaussian(
     eigenvalues = np.maximum(eigenvalues, floor)
     miss = eigenvectors.T @ miss_vector
     return PlaneGaussian(
-        mu=float(miss[1]),
-        mv=float(miss[0]),
-        su=math.sqrt(float(eigenvalues[1])),
-        sv=math.sqrt(float(eigenvalues[0])),
+        miss_u=float(miss[1]),
+        miss_v=float(miss[0]),
+        sigma_u=math.sqrt(float(eigenvalues[1])),
+        sigma_v=math.sqrt(float(eigenvalues[0])),
         radius=radius,
         diagnostics=tuple(diagnostics),
     )

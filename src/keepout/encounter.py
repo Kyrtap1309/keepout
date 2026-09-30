@@ -16,13 +16,18 @@ unit vector perpendicular to ``v`` — Pc does not depend on that choice.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal, TypeAlias
 
 import numpy as np
 from astropy.time import Time
 
-from keepout._types import FloatArray
+from keepout._types import FloatArray, symmetric_part
 from keepout.errors import GeometryError
+from keepout.frames import PARALLEL_RTOL
 from keepout.objects import ObjectState, require_same_epoch
+
+Role: TypeAlias = Literal["primary", "secondary"]
+"""Which object of a conjunction."""
 
 
 @dataclass(frozen=True, eq=False)
@@ -44,9 +49,12 @@ class EncounterPlane:
     relative_speed
         Length of ``relative_velocity`` [m/s].
     combined_covariance
-        Sum of both objects' 3x3 position covariances, GCRF [m^2].
+        Sum of the known 3x3 position covariances, GCRF [m^2].
     basis
         2x3 matrix whose rows are the plane axes ``x`` and ``z`` in GCRF.
+    unknown_covariance
+        Objects whose covariance is unknown; they contribute nothing to
+        ``covariance`` and ``combined_covariance``.
     """
 
     tca: Time
@@ -57,6 +65,7 @@ class EncounterPlane:
     relative_speed: float
     combined_covariance: FloatArray
     basis: FloatArray
+    unknown_covariance: tuple[Role, ...] = ()
 
     @property
     def miss_distance(self) -> float:
@@ -75,6 +84,11 @@ class EncounterPlane:
         Zero when the states are at the straight-line closest approach.
         """
         return float(self.relative_position @ self.direction)
+
+
+def sigma_along(direction: FloatArray, covariance: FloatArray) -> float:
+    """Standard deviation of a position covariance along a unit vector [m]."""
+    return float(np.sqrt(max(float(direction @ covariance @ direction), 0.0)))
 
 
 def _perpendicular(unit: FloatArray) -> FloatArray:
@@ -112,20 +126,31 @@ def encounter_plane(primary: ObjectState, secondary: ObjectState) -> EncounterPl
     y = v / speed
     r_perp = r - float(r @ y) * y
     r_perp_norm = float(np.linalg.norm(r_perp))
-    if r_perp_norm > 1e-12 * max(float(np.linalg.norm(r)), 1.0):
+    if r_perp_norm > PARALLEL_RTOL * max(float(np.linalg.norm(r)), 1.0):
         x = r_perp / r_perp_norm
     else:
         x = _perpendicular(y)
     basis = np.stack([x, np.cross(x, y)])
-    combined = primary.covariance.position + secondary.covariance.position
+    combined = np.zeros((3, 3))
+    unknown: list[Role] = []
+    objects: tuple[tuple[Role, ObjectState], ...] = (
+        ("primary", primary),
+        ("secondary", secondary),
+    )
+    for role, item in objects:
+        if item.covariance is None:
+            unknown.append(role)
+        else:
+            combined = combined + item.covariance.position
     projected = basis @ combined @ basis.T
     return EncounterPlane(
         tca=primary.state.epoch,
         miss_vector=basis @ r,
-        covariance=0.5 * (projected + projected.T),
+        covariance=symmetric_part(projected),
         relative_position=r,
         relative_velocity=v,
         relative_speed=speed,
         combined_covariance=combined,
         basis=basis,
+        unknown_covariance=tuple(unknown),
     )

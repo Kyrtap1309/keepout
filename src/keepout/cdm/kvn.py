@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import dataclasses
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 from keepout.cdm._io import read_text, write_text
@@ -61,6 +63,49 @@ def _section(kind: SectionKind, fields: list[Field], lines: list[int]) -> Sectio
         raise CdmParseError(str(exc)) from exc
 
 
+@dataclass
+class _Building:
+    """A section being read: its fields and the line of each."""
+
+    kind: SectionKind
+    fields: list[Field] = dataclasses.field(default_factory=list)
+    lines: list[int] = dataclasses.field(default_factory=list)
+
+    def add(self, item: Field, line: int) -> None:
+        self.fields.append(item)
+        self.lines.append(line)
+
+
+def _opened(kinds: list[SectionKind], keyword: str, line: int) -> SectionKind | None:
+    """The section ``keyword`` opens after sections ``kinds``, checking order.
+
+    Raises
+    ------
+    CdmParseError
+        If the first keyword is not ``CCSDS_CDM_VERS``, an object section
+        comes before the relative metadata, or a third object section opens.
+    """
+    if not kinds:
+        if keyword != "CCSDS_CDM_VERS":
+            raise CdmParseError(
+                "CCSDS_CDM_VERS must be the first keyword", line=line, keyword=keyword
+            )
+        return "header"
+    opened = _opens(kinds, keyword)
+    if opened == "segment":
+        if kinds[-1] == "header":
+            raise CdmParseError(
+                "object section before relative metadata (TCA)",
+                line=line,
+                keyword=keyword,
+            )
+        if kinds.count("segment") == 2:
+            raise CdmParseError(
+                "more than two object sections", line=line, keyword=keyword
+            )
+    return opened
+
+
 def loads(text: str) -> Cdm:
     """Parse a CDM in KVN.
 
@@ -77,28 +122,20 @@ def loads(text: str) -> Cdm:
     CdmParseError
         If the message is malformed; the error names the line and keyword.
     """
-    kinds: list[SectionKind] = []
-    sections: list[list[Field]] = []
-    lines: list[list[int]] = []
+    building: list[_Building] = []
     pending: list[tuple[Field, int]] = []
-
-    def append(field: Field, number: int) -> None:
-        sections[-1].append(field)
-        lines[-1].append(number)
-
     for number, raw in enumerate(text.splitlines(), start=1):
         line = raw.strip()
         if not line:
             continue
         comment = _COMMENT.match(line)
         if comment is not None:
-            if not sections:
+            if not building:
                 raise CdmParseError(
                     "CCSDS_CDM_VERS must be the first keyword", line=number
                 )
-            pending.append(
-                (Field(COMMENT, (comment.group("text") or "").strip()), number)
-            )
+            remark = (comment.group("text") or "").strip()
+            pending.append((Field(COMMENT, remark), number))
             continue
         assignment = _ASSIGNMENT.match(line)
         if assignment is None:
@@ -106,46 +143,24 @@ def loads(text: str) -> Cdm:
                 f"expected 'KEYWORD = value', got {line!r}", line=number
             )
         keyword = assignment.group("keyword")
-        if not sections:
-            if keyword != "CCSDS_CDM_VERS":
-                raise CdmParseError(
-                    "CCSDS_CDM_VERS must be the first keyword",
-                    line=number,
-                    keyword=keyword,
-                )
-            opened: SectionKind | None = "header"
-        else:
-            opened = _opens(kinds, keyword)
-        if opened == "segment":
-            if kinds[-1] == "header":
-                raise CdmParseError(
-                    "object section before relative metadata (TCA)",
-                    line=number,
-                    keyword=keyword,
-                )
-            if kinds.count("segment") == 2:
-                raise CdmParseError(
-                    "more than two object sections", line=number, keyword=keyword
-                )
+        opened = _opened([b.kind for b in building], keyword, number)
         if opened is not None:
-            kinds.append(opened)
-            sections.append([])
-            lines.append([])
-        for field, at in pending:
-            append(field, at)
+            building.append(_Building(opened))
+        current = building[-1]
+        for item, at in pending:
+            current.add(item, at)
         pending.clear()
         value = assignment.group("value").strip()
-        append(_field(kinds[-1], keyword, value, number), number)
-    for field, at in pending:
-        append(field, at)
-    if kinds != _LAYOUT:
+        current.add(_field(current.kind, keyword, value, number), number)
+    for item, at in pending:
+        building[-1].add(item, at)
+    if [b.kind for b in building] != _LAYOUT:
         raise CdmParseError(
             "a CDM needs a header, relative metadata (starting at TCA) and "
             "OBJECT1 and OBJECT2 sections"
         )
     header, relative, first, second = (
-        _section(kind, fields, numbers)
-        for kind, fields, numbers in zip(kinds, sections, lines, strict=True)
+        _section(b.kind, b.fields, b.lines) for b in building
     )
     try:
         return Cdm(header, relative, (first, second))

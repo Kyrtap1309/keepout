@@ -3,10 +3,10 @@ import numpy as np
 import pytest
 from builders import EPOCH, object_state
 
-from keepout._types import StateVector
 from keepout.covariance import Covariance
 from keepout.errors import GeometryError
 from keepout.objects import ObjectState
+from keepout.state import StateVector
 
 GCRF_STATE = StateVector(EPOCH, [7000e3, 0.0, 0.0], [0.0, 7500.0, 0.0], "GCRF")
 GCRF_COVARIANCE = Covariance(np.eye(6), "GCRF", EPOCH)
@@ -40,3 +40,8 @@ def test_object_state_needs_matching_epochs() -> None:
 def test_object_state_rejects_bad_hard_body_radius(radius: float) -> None:
     with pytest.raises(ValueError, match="hard_body_radius"):
         ObjectState("A", GCRF_STATE, GCRF_COVARIANCE, radius)
+
+
+def test_covariance_may_be_unknown() -> None:
+    state = ObjectState("A", GCRF_STATE, None, 5.0)
+    assert state.covariance is None

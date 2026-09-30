@@ -1,7 +1,9 @@
 # Objects and state vectors
 
-::: keepout._types
+::: keepout.state
 
 ::: keepout.objects
 
 ::: keepout.orbits
+
+::: keepout.equinoctial

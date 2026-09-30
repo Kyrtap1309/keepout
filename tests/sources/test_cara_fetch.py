@@ -18,25 +18,16 @@ FILE = CaraFile("Dir/Sub/data.mat", hashlib.sha256(PAYLOAD).hexdigest())
 
 
 class FakeDownloader:
-    def __init__(self, data: bytes) -> None:
+    """Serves ``data``, or each URL its own bytes from a mapping, and records
+    the URLs asked for; safe to call from several threads."""
+
+    def __init__(self, data: bytes | dict[str, bytes]) -> None:
         self.data = data
         self.urls: list[str] = []
 
     def __call__(self, url: str) -> bytes:
         self.urls.append(url)
-        return self.data
-
-
-class FakeMapDownloader:
-    """Serves each URL its own bytes; safe to call from several threads."""
-
-    def __init__(self, by_url: dict[str, bytes]) -> None:
-        self.by_url = by_url
-        self.urls: list[str] = []
-
-    def __call__(self, url: str) -> bytes:
-        self.urls.append(url)
-        return self.by_url[url]
+        return self.data if isinstance(self.data, bytes) else self.data[url]
 
 
 def cached_path(root: Path, file: CaraFile) -> Path:
@@ -106,7 +97,7 @@ def test_prefetch_caches_every_file(tmp_path: Path) -> None:
         for i, data in enumerate(payloads)
     ]
     by_url = {file.url: data for file, data in zip(files, payloads, strict=True)}
-    download = FakeMapDownloader(by_url)
+    download = FakeDownloader(by_url)
     cara.prefetch(files, cache=tmp_path, download=download)
     assert sorted(download.urls) == sorted(by_url)
     for file, data in zip(files, payloads, strict=True):
@@ -199,3 +190,22 @@ def test_http_download_wraps_connection_reset(
     monkeypatch.setattr(urllib.request, "urlopen", reset)
     with pytest.raises(SourceUnavailable, match="reset by peer"):
         cara.http_download("https://example.invalid/x")
+
+
+def test_manifest_reads_text_and_binary_sha256sum_lines() -> None:
+    digest = "0" * 64
+    text = f"{digest}  a/one.txt\n\n{'f' * 64} *b/two.xls\n"
+    assert cara._parse_manifest(text) == {"a/one.txt": digest, "b/two.xls": "f" * 64}
+
+
+@pytest.mark.parametrize(
+    ("text", "message"),
+    [
+        ("not a digest  path\n", "line 1 is not sha256sum output"),
+        (f"{'0' * 64}  \n", "line 1 is not sha256sum output"),
+        (f"{'0' * 64}  p\n{'1' * 64}  p\n", "line 2 repeats 'p'"),
+    ],
+)
+def test_malformed_manifest_is_rejected(text: str, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        cara._parse_manifest(text)

@@ -1,22 +1,21 @@
-"""Shared domain types: array aliases, reference frames and state vectors."""
+"""Private helpers shared by the package: the array alias and argument checks."""
 
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
-from typing import Literal, TypeAlias, get_args
+from typing import TypeAlias
 
 import numpy as np
 import numpy.typing as npt
-from astropy.time import Time
 
 FloatArray: TypeAlias = npt.NDArray[np.float64]
 """A float64 NumPy array."""
 
-RefFrame: TypeAlias = Literal["GCRF", "EME2000", "ITRF"]
-"""Reference frames a state vector can be expressed in."""
 
-REF_FRAMES: tuple[RefFrame, ...] = get_args(RefFrame)
+def symmetric_part(matrix: FloatArray) -> FloatArray:
+    """``(M + M^T) / 2`` of a matrix or a stack of matrices ``(..., n, n)``."""
+    result: FloatArray = 0.5 * (matrix + np.swapaxes(matrix, -1, -2))
+    return result
 
 
 def as_vector(value: npt.ArrayLike, name: str) -> FloatArray:
@@ -47,39 +46,3 @@ def require_positive(value: float, name: str) -> None:
     """Raise ``ValueError`` unless ``value`` is finite and positive."""
     if not (math.isfinite(value) and value > 0.0):
         raise ValueError(f"{name} must be finite and > 0, got {value}")
-
-
-@dataclass(frozen=True, eq=False, init=False)
-class StateVector:
-    """Position and velocity at an epoch, in an explicit frame (SI units).
-
-    Parameters
-    ----------
-    epoch
-        Epoch of the state.
-    r
-        Position [m].
-    v
-        Velocity [m/s].
-    frame
-        Reference frame of ``r`` and ``v``.
-    """
-
-    epoch: Time
-    r: FloatArray
-    v: FloatArray
-    frame: RefFrame
-
-    # A hand-written __init__ so callers may pass any array-like while the
-    # attributes stay typed as read-only float64 arrays.
-    def __init__(
-        self, epoch: Time, r: npt.ArrayLike, v: npt.ArrayLike, frame: RefFrame
-    ) -> None:
-        object.__setattr__(self, "epoch", epoch)
-        object.__setattr__(self, "r", as_vector(r, "r"))
-        object.__setattr__(self, "v", as_vector(v, "v"))
-        if frame not in REF_FRAMES:
-            raise ValueError(
-                f"unsupported frame {frame!r}; expected one of {REF_FRAMES}"
-            )
-        object.__setattr__(self, "frame", frame)

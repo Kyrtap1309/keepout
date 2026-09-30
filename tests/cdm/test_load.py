@@ -1,4 +1,5 @@
-from cdm_builders import B1_KVN, B1_XML, TRACSS, assert_equivalent
+from builders import B1_KVN
+from cdm_builders import B1_XML, TRACSS, assert_equivalent
 
 import keepout.cdm
 

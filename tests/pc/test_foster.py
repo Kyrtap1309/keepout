@@ -2,29 +2,10 @@ import math
 
 import pytest
 from builders import head_on
-from pc_builders import ANISOTROPIC, PlaneCase
-from reference_pc import isotropic_pc, principal_axes_pc
+from pc_builders import PlaneCase
+from reference_pc import principal_axes_pc
 
 from keepout.pc.foster import MIN_RTOL, foster
-
-
-@pytest.mark.parametrize(
-    ("miss", "sigma", "radius"),
-    [
-        (0.0, 10.0, 5.0),
-        (30.0, 10.0, 5.0),
-        (5.0, 1.0, 20.0),  # covariance much smaller than the hard body
-        (200.0, 500.0, 10.0),
-        (100.0, 10.0, 5.0),  # Pc ~ 1e-23
-    ],
-)
-def test_isotropic_covariance_matches_the_rice_integral(
-    miss: float, sigma: float, radius: float
-) -> None:
-    conjunction = head_on(miss, sigma, sigma, radius)
-    result = foster(conjunction.plane, radius)
-    assert result.method == "foster"
-    assert result.value == pytest.approx(isotropic_pc(miss, sigma, radius), rel=1e-9)
 
 
 def test_zero_miss_isotropic_has_a_closed_form() -> None:
@@ -99,8 +80,27 @@ def test_line_like_covariance_is_integrated_accurately(
     assert result.value == pytest.approx(expected, rel=1e-8)
 
 
-@pytest.mark.parametrize("case", ANISOTROPIC, ids=str)
-def test_correlated_off_axis_covariance_matches_the_oracle(case: PlaneCase) -> None:
-    result = foster(case.plane(), case.radius)
-    expected = principal_axes_pc(case.mu, case.mv, case.su, case.sv, case.radius)
-    assert result.value == pytest.approx(expected, rel=1e-8)
+def test_a_breakpoint_at_the_edge_of_the_band_leaves_no_sliver() -> None:
+    # Ten narrow-axis sigmas equal the radius: the chord-step breakpoints
+    # fall at theta ~ 0, where they once left QUADPACK a sliver interval.
+    case = PlaneCase(2.0, 0.0, 1.0, 10**-1.5, 1.0, 10**-0.5)
+    unscaled = foster(case.plane(), case.radius)
+    scaled = foster(case.plane(3.0), 3.0 * case.radius)
+    assert scaled.diagnostics == ()
+    assert scaled.value == pytest.approx(unscaled.value, rel=1e-10)
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        # Found by Hypothesis; the brute-force oracle once missed both by
+        # ~1e-7 and ~1e-4 (checked against 30-digit mpmath quadrature).
+        PlaneCase(0.0, 2.802844261399889e-08, 1.0, 0.01, 0.0, 1.0),
+        PlaneCase(0.0, 2.9999999999999996, 1.0, 1.0, 0.0, 1.0),
+    ],
+)
+def test_chord_steps_at_the_circle_edge_match_the_oracle(case: PlaneCase) -> None:
+    expected = principal_axes_pc(
+        case.miss_u, case.miss_v, case.sigma_u, case.sigma_v, case.radius
+    )
+    assert foster(case.plane(), case.radius).value == pytest.approx(expected, rel=1e-10)

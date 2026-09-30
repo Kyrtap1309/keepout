@@ -2,8 +2,8 @@ import numpy as np
 import pytest
 from builders import EPOCH, LEO_R
 
-from keepout._types import StateVector
 from keepout.orbits import EARTH_MU, orbital_period
+from keepout.state import StateVector
 
 
 def test_orbital_period_of_a_circular_leo() -> None:

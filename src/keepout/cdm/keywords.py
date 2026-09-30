@@ -1,6 +1,7 @@
 """CCSDS CDM keyword table and value conversion.
 
-Covers every keyword of CCSDS 508.0-B-1 plus ``HBR`` (CDM 2.0 / TraCSS). For
+Covers every keyword of CCSDS 508.0-B-1 plus ``HBR`` and the header's
+``CONJUNCTION_ID`` (CDM 2.0 / TraCSS). For
 each keyword the table gives its value type, the canonical CCSDS unit, the
 factor converting the file value to SI and the NDM/XML group it lives in.
 Keywords not in the table (CDM 2.0 additions, ``USER_DEFINED_*``) are kept as
@@ -11,11 +12,16 @@ from __future__ import annotations
 
 import math
 import re
+import warnings
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Literal, TypeAlias
+from typing import Literal, TypeAlias, assert_never
 
 import numpy as np
 from astropy.time import Time
+from erfa import ErfaWarning
+
+from keepout._types import FloatArray
 
 ValueKind: TypeAlias = Literal["str", "int", "float", "time"]
 SectionKind: TypeAlias = Literal["header", "relative", "segment"]
@@ -103,6 +109,22 @@ def covariance_entries(dimension: int) -> tuple[tuple[str, int, int], ...]:
     )
 
 
+def covariance_matrix(dimension: int, value_of: Callable[[str], float]) -> FloatArray:
+    """Symmetric covariance of the leading block from its lower-triangle keywords.
+
+    Parameters
+    ----------
+    dimension
+        Block size, as in :func:`covariance_entries`.
+    value_of
+        Value of a covariance keyword.
+    """
+    matrix = np.zeros((dimension, dimension))
+    for name, row, column in covariance_entries(dimension):
+        matrix[row, column] = matrix[column, row] = value_of(name)
+    return matrix
+
+
 def covariance_names(dimension: int) -> tuple[str, ...]:
     """Lower-triangle covariance keywords of the leading block, row by row.
 
@@ -132,7 +154,7 @@ _ADDITIONAL = ("data", "additionalParameters")
 _STATE = ("data", "stateVector")
 
 HEADER = _table(
-    _many("CCSDS_CDM_VERS ORIGINATOR MESSAGE_FOR MESSAGE_ID", "str"),
+    _many("CCSDS_CDM_VERS ORIGINATOR MESSAGE_FOR MESSAGE_ID CONJUNCTION_ID", "str"),
     _many("CREATION_DATE", "time"),
 )
 
@@ -221,8 +243,10 @@ REQUIRED: dict[SectionKind, tuple[str, ...]] = {
 _UNITLESS = {"", "n/a"}
 _INTEGER = re.compile(r"^[+-]?[0-9]+$")
 _REAL = re.compile(r"^[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$")
-_CALENDAR = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.(\d+))?Z?$")
-_ORDINAL = re.compile(r"^(\d{4})-(\d{3})T(\d{2}:\d{2}:\d{2}(?:\.(\d+))?)Z?$")
+_EPOCH = re.compile(
+    r"^(?P<year>\d{4})-(?:(?P<month>\d{2})-(?P<day>\d{2})|(?P<doy>\d{3}))"
+    r"T(?P<hour>\d{2}):(?P<minute>\d{2}):(?P<second>\d{2})(?:\.(?P<fraction>\d+))?Z?$"
+)
 
 
 def normalize_unit(unit: str) -> str:
@@ -242,6 +266,9 @@ def parse_epoch(text: str) -> Time:
     Accepts ``YYYY-MM-DDThh:mm:ss[.f]`` and ``YYYY-DDDThh:mm:ss[.f]`` with an
     optional trailing ``Z``. The returned Time keeps the number of fractional
     digits as its precision, so :func:`format_epoch` writes it back unchanged.
+    Every field must be in range: a day past the end of its month or year,
+    hour 24, or second 60 outside a UTC leap second is rejected rather than
+    rolled over to another time.
 
     Parameters
     ----------
@@ -253,23 +280,34 @@ def parse_epoch(text: str) -> Time:
     ValueError
         If the text is not a valid CCSDS epoch.
     """
-    value = text.strip()
-    if match := _CALENDAR.match(value):
-        body, time_format, fraction = value.removesuffix("Z"), "isot", match.group(1)
-    elif match := _ORDINAL.match(value):
-        year, day, clock, fraction = match.groups()
-        body, time_format = f"{year}:{day}:{clock}", "yday"
-    else:
+    match = _EPOCH.match(text.strip())
+    if match is None:
         raise ValueError(f"invalid CCSDS epoch {text!r}")
+    year, month, day, doy, hour, minute, second, fraction = match.groups()
+    clock = f"{hour}:{minute}:{second}" + (f".{fraction}" if fraction else "")
+    if doy is None:
+        body, time_format = f"{year}-{month}-{day}T{clock}", "isot"
+    else:
+        body, time_format = f"{year}:{doy}:{clock}", "yday"
     try:
-        return Time(
-            body,
-            format=time_format,
-            scale="utc",
-            precision=min(len(fraction or ""), 9),
-        )
-    except ValueError as exc:
+        with warnings.catch_warnings():
+            # ERFA only warns about a second 60 outside a leap second.
+            warnings.simplefilter("error", ErfaWarning)
+            epoch = Time(
+                body,
+                format=time_format,
+                scale="utc",
+                precision=min(len(fraction or ""), 9),
+            )
+    except (ValueError, ErfaWarning) as exc:
         raise ValueError(f"invalid CCSDS epoch {text!r}: {exc}") from exc
+    # astropy rolls some out-of-range fields over (day 366 of a common year
+    # becomes 1 January): the parsed fields must survive unchanged.
+    date = f"{year}:{doy}" if doy else f"{year}-{month}-{day}"
+    parsed = epoch.yday[:8] if doy else epoch.isot[:10]
+    if parsed != date or epoch.isot[11:19] != f"{hour}:{minute}:{second}":
+        raise ValueError(f"invalid CCSDS epoch {text!r}: a field is out of range")
+    return epoch
 
 
 def format_epoch(epoch: Time) -> str:
@@ -310,19 +348,23 @@ def parse_value(keyword: Keyword, text: str, unit: str | None) -> FieldValue:
         return text
     if not text:
         raise ValueError("empty value")
-    if keyword.kind == "time":
-        return parse_epoch(text)
     # CCSDS numbers only: Python's int()/float() also take "1_0", "inf", ...
-    if keyword.kind == "int":
-        if not _INTEGER.match(text):
-            raise ValueError(f"invalid integer {text!r}")
-        return int(text)
-    if not _REAL.match(text):
-        raise ValueError(f"invalid number {text!r}")
-    number = float(text)
-    if not math.isfinite(number):
-        raise ValueError(f"number out of range {text!r}")
-    return number * keyword.scale
+    match keyword.kind:
+        case "time":
+            return parse_epoch(text)
+        case "int":
+            if not _INTEGER.match(text):
+                raise ValueError(f"invalid integer {text!r}")
+            return int(text)
+        case "float":
+            if not _REAL.match(text):
+                raise ValueError(f"invalid number {text!r}")
+            number = float(text)
+            if not math.isfinite(number):
+                raise ValueError(f"number out of range {text!r}")
+            return number * keyword.scale
+        case _:
+            assert_never(keyword.kind)
 
 
 def format_value(keyword: Keyword, value: FieldValue) -> tuple[str, str | None]:
@@ -335,8 +377,28 @@ def format_value(keyword: Keyword, value: FieldValue) -> tuple[str, str | None]:
     value
         Stored (SI) value.
     """
-    if keyword.kind == "time":
-        return format_epoch(value), None
-    if keyword.kind == "float":
-        return repr(float(value) / keyword.scale).upper(), keyword.unit
-    return str(value), None
+    match keyword.kind:
+        case "time":
+            return format_epoch(value), None
+        case "float":
+            return _shortest(float(value), keyword.scale).upper(), keyword.unit
+        case "str" | "int":
+            return str(value), None
+        case _:
+            assert_never(keyword.kind)
+
+
+def _shortest(value: float, scale: float) -> str:
+    """Shortest number text that :func:`parse_value` turns back into ``value``.
+
+    ``value / scale`` itself may print with spurious digits: 6535.677249 km
+    is 6535677.249 m, and dividing by 1000 gives the neighbouring double
+    6535.677248999999. The shortest decimal that scales back exactly is the
+    one the message had.
+    """
+    quotient = value / scale
+    for digits in range(1, 18):
+        candidate = float(f"{quotient:.{digits}g}")
+        if candidate * scale == value:
+            return repr(candidate)
+    return repr(quotient)

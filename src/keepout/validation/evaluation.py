@@ -1,45 +1,25 @@
-"""Run validation cases and judge them against the spec tolerances."""
+"""Run validation cases and judge them against their criteria."""
 
 from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import NamedTuple, get_args
+from functools import cached_property
 
 from keepout.pc import compute_pc
 from keepout.pc.result import Method, PcResult
 from keepout.validation.cases import ValidationCase
+from keepout.validation.criteria import Verdict
 
-RELATIVE_TOLERANCE = 1e-6
-"""Spec section 5: 2-D methods, relative error where the reference >= 1e-10."""
-
-ABSOLUTE_TOLERANCE = 1e-15
-"""Spec section 5: 2-D methods, absolute error where the reference < 1e-10."""
-
-SMALL_PC = 1e-10
-"""Reference Pc below which the absolute criterion applies."""
-
-METHODS: tuple[Method, ...] = get_args(Method)
+__all__ = ["Outcome", "Verdict", "evaluate", "judge"]
 
 
-class Verdict(NamedTuple):
-    """How far a value is from a case's reference, and whether that passes."""
-
-    error: float
-    """Relative error if ``relative``, else absolute error."""
-    relative: bool
-    passed: bool
-
-
-def judge(case: ValidationCase, value: float) -> Verdict:
-    """Compare one value with the case's reference under its criterion."""
-    difference = abs(value - case.reference)
-    if case.absolute_tolerance is not None:
-        return Verdict(difference, False, difference <= case.absolute_tolerance)
-    if case.reference >= SMALL_PC:
-        error = difference / case.reference
-        return Verdict(error, True, error <= RELATIVE_TOLERANCE)
-    return Verdict(difference, False, difference <= ABSOLUTE_TOLERANCE)
+def judge(case: ValidationCase, result: PcResult) -> Verdict:
+    """Compare a result with the case's reference under the case's criterion."""
+    interval = None
+    if case.criterion.interval:
+        interval = (result.details["ci_low"], result.details["ci_high"])
+    return case.criterion.judge(result.value, case.reference, interval)
 
 
 @dataclass(frozen=True, eq=False)
@@ -67,10 +47,10 @@ class Outcome:
         """keepout's Pc."""
         return self.result.value
 
-    @property
+    @cached_property
     def verdict(self) -> Verdict:
         """Error against the reference and pass/fail."""
-        return judge(self.case, self.value)
+        return judge(self.case, self.result)
 
     @property
     def passed(self) -> bool:
@@ -79,9 +59,9 @@ class Outcome:
 
 
 def evaluate(cases: Iterable[ValidationCase]) -> list[Outcome]:
-    """Run every method on every case."""
+    """Run each case's methods on it."""
     return [
-        Outcome(case, compute_pc(case.conjunction, method))
+        Outcome(case, compute_pc(case.conjunction, method, **case.options))
         for case in cases
-        for method in METHODS
+        for method in case.methods
     ]

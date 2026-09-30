@@ -21,7 +21,7 @@ def loads(text: str) -> Cdm:
     text
         The message.
     """
-    stripped = text.lstrip("﻿ \t\r\n")
+    stripped = text.lstrip("\ufeff \t\r\n")
     return xml.loads(stripped) if stripped.startswith("<") else kvn.loads(stripped)
 
 

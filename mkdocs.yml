@@ -45,7 +45,9 @@ nav:
   - Home: index.md
   - Frames, units and CDM support: frames-and-units.md
   - 2-D probability of collision: pc-2d.md
+  - 3-D, Monte Carlo and maximum Pc: pc-3d.md
   - Validation report: validation.md
+  - Monte Carlo validation report: validation-monte-carlo.md
   - Reference:
       - Probability of collision: reference/pc.md
       - Conjunction: reference/conjunction.md

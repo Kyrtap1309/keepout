@@ -4,7 +4,8 @@ Spacecraft conjunction assessment in Python: CCSDS CDM ingest, probability of
 collision (Pc), risk trends and collision-avoidance manoeuvre planning.
 
 !!! warning "Pre-alpha"
-    Milestone M2 — 2-D probability of collision. APIs will change.
+    Milestone M3 — 3-D, Monte Carlo and maximum probability of collision.
+    APIs will change.
 
 ## Reading a CDM
 
@@ -22,13 +23,14 @@ print(plane.miss_distance, plane.covariance, primary.covariance.repairs)
 
 ```python
 import keepout.cdm
-from keepout.conjunction import Conjunction
-from keepout.pc import compute_pc
+from keepout import Conjunction, compute_pc
 
 conjunction = Conjunction.from_cdm(keepout.cdm.load("event.cdm"), hard_body_radius=20.0)
-result = compute_pc(conjunction)  # Foster; or compute_pc(conjunction, "elrod")
-print(result.value, result.diagnostics)  # repairs, 2-D warnings, method notes
-print(compute_pc(conjunction, "elrod", order=64).value)  # method options
+result = compute_pc(conjunction)  # picks Foster, Hall 3D-Nc or a maximum Pc
+print(result.method, result.value, result.diagnostics)
+print(compute_pc(conjunction, "hall3d").details["nc"])  # a method by name
+mc = compute_pc(conjunction, "montecarlo", samples=100_000, seed=1)
+print(mc.value, mc.details["ci_low"], mc.details["ci_high"])
 ```
 
 Without `hard_body_radius`, the sum of both objects' `HBR` (CDM 2.0) is used;
@@ -50,5 +52,6 @@ uv sync
 uv run pytest                 # offline test suite
 uv run pytest -m validation   # downloads CARA reference data
 uv run python tools/validation_report.py   # regenerate the validation report
+uv run python tools/validation_report.py --monte-carlo   # Monte Carlo (slow)
 uv run mkdocs serve           # this documentation
 ```
