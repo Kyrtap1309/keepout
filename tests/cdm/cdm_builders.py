@@ -1,11 +1,10 @@
 """Builders, Hypothesis strategies and comparison helpers for CDM tests."""
 
 import string
-from pathlib import Path
 
 import pytest
 from astropy.time import Time
-from builders import DIAGONAL_COVARIANCE, EPOCH
+from builders import CDM_DATA, DIAGONAL_COVARIANCE, EPOCH
 from hypothesis import strategies as st
 
 from keepout.cdm.keywords import (
@@ -17,10 +16,8 @@ from keepout.cdm.keywords import (
 )
 from keepout.cdm.model import Cdm, Field, Section
 
-DATA = Path(__file__).parent / "data"
-B1_KVN = DATA / "b1_example.kvn"
-B1_XML = DATA / "b1_example.xml"
-TRACSS = DATA / "tracss_v2.kvn"
+B1_XML = CDM_DATA / "b1_example.xml"
+TRACSS = CDM_DATA / "tracss_v2.kvn"
 TCA = EPOCH
 CREATED = parse_epoch("2010-03-12T22:31:12.000")
 POSITIONS = {1: (7000e3, 0.0, 0.0), 2: (7000e3, 0.0, 500.0)}

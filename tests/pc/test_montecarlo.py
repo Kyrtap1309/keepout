@@ -3,13 +3,13 @@ from typing import Any
 
 import numpy as np
 import pytest
-from builders import LEO_R, LEO_V, head_on, object_state
+from builders import DRIFT_WINDOW, LEO_R, LEO_V, drifting, head_on, object_state
 from scipy import stats
 
 from keepout.conjunction import Conjunction
 from keepout.errors import CovarianceError, PcConvergenceError
 from keepout.objects import ObjectState
-from keepout.pc import foster, montecarlo
+from keepout.pc import foster, hall3d, montecarlo
 from keepout.pc.montecarlo import _Trials, clopper_pearson
 
 rate_module = importlib.import_module("keepout.pc._rate")
@@ -34,6 +34,17 @@ def test_fast_encounter_agrees_with_2d_pc() -> None:
     assert result.details["ci_low"] <= expected <= result.details["ci_high"]
     assert result.details["samples"] == 20_000
     assert result.value == result.details["hits"] / 20_000
+
+
+def test_slow_uncertain_drift_agrees_with_3d_not_2d_pc() -> None:
+    # The one offline check that 3-D Pc is right where it differs from 2-D:
+    # Monte Carlo (independent of Hall's rate, apart from where to look)
+    # brackets Hall's Nc and excludes Foster's straight-line Pc.
+    conjunction = drifting(velocity_sigma=0.5)
+    result = montecarlo(conjunction, window=DRIFT_WINDOW, samples=20_000, seed=1)
+    low, high = result.details["ci_low"], result.details["ci_high"]
+    assert low <= hall3d(conjunction, window=DRIFT_WINDOW).value <= high
+    assert foster(conjunction.plane, 5.0).value < low
 
 
 def test_a_seed_makes_the_run_reproducible() -> None:

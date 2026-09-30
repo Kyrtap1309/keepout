@@ -3,7 +3,16 @@ import math
 
 import numpy as np
 import pytest
-from builders import EPOCH, LEO_R, LEO_V, head_on, known, object_state, shifted_back
+from builders import (
+    EPOCH,
+    LEO_R,
+    LEO_V,
+    head_on,
+    known,
+    object_state,
+    shifted_back,
+    without_covariance,
+)
 
 from keepout.conjunction import Conjunction
 from keepout.covariance import make_covariance
@@ -164,10 +173,6 @@ def test_large_sigma_across_a_slow_track_does_not_warn() -> None:
     assert result.details["encounter_duration_s"] == pytest.approx(
         2 * (SIGMA_EXTENT * math.sqrt(2.0) + 5.0) / 20.0, rel=1e-9
     )
-
-
-def without_covariance(item: ObjectState) -> ObjectState:
-    return ObjectState(item.object_id, item.state, None)
 
 
 def test_auto_uses_frisbee_when_one_covariance_is_unknown() -> None:

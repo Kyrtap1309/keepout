@@ -2,29 +2,10 @@ import math
 
 import pytest
 from builders import head_on
-from pc_builders import ANISOTROPIC, PlaneCase
-from reference_pc import isotropic_pc, principal_axes_pc
+from pc_builders import PlaneCase
+from reference_pc import principal_axes_pc
 
 from keepout.pc.foster import MIN_RTOL, foster
-
-
-@pytest.mark.parametrize(
-    ("miss", "sigma", "radius"),
-    [
-        (0.0, 10.0, 5.0),
-        (30.0, 10.0, 5.0),
-        (5.0, 1.0, 20.0),  # covariance much smaller than the hard body
-        (200.0, 500.0, 10.0),
-        (100.0, 10.0, 5.0),  # Pc ~ 1e-23
-    ],
-)
-def test_isotropic_covariance_matches_the_rice_integral(
-    miss: float, sigma: float, radius: float
-) -> None:
-    conjunction = head_on(miss, sigma, sigma, radius)
-    result = foster(conjunction.plane, radius)
-    assert result.method == "foster"
-    assert result.value == pytest.approx(isotropic_pc(miss, sigma, radius), rel=1e-9)
 
 
 def test_zero_miss_isotropic_has_a_closed_form() -> None:
@@ -96,15 +77,6 @@ def test_line_like_covariance_is_integrated_accurately(
     conjunction = head_on(miss, sigma_narrow, sigma_wide, radius)
     expected = principal_axes_pc(0.0, miss, sigma_wide, sigma_narrow, radius)
     result = foster(conjunction.plane, radius)
-    assert result.value == pytest.approx(expected, rel=1e-8)
-
-
-@pytest.mark.parametrize("case", ANISOTROPIC, ids=str)
-def test_correlated_off_axis_covariance_matches_the_oracle(case: PlaneCase) -> None:
-    result = foster(case.plane(), case.radius)
-    expected = principal_axes_pc(
-        case.miss_u, case.miss_v, case.sigma_u, case.sigma_v, case.radius
-    )
     assert result.value == pytest.approx(expected, rel=1e-8)
 
 

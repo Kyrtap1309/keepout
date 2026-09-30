@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 from builders import DIAGONAL_COVARIANCE, known
 from cdm_builders import (
+    CREATED,
     TCA,
     minimal_cdm,
     replace,
@@ -10,7 +11,7 @@ from cdm_builders import (
 )
 
 from keepout.cdm.keywords import covariance_names
-from keepout.cdm.model import DuplicateKeyword, Field, Section
+from keepout.cdm.model import Cdm, DuplicateKeyword, Field, Section
 from keepout.encounter import encounter_plane
 from keepout.errors import CovarianceError, GeometryError
 
@@ -20,7 +21,9 @@ def test_typed_accessors() -> None:
     assert cdm.version == "1.0"
     assert cdm.originator == "KEEPOUT"
     assert cdm.message_id == "TEST-1"
+    assert cdm.creation_date is CREATED
     assert cdm.message_for is None
+    assert cdm.conjunction_id is None
     assert cdm.tca is TCA
     assert cdm.miss_distance == 500.0
     assert cdm.collision_probability is None
@@ -35,6 +38,18 @@ def test_typed_accessors() -> None:
     np.testing.assert_array_equal(first.velocity, [0.0, 7500.0, 0.0])
     np.testing.assert_array_equal(first.covariance_rtn, DIAGONAL_COVARIANCE)
     assert cdm.object2.designator == "10002"
+
+
+def test_a_cdm_has_exactly_two_object_sections() -> None:
+    cdm = minimal_cdm()
+    with pytest.raises(ValueError, match="a CDM has 2 object sections, got 1"):
+        Cdm(cdm.header, cdm.relative, (cdm.segments[0],))  # type: ignore[arg-type]
+
+
+def test_sections_must_have_their_kind() -> None:
+    cdm = minimal_cdm()
+    with pytest.raises(ValueError, match="header section has kind 'relative'"):
+        Cdm(cdm.relative, cdm.relative, cdm.segments)
 
 
 def test_section_rejects_repeated_keywords() -> None:

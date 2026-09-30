@@ -8,7 +8,6 @@ import numpy as np
 from builders import LEO_R, LEO_V, head_on, object_state, planar, position_covariances
 from hypothesis import assume
 from hypothesis import strategies as st
-from hypothesis.extra.numpy import arrays
 
 from keepout._types import FloatArray
 from keepout.conjunction import Conjunction
@@ -18,25 +17,39 @@ _BASE_PLANE = head_on(1.0, 1.0, 1.0, 1.0).plane
 
 
 @st.composite
+def unit_vectors(draw: st.DrawFn) -> FloatArray:
+    """Unit vectors uniform on the sphere (no rejection)."""
+    azimuth = draw(st.floats(0.0, 2.0 * math.pi))
+    height = draw(st.floats(-1.0, 1.0))
+    ring = math.sqrt(1.0 - height * height)
+    return np.array([ring * math.cos(azimuth), ring * math.sin(azimuth), height])
+
+
+@st.composite
 def conjunctions(draw: st.DrawFn) -> Conjunction:
-    """Random LEO conjunctions at TCA in any orientation: miss up to 2 km,
-    relative speed 50 m/s to 15 km/s, full 3x3 covariances."""
-    direction = draw(arrays(np.float64, (3,), elements=st.floats(-1.0, 1.0)))
-    assume(float(np.linalg.norm(direction)) > 0.1)
-    speed = draw(st.floats(50.0, 15000.0))
-    relative_velocity = speed * direction / np.linalg.norm(direction)
-    offset = draw(arrays(np.float64, (3,), elements=st.floats(-2000.0, 2000.0)))
+    """Random LEO conjunctions at TCA in any orientation: relative speed 50 m/s
+    to 15 km/s, full 3x3 covariances, and a miss of up to 6 Mahalanobis units
+    on the encounter plane (so Pc never underflows to 0)."""
+    unit = draw(unit_vectors())
+    relative_velocity = draw(st.floats(50.0, 15000.0)) * unit
+    first = draw(position_covariances(300.0))
+    second = draw(position_covariances(300.0))
     # Put the secondary exactly at closest approach: no offset along v.
-    unit = relative_velocity / speed
-    offset = offset - float(offset @ unit) * unit
-    primary = object_state(
-        LEO_R, LEO_V, draw(position_covariances(300.0)), object_id="PRI"
-    )
+    across = draw(unit_vectors())
+    across = across - float(across @ unit) * unit
+    assume(float(np.linalg.norm(across)) > 1e-3)
+    across = across / np.linalg.norm(across)
+    # Miss of k plane Mahalanobis units: d^2 (P^-1)_00 = k^2 in the plane
+    # axes (across, v x across), P the combined covariance projected there.
+    basis = np.stack([across, np.cross(unit, across)])
+    plane = basis @ (first + second) @ basis.T
+    assume(float(np.linalg.det(plane)) > 1e-12 * float(np.trace(plane)) ** 2)
+    precision = np.linalg.inv(plane)
+    distance = draw(st.floats(0.0, 6.0)) / math.sqrt(float(precision[0, 0]))
+    offset = distance * across
+    primary = object_state(LEO_R, LEO_V, first, object_id="PRI")
     secondary = object_state(
-        LEO_R + offset,
-        LEO_V + relative_velocity,
-        draw(position_covariances(300.0)),
-        object_id="SEC",
+        LEO_R + offset, LEO_V + relative_velocity, second, object_id="SEC"
     )
     radius = draw(st.floats(1.0, 50.0))
     return Conjunction(primary, secondary, radius)

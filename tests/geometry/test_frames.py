@@ -1,4 +1,7 @@
+import math
+
 import astropy.units as u
+import erfa
 import numpy as np
 import pytest
 from astropy.time import Time
@@ -150,6 +153,11 @@ def test_batched_conversion_matches_one_at_a_time() -> None:
         np.testing.assert_allclose(together.v, alone.v, rtol=0, atol=1e-9)
 
 
+def angle_deg(a: FloatArray, b: FloatArray) -> float:
+    cosine = float(a @ b) / float(np.linalg.norm(a) * np.linalg.norm(b))
+    return math.degrees(math.acos(min(1.0, max(-1.0, cosine))))
+
+
 def test_itrf_point_fixed_on_the_equator_moves_with_earth_rotation() -> None:
     radius = 6378137.0
     state = StateVector(EPOCH, [radius, 0.0, 0.0], [0.0, 0.0, 0.0], "ITRF")
@@ -159,6 +167,17 @@ def test_itrf_point_fixed_on_the_equator_moves_with_earth_rotation() -> None:
     assert np.linalg.norm(converted.v) == pytest.approx(
         EARTH_ROTATION_RATE * radius, abs=1e-3
     )
+    # Independent of the conversion chain: the Greenwich meridian is at the
+    # Earth rotation angle (UTC for UT1 here: < 0.01 deg), up to precession
+    # and nutation since J2000 (< 0.3 deg in 2010). A transposed rotation
+    # would put it at -ERA.
+    era = erfa.era00(EPOCH.utc.jd1, EPOCH.utc.jd2)
+    meridian = radius * np.array([math.cos(era), math.sin(era), 0.0])
+    assert angle_deg(converted.r, meridian) < 0.3
+    # Eastward: along z x r, perpendicular to r.
+    east = np.cross([0.0, 0.0, 1.0], converted.r)
+    assert angle_deg(converted.v, east) < 0.3
+    assert abs(float(converted.r @ converted.v)) < 1e-6 * radius
 
 
 def test_itrf_velocity_gains_the_earth_rotation_term() -> None:

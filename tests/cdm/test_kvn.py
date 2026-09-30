@@ -3,8 +3,8 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from builders import B1_KVN as B1
 from builders import EARTH_ROTATION_RATE, known
-from cdm_builders import B1_KVN as B1
 from cdm_builders import TRACSS, assert_equivalent, cdms, minimal_cdm
 from hypothesis import given, settings
 

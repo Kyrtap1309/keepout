@@ -371,7 +371,7 @@ def encounter_scan(
     )
     centre = (min(0.0, closest), max(0.0, closest))
     limit = 0.5 * (period - (centre[1] - centre[0]))
-    return locate_auto(rate, half, limit, rate.screen, centre)
+    return locate_auto(rate, half, limit, rate.screen, centre=centre)
 
 
 def straight_line_closest_time(conjunction: Conjunction) -> float:

@@ -18,25 +18,16 @@ FILE = CaraFile("Dir/Sub/data.mat", hashlib.sha256(PAYLOAD).hexdigest())
 
 
 class FakeDownloader:
-    def __init__(self, data: bytes) -> None:
+    """Serves ``data``, or each URL its own bytes from a mapping, and records
+    the URLs asked for; safe to call from several threads."""
+
+    def __init__(self, data: bytes | dict[str, bytes]) -> None:
         self.data = data
         self.urls: list[str] = []
 
     def __call__(self, url: str) -> bytes:
         self.urls.append(url)
-        return self.data
-
-
-class FakeMapDownloader:
-    """Serves each URL its own bytes; safe to call from several threads."""
-
-    def __init__(self, by_url: dict[str, bytes]) -> None:
-        self.by_url = by_url
-        self.urls: list[str] = []
-
-    def __call__(self, url: str) -> bytes:
-        self.urls.append(url)
-        return self.by_url[url]
+        return self.data if isinstance(self.data, bytes) else self.data[url]
 
 
 def cached_path(root: Path, file: CaraFile) -> Path:
@@ -106,7 +97,7 @@ def test_prefetch_caches_every_file(tmp_path: Path) -> None:
         for i, data in enumerate(payloads)
     ]
     by_url = {file.url: data for file, data in zip(files, payloads, strict=True)}
-    download = FakeMapDownloader(by_url)
+    download = FakeDownloader(by_url)
     cara.prefetch(files, cache=tmp_path, download=download)
     assert sorted(download.urls) == sorted(by_url)
     for file, data in zip(files, payloads, strict=True):

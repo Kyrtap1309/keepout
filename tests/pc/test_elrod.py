@@ -1,23 +1,8 @@
 import pytest
 from builders import head_on
-from pc_builders import ANISOTROPIC, PlaneCase
 from reference_pc import isotropic_pc, principal_axes_pc
 
 from keepout.pc.elrod import MAX_ORDER, START_ORDER, elrod
-
-
-@pytest.mark.parametrize(
-    ("miss", "sigma", "radius"),
-    [(0.0, 10.0, 5.0), (30.0, 10.0, 5.0), (5.0, 1.0, 20.0), (100.0, 10.0, 5.0)],
-)
-def test_isotropic_covariance_matches_the_rice_integral(
-    miss: float, sigma: float, radius: float
-) -> None:
-    conjunction = head_on(miss, sigma, sigma, radius)
-    result = elrod(conjunction.plane, radius)
-    assert result.method == "elrod"
-    assert result.value == pytest.approx(isotropic_pc(miss, sigma, radius), rel=1e-9)
-    assert result.diagnostics == ()
 
 
 def test_adaptive_order_resolves_a_thin_covariance() -> None:
@@ -62,13 +47,3 @@ def test_order_must_be_positive(order: int) -> None:
     conjunction = head_on(30.0, 10.0, 20.0, 5.0)
     with pytest.raises(ValueError, match="order must be >= 1"):
         elrod(conjunction.plane, 5.0, order=order)
-
-
-@pytest.mark.parametrize("case", ANISOTROPIC, ids=str)
-def test_correlated_off_axis_covariance_matches_the_oracle(case: PlaneCase) -> None:
-    result = elrod(case.plane(), case.radius)
-    expected = principal_axes_pc(
-        case.miss_u, case.miss_v, case.sigma_u, case.sigma_v, case.radius
-    )
-    assert result.value == pytest.approx(expected, rel=1e-8)
-    assert result.diagnostics == ()

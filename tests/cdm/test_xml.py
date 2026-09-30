@@ -4,7 +4,8 @@ from xml.etree import ElementTree
 
 import pytest
 import xmlschema
-from cdm_builders import B1_KVN, B1_XML, TRACSS, assert_equivalent, cdms, minimal_cdm
+from builders import B1_KVN
+from cdm_builders import B1_XML, TRACSS, assert_equivalent, cdms, minimal_cdm
 from hypothesis import given, settings
 
 from keepout.cdm import Cdm, Field, Section, kvn, xml

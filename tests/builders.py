@@ -1,5 +1,7 @@
 """Builders, constants and Hypothesis strategies shared by the test packages."""
 
+from pathlib import Path
+
 import numpy as np
 import numpy.typing as npt
 from astropy.time import Time
@@ -15,6 +17,12 @@ from keepout.objects import ObjectState
 from keepout.state import StateVector
 from keepout.validation.cases import ValidationCase
 from keepout.validation.criteria import TWO_D, Criterion
+
+CDM_DATA = Path(__file__).parent / "cdm" / "data"
+"""Reference CDM files shared by the CDM and validation tests."""
+
+B1_KVN = CDM_DATA / "b1_example.kvn"
+"""CCSDS 508.0-B-1 annex example, KVN."""
 
 EPOCH = Time("2010-03-13T22:37:52.618", scale="utc")
 
@@ -42,16 +50,54 @@ def object_state(
     v: npt.ArrayLike,
     position_covariance: npt.ArrayLike | None = None,
     *,
+    velocity_sigma: float = 0.0,
     epoch: Time = EPOCH,
     object_id: str = "TEST",
 ) -> ObjectState:
-    """A GCRF object state with the given position covariance [m^2]."""
-    position = np.eye(3) if position_covariance is None else position_covariance
+    """A GCRF object state with the given position covariance [m^2].
+
+    ``velocity_sigma`` [m/s] adds an isotropic, uncorrelated velocity block.
+    """
+    matrix = np.zeros((6, 6))
+    matrix[:3, :3] = np.eye(3) if position_covariance is None else position_covariance
+    matrix[3:, 3:] = velocity_sigma**2 * np.eye(3)
     return ObjectState(
         object_id,
         StateVector(epoch, r, v, "GCRF"),
-        Covariance.from_position(position, "GCRF", epoch),
+        Covariance(matrix, "GCRF", epoch),
     )
+
+
+def without_covariance(item: ObjectState) -> ObjectState:
+    """The object with its covariance unknown."""
+    return ObjectState(item.object_id, item.state, None, item.hard_body_radius)
+
+
+def drifting(velocity_sigma: float) -> Conjunction:
+    """A slow crossing whose 3-D Pc differs from its 2-D Pc.
+
+    The secondary drifts past 15 m away at 0.3 m/s, with 10 m position
+    sigmas on both objects; over the minutes of the encounter the orbits
+    curve and, with ``velocity_sigma`` [m/s] of the order of the relative
+    speed, the relative velocity is itself uncertain. Pass
+    ``window=DRIFT_WINDOW`` to the 3-D methods.
+    """
+    covariance = 100.0 * np.eye(3)
+    primary = object_state(
+        LEO_R, LEO_V, covariance, velocity_sigma=velocity_sigma, object_id="PRI"
+    )
+    secondary = object_state(
+        LEO_R + np.array([15.0, 0.0, 0.0]),
+        LEO_V + np.array([0.0, 0.0, 0.3]),
+        covariance,
+        velocity_sigma=velocity_sigma,
+        object_id="SEC",
+    )
+    return Conjunction(primary, secondary, 5.0)
+
+
+DRIFT_WINDOW = (-200.0, 200.0)
+"""Window [s from TCA] that holds the whole :func:`drifting` encounter."""
 
 
 def planar(

@@ -4,7 +4,7 @@ from typing import Any
 
 import numpy as np
 import pytest
-from builders import DIAGONAL_COVARIANCE, LEO_R, LEO_V, known, object_state
+from builders import B1_KVN, DIAGONAL_COVARIANCE, LEO_R, LEO_V, known, object_state
 
 from keepout.errors import CaraFormatError
 from keepout.objects import ObjectState
@@ -19,6 +19,7 @@ from keepout.validation.cases import (
     load_alfano_3d_cases,
     load_alfano_cases,
     load_alfano_monte_carlo_cases,
+    load_hall_2d3d_cases,
     load_max_pc_cases,
     load_non_pd_case,
     load_pc_method_3d_cases,
@@ -27,8 +28,6 @@ from keepout.validation.cases import (
     monte_carlo_options,
 )
 from keepout.validation.criteria import HALL, HALL_PC_SET
-
-B1_KVN = Path(__file__).parents[1] / "cdm" / "data" / "b1_example.kvn"
 
 
 def alfano_rows(asymmetry: float = 0.0) -> list[list[Any]]:
@@ -227,6 +226,33 @@ def test_pc_method_3d_and_monte_carlo_cases(monkeypatch: pytest.MonkeyPatch) -> 
     (only,) = load_pc_method_monte_carlo_cases()
     assert only.case_id == "A"
     assert only.interval == (2e-4, 4e-4)
+
+
+def test_pc_method_2d_cases(monkeypatch: pytest.MonkeyPatch) -> None:
+    row = {"Conjunction_ID": "A", "HBR_m": 20.0, "Pc2D": 3e-4}
+    monkeypatch.setattr(cara, "PC_METHOD_CDMS", {"A": B1_KVN})
+    monkeypatch.setattr(cara, "fetch", lambda file, cache=None: B1_KVN)
+    monkeypatch.setattr(cara, "load_xlsx", lambda path: [row])
+    (case,) = load_pc_method_cases()
+    assert (case.suite, case.case_id, case.reference) == (
+        "CARA Pc method test set",
+        "A",
+        3e-4,
+    )
+    assert case.conjunction.hard_body_radius == 20.0
+    assert case.methods == ("foster", "elrod")
+
+
+def test_hall_2d3d_cases_share_one_conjunction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(cara, "fetch", lambda file, cache=None: B1_KVN)
+    two_d, three_d = load_hall_2d3d_cases()
+    assert two_d.conjunction is three_d.conjunction
+    assert two_d.conjunction.hard_body_radius == 20.0
+    assert (two_d.reference, three_d.reference) == (2.2660816e-20, 1.9271201e-05)
+    assert three_d.methods == ("hall3d",)
+    assert three_d.criterion is HALL
 
 
 def test_transcribed_hall_similar_to_2d_case_is_well_formed() -> None:

@@ -6,6 +6,7 @@ import pytest
 
 from keepout.errors import PcConvergenceError
 from keepout.pc._timeline import (
+    DETECTION_LEVEL,
     DETECTION_SIGMAS,
     MAX_REFINED_POINTS,
     MIN_SCAN_POINTS,
@@ -28,9 +29,19 @@ def whole_window(width: float = TAU) -> Screen:
     return lambda window: [Candidate(*window, CROSSING, width)]
 
 
-def test_detection_spacing_is_half_the_significant_width() -> None:
-    # Above RATE_FLOOR over 12.1 tau for a peak down to DETECTION_LEVEL.
-    assert pytest.approx(6.07, abs=0.01) == DETECTION_SIGMAS
+@pytest.mark.parametrize("phase", np.linspace(0.0, 1.0, 7).tolist())
+def test_an_encounter_down_to_the_detection_level_is_found(phase: float) -> None:
+    # A second encounter DETECTION_LEVEL as high as the first, placed at
+    # every phase of the detection grid (the worst case is midway between
+    # two nodes), must still get its own segment.
+    weak_centre = 1234.5 + phase * DETECTION_SIGMAS * TAU
+    strong, weak = bump(-800.0), bump(weak_centre)
+    found = locate(
+        lambda t: strong(t) + DETECTION_LEVEL * weak(t), WINDOW, whole_window()
+    )
+    spans = [(found.times[lo], found.times[hi]) for lo, hi in found.segments]
+    assert len(spans) == 2
+    assert any(a <= weak_centre <= b for a, b in spans)
 
 
 @pytest.mark.parametrize(

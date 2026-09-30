@@ -6,11 +6,18 @@ from typing import Any
 
 import numpy as np
 import pytest
-from builders import EPOCH, LEO_R, LEO_V, head_on, object_state, shifted_back
+from builders import (
+    DRIFT_WINDOW,
+    LEO_R,
+    LEO_V,
+    drifting,
+    head_on,
+    object_state,
+    shifted_back,
+)
 from scipy.spatial.transform import Rotation
 
 from keepout.conjunction import Conjunction
-from keepout.covariance import Covariance
 from keepout.errors import CovarianceError, GeometryError, PcConvergenceError
 from keepout.objects import ObjectState
 from keepout.orbits import orbital_period
@@ -21,16 +28,6 @@ from keepout.pc._timeline import RateIntegral, Segment
 hall3d_module = importlib.import_module("keepout.pc.hall3d")
 rate_module = importlib.import_module("keepout.pc._rate")
 timeline_module = importlib.import_module("keepout.pc._timeline")
-
-
-def with_velocity_sigma(item: ObjectState, sigma: float) -> ObjectState:
-    """The object with a 6x6 covariance: its position block plus sigma^2 I [m/s]."""
-    assert item.covariance is not None
-    matrix = item.covariance.matrix.copy()
-    matrix[3:, 3:] = sigma**2 * np.eye(3)
-    return ObjectState(
-        item.object_id, item.state, Covariance(matrix, "GCRF", EPOCH), None
-    )
 
 
 @pytest.mark.parametrize(
@@ -52,15 +49,21 @@ def test_fast_encounter_matches_2d_pc(
     assert result.diagnostics == ()
 
 
-def test_velocity_uncertainty_is_accepted() -> None:
-    base = head_on(30.0, 10.0, 20.0, 5.0)
-    conjunction = Conjunction(
-        with_velocity_sigma(base.primary, 0.1),
-        with_velocity_sigma(base.secondary, 0.1),
-        5.0,
-    )
+def test_a_certain_slow_drift_matches_the_2d_pc() -> None:
+    # Without velocity uncertainty the minutes-long drift is still close to
+    # a straight line at a known speed: 3-D and 2-D agree.
+    conjunction = drifting(velocity_sigma=1e-4)
+    result = hall3d(conjunction, window=DRIFT_WINDOW)
+    assert result.value == pytest.approx(foster(conjunction.plane, 5.0).value, rel=1e-3)
+
+
+def test_velocity_uncertainty_changes_the_3d_pc() -> None:
+    # Velocity sigmas of the order of the 0.3 m/s drift spread the crossing
+    # times: Nc rises by about a fifth over the 2-D Pc, which ignores them.
+    conjunction = drifting(velocity_sigma=0.5)
     two_d = foster(conjunction.plane, 5.0).value
-    assert hall3d(conjunction).value == pytest.approx(two_d, rel=1e-3)
+    result = hall3d(conjunction, window=DRIFT_WINDOW)
+    assert result.value > 1.15 * two_d
 
 
 def test_swapping_the_objects_changes_nothing() -> None:
@@ -320,9 +323,9 @@ def test_automatic_window_grows_to_hold_a_displaced_peak(
     widths: list[float] = []
     real = timeline_module.locate_auto
 
-    def spy(rate: object, half: float, *args: object) -> object:
+    def spy(rate: Any, half: float, limit: float, screen: Any, **options: Any) -> Any:
         widths.append(half)
-        return real(rate, half, *args)
+        return real(rate, half, limit, screen, **options)
 
     monkeypatch.setattr(rate_module, "locate_auto", spy)
     result = hall3d(conjunction)
@@ -334,17 +337,15 @@ def test_automatic_window_grows_to_hold_a_displaced_peak(
 
 def slow_crossing() -> Conjunction:
     """A 0.2 m/s crossing with 5 m position and 0.1 m/s velocity sigmas."""
-
-    def obj(r: np.ndarray, v: np.ndarray) -> ObjectState:
-        matrix = np.zeros((6, 6))
-        matrix[:3, :3] = 25.0 * np.eye(3)
-        matrix[3:, 3:] = 0.01 * np.eye(3)
-        state = object_state(r, v).state
-        return ObjectState("X", state, Covariance(matrix, "GCRF", EPOCH), None)
-
+    covariance = 25.0 * np.eye(3)
     return Conjunction(
-        obj(LEO_R, LEO_V),
-        obj(LEO_R + np.array([30.0, 0.0, 0.0]), LEO_V + np.array([0.0, 0.0, 0.2])),
+        object_state(LEO_R, LEO_V, covariance, velocity_sigma=0.1),
+        object_state(
+            LEO_R + np.array([30.0, 0.0, 0.0]),
+            LEO_V + np.array([0.0, 0.0, 0.2]),
+            covariance,
+            velocity_sigma=0.1,
+        ),
         5.0,
     )
 
@@ -380,8 +381,8 @@ def test_an_encounter_beyond_the_initial_window_is_searched_for(
     # keeps doubling until it reaches the encounter 1 s later.
     real = timeline_module.locate_auto
 
-    def at_tca(*args: Any) -> Any:
-        return real(*args[:4], (0.0, 0.0))
+    def at_tca(rate: Any, half: float, limit: float, screen: Any, **_: Any) -> Any:
+        return real(rate, half, limit, screen, centre=(0.0, 0.0))
 
     monkeypatch.setattr(rate_module, "locate_auto", at_tca)
     conjunction = shifted_back(head_on(30.0, 10.0, 20.0, 5.0), 1.0)
@@ -397,8 +398,8 @@ def test_a_missed_straight_line_approach_is_reported(
     # although the straight-line closest approach is 30 m away at t = 1 s.
     real = timeline_module.locate_auto
 
-    def frozen(rate: Any, half: float, limit: float, screen: Any, _: Any) -> Any:
-        return real(rate, half, half, screen, (0.0, 0.0))
+    def frozen(rate: Any, half: float, limit: float, screen: Any, **_: Any) -> Any:
+        return real(rate, half, half, screen, centre=(0.0, 0.0))
 
     monkeypatch.setattr(rate_module, "locate_auto", frozen)
     result = hall3d(shifted_back(head_on(30.0, 10.0, 20.0, 5.0), 1.0))
