@@ -147,6 +147,18 @@ def test_unknown_policy_is_rejected() -> None:
         make_covariance(VALID, "RTN", EPOCH, policy="ignore")  # type: ignore[arg-type]
 
 
+@pytest.mark.parametrize("entry", [(5, 0), (0, 1)])
+def test_repair_survives_variances_at_the_smallest_normal_float(
+    entry: tuple[int, int],
+) -> None:
+    # Found by hypothesis: 4 / sqrt(2.2e-308)^2 overflows to inf unless such
+    # a variance counts as zero.
+    matrix = np.full((6, 6), np.finfo(np.float64).tiny)
+    matrix[entry] = 4.0
+    fixed, _ = repair(matrix)
+    assert problems(fixed) == ()
+
+
 @given(
     arrays(np.float64, (6, 6), elements=st.floats(min_value=-1e3, max_value=1e3)),
     arrays(np.float64, 6, elements=st.floats(min_value=-6.0, max_value=4.0)),

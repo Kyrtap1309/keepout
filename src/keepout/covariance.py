@@ -30,9 +30,16 @@ SYMMETRY_RTOL = 1e-9
 PSD_RTOL = 1e-10
 """Allowed negative eigenvalue of the correlation matrix ``D^-1 C D^-1``.
 
-``D = diag(sqrt|C[i, i]|)`` (1 where a variance is 0 or subnormal), so each block is
-judged at its own scale: a velocity variance of 1e-4 m^2/s^2 is checked as
-strictly as a position variance of 1e8 m^2."""
+``D = diag(sqrt|C[i, i]|)`` (1 where a variance is negligible, see
+:data:`NEGLIGIBLE_VARIANCE`), so each block is judged at its own scale: a
+velocity variance of 1e-4 m^2/s^2 is checked as strictly as a position
+variance of 1e8 m^2."""
+
+NEGLIGIBLE_VARIANCE = 1e-200
+"""Variance, relative to the largest absolute entry, below which it is taken
+as 0 when forming the correlation matrix. Dividing by its square root would
+otherwise overflow; real covariances span far less (a mm/s velocity next to
+a 10 km position is 1e-16)."""
 
 
 RANK_RTOL = 1e-8
@@ -69,8 +76,8 @@ def _inspect(array: FloatArray) -> tuple[FloatArray, float, FloatArray, FloatArr
     """Standard deviations ``D``, relative asymmetry, and the eigen-decomposition
     of the symmetric part of the correlation matrix ``D^-1 C D^-1``."""
     variances = np.abs(np.diag(array))
-    # A subnormal variance is 0: its square root would make the ratios noise.
-    deviations = np.where(variances >= _SMALLEST_NORMAL, np.sqrt(variances), 1.0)
+    floor = max(_SMALLEST_NORMAL, NEGLIGIBLE_VARIANCE * float(np.max(np.abs(array))))
+    deviations = np.where(variances >= floor, np.sqrt(variances), 1.0)
     scaled = array / np.outer(deviations, deviations)
     asymmetry = float(np.max(np.abs(scaled - scaled.T)))
     eigenvalues, eigenvectors = _eigh(symmetric_part(scaled))
