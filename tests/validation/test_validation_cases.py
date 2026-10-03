@@ -4,7 +4,15 @@ from typing import Any
 
 import numpy as np
 import pytest
-from builders import B1_KVN, DIAGONAL_COVARIANCE, LEO_R, LEO_V, known, object_state
+from builders import (
+    B1_KVN,
+    DIAGONAL_COVARIANCE,
+    LEO_R,
+    LEO_V,
+    case_with_reference,
+    known,
+    object_state,
+)
 
 from keepout.errors import CaraFormatError
 from keepout.objects import ObjectState
@@ -13,6 +21,7 @@ from keepout.validation import cases as cases_module
 from keepout.validation.cases import (
     MC_MIN_PC,
     MC_SAMPLES,
+    MC_SUITE_ALPHA,
     alfano_objects,
     elrod_similar_to_3d_case,
     hall_similar_to_2d_case,
@@ -290,3 +299,18 @@ def test_max_pc_cases_follow_cara_unit_tests(monkeypatch: pytest.MonkeyPatch) ->
     assert found[0].criterion.absolute == 5e-7
     assert found[2].criterion.relative == 5e-3
     assert found[0].conjunction.unknown_covariance == ("secondary",)
+
+
+def test_monte_carlo_intervals_share_the_suite_false_failure_chance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    case = case_with_reference(1e-3)
+    monkeypatch.setattr(cara, "prefetch", lambda *_, **__: None)
+    monkeypatch.setattr(
+        cases_module, "load_alfano_monte_carlo_cases", lambda _: [case] * 3
+    )
+    monkeypatch.setattr(
+        cases_module, "load_pc_method_monte_carlo_cases", lambda _: [case]
+    )
+    loaded = cases_module.load_monte_carlo_cases()
+    assert [c.options["confidence"] for c in loaded] == [1.0 - MC_SUITE_ALPHA / 4] * 4

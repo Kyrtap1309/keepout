@@ -67,3 +67,20 @@ def test_batched_expansions_match_one_at_a_time() -> None:
         [orbit.centre_at(m, float(t)) for m, t in zip(means, times, strict=True)],
         rtol=1e-12,
     )
+
+
+def test_samples_do_not_depend_on_the_eigenvector_signs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    orbit = OrbitUncertainty.of(ALONG_TRACK)
+    expected = orbit.sample(np.random.default_rng(3), 50)
+    eigh = np.linalg.eigh
+
+    def flipped(matrix: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        values, vectors = eigh(matrix)
+        return values, vectors * np.array([1.0, -1.0, 1.0, -1.0, -1.0, 1.0])
+
+    monkeypatch.setattr(np.linalg, "eigh", flipped)
+    np.testing.assert_allclose(
+        orbit.sample(np.random.default_rng(3), 50), expected, rtol=1e-12, atol=1e-15
+    )

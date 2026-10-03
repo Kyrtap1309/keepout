@@ -172,7 +172,10 @@ class OrbitUncertainty:
         scale = np.sqrt(np.clip(np.diag(self.covariance), 0.0, None))
         safe = np.where(scale > 0.0, scale, 1.0)
         values, vectors = np.linalg.eigh(self.covariance / np.outer(safe, safe))
-        factor = (scale[:, None] * vectors) * np.sqrt(np.clip(values, 0.0, None))
+        # The symmetric square root, unlike vectors * sqrt(values), does not
+        # depend on the eigenvector signs and bases LAPACK picks on each CPU.
+        root = (vectors * np.sqrt(np.clip(values, 0.0, None))) @ vectors.T
+        factor = scale[:, None] * root
         drawn: FloatArray = self.elements + rng.standard_normal((count, 6)) @ factor.T
         return drawn
 

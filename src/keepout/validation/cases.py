@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import zlib
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
@@ -48,6 +48,10 @@ MC_SAMPLES = (100_000, 4_000_000)
 MC_MIN_PC = 1e-4
 """Smallest CARA Monte Carlo Pc compared: below it the trials needed exceed
 :data:`MC_SAMPLES`."""
+
+MC_SUITE_ALPHA = 0.01
+"""Chance that a correct keepout fails any of the ``n`` Monte Carlo cases: each
+interval is at confidence ``1 - MC_SUITE_ALPHA / n`` (Bonferroni)."""
 
 
 @dataclass(frozen=True, eq=False)
@@ -662,9 +666,15 @@ def load_all(cache: Path | None = None) -> list[ValidationCase]:
 
 
 def load_monte_carlo_cases(cache: Path | None = None) -> list[ValidationCase]:
-    """The Monte Carlo validation cases (minutes to hours of computing)."""
+    """The Monte Carlo validation cases (minutes to hours of computing), with
+    the interval confidence of :data:`MC_SUITE_ALPHA`."""
     cara.prefetch(cara.MANIFEST, cache=cache)
-    return [
+    cases = [
         *load_alfano_monte_carlo_cases(cache),
         *load_pc_method_monte_carlo_cases(cache),
+    ]
+    confidence = 1.0 - MC_SUITE_ALPHA / max(len(cases), 1)
+    return [
+        replace(case, options={**case.options, "confidence": confidence})
+        for case in cases
     ]

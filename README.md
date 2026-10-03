@@ -39,8 +39,8 @@ Monte Carlo against CARA's two-body Monte Carlo
 <!-- validation-monte-carlo-summary:start -->
 | Suite | Method | Cases passed | Worst relative error |
 |---|---|---|---|
-| Alfano (2009), Monte Carlo | montecarlo | 12 / 12 | 1.1e-01 |
-| CARA Pc method test set, Monte Carlo | montecarlo | 21 / 21 | 1.1e-01 |
+| Alfano (2009), Monte Carlo | montecarlo | 12 / 12 | 7.3e-02 |
+| CARA Pc method test set, Monte Carlo | montecarlo | 21 / 21 | 1.6e-01 |
 <!-- validation-monte-carlo-summary:end -->
 
 ## Reading a CDM

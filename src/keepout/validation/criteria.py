@@ -16,6 +16,12 @@ class Verdict(NamedTuple):
     passed: bool
 
 
+REPRODUCIBILITY_FRACTION = 0.25
+"""Share of a criterion's margin within which two runs give the same result.
+Runs on different CPUs differ by up to ~1/20 of it (BLAS kernels, adaptive
+quadrature paths, Monte Carlo hits at the sphere boundary)."""
+
+
 @dataclass(frozen=True)
 class Criterion:
     """How a method's value is compared with a case's reference.
@@ -71,16 +77,55 @@ class Criterion:
         """
         difference = abs(value - reference)
         if self.interval:
-            if interval is None:
-                raise ValueError("an interval criterion needs the result's interval")
-            low, high = interval
+            low, high = self._interval(interval)
             error = difference / reference if reference > 0.0 else difference
             return Verdict(error, reference > 0.0, low <= reference <= high)
-        if self.relative is not None and reference >= self.small and reference > 0.0:
+        relative = self._relative_at(reference)
+        if relative is not None:
             error = difference / reference
-            return Verdict(error, True, error <= self.relative)
-        bound = self.absolute if self.absolute is not None else 0.0
-        return Verdict(difference, False, difference <= bound)
+            return Verdict(error, True, error <= relative)
+        return Verdict(difference, False, difference <= self.margin(reference))
+
+    def margin(
+        self, reference: float, interval: tuple[float, float] | None = None
+    ) -> float:
+        """Absolute difference from ``reference`` the criterion allows.
+
+        That is the bound that applies at ``reference`` or, for an interval
+        criterion, the half-width of the result's ``interval``.
+        """
+        if self.interval:
+            low, high = self._interval(interval)
+            return 0.5 * (high - low)
+        relative = self._relative_at(reference)
+        if relative is not None:
+            return relative * reference
+        return self.absolute if self.absolute is not None else 0.0
+
+    def reproduces(
+        self,
+        previous: float,
+        current: float,
+        reference: float,
+        interval: tuple[float, float] | None = None,
+    ) -> bool:
+        """Whether ``current`` repeats ``previous`` within
+        :data:`REPRODUCIBILITY_FRACTION` of the :meth:`margin` at ``reference``.
+        """
+        allowed = REPRODUCIBILITY_FRACTION * self.margin(reference, interval)
+        return abs(current - previous) <= allowed
+
+    def _relative_at(self, reference: float) -> float | None:
+        """The relative bound if it applies at ``reference``."""
+        if reference >= self.small and reference > 0.0:
+            return self.relative
+        return None
+
+    @staticmethod
+    def _interval(interval: tuple[float, float] | None) -> tuple[float, float]:
+        if interval is None:
+            raise ValueError("an interval criterion needs the result's interval")
+        return interval
 
     def describe(self) -> str:
         """The criterion in words, for the report."""

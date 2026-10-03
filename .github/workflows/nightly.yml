@@ -24,4 +24,13 @@ jobs:
           path: ~/.cache/keepout
           key: cara-${{ hashFiles('src/keepout/sources/cara_manifest.sha256') }}
       - run: uv sync --locked
-      - run: uv run python tools/validation_report.py --monte-carlo --check
+      - run: uv run python tools/validation_report.py --monte-carlo
+      - run: git add --intent-to-add docs && git diff --exit-code -- docs README.md
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-monte-carlo-results
+          path: |
+            docs/validation-monte-carlo.json
+            docs/validation-monte-carlo.md
+            README.md
