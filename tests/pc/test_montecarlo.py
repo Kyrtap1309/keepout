@@ -5,26 +5,15 @@ import numpy as np
 import pytest
 from builders import DRIFT_WINDOW, LEO_R, LEO_V, drifting, head_on, object_state
 from faults import failing_where, not_converging
-from scipy import stats
 
 from keepout.conjunction import Conjunction
 from keepout.errors import CovarianceError, PcConvergenceError
 from keepout.objects import ObjectState
 from keepout.pc import foster, hall3d, montecarlo
-from keepout.pc.montecarlo import _Trials, clopper_pearson
+from keepout.pc.montecarlo import _Trials
 
 rate_module = importlib.import_module("keepout.pc._rate")
 montecarlo_module = importlib.import_module("keepout.pc.montecarlo")
-
-
-def test_clopper_pearson_matches_the_beta_quantiles() -> None:
-    low, high = clopper_pearson(0, 100, 0.99)
-    assert low == 0.0
-    assert high == pytest.approx(1.0 - 0.005 ** (1.0 / 100.0), rel=1e-12)
-    low, high = clopper_pearson(30, 1000, 0.95)
-    assert low == pytest.approx(stats.beta.ppf(0.025, 30, 971))
-    assert high == pytest.approx(stats.beta.ppf(0.975, 31, 970))
-    assert clopper_pearson(10, 10, 0.99)[1] == 1.0
 
 
 def test_fast_encounter_agrees_with_2d_pc() -> None:

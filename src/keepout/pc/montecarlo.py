@@ -22,7 +22,7 @@ import math
 
 import numpy as np
 import numpy.typing as npt
-from scipy import special
+from scipy import stats
 
 from keepout._types import FloatArray
 from keepout.conjunction import Conjunction
@@ -48,21 +48,6 @@ NEWTON_STEPS = 12
 
 SPEED_MARGIN = 1.5
 """Factor on the larger grid-point relative speed bounding the speed in between."""
-
-
-def clopper_pearson(hits: int, trials: int, confidence: float) -> tuple[float, float]:
-    """Exact binomial confidence interval for ``hits / trials``."""
-    alpha = 1.0 - confidence
-    # betaincinv(a, b, q) is the q-quantile of Beta(a, b).
-    low = (
-        float(special.betaincinv(hits, trials - hits + 1, alpha / 2.0)) if hits else 0.0
-    )
-    high = (
-        float(special.betaincinv(hits + 1, trials - hits, 1.0 - alpha / 2.0))
-        if hits < trials
-        else 1.0
-    )
-    return low, high
 
 
 def _converged(hits: int, trials: int, low: float, high: float, rtol: float) -> bool:
@@ -288,7 +273,8 @@ def montecarlo(
         )
         new_hits, new_inside = _collisions(trials, found, conjunction.hard_body_radius)
         hits, inside, done = hits + new_hits, inside + new_inside, done + count
-        low, high = clopper_pearson(hits, done, confidence)
+        interval = stats.binomtest(hits, done).proportion_ci(confidence, "exact")
+        low, high = float(interval.low), float(interval.high)
         converged = _converged(hits, done, low, high, rtol)
         if samples is None and converged:
             break

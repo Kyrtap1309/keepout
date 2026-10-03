@@ -19,6 +19,7 @@ import math
 from functools import lru_cache
 
 import numpy as np
+from scipy import special
 
 from keepout._types import FloatArray
 from keepout.encounter import EncounterPlane
@@ -38,8 +39,7 @@ ELROD_RTOL = 1e-10
 @lru_cache(maxsize=16)
 def _nodes(order: int) -> tuple[FloatArray, FloatArray]:
     """Gauss-Chebyshev (second kind) nodes and weights on ``[-1, 1]``, read-only."""
-    angles = np.arange(1, order + 1) * (math.pi / (order + 1))
-    nodes, weights = np.cos(angles), (math.pi / (order + 1)) * np.sin(angles) ** 2
+    nodes, weights = special.roots_chebyu(order)
     nodes.flags.writeable = weights.flags.writeable = False
     return nodes, weights
 
