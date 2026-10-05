@@ -43,10 +43,15 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - uses: actions/cache@v4
         with:
-          path: ~/.cache/keepout
+          path: ~/.cache/keepout/cara
           key: cara-${{ hashFiles('src/keepout/sources/cara_manifest.sha256') }}
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/keepout/kelvins
+          key: kelvins-${{ hashFiles('src/keepout/sources/kelvins.py') }}
       - run: uv sync --locked
       - run: uv run pytest -m validation -v
+      - run: uv run python tools/risk_report.py --check
       - run: uv run python tools/validation_report.py
       - run: git add --intent-to-add docs && git diff --exit-code -- docs README.md
       - if: failure()

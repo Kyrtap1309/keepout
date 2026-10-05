@@ -8,6 +8,7 @@ __all__ = [
     "CovarianceError",
     "GeometryError",
     "KeepoutError",
+    "KelvinsFormatError",
     "PcConvergenceError",
     "SourceUnavailable",
     "UnsupportedFrame",
@@ -28,6 +29,10 @@ class ChecksumMismatch(KeepoutError):
 
 class CaraFormatError(KeepoutError):
     """A NASA CARA data file could not be parsed."""
+
+
+class KelvinsFormatError(KeepoutError):
+    """ESA's Kelvins collision avoidance data could not be parsed."""
 
 
 class CdmParseError(KeepoutError):

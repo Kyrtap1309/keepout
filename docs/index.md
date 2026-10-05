@@ -4,8 +4,8 @@ Spacecraft conjunction assessment in Python: CCSDS CDM ingest, probability of
 collision (Pc), risk trends and collision-avoidance manoeuvre planning.
 
 !!! warning "Pre-alpha"
-    Milestone M3 — 3-D, Monte Carlo and maximum probability of collision.
-    APIs will change.
+    Milestone M4 — risk levels, trends and decisions over a conjunction
+    event. APIs will change.
 
 ## Reading a CDM
 
@@ -36,6 +36,23 @@ print(mc.value, mc.details["ci_low"], mc.details["ci_high"])
 Without `hard_body_radius`, the sum of both objects' `HBR` (CDM 2.0) is used;
 keepout never falls back to a default radius.
 
+## Risk of an event
+
+```python
+from pathlib import Path
+
+import keepout.cdm
+from keepout import ConjunctionEvent, assess
+
+cdms = [keepout.cdm.load(path) for path in Path("event").glob("*.cdm")]
+assessment = assess(ConjunctionEvent.from_cdms(cdms).observations())
+print(assessment.decision.action.name, assessment.decision.reasons)
+```
+
+See [Risk assessment](risk.md) for the rules and the
+[Kelvins report](risk-kelvins.md) for keepout's decisions on 15 321 real
+events of ESA missions.
+
 ## Validation philosophy
 
 Every Pc algorithm in keepout is implemented from the published literature
@@ -53,5 +70,6 @@ uv run pytest                 # offline test suite
 uv run pytest -m validation   # downloads CARA reference data
 uv run python tools/validation_report.py   # regenerate the validation report
 uv run python tools/validation_report.py --monte-carlo   # Monte Carlo (slow)
+uv run python tools/risk_report.py   # Kelvins risk report (downloads 221 MB once)
 uv run mkdocs serve           # this documentation
 ```

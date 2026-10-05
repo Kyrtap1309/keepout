@@ -9,15 +9,8 @@ from __future__ import annotations
 
 import csv
 import hashlib
-import http.client
-import os
 import re
-import stat
-import tempfile
-import threading
-import urllib.error
 import urllib.parse
-import urllib.request
 import zipfile
 import zlib
 from collections.abc import Callable, Iterable, Mapping
@@ -27,7 +20,14 @@ from importlib import resources
 from pathlib import Path, PurePosixPath
 from typing import Any, Final, TypeAlias
 
-from keepout.errors import CaraFormatError, ChecksumMismatch, SourceUnavailable
+from keepout.errors import CaraFormatError, ChecksumMismatch
+from keepout.sources._cache import (
+    DOWNLOAD_TIMEOUT,
+    cache_dir,
+    has_digest,
+    http_download,
+    store,
+)
 
 __all__ = [
     "ALFANO_2009_RESULTS",
@@ -58,9 +58,6 @@ __all__ = [
 
 CARA_REPO: Final = "nasa/CARA_Analysis_Tools"
 CARA_COMMIT: Final = "1c78beb1f7aefc384886c3be1d09e4681acb5d37"
-
-DOWNLOAD_TIMEOUT: Final = 60.0
-"""Seconds :func:`http_download` waits for the server."""
 
 Downloader: TypeAlias = Callable[[str], bytes]
 
@@ -184,85 +181,6 @@ DILUTION_CDMS: Final[Mapping[str, CaraFile]] = {
 """Omitron test CDMs of CARA's ``DilutionMaxPc_UnitTest.m``."""
 
 
-def cache_dir() -> Path:
-    """Root cache directory for downloaded reference data.
-
-    ``$KEEPOUT_CACHE_DIR`` if set, else ``$XDG_CACHE_HOME/keepout``, else
-    ``~/.cache/keepout``. The directory is not created here.
-    """
-    override = os.environ.get("KEEPOUT_CACHE_DIR")
-    if override:
-        return Path(override)
-    xdg = os.environ.get("XDG_CACHE_HOME")
-    base = Path(xdg) if xdg else Path.home() / ".cache"
-    return base / "keepout"
-
-
-def http_download(url: str) -> bytes:
-    """Download ``url`` and return the body.
-
-    Raises
-    ------
-    SourceUnavailable
-        On any network or HTTP error.
-    """
-    try:
-        with urllib.request.urlopen(url, timeout=DOWNLOAD_TIMEOUT) as response:
-            body: bytes = response.read()
-            return body
-    except (OSError, http.client.HTTPException) as exc:
-        raise SourceUnavailable(f"cannot download {url}: {exc}") from exc
-
-
-_Signature: TypeAlias = tuple[int, int, int]
-"""Inode, size and modification time [ns] of a cached file."""
-
-_verified: dict[Path, tuple[str, _Signature]] = {}
-"""Cached files whose digest this process has checked (or written), with the
-signature they had then; see :func:`_has_digest`."""
-_verified_lock = threading.Lock()
-
-
-def _signature(path: Path) -> _Signature | None:
-    """Signature of the regular file at ``path``; ``None`` if there is none."""
-    try:
-        status = path.stat()
-    except OSError:
-        return None
-    if not stat.S_ISREG(status.st_mode):
-        return None
-    return status.st_ino, status.st_size, status.st_mtime_ns
-
-
-def _remember(path: Path, sha256: str) -> None:
-    """Record that ``path`` has digest ``sha256`` as the file is now."""
-    signature = _signature(path)
-    if signature is not None:
-        with _verified_lock:
-            _verified[path] = (sha256, signature)
-
-
-def _has_digest(path: Path, sha256: str) -> bool:
-    """Whether the file at ``path`` exists and has SHA-256 digest ``sha256``.
-
-    A file already checked by this process is not hashed again while its
-    inode, size and modification time are unchanged, so :func:`prefetch`
-    followed by :func:`fetch` of the same files hashes each only once.
-    """
-    signature = _signature(path)
-    if signature is None:
-        return False
-    with _verified_lock:
-        if _verified.get(path) == (sha256, signature):
-            return True
-    with path.open("rb") as cached:
-        if hashlib.file_digest(cached, "sha256").hexdigest() != sha256:
-            return False
-    with _verified_lock:
-        _verified[path] = (sha256, signature)
-    return True
-
-
 def fetch(
     file: CaraFile,
     *,
@@ -286,7 +204,7 @@ def fetch(
     """
     root = cache if cache is not None else cache_dir()
     target = root / "cara" / CARA_COMMIT / file.path
-    if _has_digest(target, file.sha256):
+    if has_digest(target, file.sha256):
         return target
 
     data = download(file.url)
@@ -295,20 +213,7 @@ def fetch(
         raise ChecksumMismatch(
             f"{file.url}: expected sha256 {file.sha256}, got {actual}"
         )
-    target.parent.mkdir(parents=True, exist_ok=True)
-    # A unique temporary name, so concurrent fetches never share a partial file.
-    descriptor, name = tempfile.mkstemp(
-        dir=target.parent, prefix=f".{target.name}.", suffix=".part"
-    )
-    partial = Path(name)
-    try:
-        with os.fdopen(descriptor, "wb") as stream:
-            stream.write(data)
-        partial.replace(target)
-    except BaseException:
-        partial.unlink(missing_ok=True)
-        raise
-    _remember(target, file.sha256)
+    store(target, lambda sink: sink.write(data), file.sha256, file.url)
     return target
 
 

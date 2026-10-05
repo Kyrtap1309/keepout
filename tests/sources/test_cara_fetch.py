@@ -1,16 +1,11 @@
 import hashlib
-import http.client
-import io
 import re
-import urllib.error
-import urllib.request
-from email.message import Message
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from keepout.errors import ChecksumMismatch, SourceUnavailable
+from keepout.errors import ChecksumMismatch
 from keepout.sources import cara
 from keepout.sources.cara import CaraFile, fetch
 
@@ -159,87 +154,12 @@ def test_prefetch_reports_a_failed_file(tmp_path: Path) -> None:
         cara.prefetch([FILE], cache=tmp_path, download=FakeDownloader(b"tampered"))
 
 
-def test_cache_dir_env_override(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setenv("KEEPOUT_CACHE_DIR", str(tmp_path / "custom"))
-    assert cara.cache_dir() == tmp_path / "custom"
-
-
-def test_cache_dir_uses_xdg(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.delenv("KEEPOUT_CACHE_DIR", raising=False)
-    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
-    assert cara.cache_dir() == tmp_path / "keepout"
-
-
-def test_cache_dir_defaults_to_home(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.delenv("KEEPOUT_CACHE_DIR", raising=False)
-    monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
-    monkeypatch.setenv("HOME", str(tmp_path))
-    assert cara.cache_dir() == tmp_path / ".cache" / "keepout"
-
-
 def test_fetch_uses_cache_dir_by_default(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setenv("KEEPOUT_CACHE_DIR", str(tmp_path / "not-yet-created"))
     path = fetch(FILE, download=FakeDownloader(PAYLOAD))
     assert path == cached_path(tmp_path / "not-yet-created", FILE)
-
-
-def test_http_download_returns_body(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fake_urlopen(url: str, timeout: float) -> io.BytesIO:
-        return io.BytesIO(b"body")
-
-    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
-    assert cara.http_download("https://example.invalid/x") == b"body"
-
-
-def test_http_download_wraps_network_errors(monkeypatch: pytest.MonkeyPatch) -> None:
-    def offline(url: str, timeout: float) -> io.BytesIO:
-        raise urllib.error.URLError("offline")
-
-    monkeypatch.setattr(urllib.request, "urlopen", offline)
-    with pytest.raises(SourceUnavailable, match=r"example\.invalid.*offline"):
-        cara.http_download("https://example.invalid/x")
-
-
-def test_http_download_wraps_http_404(monkeypatch: pytest.MonkeyPatch) -> None:
-    def not_found(url: str, timeout: float) -> io.BytesIO:
-        raise urllib.error.HTTPError(url, 404, "Not Found", Message(), None)
-
-    monkeypatch.setattr(urllib.request, "urlopen", not_found)
-    with pytest.raises(SourceUnavailable, match="404"):
-        cara.http_download("https://example.invalid/x")
-
-
-class _BrokenBody(io.BytesIO):
-    def read(self, size: int | None = -1) -> bytes:
-        raise http.client.IncompleteRead(b"partial")
-
-
-def test_http_download_wraps_mid_read_failure(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def dropped(url: str, timeout: float) -> io.BytesIO:
-        return _BrokenBody()
-
-    monkeypatch.setattr(urllib.request, "urlopen", dropped)
-    with pytest.raises(SourceUnavailable, match=r"example\.invalid"):
-        cara.http_download("https://example.invalid/x")
-
-
-def test_http_download_wraps_connection_reset(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def reset(url: str, timeout: float) -> io.BytesIO:
-        raise ConnectionResetError("reset by peer")
-
-    monkeypatch.setattr(urllib.request, "urlopen", reset)
-    with pytest.raises(SourceUnavailable, match="reset by peer"):
-        cara.http_download("https://example.invalid/x")
 
 
 def test_manifest_reads_text_and_binary_sha256sum_lines() -> None:

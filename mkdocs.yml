@@ -46,10 +46,13 @@ nav:
   - Frames, units and CDM support: frames-and-units.md
   - 2-D probability of collision: pc-2d.md
   - 3-D, Monte Carlo and maximum Pc: pc-3d.md
+  - Risk assessment: risk.md
   - Validation report: validation.md
   - Monte Carlo validation report: validation-monte-carlo.md
+  - Risk on ESA's Kelvins data: risk-kelvins.md
   - Reference:
       - Probability of collision: reference/pc.md
+      - Risk: reference/risk.md
       - Conjunction: reference/conjunction.md
       - CDM: reference/cdm.md
       - Covariance: reference/covariance.md
@@ -57,5 +60,6 @@ nav:
       - Frames: reference/frames.md
       - Objects and state vectors: reference/objects.md
       - CARA reference data: reference/cara.md
+      - Kelvins data: reference/kelvins.md
       - Validation tooling: reference/validation.md
       - Errors: reference/errors.md

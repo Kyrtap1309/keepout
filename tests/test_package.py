@@ -17,11 +17,14 @@ def test_version_matches_distribution_metadata() -> None:
 def test_core_api_is_importable_from_the_package() -> None:
     from keepout.conjunction import Conjunction
     from keepout.pc import compute_pc
+    from keepout.risk import ConjunctionEvent, assess
     from keepout.state import StateVector
 
     assert keepout.Conjunction is Conjunction
     assert keepout.compute_pc is compute_pc
     assert keepout.StateVector is StateVector
+    assert keepout.ConjunctionEvent is ConjunctionEvent
+    assert keepout.assess is assess
     assert [name for name in keepout.__all__ if not hasattr(keepout, name)] == []
 
 

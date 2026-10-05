@@ -1,8 +1,8 @@
 """Test-suite configuration: tests must not reach the network.
 
 Only tests marked ``validation`` (which download the NASA CARA reference data
-on first run) may; the others fail on any ``urllib.request.urlopen``, and
-astropy never downloads IERS tables.
+or ESA's Kelvins data on first run) may; the others fail on any
+``urllib.request.urlopen``, and astropy never downloads IERS tables.
 
 Hypothesis profiles: ``default`` (random examples, the local database) and
 ``ci`` (derandomized, so a CI failure reproduces exactly, and printing the
@@ -10,8 +10,8 @@ blob to ``@reproduce_failure``); pick one with ``HYPOTHESIS_PROFILE``.
 
 Layout: ``geometry/`` tests the top-level domain modules (state, objects,
 covariance, frames, orbits, equinoctial, encounter, conjunction); the other
-directories mirror the ``keepout`` subpackages (``cdm``, ``pc``, ``sources``,
-``validation``) and ``tools``.
+directories mirror the ``keepout`` subpackages (``cdm``, ``pc``, ``risk``,
+``sources``, ``validation``) and ``tools``.
 """
 
 import os

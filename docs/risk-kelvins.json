@@ -1,0 +1,75 @@
+{
+  "doi": "10.5281/zenodo.4463683",
+  "settings": {
+    "green_below": 1e-07,
+    "red_from": 0.0001,
+    "basis": "conservative",
+    "trend_window": 3,
+    "steady_within": 0.5,
+    "decision_point_days": 2.0
+  },
+  "events": 15321,
+  "cdms": 199082,
+  "actions": {
+    "ignore": 13823,
+    "monitor": 1468,
+    "monitor, prepare manoeuvre": 6,
+    "manoeuvre": 24
+  },
+  "directions": {
+    "rising": 947,
+    "steady": 11363,
+    "falling": 2774,
+    "undetermined": 237
+  },
+  "decision_point_vs_final": {
+    "green": {
+      "green": 12429,
+      "yellow": 63,
+      "red": 1,
+      "none": 0
+    },
+    "yellow": {
+      "green": 587,
+      "yellow": 970,
+      "red": 10,
+      "none": 0
+    },
+    "red": {
+      "green": 18,
+      "yellow": 14,
+      "red": 17,
+      "none": 0
+    },
+    "none": {
+      "green": 1130,
+      "yellow": 69,
+      "red": 2,
+      "none": 11
+    }
+  },
+  "challenge_label": {
+    "ignore": {
+      "high": 1,
+      "low": 13822
+    },
+    "monitor": {
+      "high": 484,
+      "low": 984
+    },
+    "monitor, prepare manoeuvre": {
+      "high": 6,
+      "low": 0
+    },
+    "manoeuvre": {
+      "high": 24,
+      "low": 0
+    }
+  },
+  "examples": {
+    "manoeuvre": 734,
+    "prepare": 17487,
+    "rising": 4401,
+    "falling": 9860
+  }
+}
