@@ -266,7 +266,7 @@ def _error(row: Row) -> str:
     return f"{row.error:.1e}" if row.relative else f"{row.error:.1e} (abs)"
 
 
-def _mark(passed: bool) -> str:
+def _mark(*, passed: bool) -> str:
     return "pass" if passed else "**FAIL**"
 
 
@@ -326,7 +326,7 @@ def _method_columns(method: Method) -> _Columns:
         found = rows.get(method)
         if found is None:
             return ["-"] * len(titles)
-        values = [_pc(found.value), f"{_error(found)} {_mark(found.passed)}"]
+        values = [_pc(found.value), f"{_error(found)} {_mark(passed=found.passed)}"]
         if monte_carlo:
             low, high = found.ci or (0.0, 0.0)
             values += [f"[{_pc(low)}, {_pc(high)}]", f"{found.samples}"]
@@ -340,7 +340,7 @@ def _paper_cells(case: Row, rows: Mapping[Method, Row]) -> list[str]:
     if case.paper is None or found is None:
         return ["-", "-"]
     error, _, passed = PAPER.judge(found.value, case.paper)
-    return [_pc(case.paper), f"{error:.1e} {_mark(passed)}"]
+    return [_pc(case.paper), f"{error:.1e} {_mark(passed=passed)}"]
 
 
 def _suite_table(members: Sequence[Row]) -> list[str]:

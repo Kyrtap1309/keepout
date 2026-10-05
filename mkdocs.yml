@@ -61,5 +61,6 @@ nav:
       - Objects and state vectors: reference/objects.md
       - CARA reference data: reference/cara.md
       - Kelvins data: reference/kelvins.md
+      - Data cache: reference/cache.md
       - Validation tooling: reference/validation.md
       - Errors: reference/errors.md

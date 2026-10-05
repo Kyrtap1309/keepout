@@ -2,24 +2,25 @@ import math
 from random import Random
 
 import pytest
+from builders import at, series
 from hypothesis import given
 from hypothesis import strategies as st
-from risk_builders import at, observations, series
+from risk_builders import observations
 
 from keepout.risk import (
+    DAY,
     PcObservation,
     RiskLevel,
     Thresholds,
     Trend,
     TrendConfig,
     analyse_trend,
-    chronological,
 )
 
 
 def test_points_are_oldest_first_with_levels() -> None:
     trend = analyse_trend(series((1.0, 2e-4), (5.0, 1e-8), (3.0, 1e-6)))
-    assert [point.time_to_tca / 86400 for point in trend.points] == [5.0, 3.0, 1.0]
+    assert [point.time_to_tca / DAY for point in trend.points] == [5.0, 3.0, 1.0]
     assert [point.level for point in trend.points] == [
         RiskLevel.GREEN,
         RiskLevel.YELLOW,
@@ -65,6 +66,17 @@ def test_steady_within_sets_the_band() -> None:
     )
 
 
+def test_a_slope_of_exactly_steady_within_is_steady() -> None:
+    seen = series((2.0, 1e-6), (1.0, 1e-5))
+    trend = analyse_trend(seen, config=TrendConfig(steady_within=1.0))
+    assert (trend.slope, trend.direction) == (1.0, "steady")
+
+
+def test_an_observation_at_tca_is_a_point_and_one_after_it_is_not() -> None:
+    assert len(analyse_trend(series((0.0, 1e-5))).points) == 1
+    assert analyse_trend([at(-1e-9, 1e-5)]).points == ()
+
+
 def test_one_observation_has_no_direction() -> None:
     trend = analyse_trend(series((1.0, 1e-5)))
     assert (trend.direction, trend.slope) == ("undetermined", None)
@@ -86,7 +98,7 @@ def test_observations_after_tca_are_left_out() -> None:
     assert trend.notes == ("1 observation(s) issued after TCA left out",)
     latest = trend.latest_observation
     assert latest is not None
-    assert latest.time_to_tca == 86400.0
+    assert latest.time_to_tca == DAY
 
 
 def test_failed_observations_are_named_in_the_notes() -> None:
@@ -101,7 +113,7 @@ def test_failed_observations_are_named_in_the_notes() -> None:
 def test_latest_observation_may_be_a_failed_one() -> None:
     trend = analyse_trend([*series((2.0, 1e-6)), at(1.0, None)])
     assert trend.latest is not None
-    assert trend.latest.time_to_tca == 2 * 86400.0
+    assert trend.latest.time_to_tca == 2 * DAY
     latest = trend.latest_observation
     assert latest is not None
     assert not latest.ok
@@ -117,7 +129,7 @@ def test_zero_pc_is_fitted_at_the_floor() -> None:
 def test_points_use_the_threshold_basis() -> None:
     interval = at(1.0, 5e-5, ci_high=2e-4)
     assert analyse_trend([interval]).points[0].level is RiskLevel.RED
-    estimate = analyse_trend([interval], Thresholds(basis="estimate"))
+    estimate = analyse_trend([interval], thresholds=Thresholds(basis="estimate"))
     assert estimate.points[0].level is RiskLevel.YELLOW
     assert estimate.points[0].value == 5e-5
 
@@ -164,8 +176,8 @@ def test_no_observations_is_an_error() -> None:
     ("window", "steady", "message"),
     [
         (1, 0.5, "window must be at least 2"),
-        (3, 0.0, "steady_within must be finite and positive"),
-        (3, math.inf, "steady_within must be finite and positive"),
+        (3, 0.0, "steady_within must be finite and > 0"),
+        (3, math.inf, "steady_within must be finite and > 0"),
     ],
 )
 def test_invalid_config_is_refused(window: int, steady: float, message: str) -> None:
@@ -173,7 +185,7 @@ def test_invalid_config_is_refused(window: int, steady: float, message: str) -> 
         TrendConfig(window=window, steady_within=steady)
 
 
-@given(st.lists(observations, min_size=1, max_size=8), st.randoms())
+@given(st.lists(observations(), min_size=1, max_size=8), st.randoms())
 def test_the_order_of_the_input_does_not_matter(
     seen: list[PcObservation], random: Random
 ) -> None:
@@ -183,12 +195,15 @@ def test_the_order_of_the_input_does_not_matter(
 
     def summary(trend: Trend) -> object:
         points = [(p.time_to_tca, p.value, p.level) for p in trend.points]
-        return points, trend.direction, trend.slope, trend.notes
+        kept = [
+            (o.time_to_tca, o.pc, o.kind, o.diagnostics) for o in trend.observations
+        ]
+        return points, kept, trend.direction, trend.slope, trend.notes
 
     assert summary(first) == summary(second)
 
 
-@given(st.lists(observations, max_size=8))
-def test_chronological_puts_the_latest_last(seen: list[PcObservation]) -> None:
-    times = [o.time_to_tca for o in chronological(seen)]
+@given(st.lists(observations(), min_size=1, max_size=8))
+def test_observations_are_kept_oldest_first(seen: list[PcObservation]) -> None:
+    times = [o.time_to_tca for o in analyse_trend(seen).observations]
     assert times == sorted(times, reverse=True)

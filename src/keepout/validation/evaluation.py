@@ -73,7 +73,7 @@ class Outcome:
 
 
 def run(case: ValidationCase, method: Method) -> PcResult:
-    """keepout's Pc of a case by one of its methods, with the case's options.
+    """Keepout's Pc of a case by one of its methods, with the case's options.
 
     :class:`ValidationCase` checks that its methods take its options, so
     each method is given all of them.

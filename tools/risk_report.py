@@ -20,7 +20,7 @@ from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final
+from typing import Final, Literal, TypeAlias, TypedDict, TypeVar, assert_never, get_args
 
 import matplotlib as mpl
 from generated import replace_block, write_or_check
@@ -31,7 +31,9 @@ from keepout.risk import (
     PC_FLOOR,
     Action,
     Assessment,
+    Basis,
     DecisionConfig,
+    Direction,
     PcObservation,
     RiskLevel,
     Thresholds,
@@ -54,9 +56,30 @@ DECISION: Final = DecisionConfig()
 HIGH_RISK: Final = -6.0
 """The challenge's high-risk label: log10 Pc of an event's last CDM >= -6."""
 
-ACTIONS: Final = ("ignore", "monitor", "monitor, prepare manoeuvre", "manoeuvre")
-DIRECTIONS: Final = ("rising", "steady", "falling", "undetermined")
-LEVELS: Final = ("green", "yellow", "red", "none")
+ActionName: TypeAlias = Literal[
+    "ignore", "monitor", "monitor, prepare manoeuvre", "manoeuvre"
+]
+"""An :class:`~keepout.risk.Action` as the report names it."""
+
+LevelName: TypeAlias = Literal["green", "yellow", "red", "none"]
+"""A :class:`~keepout.risk.RiskLevel` as the report names it (``"none"``: no
+Pc)."""
+
+Label: TypeAlias = Literal["high", "low"]
+"""The challenge's risk label of an event."""
+
+ACTIONS: Final[tuple[ActionName, ...]] = get_args(ActionName)
+DIRECTIONS: Final[tuple[Direction, ...]] = (
+    "rising",
+    "steady",
+    "falling",
+    "undetermined",
+)
+LEVELS: Final[tuple[LevelName, ...]] = get_args(LevelName)
+LABELS: Final[tuple[Label, ...]] = get_args(Label)
+
+PLOT_DAYS: Final = 7.5
+"""Days before TCA a plot starts at (Kelvins events span about a week)."""
 
 LOWEST_AXIS: Final = 1e-12
 """The Pc axis reaches at least this low (lower if an event needs it)."""
@@ -68,17 +91,60 @@ COLOURS: Final[Mapping[RiskLevel, str]] = {
 }
 
 
-def action_name(assessment: Assessment) -> str:
+def action_name(assessment: Assessment) -> ActionName:
     """The decision as one of :data:`ACTIONS`."""
-    decision = assessment.decision
-    if decision.prepare_manoeuvre:
-        return "monitor, prepare manoeuvre"
-    return decision.action.name.lower()
+    action = assessment.decision.action
+    match action:
+        case Action.IGNORE:
+            return "ignore"
+        case Action.MONITOR:
+            return "monitor"
+        case Action.PREPARE_MANOEUVRE:
+            return "monitor, prepare manoeuvre"
+        case Action.MANOEUVRE:
+            return "manoeuvre"
+        case _:
+            assert_never(action)
 
 
-def level_name(level: RiskLevel | None) -> str:
+def level_name(level: RiskLevel | None) -> LevelName:
     """A level as one of :data:`LEVELS` (``"none"`` for no Pc)."""
-    return "none" if level is None else level.name.lower()
+    match level:
+        case None:
+            return "none"
+        case RiskLevel.GREEN:
+            return "green"
+        case RiskLevel.YELLOW:
+            return "yellow"
+        case RiskLevel.RED:
+            return "red"
+        case _:
+            assert_never(level)
+
+
+class Settings(TypedDict):
+    """The report's settings, as written to the JSON file."""
+
+    green_below: float
+    red_from: float
+    basis: Basis
+    trend_window: int
+    steady_within: float
+    decision_point_days: float
+
+
+class Summary(TypedDict):
+    """The report's numbers, as written to the JSON file."""
+
+    doi: str
+    settings: Settings
+    events: int
+    cdms: int
+    actions: dict[ActionName, int]
+    directions: dict[Direction, int]
+    decision_point_vs_final: dict[LevelName, dict[LevelName, int]]
+    challenge_label: dict[ActionName, dict[Label, int]]
+    examples: dict[str, int]
 
 
 def assess_with_settings(observations: Iterable[PcObservation]) -> Assessment:
@@ -92,11 +158,10 @@ def assess_with_settings(observations: Iterable[PcObservation]) -> Assessment:
     )
 
 
-def at_decision_point(event: KelvinsEvent) -> RiskLevel | None:
-    """Risk level of the latest CDM issued at or before the decision point."""
-    known = [
-        o for o in event.observations() if o.time_to_tca >= DECISION.decision_point
-    ]
+def at_decision_point(observations: Iterable[PcObservation]) -> RiskLevel | None:
+    """Risk level of the latest observation issued at or before the decision
+    point."""
+    known = [o for o in observations if o.time_to_tca >= DECISION.decision_point]
     return assess_with_settings(known).level if known else None
 
 
@@ -118,7 +183,7 @@ EXAMPLES: Final = (
     Example(
         "prepare",
         "Red before the decision point: monitor and prepare a manoeuvre",
-        lambda a: a.decision.prepare_manoeuvre,
+        lambda a: a.decision.action is Action.PREPARE_MANOEUVRE,
     ),
     Example(
         "rising",
@@ -153,19 +218,20 @@ def choose(
     return chosen
 
 
-def summarise(events: Sequence[KelvinsEvent]) -> dict[str, Any]:
+def summarise(events: Sequence[KelvinsEvent]) -> Summary:
     """The report's numbers."""
-    assessed = {e.event_id: assess_with_settings(e.observations()) for e in events}
-    actions = Counter(action_name(a) for a in assessed.values())
-    directions = Counter(a.trend.direction for a in assessed.values())
-    known: dict[str, Counter[str]] = {level: Counter() for level in LEVELS}
-    labels: dict[str, Counter[str]] = {action: Counter() for action in ACTIONS}
+    assessed: dict[int, Assessment] = {}
+    known: dict[LevelName, Counter[LevelName]] = {level: Counter() for level in LEVELS}
+    labels: dict[ActionName, Counter[Label]] = {action: Counter() for action in ACTIONS}
     for event in events:
-        assessment = assessed[event.event_id]
+        observations = event.observations()
+        assessment = assessed[event.event_id] = assess_with_settings(observations)
         final = level_name(assessment.level)
-        known[level_name(at_decision_point(event))][final] += 1
+        known[level_name(at_decision_point(observations))][final] += 1
         high = event.column("risk")[-1] >= HIGH_RISK
         labels[action_name(assessment)]["high" if high else "low"] += 1
+    actions = Counter(action_name(a) for a in assessed.values())
+    directions = Counter(a.trend.direction for a in assessed.values())
     return {
         "doi": kelvins.DOI,
         "settings": {
@@ -184,7 +250,7 @@ def summarise(events: Sequence[KelvinsEvent]) -> dict[str, Any]:
             level: {final: known[level][final] for final in LEVELS} for level in LEVELS
         },
         "challenge_label": {
-            action: {label: labels[action][label] for label in ("high", "low")}
+            action: {label: labels[action][label] for label in LABELS}
             for action in ACTIONS
         },
         "examples": choose(EXAMPLES, assessed),
@@ -204,25 +270,30 @@ def _table(header: Sequence[str], rows: Sequence[Sequence[object]]) -> list[str]
     return lines
 
 
+_Key = TypeVar("_Key", bound=str)
+
+
+def _counts_table(title: str, counts: Mapping[_Key, int], total: int) -> list[str]:
+    """Events per ``title`` value, with their share of ``total``."""
+    return _table(
+        (title, "Events", "Share"),
+        [(key, count, _share(count, total)) for key, count in counts.items()],
+    )
+
+
 def image(event_id: int) -> str:
     """File name of an example plot."""
     return f"event-{event_id}.svg"
 
 
-def render_summary(summary: Mapping[str, Any], images: str) -> str:
+def render_summary(summary: Summary, images: str) -> str:
     """The README block: the decisions and the first example plot."""
     total = summary["events"]
     lines = [
         f"keepout's decision for each of the {total} events of ESA's Kelvins "
         "data, from ESA's Pc of every CDM ([report](docs/risk-kelvins.md)):",
         "",
-        *_table(
-            ("Decision", "Events", "Share"),
-            [
-                (action, count, _share(count, total))
-                for action, count in summary["actions"].items()
-            ],
-        ),
+        *_counts_table("Decision", summary["actions"], total),
     ]
     examples = summary["examples"]
     if examples:
@@ -231,7 +302,7 @@ def render_summary(summary: Mapping[str, Any], images: str) -> str:
     return "\n".join(lines)
 
 
-def render_page(summary: Mapping[str, Any], images: str) -> str:
+def render_page(summary: Summary, images: str) -> str:
     """The report page, with the example plots under ``images``."""
     total = summary["events"]
     settings = summary["settings"]
@@ -261,23 +332,11 @@ def render_page(summary: Mapping[str, Any], images: str) -> str:
         "",
         "## Decisions",
         "",
-        *_table(
-            ("Decision", "Events", "Share"),
-            [
-                (action, count, _share(count, total))
-                for action, count in summary["actions"].items()
-            ],
-        ),
+        *_counts_table("Decision", summary["actions"], total),
         "",
         "## Trend at the last CDM before TCA",
         "",
-        *_table(
-            ("Direction", "Events", "Share"),
-            [
-                (direction, count, _share(count, total))
-                for direction, count in summary["directions"].items()
-            ],
-        ),
+        *_counts_table("Direction", summary["directions"], total),
         "",
         "## Risk at the decision point and at the last CDM",
         "",
@@ -363,14 +422,14 @@ def plot(event: KelvinsEvent, assessment: Assessment, path: Path) -> None:
         axes.set_yscale("log")
         axes.set_ylim(min([LOWEST_AXIS, *values]) / 10, 1.0)
         axes.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), fontsize="small")
-        axes.set_xlim(7.5, 0.0)
+        axes.set_xlim(PLOT_DAYS, 0.0)
         axes.set_xlabel("days to TCA")
         axes.set_ylabel("Pc (ESA)")
         axes.set_title(
             f"Kelvins event {event.event_id} (mission {event.mission_id}): "
             f"{action_name(assessment)}, trend {assessment.trend.direction}"
         )
-        axes.grid(True, which="major", alpha=0.3)
+        axes.grid(visible=True, which="major", alpha=0.3)
         figure.tight_layout()
         figure.savefig(path, format="svg", metadata={"Date": None})
 

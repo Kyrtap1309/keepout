@@ -17,6 +17,8 @@ classifiers = [
 dependencies = [
     "astropy>=8.0.1",
     "numpy>=2.4.6",
+    "platformdirs>=4.11.12",
+    "pyerfa>=2.0.1.5",
     "scipy>=1.17.1",
 ]
 
@@ -35,9 +37,28 @@ line-length = 88
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "N", "PT", "NPY"]
-# Exception names follow the spec (SourceUnavailable, ChecksumMismatch, ...).
-ignore = ["N818"]
+select = [
+    "E", "F", "W", "I", "B", "UP", "SIM", "RUF", "N", "PT", "NPY",
+    "ARG", "BLE", "C4", "D", "DTZ", "FBT", "FURB", "PERF", "PGH", "PIE", "PTH",
+    "RET", "TID",
+]
+ignore = [
+    # Exception names follow the spec (SourceUnavailable, ChecksumMismatch, ...).
+    "N818",
+    # House docstring style: a noun-phrase summary, which may wrap onto a
+    # second line, with the closing quotes right after the last sentence.
+    "D205", "D209", "D401",
+    # Dunder methods and __init__ are documented on the class.
+    "D105", "D107",
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
+[tool.ruff.lint.per-file-ignores]
+# Tests: named test functions need no docstrings; fixtures and fakes take
+# arguments they do not use, and parametrized tests take booleans.
+"tests/**" = ["D", "ARG", "FBT"]
 
 [tool.mypy]
 strict = true
@@ -84,8 +105,10 @@ dev = [
     "mkdocs-material>=9.7.7",
     "mkdocstrings[python]>=1.0.6",
     "mypy>=2.3.1",
+    "pre-commit>=4.6.2",
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
+    "pytest-randomly>=5.0.0",
     "ruff>=0.16.8",
     "scipy-stubs>=1.17.1.5",
     "types-openpyxl>=3.1.5.20260827",

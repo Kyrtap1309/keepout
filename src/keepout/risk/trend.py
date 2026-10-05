@@ -3,25 +3,23 @@
 from __future__ import annotations
 
 import math
+import statistics
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import Final, Literal, TypeAlias
+from typing import Literal, TypeAlias
 
+from keepout._types import require_positive
+from keepout._units import DAY
 from keepout.risk.observation import PC_FLOOR, PcObservation
 from keepout.risk.thresholds import RiskLevel, Thresholds
 
 __all__ = [
-    "DAY",
     "Direction",
     "Trend",
     "TrendConfig",
     "TrendPoint",
     "analyse_trend",
-    "chronological",
 ]
-
-DAY: Final = 86400.0
-"""Seconds in a day."""
 
 Direction: TypeAlias = Literal["rising", "falling", "steady", "undetermined"]
 """Where the Pc is heading: the sign of the fitted slope of log10 Pc, or
@@ -57,10 +55,7 @@ class TrendConfig:
     def __post_init__(self) -> None:
         if self.window < 2:
             raise ValueError(f"window must be at least 2, got {self.window}")
-        if not (math.isfinite(self.steady_within) and self.steady_within > 0.0):
-            raise ValueError(
-                f"steady_within must be finite and positive, got {self.steady_within}"
-            )
+        require_positive(self.steady_within, "steady_within")
 
 
 @dataclass(frozen=True, eq=False)
@@ -88,14 +83,13 @@ class TrendPoint:
         return self.observation.time_to_tca
 
 
-def _order(
-    observation: PcObservation,
-) -> tuple[float, bool, float, float, float, str, str, str]:
-    # Oldest first; among simultaneous ones a failed or higher Pc comes later,
-    # so it counts as the latest (the cautious choice). "Higher" ranks by the
-    # larger of the estimate and the interval's upper end first, so the order
-    # is cautious under either threshold basis. The remaining fields only make
-    # the order total, so the result does not depend on the input order.
+def _order(observation: PcObservation) -> tuple[object, ...]:
+    # Oldest first; among simultaneous ones a failed, higher or doubtful Pc
+    # comes later, so it counts as the latest (the cautious choice). "Higher"
+    # ranks by the larger of the estimate and the interval's upper end first,
+    # so the order is cautious under either threshold basis; "doubtful" is an
+    # upper bound or a Pc with diagnostics. The remaining fields only make the
+    # order total, so the result does not depend on the input order.
     pc = observation.pc or 0.0
     ci_high = observation.ci_high or 0.0
     return (
@@ -104,13 +98,20 @@ def _order(
         max(pc, ci_high),
         pc,
         ci_high,
+        observation.kind == "upper_bound" or bool(observation.diagnostics),
+        observation.kind,
+        observation.diagnostics,
         observation.message_id or "",
         observation.error or "",
         observation.source,
+        observation.reported_pc is not None,
+        observation.reported_pc or 0.0,
     )
 
 
-def chronological(observations: Iterable[PcObservation]) -> tuple[PcObservation, ...]:
+def _chronological(
+    observations: Iterable[PcObservation],
+) -> tuple[PcObservation, ...]:
     """The observations from the oldest to the latest (by time to TCA)."""
     return tuple(sorted(observations, key=_order))
 
@@ -126,15 +127,10 @@ def _slope(points: Sequence[TrendPoint]) -> float | None:
     """Least-squares slope of log10 Pc per day; ``None`` if all times agree."""
     days = [-point.time_to_tca / DAY for point in points]
     logs = [math.log10(max(point.value, PC_FLOOR)) for point in points]
-    mean_day = sum(days) / len(days)
-    mean_log = sum(logs) / len(logs)
-    spread = sum((day - mean_day) ** 2 for day in days)
-    if spread == 0.0:
+    try:
+        return statistics.linear_regression(days, logs).slope
+    except statistics.StatisticsError:  # all days equal
         return None
-    covariance = sum(
-        (day - mean_day) * (log - mean_log) for day, log in zip(days, logs, strict=True)
-    )
-    return covariance / spread
 
 
 @dataclass(frozen=True, eq=False)
@@ -153,6 +149,8 @@ class Trend:
         Fitted slope [decades of Pc per day], if there is one.
     notes
         What the trend left out or could not do, in words.
+    thresholds
+        The thresholds of the points' levels.
     """
 
     observations: tuple[PcObservation, ...]
@@ -160,6 +158,7 @@ class Trend:
     direction: Direction
     slope: float | None
     notes: tuple[str, ...]
+    thresholds: Thresholds
 
     @property
     def latest(self) -> TrendPoint | None:
@@ -182,6 +181,7 @@ class Trend:
 
 def analyse_trend(
     observations: Iterable[PcObservation],
+    *,
     thresholds: Thresholds | None = None,
     config: TrendConfig | None = None,
 ) -> Trend:
@@ -208,22 +208,23 @@ def analyse_trend(
     """
     limits = thresholds if thresholds is not None else Thresholds()
     settings = config if config is not None else TrendConfig()
-    ordered = chronological(observations)
+    ordered = _chronological(observations)
     if not ordered:
         raise ValueError("a trend needs at least one observation")
     notes: list[str] = []
-    after = sum(1 for o in ordered if o.time_to_tca < 0.0)
-    if after:
-        notes.append(f"{after} observation(s) issued after TCA left out")
+    after = 0
     points: list[TrendPoint] = []
     for observation in ordered:
         if observation.time_to_tca < 0.0:
+            after += 1
             continue
         if observation.pc is None:
             notes.append(f"no Pc for {_label(observation)}: {observation.error}")
             continue
         value = limits.value_of(observation)
         points.append(TrendPoint(observation, value, limits.level(value)))
+    if after:
+        notes.insert(0, f"{after} observation(s) issued after TCA left out")
     fitted = points[-settings.window :]
     if any(point.value < PC_FLOOR for point in fitted):
         notes.append(f"Pc below {PC_FLOOR:g} fitted at {PC_FLOOR:g}")
@@ -243,4 +244,4 @@ def analyse_trend(
             direction = "falling"
         else:
             direction = "steady"
-    return Trend(ordered, tuple(points), direction, slope, tuple(notes))
+    return Trend(ordered, tuple(points), direction, slope, tuple(notes), limits)

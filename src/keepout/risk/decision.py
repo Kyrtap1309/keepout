@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-import enum
 import math
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
+from keepout._types import OrderedEnum, require_positive
+from keepout._units import DAY
 from keepout.risk.observation import PC_FLOOR, PcObservation
 from keepout.risk.thresholds import RiskLevel, Thresholds
-from keepout.risk.trend import DAY, Trend, TrendConfig, TrendPoint, analyse_trend
+from keepout.risk.trend import Trend, TrendConfig, TrendPoint, analyse_trend
 
 __all__ = [
     "Action",
@@ -21,14 +22,18 @@ __all__ = [
 ]
 
 
-class Action(enum.IntEnum):
+class Action(OrderedEnum):
     """Recommended action, ordered from the mildest to the most drastic."""
 
     IGNORE = 0
     """Nothing to do."""
     MONITOR = 1
     """Watch the next messages."""
-    MANOEUVRE = 2
+    PREPARE_MANOEUVRE = 2
+    """Watch the next messages and prepare an avoidance manoeuvre (a red
+    event before the decision point, or a red event whose latest Pc is
+    missing)."""
+    MANOEUVRE = 3
     """Plan and execute an avoidance manoeuvre."""
 
 
@@ -52,10 +57,7 @@ class DecisionConfig:
     decision_point: float = 2 * DAY
 
     def __post_init__(self) -> None:
-        if not (math.isfinite(self.decision_point) and self.decision_point > 0.0):
-            raise ValueError(
-                f"decision_point must be finite and positive, got {self.decision_point}"
-            )
+        require_positive(self.decision_point, "decision_point")
 
 
 @dataclass(frozen=True, eq=False)
@@ -66,16 +68,12 @@ class Decision:
     ----------
     action
         The recommended action.
-    prepare_manoeuvre
-        Whether to prepare a manoeuvre while monitoring (a red event before
-        the decision point, or a red event whose latest Pc is missing).
     reasons
         Why, in words: the risk level, the trend, and every concern about
         the data.
     """
 
     action: Action
-    prepare_manoeuvre: bool
     reasons: tuple[str, ...]
 
 
@@ -126,27 +124,23 @@ def _trend_reason(trend: Trend) -> str:
 def _red(
     time_to_tca: float,
     settings: DecisionConfig,
-    reasons: list[str],
-    concerns: Sequence[str] = (),
+    reasons: Sequence[str],
+    concerns: Sequence[str],
 ) -> Decision:
     """The decision on a red event, judged ``time_to_tca`` seconds before TCA."""
     if time_to_tca <= settings.decision_point:
-        reasons.append(
+        timing = (
             f"within the decision point ({_days(settings.decision_point)} before TCA)"
         )
-        return Decision(Action.MANOEUVRE, False, (*reasons, *concerns))
-    reasons.append(
+        return Decision(Action.MANOEUVRE, (*reasons, timing, *concerns))
+    timing = (
         f"before the decision point ({_days(settings.decision_point)} before "
         "TCA): prepare a manoeuvre"
     )
-    return Decision(Action.MONITOR, True, (*reasons, *concerns))
+    return Decision(Action.PREPARE_MANOEUVRE, (*reasons, timing, *concerns))
 
 
-def decide(
-    trend: Trend,
-    config: DecisionConfig | None = None,
-    thresholds: Thresholds | None = None,
-) -> Decision:
+def decide(trend: Trend, *, config: DecisionConfig | None = None) -> Decision:
     """The recommended action for an event's trend.
 
     Rules, on the latest observation before TCA:
@@ -155,13 +149,14 @@ def decide(
       observation with a Pc. If that one was red, the red rule below applies,
       judged at the time of the observation without a Pc; otherwise (no
       observation with a Pc, or it was not red) ``MONITOR``;
-    - red: ``MANOEUVRE`` within the decision point, else ``MONITOR`` while
-      preparing a manoeuvre;
+    - red: ``MANOEUVRE`` within the decision point, else
+      ``PREPARE_MANOEUVRE``;
     - yellow: ``MONITOR``;
     - green: ``IGNORE``, unless the Pc is an upper bound, has diagnostics
       (covariance repairs, questionable assumptions) or is rising fast
-      enough to reach the yellow threshold by TCA (extrapolating the fitted
-      slope): then ``MONITOR``. A doubtful green is never ignored.
+      enough to reach the yellow threshold of the trend's thresholds by TCA
+      (extrapolating the fitted slope): then ``MONITOR``. A doubtful green
+      is never ignored.
 
     With no observation before TCA the event is past; it is ``MONITOR``-ed
     so the outcome is not lost.
@@ -172,23 +167,19 @@ def decide(
         The event's trend.
     config
         The decision point; :class:`DecisionConfig` defaults if ``None``.
-    thresholds
-        The thresholds the trend was built with (as :func:`assess` does),
-        used for a rising green Pc;
-        :class:`~keepout.risk.thresholds.Thresholds` defaults if ``None``.
     """
     settings = config if config is not None else DecisionConfig()
-    limits = thresholds if thresholds is not None else Thresholds()
+    limits = trend.thresholds
     latest = trend.latest_observation
     if latest is None:
         return Decision(
-            Action.MONITOR, False, ("no observation before TCA: nothing to decide on",)
+            Action.MONITOR, ("no observation before TCA: nothing to decide on",)
         )
     point = trend.latest
     if not latest.ok:
         reasons = [f"latest observation has no Pc: {latest.error}"]
         if point is None or point.level is not RiskLevel.RED:
-            return Decision(Action.MONITOR, False, tuple(reasons))
+            return Decision(Action.MONITOR, tuple(reasons))
         reasons += [_describe(point, before_a_failure=True), _trend_reason(trend)]
         return _red(latest.time_to_tca, settings, reasons, _concerns(point))
     assert point is not None  # the latest observation has a Pc
@@ -197,7 +188,7 @@ def decide(
     if point.level is RiskLevel.RED:
         return _red(point.time_to_tca, settings, reasons, concerns)
     if point.level is RiskLevel.YELLOW:
-        return Decision(Action.MONITOR, False, (*reasons, *concerns))
+        return Decision(Action.MONITOR, (*reasons, *concerns))
     if trend.direction == "rising" and trend.slope is not None:
         reaches = _reaches(point, trend.slope, limits.green_below)
         if reaches:
@@ -210,7 +201,7 @@ def decide(
                 f"rising, but at this rate below {limits.green_below:g} at TCA"
             )
     action = Action.MONITOR if concerns else Action.IGNORE
-    return Decision(action, False, (*reasons, *concerns))
+    return Decision(action, (*reasons, *concerns))
 
 
 @dataclass(frozen=True, eq=False)
@@ -223,20 +214,22 @@ class Assessment:
         The trend of the event's observations.
     decision
         The recommended action.
-    thresholds
-        The thresholds used.
     """
 
     trend: Trend
     decision: Decision
-    thresholds: Thresholds
+
+    @property
+    def thresholds(self) -> Thresholds:
+        """The thresholds used."""
+        return self.trend.thresholds
 
     @property
     def level(self) -> RiskLevel | None:
         """Risk level of the latest observation before TCA, if it has a Pc."""
         latest = self.trend.latest_observation
         point = self.trend.latest
-        if latest is None or not latest.ok or point is None:
+        if latest is None or point is None or point.observation is not latest:
             return None
         return point.level
 
@@ -268,6 +261,5 @@ def assess(
     ValueError
         If there are no observations.
     """
-    limits = thresholds if thresholds is not None else Thresholds()
-    trend = analyse_trend(observations, limits, trend_config)
-    return Assessment(trend, decide(trend, decision_config, limits), limits)
+    trend = analyse_trend(observations, thresholds=thresholds, config=trend_config)
+    return Assessment(trend, decide(trend, config=decision_config))

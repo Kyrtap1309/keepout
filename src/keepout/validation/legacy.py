@@ -49,7 +49,7 @@ def _number(fields: dict[str, str], keyword: str, path: Path) -> float:
 
 
 def _reported(
-    fields: dict[str, str], tca: Time, path: Path, known: bool
+    fields: dict[str, str], tca: Time, path: Path, *, known: bool
 ) -> ReportedObject:
     """One object section; its covariance only if ``known``."""
     try:
@@ -94,7 +94,7 @@ def legacy_objects(
     sections = (lines[starts[0] : starts[1]], lines[starts[1] :])
     first, second = gcrf_object_states(
         [
-            _reported(_fields(section), tca, path, use)
+            _reported(_fields(section), tca, path, known=use)
             for section, use in zip(sections, known, strict=True)
         ]
     )

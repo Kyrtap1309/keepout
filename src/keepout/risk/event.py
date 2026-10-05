@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import math
+from collections import Counter
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
-from typing import Final
+from typing import Final, TypeAlias
 
 from astropy.time import Time
 
+from keepout._types import require_non_negative
 from keepout.cdm.model import Cdm
 from keepout.conjunction import Conjunction
 from keepout.covariance import Policy
@@ -30,14 +32,14 @@ DEFAULT_TCA_TOLERANCE: Final = 600.0
 encounter move its TCA by milliseconds to seconds; two encounters of the same
 pair are at least a large fraction of an orbit apart."""
 
-PcComputation = Callable[[Conjunction], PcResult]
+PcComputation: TypeAlias = Callable[[Conjunction], PcResult]
 """A Pc computation with its own options, e.g.
 ``lambda c: compute_pc(c, "montecarlo", samples=100_000, seed=1)``."""
 
 
 def time_to_tca(cdm: Cdm) -> float:
     """Seconds from the CDM's creation to its TCA (negative after TCA)."""
-    return float((cdm.tca - cdm.creation_date).to_value("s"))
+    return _seconds(cdm.tca, cdm.creation_date)
 
 
 def _seconds(later: Time, earlier: Time) -> float:
@@ -88,10 +90,7 @@ class ConjunctionEvent:
             raise ValueError("an event needs at least one CDM")
         if not self.event_id:
             raise ValueError("event_id must not be empty")
-        if not (math.isfinite(self.tca_tolerance) and self.tca_tolerance >= 0.0):
-            raise ValueError(
-                f"tca_tolerance must be finite and >= 0, got {self.tca_tolerance}"
-            )
+        require_non_negative(self.tca_tolerance, "tca_tolerance")
         first = self.cdms[0]
         ordered = tuple(
             sorted(
@@ -103,8 +102,8 @@ class ConjunctionEvent:
             )
         )
         object.__setattr__(self, "cdms", ordered)
-        ids = [cdm.message_id for cdm in ordered]
-        repeated = sorted({i for i in ids if ids.count(i) > 1})
+        counts = Counter(cdm.message_id for cdm in ordered)
+        repeated = sorted(i for i, n in counts.items() if n > 1)
         if repeated:
             raise ValueError(f"MESSAGE_ID repeated: {', '.join(repeated)}")
         pairs = {_pair(cdm) for cdm in ordered}
@@ -118,11 +117,13 @@ class ConjunctionEvent:
                 f"TCAs spread over {spread:.3g} s, more than tca_tolerance "
                 f"({self.tca_tolerance:g} s)"
             )
-        conjunction_ids = {cdm.conjunction_id for cdm in ordered} - {None}
+        conjunction_ids = {
+            cdm.conjunction_id for cdm in ordered if cdm.conjunction_id is not None
+        }
         if len(conjunction_ids) > 1:
             raise ValueError(
                 "CDMs of one event give different CONJUNCTION_ID values: "
-                f"{', '.join(sorted(i for i in conjunction_ids if i is not None))}"
+                f"{', '.join(sorted(conjunction_ids))}"
             )
 
     @classmethod
@@ -186,7 +187,7 @@ class ConjunctionEvent:
         policy: Policy = "repair",
         hard_body_radius: float | None = None,
     ) -> tuple[PcObservation, ...]:
-        """keepout's Pc of every CDM, oldest first.
+        """Keepout's Pc of every CDM, oldest first.
 
         Each CDM is computed as :func:`~keepout.pc.api.compute_pc` would (in
         ``"auto"`` mode a slow encounter can take up to a minute per CDM;
@@ -224,7 +225,7 @@ class ConjunctionEvent:
                     f"no HBR for both objects in {', '.join(missing)}: pass "
                     "hard_body_radius= (combined, in metres)"
                 )
-        source = f"keepout ({method})" if isinstance(method, str) else "keepout"
+        source = "keepout" if callable(method) else f"keepout ({method})"
         observations: list[PcObservation] = []
         for cdm in self.cdms:
             reported, notes = _reported(cdm)
@@ -234,9 +235,9 @@ class ConjunctionEvent:
                     cdm, hard_body_radius=hard_body_radius, policy=policy
                 )
                 result = (
-                    compute_pc(conjunction, method)
-                    if isinstance(method, str)
-                    else method(conjunction)
+                    method(conjunction)
+                    if callable(method)
+                    else compute_pc(conjunction, method)
                 )
             except KeepoutError as exc:
                 observations.append(
@@ -293,8 +294,7 @@ def group_events(
         (e.g. a repeated ``MESSAGE_ID``, or different ``CONJUNCTION_ID``
         values within ``tca_tolerance``).
     """
-    if not (math.isfinite(tca_tolerance) and tca_tolerance >= 0.0):
-        raise ValueError(f"tca_tolerance must be finite and >= 0, got {tca_tolerance}")
+    require_non_negative(tca_tolerance, "tca_tolerance")
     messages = list(cdms)
     if not messages:
         return []
@@ -304,11 +304,13 @@ def group_events(
         by_pair.setdefault(_pair(cdm), []).append(cdm)
     groups: list[tuple[float, tuple[str, str], list[Cdm]]] = []
     for pair, members in by_pair.items():
-        members.sort(key=lambda cdm: _seconds(cdm.tca, reference))
-        start = _seconds(members[0].tca, reference)
+        timed = sorted(
+            ((_seconds(cdm.tca, reference), cdm) for cdm in members),
+            key=lambda item: item[0],
+        )
+        start = timed[0][0]
         current: list[Cdm] = []
-        for cdm in members:
-            offset = _seconds(cdm.tca, reference)
+        for offset, cdm in timed:
             if current and offset - start > tca_tolerance:
                 groups.append((start, pair, current))
                 current, start = [], offset

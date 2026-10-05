@@ -5,12 +5,11 @@ import gzip
 from pathlib import Path
 
 import pytest
+from builders import KELVINS_EXCERPT as EXCERPT
 
 from keepout.sources import kelvins
 
 pytestmark = pytest.mark.validation
-
-EXCERPT = Path(__file__).parent / "data" / "kelvins_excerpt.csv"
 
 
 @pytest.fixture(scope="module")

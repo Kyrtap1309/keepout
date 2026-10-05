@@ -2,8 +2,8 @@
 
 A conjunction is rarely a single message: the screening service sends a CDM
 every few hours for days before TCA, and each one gives a new Pc. keepout
-turns that sequence into a recommendation: **ignore**, **monitor** or
-**manoeuvre**, always with the reasons.
+turns that sequence into a recommendation: **ignore**, **monitor**,
+**prepare manoeuvre** or **manoeuvre**, always with the reasons.
 
 ```python
 from pathlib import Path
@@ -83,17 +83,19 @@ they behave on 15 321 real events.
 
 ## Decision
 
-`decide` looks at the latest observation before TCA:
+`decide` looks at the latest observation before TCA; the actions are
+ordered from the mildest to the most drastic (`Action.IGNORE <
+Action.MONITOR < Action.PREPARE_MANOEUVRE < Action.MANOEUVRE`):
 
 | Latest observation | Action |
 |---|---|
 | red, at most `decision_point` before TCA (2 days by default) | **manoeuvre** |
-| red, earlier | **monitor**, prepare a manoeuvre |
+| red, earlier | **prepare manoeuvre** (monitor and prepare a manoeuvre) |
 | yellow | **monitor** |
 | green, rising fast enough to reach yellow by TCA | **monitor** |
 | green, an upper bound or with diagnostics | **monitor** |
 | green otherwise | **ignore** |
-| no Pc (the computation failed) | **monitor**; if the latest observation with a Pc was red, the red rules judged at this observation's time (manoeuvre within the decision point, otherwise monitor + prepare) |
+| no Pc (the computation failed) | **monitor**; if the latest observation with a Pc was red, the red rules judged at this observation's time (manoeuvre within the decision point, otherwise prepare manoeuvre) |
 | none before TCA (the event is past) | **monitor** |
 
 A green Pc that rises is projected to TCA along the fitted slope; a rise from

@@ -74,7 +74,7 @@ a result at that accuracy."""
 
 
 def _integral_notes(
-    integral: RateIntegral, window_given: bool, rtol: float
+    integral: RateIntegral, *, window_given: bool, rtol: float
 ) -> list[str]:
     """Diagnostics on the time integral: negligible rate, Nc above 1, several
     encounters, a non-negligible window edge and a missed ``rtol``."""
@@ -253,8 +253,14 @@ def integrate(
     }
     notes = [
         *_floor_notes(rate),
-        *_integral_notes(integral, encounters.window_given, rtol),
-        *_entry_notes(conjunction, rate, integral, encounters.window_given, long),
+        *_integral_notes(integral, window_given=encounters.window_given, rtol=rtol),
+        *_entry_notes(
+            conjunction,
+            rate,
+            integral,
+            window_given=encounters.window_given,
+            long=long,
+        ),
     ]
     return PcResult.clamped(min(integral.nc, 1.0), "hall3d", tuple(notes), details)
 
@@ -279,6 +285,7 @@ def _entry_notes(
     conjunction: Conjunction,
     rate: CollisionRate,
     integral: RateIntegral,
+    *,
     window_given: bool,
     long: bool,
 ) -> list[str]:

@@ -1,6 +1,7 @@
 """Builders, constants and Hypothesis strategies shared by the test packages."""
 
 from pathlib import Path
+from typing import TypedDict, Unpack
 
 import numpy as np
 import numpy.typing as npt
@@ -15,6 +16,8 @@ from keepout._types import FloatArray
 from keepout.conjunction import Conjunction
 from keepout.covariance import Covariance
 from keepout.objects import ObjectState
+from keepout.pc.result import PcResult
+from keepout.risk import DAY, PcKind, PcObservation
 from keepout.state import StateVector
 from keepout.validation.cases import ValidationCase
 from keepout.validation.criteria import TWO_D, Criterion
@@ -24,6 +27,9 @@ CDM_DATA = Path(__file__).parent / "cdm" / "data"
 
 B1_KVN = CDM_DATA / "b1_example.kvn"
 """CCSDS 508.0-B-1 annex example, KVN."""
+
+KELVINS_EXCERPT = Path(__file__).parent / "sources" / "data" / "kelvins_excerpt.csv"
+"""Every row of six events of ESA's Kelvins raw table."""
 
 EPOCH = Time("2010-03-13T22:37:52.618", scale="utc")
 
@@ -227,3 +233,29 @@ def shifted_back(conjunction: Conjunction, dt: float) -> Conjunction:
         move(conjunction.secondary),
         conjunction.hard_body_radius,
     )
+
+
+class ObservationChanges(TypedDict, total=False):
+    """Optional fields of a :class:`PcObservation`."""
+
+    kind: PcKind
+    ci_high: float | None
+    error: str | None
+    message_id: str | None
+    reported_pc: float | None
+    diagnostics: tuple[str, ...]
+    result: PcResult | None
+
+
+def at(
+    days: float, pc: float | None, **changes: Unpack[ObservationChanges]
+) -> PcObservation:
+    """An observation ``days`` before TCA; ``pc=None`` makes it a failed one."""
+    if pc is None:
+        changes.setdefault("error", "GeometryError: no plane")
+    return PcObservation(time_to_tca=days * DAY, source="test", pc=pc, **changes)
+
+
+def series(*pairs: tuple[float, float | None]) -> list[PcObservation]:
+    """Observations from ``(days before TCA, Pc)`` pairs."""
+    return [at(days, pc) for days, pc in pairs]

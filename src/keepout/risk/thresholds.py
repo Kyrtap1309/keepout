@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-import enum
 import math
 from dataclasses import dataclass
-from typing import Literal, TypeAlias, get_args
+from typing import Final, Literal, TypeAlias, get_args
 
+from keepout._types import OrderedEnum
 from keepout.risk.observation import PcObservation
 
-__all__ = ["Basis", "RiskLevel", "Thresholds", "classify"]
+__all__ = ["BASES", "Basis", "RiskLevel", "Thresholds"]
 
 
-class RiskLevel(enum.IntEnum):
+class RiskLevel(OrderedEnum):
     """Risk of a conjunction, ordered from the least to the most severe."""
 
     GREEN = 0
@@ -27,6 +27,9 @@ Basis: TypeAlias = Literal["conservative", "estimate"]
 """Which value of an observation is compared with the thresholds:
 ``"conservative"`` takes the upper end of a Monte Carlo confidence interval
 where there is one, ``"estimate"`` always the Pc itself."""
+
+BASES: Final[tuple[Basis, ...]] = get_args(Basis)
+"""Every :data:`Basis`."""
 
 
 @dataclass(frozen=True)
@@ -66,10 +69,8 @@ class Thresholds:
                 "thresholds need 0 < green_below < red_from <= 1, got "
                 f"green_below={self.green_below}, red_from={self.red_from}"
             )
-        if self.basis not in get_args(Basis):
-            raise ValueError(
-                f"basis must be one of {get_args(Basis)}, got {self.basis!r}"
-            )
+        if self.basis not in BASES:
+            raise ValueError(f"basis must be one of {BASES}, got {self.basis!r}")
 
     def value_of(self, observation: PcObservation) -> float:
         """The value of ``observation`` compared with the thresholds.
@@ -92,24 +93,3 @@ class Thresholds:
         if value >= self.green_below:
             return RiskLevel.YELLOW
         return RiskLevel.GREEN
-
-
-def classify(
-    observation: PcObservation, thresholds: Thresholds | None = None
-) -> RiskLevel:
-    """The risk level of an observation.
-
-    Parameters
-    ----------
-    observation
-        An observation with a Pc.
-    thresholds
-        The thresholds; :class:`Thresholds` defaults if ``None``.
-
-    Raises
-    ------
-    ValueError
-        If the observation has no Pc.
-    """
-    limits = thresholds if thresholds is not None else Thresholds()
-    return limits.level(limits.value_of(observation))

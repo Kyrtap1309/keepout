@@ -111,7 +111,7 @@ def test_monte_carlo_rows_show_both_intervals_and_the_trials() -> None:
 def test_monte_carlo_mode_writes_its_own_page_and_block(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(report, "load_monte_carlo_cases", lambda: [])
+    monkeypatch.setattr(report, "load_monte_carlo_cases", list)
     monkeypatch.setattr(report, "evaluate", lambda cases: [monte_carlo_outcome()])
     readme = tmp_path / "README.md"
     readme.write_text(
@@ -176,7 +176,7 @@ def test_another_cara_commit_is_not_reproduced() -> None:
 def run_monte_carlo(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shift: float, *flags: str
 ) -> int:
-    monkeypatch.setattr(report, "load_monte_carlo_cases", lambda: [])
+    monkeypatch.setattr(report, "load_monte_carlo_cases", list)
     monkeypatch.setattr(report, "evaluate", lambda _: [monte_carlo_outcome(shift)])
     readme = tmp_path / "README.md"
     if not readme.exists():

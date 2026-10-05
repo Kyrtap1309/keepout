@@ -2,41 +2,36 @@
 
 import re
 
-from builders import CDM_DATA
+from builders import CDM_DATA, at
 from hypothesis import strategies as st
 
 import keepout.cdm
 from keepout.cdm import Cdm
-from keepout.risk import DAY, PcObservation
-
-
-def at(days: float, pc: float | None, **changes: object) -> PcObservation:
-    """An observation ``days`` before TCA; ``pc=None`` makes it a failed one."""
-    if pc is None:
-        changes.setdefault("error", "GeometryError: no plane")
-    return PcObservation(
-        time_to_tca=days * DAY,
-        source="test",
-        pc=pc,
-        **changes,  # type: ignore[arg-type]
-    )
-
-
-def series(*pairs: tuple[float, float | None]) -> list[PcObservation]:
-    """Observations from ``(days before TCA, Pc)`` pairs."""
-    return [at(days, pc) for days, pc in pairs]
-
+from keepout.risk import PcObservation
 
 pcs = st.one_of(st.just(0.0), st.floats(1e-12, 1.0))
 """Probabilities across the levels, including exactly 0."""
 
-observations = st.builds(
-    lambda days, pc, failed: at(days, None if failed else pc),
-    st.floats(-0.5, 7.0),
-    pcs,
-    st.booleans(),
-)
-"""Any observation, also failed ones and ones issued after TCA."""
+days = st.one_of(st.sampled_from([3.0, 2.0, 1.0, 0.0, -0.1]), st.floats(-0.5, 7.0))
+"""Times before TCA [d]; the few fixed ones make simultaneous observations
+likely."""
+
+
+@st.composite
+def observations(draw: st.DrawFn) -> PcObservation:
+    """Any observation: also failed ones, ones issued after TCA, upper bounds,
+    ones with diagnostics or a Monte Carlo interval."""
+    when = draw(days)
+    if draw(st.booleans()):
+        return at(when, None)
+    pc = draw(pcs)
+    return at(
+        when,
+        pc,
+        kind=draw(st.sampled_from(["estimate", "upper_bound"])),
+        diagnostics=draw(st.sampled_from([(), ("covariance repaired",)])),
+        ci_high=draw(st.one_of(st.none(), st.floats(pc, 1.0))),
+    )
 
 
 B1_TEXT = (CDM_DATA / "b1_example.kvn").read_text(encoding="utf-8")

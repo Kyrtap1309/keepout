@@ -8,13 +8,16 @@ from typing import Final, Literal, TypeAlias, get_args
 
 from keepout.pc.result import Method, PcResult
 
-__all__ = ["PC_FLOOR", "UPPER_BOUND_METHODS", "PcKind", "PcObservation"]
+__all__ = ["PC_FLOOR", "PC_KINDS", "UPPER_BOUND_METHODS", "PcKind", "PcObservation"]
 
 PcKind: TypeAlias = Literal["estimate", "upper_bound", "below_floor"]
 """What a Pc value means: an ``"estimate"`` of the probability; an
 ``"upper_bound"`` (a maximum Pc, used when a covariance is unknown); or
 ``"below_floor"``, when the source reports only that the probability is at
 most the value given (ESA's Kelvins data floors log10 Pc at -30)."""
+
+PC_KINDS: Final[tuple[PcKind, ...]] = get_args(PcKind)
+"""Every :data:`PcKind`."""
 
 UPPER_BOUND_METHODS: Final[frozenset[Method]] = frozenset(
     {"frisbee", "dilution", "alfano"}
@@ -92,10 +95,8 @@ class PcObservation:
             raise ValueError("give exactly one of pc and error")
         if self.error == "":
             raise ValueError("error must not be empty")
-        if self.kind not in get_args(PcKind):
-            raise ValueError(
-                f"kind must be one of {get_args(PcKind)}, got {self.kind!r}"
-            )
+        if self.kind not in PC_KINDS:
+            raise ValueError(f"kind must be one of {PC_KINDS}, got {self.kind!r}")
         if self.pc is not None:
             _probability("pc", self.pc)
             object.__setattr__(self, "pc", float(self.pc))

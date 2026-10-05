@@ -22,6 +22,7 @@ from astropy.time import Time
 from erfa import ErfaWarning
 
 from keepout._types import FloatArray
+from keepout._units import DAY
 
 __all__ = [
     "COVARIANCE_AXES",
@@ -227,7 +228,7 @@ SEGMENT: Final = _table(
         group=_METADATA,
     ),
     _many("TIME_LASTOB_START TIME_LASTOB_END", "time", group=_OD),
-    _many("RECOMMENDED_OD_SPAN ACTUAL_OD_SPAN", "float", "d", 86400.0, _OD),
+    _many("RECOMMENDED_OD_SPAN ACTUAL_OD_SPAN", "float", "d", DAY, _OD),
     _many("OBS_AVAILABLE OBS_USED TRACKS_AVAILABLE TRACKS_USED", "int", group=_OD),
     _many("RESIDUALS_ACCEPTED", "float", "%", group=_OD),
     _many("WEIGHTED_RMS", "float", group=_OD),

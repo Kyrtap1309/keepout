@@ -4,9 +4,7 @@ from typing import Any
 import pytest
 
 from keepout.pc.result import PcResult
-from keepout.risk import PcObservation
-
-DAY = 86400.0
+from keepout.risk import DAY, PcObservation
 
 
 def observation(**changes: Any) -> PcObservation:
@@ -29,6 +27,20 @@ def test_an_observation_keeps_its_values() -> None:
         2e-5,
         ("note",),
     )
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"pc": 0.0},
+        {"pc": 1.0},
+        {"pc": 1e-5, "ci_high": 1e-5},
+        {"pc": 0.5, "ci_high": 1.0},
+    ],
+    ids=["zero", "one", "interval-end-at-pc", "interval-end-at-one"],
+)
+def test_edge_probabilities_are_accepted(changes: dict[str, Any]) -> None:
+    assert observation(**changes).ok
 
 
 def test_a_failed_observation_has_an_error_and_no_pc() -> None:

@@ -19,22 +19,22 @@ from __future__ import annotations
 
 import csv
 import gzip
-import io
+import itertools
 import math
 import shutil
 import zipfile
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final, TextIO, TypeAlias
+from typing import Final, NamedTuple, TextIO, TypeAlias
 
 import numpy as np
 
-from keepout._types import FloatArray
+from keepout._types import FloatArray, read_only
+from keepout._units import DAY
 from keepout.errors import KelvinsFormatError
-from keepout.risk.observation import PC_FLOOR, PcObservation
-from keepout.risk.trend import DAY
-from keepout.sources._cache import Sink, cache_dir, has_digest, http_stream, store
+from keepout.risk.observation import PcObservation
+from keepout.sources.cache import Sink, cache_dir, has_digest, http_stream, store
 
 __all__ = [
     "ARCHIVE_SHA256",
@@ -57,6 +57,7 @@ ZENODO_RECORD: Final = "4463683"
 """The Zenodo record of the data set (version of 2021-01-25)."""
 
 DOI: Final = "10.5281/zenodo.4463683"
+"""The data set's DOI, to cite it."""
 
 ARCHIVE_URL: Final = (
     f"https://zenodo.org/api/records/{ZENODO_RECORD}/files/"
@@ -116,10 +117,10 @@ FEATURES: Final = tuple(
 
 _INDEX: Final = {name: index for index, name in enumerate(COLUMNS)}
 _FEATURE_INDEX: Final = {name: index for index, name in enumerate(FEATURES)}
-_FEATURE_COLUMNS: Final = [_INDEX[name] for name in FEATURES]
+_FEATURE_COLUMNS: Final = tuple(_INDEX[name] for name in FEATURES)
 
 StreamDownloader: TypeAlias = Callable[[str, Sink], None]
-"""Downloads a URL into a sink, like :func:`keepout.sources._cache.http_stream`."""
+"""Downloads a URL into a sink, like :func:`keepout.sources.cache.http_stream`."""
 
 
 def fetch_raw(
@@ -135,7 +136,7 @@ def fetch_raw(
     Parameters
     ----------
     cache
-        Cache root; :func:`~keepout.sources._cache.cache_dir` if ``None``.
+        Cache root; :func:`~keepout.sources.cache.cache_dir` if ``None``.
     download
         Downloads the archive.
 
@@ -216,7 +217,7 @@ class KelvinsEvent:
                 f"{features.shape[0]} feature rows for "
                 f"{len(self.object_types)} object types; need at least one CDM"
             )
-        features.flags.writeable = False
+        read_only(features)
         object.__setattr__(self, "features", features)
         object.__setattr__(self, "object_types", tuple(self.object_types))
 
@@ -248,7 +249,7 @@ class KelvinsEvent:
         1e-30. keepout does not recompute the Pc: the table lacks absolute
         states, and ESA's method is not published.
         """
-        observations = []
+        observations: list[PcObservation] = []
         for index, (seconds, risk) in enumerate(
             zip(self.time_to_tca, self.column("risk"), strict=True)
         ):
@@ -257,7 +258,7 @@ class KelvinsEvent:
                 PcObservation(
                     time_to_tca=float(seconds),
                     source=SOURCE,
-                    pc=PC_FLOOR if floored else float(10.0**risk),
+                    pc=10.0**RISK_FLOOR if floored else float(10.0**risk),
                     kind="below_floor" if floored else "estimate",
                     message_id=f"{self.event_id}/{index}",
                 )
@@ -283,7 +284,7 @@ def _integer(text: str, where: str, name: str) -> int:
 
 def _open(path: Path) -> TextIO:
     if path.suffix == ".gz":
-        return io.TextIOWrapper(gzip.open(path, "rb"), encoding="utf-8", newline="")
+        return gzip.open(path, "rt", encoding="utf-8", newline="")
     return path.open(encoding="utf-8", newline="")
 
 
@@ -304,6 +305,30 @@ def _rows(path: Path) -> Iterator[tuple[int, list[str]]]:
                     f"{path}, line {line}: {len(row)} values, expected {len(COLUMNS)}"
                 )
             yield line, row
+
+
+class _Row(NamedTuple):
+    """One validated CDM row of the raw table."""
+
+    where: str
+    event_id: int
+    mission_id: int
+    values: list[float]
+    object_type: str
+
+
+def _parsed(source: Path) -> Iterator[_Row]:
+    for line, row in _rows(source):
+        where = f"{source}, line {line}"
+        event_id = _integer(row[_INDEX["event_id"]], where, "event_id")
+        mission_id = _integer(row[_INDEX["mission_id"]], where, "mission_id")
+        values = [_number(row[i], where, COLUMNS[i]) for i in _FEATURE_COLUMNS]
+        for name in ("time_to_tca", "risk"):
+            if not math.isfinite(values[_FEATURE_INDEX[name]]):
+                raise KelvinsFormatError(f"{where}: {name} is missing")
+        if values[_FEATURE_INDEX["risk"]] > 0.0:
+            raise KelvinsFormatError(f"{where}: risk (log10 Pc) is above 0")
+        yield _Row(where, event_id, mission_id, values, row[_INDEX["c_object_type"]])
 
 
 def load(path: Path | None = None) -> tuple[KelvinsEvent, ...]:
@@ -331,41 +356,28 @@ def load(path: Path | None = None) -> tuple[KelvinsEvent, ...]:
     source = path if path is not None else fetch_raw()
     events: list[KelvinsEvent] = []
     seen: set[int] = set()
-    current: tuple[int, int] | None = None
-    features: list[list[float]] = []
-    types: list[str] = []
-
-    def close() -> None:
-        if current is not None:
-            events.append(
-                KelvinsEvent(current[0], current[1], np.array(features), tuple(types))
-            )
-
-    for line, row in _rows(source):
-        where = f"{source}, line {line}"
-        event_id = _integer(row[_INDEX["event_id"]], where, "event_id")
-        mission_id = _integer(row[_INDEX["mission_id"]], where, "mission_id")
-        values = [_number(row[i], where, COLUMNS[i]) for i in _FEATURE_COLUMNS]
-        for name in ("time_to_tca", "risk"):
-            if not math.isfinite(values[_FEATURE_INDEX[name]]):
-                raise KelvinsFormatError(f"{where}: {name} is missing")
-        if values[_FEATURE_INDEX["risk"]] > 0.0:
-            raise KelvinsFormatError(f"{where}: risk (log10 Pc) is above 0")
-        if current is None or event_id != current[0]:
-            if event_id in seen:
+    for event_id, group in itertools.groupby(
+        _parsed(source), key=lambda row: row.event_id
+    ):
+        rows: list[_Row] = []
+        for row in group:
+            if not rows and event_id in seen:
                 raise KelvinsFormatError(
-                    f"{where}: rows of event {event_id} are not contiguous"
+                    f"{row.where}: rows of event {event_id} are not contiguous"
                 )
-            close()
-            seen.add(event_id)
-            current = (event_id, mission_id)
-            features, types = [], []
-        elif mission_id != current[1]:
-            raise KelvinsFormatError(
-                f"{where}: event {event_id} changes mission from {current[1]} "
-                f"to {mission_id}"
+            if rows and row.mission_id != rows[0].mission_id:
+                raise KelvinsFormatError(
+                    f"{row.where}: event {event_id} changes mission from "
+                    f"{rows[0].mission_id} to {row.mission_id}"
+                )
+            rows.append(row)
+        seen.add(event_id)
+        events.append(
+            KelvinsEvent(
+                event_id,
+                rows[0].mission_id,
+                np.array([row.values for row in rows], dtype=np.float64),
+                tuple(row.object_type for row in rows),
             )
-        features.append(values)
-        types.append(row[_INDEX["c_object_type"]])
-    close()
+        )
     return tuple(events)

@@ -104,8 +104,9 @@ Kelvins data: ESA, *Collision Avoidance Challenge dataset*, Zenodo, 2021,
 
 ```bash
 uv sync
+uv run pre-commit install     # ruff, mypy and the lock checked on commit
 uv run pytest                 # offline test suite
-uv run pytest -m validation   # downloads CARA reference data
+uv run pytest -m validation   # downloads CARA and Kelvins data
 uv run python tools/validation_report.py   # regenerate the validation report
 uv run python tools/validation_report.py --monte-carlo   # Monte Carlo (slow)
 uv run python tools/risk_report.py   # Kelvins risk report (downloads 221 MB once)

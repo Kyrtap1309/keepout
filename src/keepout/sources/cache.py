@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import http.client
+import io
 import os
 import stat
 import tempfile
@@ -20,6 +21,8 @@ import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 from typing import Final, Protocol, TypeAlias
+
+import platformdirs
 
 from keepout.errors import ChecksumMismatch, SourceUnavailable
 
@@ -51,15 +54,15 @@ class Sink(Protocol):
 def cache_dir() -> Path:
     """Root cache directory for downloaded reference data.
 
-    ``$KEEPOUT_CACHE_DIR`` if set, else ``$XDG_CACHE_HOME/keepout``, else
-    ``~/.cache/keepout``. The directory is not created here.
+    ``$KEEPOUT_CACHE_DIR`` if set, else the platform's user cache directory
+    for keepout (on Linux ``$XDG_CACHE_HOME/keepout`` or
+    ``~/.cache/keepout``; on macOS ``~/Library/Caches/keepout``). The
+    directory is not created here.
     """
     override = os.environ.get("KEEPOUT_CACHE_DIR")
     if override:
         return Path(override)
-    xdg = os.environ.get("XDG_CACHE_HOME")
-    base = Path(xdg) if xdg else Path.home() / ".cache"
-    return base / "keepout"
+    return platformdirs.user_cache_path("keepout")
 
 
 def http_download(url: str) -> bytes:
@@ -70,12 +73,9 @@ def http_download(url: str) -> bytes:
     SourceUnavailable
         On any network or HTTP error.
     """
-    try:
-        with urllib.request.urlopen(url, timeout=DOWNLOAD_TIMEOUT) as response:
-            body: bytes = response.read()
-            return body
-    except (OSError, http.client.HTTPException) as exc:
-        raise SourceUnavailable(f"cannot download {url}: {exc}") from exc
+    buffer = io.BytesIO()
+    http_stream(url, buffer)
+    return buffer.getvalue()
 
 
 def http_stream(url: str, sink: Sink) -> None:
@@ -99,7 +99,7 @@ def http_stream(url: str, sink: Sink) -> None:
 _Signature: TypeAlias = tuple[int, int, int]
 """Inode, size and modification time [ns] of a cached file."""
 
-_verified: dict[Path, tuple[str, _Signature]] = {}
+_verified: Final[dict[Path, tuple[str, _Signature]]] = {}
 """Cached files whose digest this process has checked (or written), with the
 signature they had then; see :func:`has_digest`."""
 _verified_lock = threading.Lock()
@@ -116,9 +116,8 @@ def _signature(path: Path) -> _Signature | None:
     return status.st_ino, status.st_size, status.st_mtime_ns
 
 
-def _remember(path: Path, sha256: str) -> None:
-    """Record that ``path`` has digest ``sha256`` as the file is now."""
-    signature = _signature(path)
+def _remember(path: Path, sha256: str, signature: _Signature | None) -> None:
+    """Record that ``path``, with ``signature``, has digest ``sha256``."""
     if signature is not None:
         with _verified_lock:
             _verified[path] = (sha256, signature)
@@ -140,8 +139,7 @@ def has_digest(path: Path, sha256: str) -> bool:
     with path.open("rb") as cached:
         if hashlib.file_digest(cached, "sha256").hexdigest() != sha256:
             return False
-    with _verified_lock:
-        _verified[path] = (sha256, signature)
+    _remember(path, sha256, signature)
     return True
 
 
@@ -196,4 +194,4 @@ def store(
     except BaseException:
         partial.unlink(missing_ok=True)
         raise
-    _remember(target, sha256)
+    _remember(target, sha256, _signature(target))

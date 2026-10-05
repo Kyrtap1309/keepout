@@ -2,13 +2,13 @@
 
 keepout never vendors CARA files (they are distributed under the NASA Open
 Source Agreement). Files are downloaded on demand from a pinned commit,
-verified by SHA-256 and cached under :func:`cache_dir`.
+verified by SHA-256 and cached under
+:func:`~keepout.sources.cache.cache_dir`.
 """
 
 from __future__ import annotations
 
 import csv
-import hashlib
 import re
 import urllib.parse
 import zipfile
@@ -20,14 +20,8 @@ from importlib import resources
 from pathlib import Path, PurePosixPath
 from typing import Any, Final, TypeAlias
 
-from keepout.errors import CaraFormatError, ChecksumMismatch
-from keepout.sources._cache import (
-    DOWNLOAD_TIMEOUT,
-    cache_dir,
-    has_digest,
-    http_download,
-    store,
-)
+from keepout.errors import CaraFormatError
+from keepout.sources.cache import cache_dir, has_digest, http_download, store
 
 __all__ = [
     "ALFANO_2009_RESULTS",
@@ -36,7 +30,6 @@ __all__ = [
     "CARA_COMMIT",
     "CARA_REPO",
     "DILUTION_CDMS",
-    "DOWNLOAD_TIMEOUT",
     "FRISBEE_CDM",
     "HALL_3D_CDM",
     "MANIFEST",
@@ -47,9 +40,7 @@ __all__ = [
     "PREFETCH_WORKERS",
     "CaraFile",
     "Downloader",
-    "cache_dir",
     "fetch",
-    "http_download",
     "load_csv",
     "load_xls_rows",
     "load_xlsx",
@@ -208,11 +199,6 @@ def fetch(
         return target
 
     data = download(file.url)
-    actual = hashlib.sha256(data).hexdigest()
-    if actual != file.sha256:
-        raise ChecksumMismatch(
-            f"{file.url}: expected sha256 {file.sha256}, got {actual}"
-        )
     store(target, lambda sink: sink.write(data), file.sha256, file.url)
     return target
 

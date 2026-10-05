@@ -1,15 +1,21 @@
 import math
+import operator
 from typing import Any
 
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from keepout.risk import PcObservation, RiskLevel, Thresholds, classify
+from keepout.risk import PcObservation, RiskLevel, Thresholds
 
 
 def seen(pc: float, ci_high: float | None = None) -> PcObservation:
     return PcObservation(time_to_tca=3600.0, source="test", pc=pc, ci_high=ci_high)
+
+
+def classify(observation: PcObservation, limits: Thresholds | None = None) -> RiskLevel:
+    limits = limits if limits is not None else Thresholds()
+    return limits.level(limits.value_of(observation))
 
 
 @pytest.mark.parametrize(
@@ -29,6 +35,13 @@ def test_default_levels(pc: float, level: RiskLevel) -> None:
 
 def test_levels_are_ordered_by_severity() -> None:
     assert RiskLevel.GREEN < RiskLevel.YELLOW < RiskLevel.RED
+    assert RiskLevel.RED > RiskLevel.GREEN
+    assert not isinstance(RiskLevel.GREEN, int)
+
+
+def test_levels_do_not_compare_with_other_types() -> None:
+    with pytest.raises(TypeError):
+        operator.lt(RiskLevel.GREEN, 1)
 
 
 def test_conservative_basis_uses_the_upper_end_of_an_interval() -> None:

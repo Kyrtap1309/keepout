@@ -1,14 +1,18 @@
 import math
 from random import Random
+from typing import Any
 
 import pytest
+from builders import at, series
 from hypothesis import given
 from hypothesis import strategies as st
-from risk_builders import at, observations, pcs, series
+from risk_builders import observations, pcs
 
 from keepout.risk import (
+    DAY,
     Action,
     DecisionConfig,
+    PcKind,
     PcObservation,
     RiskLevel,
     Thresholds,
@@ -18,22 +22,21 @@ from keepout.risk import (
 )
 
 
-def decision_for(seen: list[PcObservation], **config: float) -> tuple[Action, bool]:
-    decision = decide(analyse_trend(seen), DecisionConfig(**config))
-    return decision.action, decision.prepare_manoeuvre
+def decision_for(seen: list[PcObservation], **config: float) -> Action:
+    return decide(analyse_trend(seen), config=DecisionConfig(**config)).action
 
 
 @pytest.mark.parametrize(
     ("seen", "expected"),
     [
-        (series((3.0, 1e-9), (1.0, 1e-9)), (Action.IGNORE, False)),
-        (series((3.0, 1e-6), (1.0, 1e-6)), (Action.MONITOR, False)),
-        (series((3.0, 1e-3), (1.0, 1e-3)), (Action.MANOEUVRE, False)),
-        (series((4.0, 1e-3), (3.0, 1e-3)), (Action.MONITOR, True)),
-        (series((3.0, 1e-3), (2.0, 1e-3)), (Action.MANOEUVRE, False)),
-        (series((3.0, 1e-12), (2.0, 1e-10), (1.0, 1e-8)), (Action.MONITOR, False)),
-        (series((3.0, 1e-8), (2.0, 1e-10), (1.0, 1e-12)), (Action.IGNORE, False)),
-        (series((3.0, 1e-18), (2.0, 1e-17), (1.0, 1e-16)), (Action.IGNORE, False)),
+        (series((3.0, 1e-9), (1.0, 1e-9)), Action.IGNORE),
+        (series((3.0, 1e-6), (1.0, 1e-6)), Action.MONITOR),
+        (series((3.0, 1e-3), (1.0, 1e-3)), Action.MANOEUVRE),
+        (series((4.0, 1e-3), (3.0, 1e-3)), Action.PREPARE_MANOEUVRE),
+        (series((3.0, 1e-3), (2.0, 1e-3)), Action.MANOEUVRE),
+        (series((3.0, 1e-12), (2.0, 1e-10), (1.0, 1e-8)), Action.MONITOR),
+        (series((3.0, 1e-8), (2.0, 1e-10), (1.0, 1e-12)), Action.IGNORE),
+        (series((3.0, 1e-18), (2.0, 1e-17), (1.0, 1e-16)), Action.IGNORE),
     ],
     ids=[
         "green",
@@ -46,7 +49,7 @@ def decision_for(seen: list[PcObservation], **config: float) -> tuple[Action, bo
         "green-rising-far-below",
     ],
 )
-def test_rules(seen: list[PcObservation], expected: tuple[Action, bool]) -> None:
+def test_rules(seen: list[PcObservation], expected: Action) -> None:
     assert decision_for(seen) == expected
 
 
@@ -59,23 +62,28 @@ def test_a_rising_green_pc_says_whether_it_reaches_yellow() -> None:
 
 def test_a_rising_green_pc_names_a_custom_threshold_exactly() -> None:
     custom = Thresholds(green_below=2.5e-7, red_from=1e-4)
-    fast = analyse_trend(series((3.0, 1e-12), (2.0, 1e-10), (1.0, 1e-8)), custom)
-    reasons = decide(fast, thresholds=custom).reasons
+    fast = analyse_trend(
+        series((3.0, 1e-12), (2.0, 1e-10), (1.0, 1e-8)), thresholds=custom
+    )
+    reasons = decide(fast).reasons
     assert reasons[-1] == "rising fast enough to reach 2.5e-07 before TCA"
-    slow = analyse_trend(series((3.0, 1e-18), (2.0, 1e-17), (1.0, 1e-16)), custom)
-    reasons = decide(slow, thresholds=custom).reasons
+    slow = analyse_trend(
+        series((3.0, 1e-18), (2.0, 1e-17), (1.0, 1e-16)), thresholds=custom
+    )
+    reasons = decide(slow).reasons
     assert reasons[-1] == "rising, but at this rate below 2.5e-07 at TCA"
 
 
-def test_rising_is_judged_against_the_given_thresholds() -> None:
-    trend = analyse_trend(series((3.0, 1e-18), (2.0, 1e-17), (1.0, 1e-16)))
+def test_rising_is_judged_against_the_trends_thresholds() -> None:
+    seen = series((3.0, 1e-18), (2.0, 1e-17), (1.0, 1e-16))
+    assert decide(analyse_trend(seen)).action is Action.IGNORE
     low = Thresholds(green_below=1e-15, red_from=1e-4)
-    assert decide(trend, thresholds=low).action is Action.MONITOR
+    assert decide(analyse_trend(seen, thresholds=low)).action is Action.MONITOR
 
 
 def test_decision_point_is_configurable() -> None:
     seen = series((4.0, 1e-3), (3.0, 1e-3))
-    assert decision_for(seen, decision_point=3.5 * 86400) == (Action.MANOEUVRE, False)
+    assert decision_for(seen, decision_point=3.5 * 86400) == Action.MANOEUVRE
 
 
 def test_a_manoeuvre_says_why() -> None:
@@ -130,7 +138,7 @@ def test_a_floored_pc_says_so() -> None:
 def test_a_missing_latest_pc_is_monitored() -> None:
     seen = [*series((3.0, 1e-9)), at(1.0, None, error="GeometryError: no plane")]
     decision = decide(analyse_trend(seen))
-    assert (decision.action, decision.prepare_manoeuvre) == (Action.MONITOR, False)
+    assert decision.action is Action.MONITOR
     assert decision.reasons == (
         "latest observation has no Pc: GeometryError: no plane",
     )
@@ -139,7 +147,7 @@ def test_a_missing_latest_pc_is_monitored() -> None:
 def test_a_missing_latest_pc_after_an_early_red_one_prepares_a_manoeuvre() -> None:
     seen = [*series((4.0, 1e-3)), at(3.0, None)]
     decision = decide(analyse_trend(seen))
-    assert (decision.action, decision.prepare_manoeuvre) == (Action.MONITOR, True)
+    assert decision.action is Action.PREPARE_MANOEUVRE
     assert decision.reasons == (
         "latest observation has no Pc: GeometryError: no plane",
         "the latest observation with a Pc was red: Pc 1.00e-03, 4.00 d before TCA",
@@ -151,7 +159,7 @@ def test_a_missing_latest_pc_after_an_early_red_one_prepares_a_manoeuvre() -> No
 def test_a_missing_latest_pc_does_not_downgrade_a_manoeuvre() -> None:
     seen = [*series((1.5, 1e-3)), at(1.0, None)]
     decision = decide(analyse_trend(seen))
-    assert (decision.action, decision.prepare_manoeuvre) == (Action.MANOEUVRE, False)
+    assert decision.action is Action.MANOEUVRE
     assert decision.reasons == (
         "latest observation has no Pc: GeometryError: no plane",
         "the latest observation with a Pc was red: Pc 1.00e-03, 1.50 d before TCA",
@@ -163,7 +171,7 @@ def test_a_missing_latest_pc_does_not_downgrade_a_manoeuvre() -> None:
 def test_a_missing_pc_simultaneous_with_a_red_one_is_manoeuvred() -> None:
     seen = [*series((1.0, 1e-3)), at(1.0, None)]
     decision = decide(analyse_trend(seen))
-    assert (decision.action, decision.prepare_manoeuvre) == (Action.MANOEUVRE, False)
+    assert decision.action is Action.MANOEUVRE
     assert decision.reasons == (
         "latest observation has no Pc: GeometryError: no plane",
         "the latest observation with a Pc was red: Pc 1.00e-03, 1.00 d before TCA",
@@ -175,7 +183,7 @@ def test_a_missing_pc_simultaneous_with_a_red_one_is_manoeuvred() -> None:
 def test_a_missing_latest_pc_after_a_red_upper_bound_names_the_concern() -> None:
     seen = [at(3.0, 1e-3, kind="upper_bound"), at(2.5, None)]
     decision = decide(analyse_trend(seen))
-    assert (decision.action, decision.prepare_manoeuvre) == (Action.MONITOR, True)
+    assert decision.action is Action.PREPARE_MANOEUVRE
     assert decision.reasons == (
         "latest observation has no Pc: GeometryError: no plane",
         "the latest observation with a Pc was red: Pc 1.00e-03 (an upper bound: "
@@ -189,7 +197,7 @@ def test_a_missing_latest_pc_after_a_red_upper_bound_names_the_concern() -> None
 def test_a_missing_latest_pc_follows_the_latest_pc_not_an_older_red_one() -> None:
     seen = [*series((6.0, 1e-3), (3.0, 1e-9), (2.0, 1e-9)), at(1.0, None)]
     decision = decide(analyse_trend(seen))
-    assert (decision.action, decision.prepare_manoeuvre) == (Action.MONITOR, False)
+    assert decision.action is Action.MONITOR
     assert decision.reasons == (
         "latest observation has no Pc: GeometryError: no plane",
     )
@@ -203,7 +211,7 @@ def test_an_event_past_tca_is_monitored() -> None:
 
 @pytest.mark.parametrize("seconds", [0.0, -1.0, math.inf, math.nan])
 def test_invalid_decision_point_is_refused(seconds: float) -> None:
-    with pytest.raises(ValueError, match="decision_point must be finite and positive"):
+    with pytest.raises(ValueError, match="decision_point must be finite and > 0"):
         DecisionConfig(decision_point=seconds)
 
 
@@ -213,6 +221,26 @@ def test_assess_combines_trend_and_decision() -> None:
     assert assessment.decision.action is Action.MANOEUVRE
     assert assessment.trend.direction == "steady"
     assert assessment.thresholds == Thresholds()
+
+
+@pytest.mark.parametrize(
+    "doubtful",
+    [
+        {"kind": "upper_bound"},
+        {"diagnostics": ("secondary (2): covariance repaired",)},
+    ],
+    ids=["upper-bound", "diagnostics"],
+)
+def test_a_doubtful_simultaneous_pc_counts_as_latest(doubtful: dict[str, Any]) -> None:
+    estimate, flagged = at(1.0, 1e-9), at(1.0, 1e-9, **doubtful)
+    for seen in ([estimate, flagged], [flagged, estimate]):
+        assert assess(seen).decision.action is Action.MONITOR
+
+
+def test_actions_are_ordered_and_not_numbers() -> None:
+    assert Action.IGNORE < Action.MONITOR < Action.PREPARE_MANOEUVRE
+    assert Action.PREPARE_MANOEUVRE < Action.MANOEUVRE
+    assert not isinstance(Action.IGNORE, int)
 
 
 def test_assess_passes_its_settings_on() -> None:
@@ -230,23 +258,23 @@ def test_an_assessment_without_a_latest_pc_has_no_level() -> None:
 
 
 @given(
-    st.lists(observations, max_size=6),
+    st.lists(observations(), max_size=6),
     st.floats(0.0, 7.0),
     pcs,
     pcs,
     st.sampled_from(["estimate", "upper_bound"]),
 )
 def test_a_higher_latest_pc_never_gives_a_milder_action(
-    history: list[PcObservation], days: float, low: float, high: float, kind: str
+    history: list[PcObservation], days: float, low: float, high: float, kind: PcKind
 ) -> None:
     low, high = sorted((low, high))
-    earlier = [o for o in history if o.time_to_tca > days * 86400]
+    earlier = [o for o in history if o.time_to_tca > days * DAY]
     milder = assess([*earlier, at(days, low, kind=kind)]).decision.action
     harsher = assess([*earlier, at(days, high, kind=kind)]).decision.action
     assert milder <= harsher
 
 
-@given(st.lists(observations, min_size=1, max_size=6))
+@given(st.lists(observations(), min_size=1, max_size=6))
 def test_doubtful_data_is_never_ignored(history: list[PcObservation]) -> None:
     assessment = assess(history)
     latest = assessment.trend.latest_observation
@@ -255,15 +283,11 @@ def test_doubtful_data_is_never_ignored(history: list[PcObservation]) -> None:
         assert assessment.decision.action is not Action.IGNORE
 
 
-@given(st.lists(observations, min_size=1, max_size=6), st.randoms())
+@given(st.lists(observations(), min_size=1, max_size=6), st.randoms())
 def test_the_order_of_the_input_does_not_change_the_decision(
     history: list[PcObservation], random: Random
 ) -> None:
     shuffled = list(history)
     random.shuffle(shuffled)
     first, second = assess(history).decision, assess(shuffled).decision
-    assert (first.action, first.prepare_manoeuvre, first.reasons) == (
-        second.action,
-        second.prepare_manoeuvre,
-        second.reasons,
-    )
+    assert (first.action, first.reasons) == (second.action, second.reasons)

@@ -7,14 +7,12 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from builders import KELVINS_EXCERPT as EXCERPT
 
 from keepout.errors import ChecksumMismatch, KelvinsFormatError
-from keepout.risk import Action, assess
-from keepout.sources import _cache, kelvins
+from keepout.risk import DAY, Action, assess
+from keepout.sources import cache, kelvins
 from keepout.sources.kelvins import FEATURES, KelvinsEvent
-
-EXCERPT = Path(__file__).parent / "data" / "kelvins_excerpt.csv"
-DAY = 86400.0
 
 
 @pytest.fixture(scope="module")
@@ -161,7 +159,7 @@ class FakeZenodo:
         self.body = body
         self.calls = 0
 
-    def __call__(self, url: str, sink: _cache.Sink) -> None:
+    def __call__(self, url: str, sink: cache.Sink) -> None:
         assert url == kelvins.ARCHIVE_URL
         self.calls += 1
         sink.write(self.body)

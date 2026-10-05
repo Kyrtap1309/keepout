@@ -15,13 +15,31 @@ def test_replace_block_needs_both_markers_in_order(text: str) -> None:
         replace_block(text, "<s>", "<e>", "new")
 
 
-def test_write_or_check(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    same, stale = tmp_path / "same.md", tmp_path / "sub" / "stale.md"
+@pytest.fixture
+def files(tmp_path: Path) -> dict[Path, str]:
+    """An up-to-date file and a missing one in a missing directory."""
+    same = tmp_path / "same.md"
     same.write_text("same", encoding="utf-8")
-    files = {same: "same", stale: "fresh"}
+    return {same: "same", tmp_path / "sub" / "stale.md": "fresh"}
+
+
+def test_check_reports_a_stale_file_without_writing(
+    files: dict[Path, str], capsys: pytest.CaptureFixture[str]
+) -> None:
+    same, stale = files
+    before = same.stat().st_mtime_ns
     assert write_or_check(files, check=True, tool="tool.py") == 1
     assert capsys.readouterr().out == f"{stale} is out of date; run tool.py\n"
     assert not stale.exists()
+    assert same.stat().st_mtime_ns == before
+
+
+def test_write_creates_stale_files_and_leaves_current_ones(
+    files: dict[Path, str],
+) -> None:
+    same, stale = files
+    before = same.stat().st_mtime_ns
     assert write_or_check(files, check=False, tool="tool.py") == 0
     assert stale.read_text(encoding="utf-8") == "fresh"
+    assert same.stat().st_mtime_ns == before
     assert write_or_check(files, check=True, tool="tool.py") == 0

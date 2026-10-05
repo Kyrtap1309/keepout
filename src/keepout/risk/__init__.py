@@ -5,6 +5,7 @@ source: keepout's own Pc of each CDM of an event, or Pc values reported by
 others (ESA's Kelvins data).
 """
 
+from keepout._units import DAY
 from keepout.risk.decision import (
     Action,
     Assessment,
@@ -21,15 +22,13 @@ from keepout.risk.event import (
     time_to_tca,
 )
 from keepout.risk.observation import PC_FLOOR, PcKind, PcObservation
-from keepout.risk.thresholds import Basis, RiskLevel, Thresholds, classify
+from keepout.risk.thresholds import Basis, RiskLevel, Thresholds
 from keepout.risk.trend import (
-    DAY,
     Direction,
     Trend,
     TrendConfig,
     TrendPoint,
     analyse_trend,
-    chronological,
 )
 
 __all__ = [
@@ -53,8 +52,6 @@ __all__ = [
     "TrendPoint",
     "analyse_trend",
     "assess",
-    "chronological",
-    "classify",
     "decide",
     "group_events",
     "time_to_tca",

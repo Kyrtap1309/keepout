@@ -20,6 +20,7 @@ from keepout.errors import (
     KeepoutError,
     KelvinsFormatError,
     PcConvergenceError,
+    SourceFormatError,
     SourceUnavailable,
     UnsupportedFrame,
 )
@@ -49,6 +50,7 @@ __all__ = [
     "PcObservation",
     "PcResult",
     "RefFrame",
+    "SourceFormatError",
     "SourceUnavailable",
     "StateVector",
     "UnsupportedFrame",
