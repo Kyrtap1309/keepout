@@ -11,11 +11,11 @@ collision (Pc), risk trends and collision-avoidance manoeuvre planning.
 
 ```python
 import keepout.cdm
-from keepout.encounter import encounter_plane
+from keepout import Conjunction
 
 cdm = keepout.cdm.load("event.cdm")  # KVN or XML, CDM 1.0 or 2.0
 primary, secondary = cdm.object_states()  # GCRF, SI units
-plane = encounter_plane(primary, secondary)
+plane = Conjunction(primary, secondary, hard_body_radius=20.0).plane
 print(plane.miss_distance, plane.covariance, primary.covariance.repairs)
 ```
 

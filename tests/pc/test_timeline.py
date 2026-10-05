@@ -56,7 +56,7 @@ def test_an_encounter_anywhere_in_a_long_window_is_found_and_integrated(
     assert found.times.size < 5000
     lo, hi = found.segments[0]
     assert np.max(np.diff(found.times[lo : hi + 1])) <= CROSSING / 8 * (1 + 1e-9)
-    nc = integrate_segments(rate, found).nc
+    nc = integrate_segments(rate, found, rtol=1e-6).nc
     assert nc == pytest.approx(TAU * math.sqrt(2 * math.pi), rel=1e-9)
 
 
@@ -65,7 +65,7 @@ def test_refinement_beyond_its_budget_is_coarser_not_an_error() -> None:
     rate = bump(123.4, tau=40.0)
     found = locate(rate, WINDOW, lambda w: [Candidate(*w, 0.01, 40.0)])
     assert found.times.size <= MIN_SCAN_POINTS + MAX_REFINED_POINTS
-    nc = integrate_segments(rate, found).nc
+    nc = integrate_segments(rate, found, rtol=1e-6).nc
     assert nc == pytest.approx(40.0 * math.sqrt(2 * math.pi), rel=1e-9)
 
 

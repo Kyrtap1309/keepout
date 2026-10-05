@@ -3,6 +3,7 @@ from cdm_builders import minimal_cdm, replace, segment_fields
 
 from keepout.cdm.model import Field
 from keepout.conjunction import Conjunction
+from keepout.errors import CovarianceError
 
 
 def with_hbr(index: int, radius: float) -> list[Field]:
@@ -33,3 +34,11 @@ def test_covariance_repairs_become_conjunction_diagnostics() -> None:
     assert diagnostic.startswith(
         "primary (10001): clipped 1 negative position-block eigenvalue"
     )
+
+
+def test_raise_policy_rejects_an_invalid_cdm_covariance() -> None:
+    cdm = minimal_cdm(segment2=replace(segment_fields(2), "CT_R", 1e6))
+    with pytest.raises(CovarianceError, match="not positive semi-definite"):
+        Conjunction.from_cdm(cdm, hard_body_radius=10.0, policy="raise")
+    valid = Conjunction.from_cdm(minimal_cdm(), hard_body_radius=10.0, policy="raise")
+    assert valid.diagnostics == ()

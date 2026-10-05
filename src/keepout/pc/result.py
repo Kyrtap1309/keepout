@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Literal, TypeAlias
 
+__all__ = ["Method", "PcResult"]
+
 Method: TypeAlias = Literal[
     "foster", "elrod", "hall3d", "montecarlo", "frisbee", "dilution", "alfano"
 ]

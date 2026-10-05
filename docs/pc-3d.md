@@ -60,6 +60,14 @@ convergence when the squared Mahalanobis step of the peak is below 1e-6).
 Where the gap between the mean positions, less the radius, exceeds
 `sqrt(1500)` (about 39) of the largest standard deviations of `A`, the rate
 underflows and is taken as 0 without iterating.
+Because this Gaussian is linear in the elements about the peak-overlap
+states, not in Cartesian position, its curved map brings the far tail
+slightly closer: with the miss `k` standard deviations out, `hall3d` exceeds
+the 2-D Pc of even a fast, straight-line encounter by a relative
+`4e-6 k^3` or so in LEO (7e-5 at 3 sigma, 0.4% at 10 sigma), scaling as
+`miss^3 / r` with `r` the orbit radius. This is an intended consequence of
+the curvilinear Gaussian, not a numerical error; the mean-centred expansion
+does not show it.
 Where the iteration fails, keepout falls back to the mean-centred expansion
 only in the far tail: a failure inside an encounter segment, or within one
 scan step of one, raises `PcConvergenceError` whatever the mean-centred rate
@@ -88,9 +96,9 @@ split at their maxima and integrated by nested Clenshaw-Curtis rules (each
 doubling reuses the previous nodes) whose order doubles until two agree to
 `rtol` (1e-6 by default; it must be finite and positive), or until their
 difference, already below 1e-4, stops halving: the rate itself is only
-resolved to about 1e-5 by its sphere quadrature. Without an explicit `window`, the window covers TCA and the
-straight-line closest approach of the states, widened by the straight-line
-bound, which doubles until the rate at the edges is negligible; the window is
+resolved to about 1e-5 by its sphere quadrature. Without an explicit
+`window`, the window covers TCA and the straight-line closest approach of the
+states, widened by the straight-line bound, which doubles until the rate at the edges is negligible; the window is
 never wider than the shorter orbital period, so the next revolution's
 encounter is not counted twice. `hall3d` raises `PcConvergenceError`
 naming the window only when detecting its encounters would need more than
@@ -115,7 +123,9 @@ sigmas, 5 m radius, 120 s), `Nc` = 1.50e-4 matches the expected number of
 entries of a brute-force simulation (1.65e-4) while the probability of a
 first entry is about 8e-5. `hall3d` adds a diagnostic when the relative
 velocity is zero or the encounter lasts longer than the applicability limit
-(1% of the primary's period, as for the 2-D warning).
+(1% of the primary's period, as for the 2-D warning): "long encounter: Nc
+counts repeated entries into the hard-body sphere, so it is an upper bound on
+Pc".
 
 ## Monte Carlo
 
@@ -195,10 +205,12 @@ peak-overlap iteration failed where the rate matters, the rate cannot be
 computed at a quadrature node, or `Nc` is not finite), `auto` falls back to
 `montecarlo` with at most `AUTO_MC_SAMPLES` (1 000 000) trials and the fixed
 seed `AUTO_MC_SEED` (0), so the same conjunction always gives the same
-result; the diagnostic says so. A failure of the encounter scan itself (its
-encounters need more than 20 001 detection points, the rate is significant
-where the screen ruled it negligible, or it cannot be computed on the scan
-grid) is not covered: Monte Carlo runs the same scan, so the same
+result; the diagnostic says so. The fallback reuses Hall's encounter scan
+rather than repeating it: the trials are searched in the segments Hall
+found. A failure of the scan itself (its encounters need more than 20 001
+detection points, the rate is significant where the screen ruled it
+negligible, or it cannot be computed on the scan grid) is not covered: Monte
+Carlo has no scan to reuse, and would need the same one, so the
 `PcConvergenceError` propagates from `compute_pc` even in `auto` mode.
 
 The applicability warnings (e.g. "states are ... m from closest approach

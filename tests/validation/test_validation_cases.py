@@ -1,3 +1,4 @@
+import dataclasses
 import math
 from pathlib import Path
 from typing import Any
@@ -22,21 +23,26 @@ from keepout.validation.cases import (
     MC_MIN_PC,
     MC_SAMPLES,
     MC_SUITE_ALPHA,
+    PC_METHOD_SET,
+    alfano_3d_cases,
+    alfano_cases,
+    alfano_monte_carlo_cases,
     alfano_objects,
     elrod_similar_to_3d_case,
     hall_similar_to_2d_case,
-    load_alfano_3d_cases,
-    load_alfano_cases,
-    load_alfano_monte_carlo_cases,
+    load_alfano_inputs,
+    load_alfano_windows,
     load_hall_2d3d_cases,
     load_max_pc_cases,
     load_non_pd_case,
-    load_pc_method_3d_cases,
-    load_pc_method_cases,
-    load_pc_method_monte_carlo_cases,
+    load_pc_method_inputs,
     monte_carlo_options,
+    pc_method_3d_cases,
+    pc_method_cases,
+    pc_method_monte_carlo_cases,
 )
-from keepout.validation.criteria import HALL, HALL_PC_SET
+from keepout.validation.criteria import HALL, HALL_PC_SET, MONTE_CARLO
+from keepout.validation.evaluation import evaluate
 
 
 def alfano_rows(asymmetry: float = 0.0) -> list[list[Any]]:
@@ -79,8 +85,11 @@ def test_alfano_sheet_with_the_wrong_layout_is_rejected() -> None:
 def test_transcribed_similar_to_3d_case_is_well_formed() -> None:
     case = elrod_similar_to_3d_case()
     assert case.conjunction.hard_body_radius == 20.0
-    assert case.reference == 1.0281653e-02
     assert case.conjunction.diagnostics == ()
+    # The transcribed states reproduce CARA's 8-digit reference.
+    outcomes = evaluate([case])
+    assert [outcome.result.method for outcome in outcomes] == ["foster", "elrod"]
+    assert all(outcome.passed for outcome in outcomes)
 
 
 @pytest.mark.parametrize(
@@ -96,7 +105,13 @@ def test_malformed_pc_method_table_is_a_format_error(
     monkeypatch.setattr(cara, "fetch", lambda file, cache=None: file.path)
     monkeypatch.setattr(cara, "load_xlsx", lambda path: [row])
     with pytest.raises(CaraFormatError, match=message):
-        load_pc_method_cases()
+        load_pc_method_inputs()
+
+
+@pytest.fixture
+def offline_b1(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Serve the B1 example CDM for every CARA file."""
+    monkeypatch.setattr(cara, "fetch", lambda file, cache=None: B1_KVN)
 
 
 def offline_alfano(
@@ -116,7 +131,7 @@ def test_alfano_cases_are_built_from_the_results_table(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     offline_alfano(monkeypatch, [alfano_result(n) for n in range(1, 13)])
-    cases = load_alfano_cases()
+    cases = alfano_cases(load_alfano_inputs())
     assert [c.case_id for c in cases] == [str(n) for n in range(1, 13)]
     assert cases[0].conjunction.hard_body_radius == 10.0
     assert (cases[0].reference, cases[0].paper) == (1e-4, 2e-4)
@@ -127,15 +142,15 @@ def test_alfano_case_without_a_cara_value_is_skipped(
 ) -> None:
     results = [alfano_result(n) for n in range(1, 12)] + [alfano_result(12, math.nan)]
     offline_alfano(monkeypatch, results)
-    assert [c.case_id for c in load_alfano_cases()] == [str(n) for n in range(1, 12)]
+    cases = alfano_cases(load_alfano_inputs())
+    assert [c.case_id for c in cases] == [str(n) for n in range(1, 12)]
 
 
 @pytest.mark.parametrize(
     ("results", "message"),
     [
         ([alfano_result(n) for n in range(2, 13)], "no row for case 1"),
-        ([alfano_result(1, "n/a")], "expected a number, got 'n/a'"),
-        ([{"Case": 1}], "no column 'CARA_Pc2D'"),
+        ([{"Case": n} for n in range(1, 13)], "no column 'HBR'"),
     ],
 )
 def test_malformed_alfano_results_are_a_format_error(
@@ -143,13 +158,36 @@ def test_malformed_alfano_results_are_a_format_error(
 ) -> None:
     offline_alfano(monkeypatch, results)
     with pytest.raises(CaraFormatError, match=message):
-        load_alfano_cases()
+        load_alfano_inputs()
 
 
-def test_non_pd_case_uses_cara_reference_and_tolerance(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize(
+    ("results", "message"),
+    [
+        (
+            [alfano_result(n, "n/a") for n in range(1, 13)],
+            "column 'CARA_Pc2D': expected a number, got 'n/a'",
+        ),
+        (
+            [
+                {k: v for k, v in alfano_result(n).items() if k != "CARA_Pc2D"}
+                for n in range(1, 13)
+            ],
+            "no column 'CARA_Pc2D'",
+        ),
+    ],
+)
+def test_malformed_alfano_reference_is_a_format_error(
+    monkeypatch: pytest.MonkeyPatch, results: list[dict[str, Any]], message: str
 ) -> None:
-    monkeypatch.setattr(cara, "fetch", lambda file, cache=None: B1_KVN)
+    offline_alfano(monkeypatch, results)
+    alfano = load_alfano_inputs()
+    with pytest.raises(CaraFormatError, match=message):
+        alfano_cases(alfano)
+
+
+@pytest.mark.usefixtures("offline_b1")
+def test_non_pd_case_uses_cara_reference_and_tolerance() -> None:
     case = load_non_pd_case()
     assert case.conjunction.hard_body_radius == 20.0
     assert (case.reference, case.criterion.absolute) == (0.0, 1e-10)
@@ -179,7 +217,7 @@ def test_alfano_3d_cases_use_the_supplementary_windows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     offline_alfano_3d(monkeypatch)
-    cases = load_alfano_3d_cases()
+    cases = alfano_3d_cases(load_alfano_inputs(), load_alfano_windows())
     assert [c.case_id for c in cases] == [str(n) for n in range(1, 13)]
     ninth = cases[8]
     assert ninth.methods == ("hall3d",)
@@ -192,9 +230,9 @@ def test_alfano_monte_carlo_cases_carry_the_cara_interval(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     offline_alfano_3d(monkeypatch)
-    first = load_alfano_monte_carlo_cases()[0]
+    first = alfano_monte_carlo_cases(load_alfano_inputs(), load_alfano_windows())[0]
     assert first.methods == ("montecarlo",)
-    assert first.monte_carlo
+    assert first.criterion is MONTE_CARLO
     assert first.interval == (1e-3, 3e-3)
     assert first.options["window"] == (-100.0, 100.0)
     assert first.options["samples"] == 200_000  # 400 / 2e-3
@@ -207,14 +245,35 @@ def test_monte_carlo_options_are_bounded_and_reproducible() -> None:
     assert monte_carlo_options("s", "1", 1e-3) != monte_carlo_options("s", "2", 1e-3)
 
 
+def test_a_case_refuses_options_its_methods_do_not_take() -> None:
+    case = case_with_reference(1e-3)
+    with pytest.raises(
+        ValueError, match=r"test/case: foster takes no options \['window'\]"
+    ):
+        dataclasses.replace(case, options={"window": (-1.0, 1.0)})
+    with pytest.raises(ValueError, match=r"hall3d takes no options \['seed'\]"):
+        dataclasses.replace(
+            case,
+            methods=("hall3d", "montecarlo"),
+            options={"window": (-1.0, 1.0), "seed": 1},
+        )
+    both = dataclasses.replace(
+        case, methods=("hall3d", "montecarlo"), options={"window": (-1.0, 1.0)}
+    )
+    assert both.options == {"window": (-1.0, 1.0)}
+
+
 def test_alfano_tables_must_cover_every_case(monkeypatch: pytest.MonkeyPatch) -> None:
     offline_alfano_3d(monkeypatch)
     monkeypatch.setattr(cara, "load_xlsx", lambda path: [])
-    with pytest.raises(CaraFormatError, match="no row for case 1"):
-        load_alfano_3d_cases()
+    alfano = load_alfano_inputs()
+    with pytest.raises(CaraFormatError, match="supplement has no row for case 1"):
+        alfano_3d_cases(alfano, load_alfano_windows())
 
 
-def test_pc_method_3d_and_monte_carlo_cases(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_pc_method_3d_and_monte_carlo_cases(
+    monkeypatch: pytest.MonkeyPatch, offline_b1: None
+) -> None:
     row = {
         "Conjunction_ID": "A",
         "HBR_m": 20.0,
@@ -226,36 +285,29 @@ def test_pc_method_3d_and_monte_carlo_cases(monkeypatch: pytest.MonkeyPatch) -> 
     }
     rare = {**row, "Conjunction_ID": "B", "PcSDMC": 0.5 * MC_MIN_PC}
     monkeypatch.setattr(cara, "PC_METHOD_CDMS", {"A": B1_KVN, "B": B1_KVN})
-    monkeypatch.setattr(cara, "fetch", lambda file, cache=None: B1_KVN)
     monkeypatch.setattr(cara, "load_xlsx", lambda path: [row, rare])
-    three_d = load_pc_method_3d_cases()
+    pc_method = load_pc_method_inputs()
+    three_d = pc_method_3d_cases(pc_method)
     assert [c.case_id for c in three_d] == ["A", "B"]
     assert three_d[0].criterion is HALL_PC_SET
     assert three_d[0].informative == ("Coppola 3-D Pc", 1e-20)
-    (only,) = load_pc_method_monte_carlo_cases()
+    (only,) = pc_method_monte_carlo_cases(pc_method)
     assert only.case_id == "A"
     assert only.interval == (2e-4, 4e-4)
 
 
-def test_pc_method_2d_cases(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_pc_method_2d_cases(monkeypatch: pytest.MonkeyPatch, offline_b1: None) -> None:
     row = {"Conjunction_ID": "A", "HBR_m": 20.0, "Pc2D": 3e-4}
     monkeypatch.setattr(cara, "PC_METHOD_CDMS", {"A": B1_KVN})
-    monkeypatch.setattr(cara, "fetch", lambda file, cache=None: B1_KVN)
     monkeypatch.setattr(cara, "load_xlsx", lambda path: [row])
-    (case,) = load_pc_method_cases()
-    assert (case.suite, case.case_id, case.reference) == (
-        "CARA Pc method test set",
-        "A",
-        3e-4,
-    )
+    (case,) = pc_method_cases(load_pc_method_inputs())
+    assert (case.suite, case.case_id, case.reference) == (PC_METHOD_SET, "A", 3e-4)
     assert case.conjunction.hard_body_radius == 20.0
     assert case.methods == ("foster", "elrod")
 
 
-def test_hall_2d3d_cases_share_one_conjunction(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(cara, "fetch", lambda file, cache=None: B1_KVN)
+@pytest.mark.usefixtures("offline_b1")
+def test_hall_2d3d_cases_share_one_conjunction() -> None:
     two_d, three_d = load_hall_2d3d_cases()
     assert two_d.conjunction is three_d.conjunction
     assert two_d.conjunction.hard_body_radius == 20.0
@@ -267,8 +319,11 @@ def test_hall_2d3d_cases_share_one_conjunction(
 def test_transcribed_hall_similar_to_2d_case_is_well_formed() -> None:
     case = hall_similar_to_2d_case()
     two_d = elrod_similar_to_3d_case().conjunction
-    assert case.reference == 1.0289973e-02
     assert case.conjunction.diagnostics == ()
+    # The transcribed 6x6 covariances reproduce CARA's reference to its 1e-3.
+    [outcome] = evaluate([case])
+    assert outcome.result.method == "hall3d"
+    assert outcome.passed
     np.testing.assert_array_equal(
         case.conjunction.primary.state.r, two_d.primary.state.r
     )
@@ -304,13 +359,12 @@ def test_max_pc_cases_follow_cara_unit_tests(monkeypatch: pytest.MonkeyPatch) ->
 def test_monte_carlo_intervals_share_the_suite_false_failure_chance(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    case = case_with_reference(1e-3)
+    case = dataclasses.replace(case_with_reference(1e-3), methods=("montecarlo",))
     monkeypatch.setattr(cara, "prefetch", lambda *_, **__: None)
-    monkeypatch.setattr(
-        cases_module, "load_alfano_monte_carlo_cases", lambda _: [case] * 3
-    )
-    monkeypatch.setattr(
-        cases_module, "load_pc_method_monte_carlo_cases", lambda _: [case]
-    )
+    loaders = ("load_alfano_inputs", "load_alfano_windows", "load_pc_method_inputs")
+    for loader in loaders:
+        monkeypatch.setattr(cases_module, loader, lambda _: [])
+    monkeypatch.setattr(cases_module, "alfano_monte_carlo_cases", lambda *_: [case] * 3)
+    monkeypatch.setattr(cases_module, "pc_method_monte_carlo_cases", lambda _: [case])
     loaded = cases_module.load_monte_carlo_cases()
     assert [c.options["confidence"] for c in loaded] == [1.0 - MC_SUITE_ALPHA / 4] * 4

@@ -18,6 +18,8 @@ from keepout.objects import ObjectState, require_same_epoch
 if TYPE_CHECKING:
     from keepout.cdm.model import Cdm
 
+__all__ = ["Conjunction", "combined_hard_body_radius"]
+
 
 def combined_hard_body_radius(
     primary: ObjectState, secondary: ObjectState, explicit: float | None = None
@@ -102,7 +104,7 @@ class Conjunction:
             If the relative velocity is zero: the plane, and 2-D Pc, are then
             undefined (3-D and Monte Carlo Pc are not).
         """
-        return encounter_plane(self.primary, self.secondary)
+        return encounter_plane(self)
 
     @classmethod
     def from_cdm(

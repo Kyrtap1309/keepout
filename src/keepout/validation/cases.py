@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import math
 import zlib
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from types import MappingProxyType
-from typing import Any
+from typing import Any, Final, TypedDict
 
 import numpy as np
 import numpy.typing as npt
@@ -32,26 +31,105 @@ from keepout.validation.criteria import (
 )
 from keepout.validation.legacy import legacy_objects
 
-NOMINAL_EPOCH = Time("2000-01-01T00:00:00", scale="utc")
+__all__ = [
+    "ALFANO",
+    "ALFANO_3D",
+    "ALFANO_MONTE_CARLO",
+    "DILUTION_REFERENCES",
+    "FRISBEE_REFERENCES",
+    "MAX_PC_UNIT_TESTS",
+    "MC_MIN_PC",
+    "MC_SAMPLES",
+    "MC_SUITE_ALPHA",
+    "MC_TARGET_HITS",
+    "NOMINAL_EPOCH",
+    "PC_METHOD_SET",
+    "PC_METHOD_SET_3D",
+    "PC_METHOD_SET_MONTE_CARLO",
+    "TWO_D_METHODS",
+    "UNIT_TESTS",
+    "AlfanoInput",
+    "CaseOptions",
+    "MonteCarloSizing",
+    "PcMethodInput",
+    "ValidationCase",
+    "alfano_3d_cases",
+    "alfano_cases",
+    "alfano_monte_carlo_cases",
+    "alfano_objects",
+    "elrod_similar_to_3d_case",
+    "hall_similar_to_2d_case",
+    "load_alfano_inputs",
+    "load_alfano_windows",
+    "load_all",
+    "load_hall_2d3d_cases",
+    "load_max_pc_cases",
+    "load_monte_carlo_cases",
+    "load_non_pd_case",
+    "load_pc_method_inputs",
+    "monte_carlo_options",
+    "pc_method_3d_cases",
+    "pc_method_cases",
+    "pc_method_monte_carlo_cases",
+]
+
+NOMINAL_EPOCH: Final = Time("2000-01-01T00:00:00", scale="utc")
 """Nominal epoch of the cases whose states have no calendar date (the Alfano
 sheets and CARA's inline unit-test cases): inertial vectors at TCA; no Pc
 depends on it."""
 
-TWO_D_METHODS: tuple[Method, ...] = ("foster", "elrod")
+TWO_D_METHODS: Final[tuple[Method, ...]] = ("foster", "elrod")
 
-MC_TARGET_HITS = 400
+ALFANO: Final = "Alfano (2009)"
+ALFANO_3D: Final = "Alfano (2009), 3-D"
+ALFANO_MONTE_CARLO: Final = "Alfano (2009), Monte Carlo"
+PC_METHOD_SET: Final = "CARA Pc method test set"
+PC_METHOD_SET_3D: Final = "CARA Pc method test set, 3-D"
+PC_METHOD_SET_MONTE_CARLO: Final = "CARA Pc method test set, Monte Carlo"
+UNIT_TESTS: Final = "CARA unit tests"
+MAX_PC_UNIT_TESTS: Final = "CARA unit tests, maximum Pc"
+"""Suite names (:attr:`ValidationCase.suite`), as the report titles them."""
+
+MC_TARGET_HITS: Final = 400
 """Expected collisions a Monte Carlo case is sized for (about +-13% at 99%)."""
 
-MC_SAMPLES = (100_000, 4_000_000)
+MC_SAMPLES: Final = (100_000, 4_000_000)
 """Bounds on the trials of one Monte Carlo case."""
 
-MC_MIN_PC = 1e-4
+MC_MIN_PC: Final = 1e-4
 """Smallest CARA Monte Carlo Pc compared: below it the trials needed exceed
 :data:`MC_SAMPLES`."""
 
-MC_SUITE_ALPHA = 0.01
+MC_SUITE_ALPHA: Final = 0.01
 """Chance that a correct keepout fails any of the ``n`` Monte Carlo cases: each
 interval is at confidence ``1 - MC_SUITE_ALPHA / n`` (Bonferroni)."""
+
+
+class MonteCarloSizing(TypedDict):
+    """Trials and seed of a Monte Carlo case (:func:`monte_carlo_options`)."""
+
+    samples: int
+    seed: int
+
+
+class CaseOptions(TypedDict, total=False):
+    """Options a case passes to :func:`~keepout.pc.compute_pc`.
+
+    ``window`` is passed to ``"hall3d"`` and ``"montecarlo"``, the others
+    to ``"montecarlo"`` only.
+    """
+
+    window: tuple[float, float]
+    samples: int
+    seed: int
+    confidence: float
+
+
+_ACCEPTED: Final[Mapping[Method, frozenset[str]]] = {
+    "hall3d": frozenset({"window"}),
+    "montecarlo": CaseOptions.__optional_keys__,
+}
+"""The :class:`CaseOptions` each method takes; the others take none."""
 
 
 @dataclass(frozen=True, eq=False)
@@ -61,7 +139,7 @@ class ValidationCase:
     Parameters
     ----------
     suite
-        Name of the case collection, e.g. ``"Alfano (2009)"``.
+        Name of the case collection, e.g. :data:`ALFANO`.
     case_id
         Identifier within the suite.
     conjunction
@@ -75,8 +153,9 @@ class ValidationCase:
     paper
         Value published with the test case (Alfano 2009), if any.
     options
-        Passed to :func:`~keepout.pc.compute_pc` (e.g. ``window``,
-        ``samples``, ``seed``); stored read-only.
+        Passed to :func:`~keepout.pc.compute_pc`; each must be taken by
+        every method of the case (see :class:`CaseOptions`). Stored as a
+        copy.
     interval
         CARA's own confidence interval (Monte Carlo references), if any.
     informative
@@ -90,20 +169,22 @@ class ValidationCase:
     methods: tuple[Method, ...] = TWO_D_METHODS
     criterion: Criterion = TWO_D
     paper: float | None = None
-    options: Mapping[str, Any] = field(default_factory=dict)
+    options: CaseOptions = field(default_factory=CaseOptions)
     interval: tuple[float, float] | None = None
     informative: tuple[str, float] | None = None
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "options", MappingProxyType(dict(self.options)))
+        for method in self.methods:
+            refused = self.options.keys() - _ACCEPTED.get(method, frozenset())
+            if refused:
+                raise ValueError(
+                    f"case {self.suite}/{self.case_id}: {method} takes no "
+                    f"options {sorted(refused)}"
+                )
+        object.__setattr__(self, "options", self.options.copy())
 
-    @property
-    def monte_carlo(self) -> bool:
-        """Whether the case is judged by a Monte Carlo interval."""
-        return self.criterion.interval
 
-
-def monte_carlo_options(suite: str, case_id: str, reference: float) -> dict[str, int]:
+def monte_carlo_options(suite: str, case_id: str, reference: float) -> MonteCarloSizing:
     """Trials and seed of a Monte Carlo case: about :data:`MC_TARGET_HITS`
     expected collisions within :data:`MC_SAMPLES`, and a seed fixed by the
     case's name so the report is reproducible."""
@@ -164,58 +245,197 @@ def _field(row: Mapping[str, Any], name: str) -> Any:
         raise CaraFormatError(f"CARA table has no column {name!r}") from exc
 
 
-def _float(value: Any) -> float:
+def _number(row: Mapping[str, Any], name: str) -> float:
+    value = _field(row, name)
     try:
         return float(value)
     except (TypeError, ValueError) as exc:
-        raise CaraFormatError(f"expected a number, got {value!r}") from exc
+        raise CaraFormatError(
+            f"column {name!r}: expected a number, got {value!r}"
+        ) from exc
 
 
-def load_alfano_cases(cache: Path | None = None) -> list[ValidationCase]:
-    """Alfano (2009) cases with a CARA 2-D reference (cases 1-11).
+@dataclass(frozen=True, eq=False)
+class AlfanoInput:
+    """One Alfano (2009) case as CARA gives it.
 
-    Case 12 has zero relative velocity; CARA gives no 2-D value for it.
+    Parameters
+    ----------
+    number
+        Case number, 1-12.
+    conjunction
+        The conjunction of its ``.xls`` sheet, with the HBR of ``results``.
+    results
+        Its row of CARA's results table.
     """
-    results = _alfano_results(cache)
-    cases: list[ValidationCase] = []
+
+    number: int
+    conjunction: Conjunction
+    results: Mapping[str, Any]
+
+
+@dataclass(frozen=True, eq=False)
+class PcMethodInput:
+    """One conjunction of the CARA Pc method test set.
+
+    Parameters
+    ----------
+    conjunction_id
+        CARA's identifier.
+    conjunction
+        The conjunction of its CDM, with the HBR of ``row``.
+    row
+        Its row of CARA's results table.
+    """
+
+    conjunction_id: str
+    conjunction: Conjunction
+    row: Mapping[str, Any]
+
+
+def load_alfano_inputs(cache: Path | None = None) -> list[AlfanoInput]:
+    """Every Alfano (2009) case: CARA's results table and the ``.xls`` sheets."""
+    results = {
+        int(_number(row, "Case")): row
+        for row in cara.load_csv(cara.fetch(cara.ALFANO_2009_RESULTS, cache=cache))
+    }
+    inputs: list[AlfanoInput] = []
     for number, file in enumerate(cara.ALFANO_2009_TCA, start=1):
         if number not in results:
             raise CaraFormatError(f"Alfano results have no row for case {number}")
         result = results[number]
-        reference = _float(_field(result, "CARA_Pc2D"))
+        primary, secondary = alfano_objects(
+            cara.load_xls_rows(cara.fetch(file, cache=cache))
+        )
+        conjunction = Conjunction(primary, secondary, _number(result, "HBR"))
+        inputs.append(AlfanoInput(number, conjunction, result))
+    return inputs
+
+
+def load_alfano_windows(cache: Path | None = None) -> dict[int, float]:
+    """Half-width [s] of each Alfano case's window, by case number:
+    ``A09_FinalTime_s`` of CARA's supplementary table."""
+    return {
+        int(_number(row, "CaseNumber")): _number(row, "A09_FinalTime_s")
+        for row in cara.load_xlsx(cara.fetch(cara.ALFANO_2009_SUPPLEMENT, cache=cache))
+    }
+
+
+def load_pc_method_inputs(cache: Path | None = None) -> list[PcMethodInput]:
+    """Every conjunction of the CARA Pc method test set: table row and CDM."""
+    inputs: list[PcMethodInput] = []
+    for row in cara.load_xlsx(cara.fetch(cara.PC_METHOD_TABLE, cache=cache)):
+        conjunction_id = str(_field(row, "Conjunction_ID"))
+        if conjunction_id not in cara.PC_METHOD_CDMS:
+            raise CaraFormatError(f"no pinned CDM for conjunction {conjunction_id}")
+        path = cara.fetch(cara.PC_METHOD_CDMS[conjunction_id], cache=cache)
+        conjunction = Conjunction.from_cdm(
+            cdm.load(path), hard_body_radius=_number(row, "HBR_m")
+        )
+        inputs.append(PcMethodInput(conjunction_id, conjunction, row))
+    return inputs
+
+
+def _window(windows: Mapping[int, float], number: int) -> tuple[float, float]:
+    if number not in windows:
+        raise CaraFormatError(f"Alfano supplement has no row for case {number}")
+    return -windows[number], windows[number]
+
+
+def _monte_carlo_case(
+    suite: str,
+    case_id: str,
+    conjunction: Conjunction,
+    reference: float,
+    interval: tuple[float, float],
+    window: tuple[float, float] | None = None,
+) -> ValidationCase:
+    """A case judged by keepout's Monte Carlo interval, sized for its reference.
+
+    ``window`` is the Monte Carlo window; ``None`` sizes it automatically.
+    """
+    sizing = monte_carlo_options(suite, case_id, reference)
+    options = CaseOptions(samples=sizing["samples"], seed=sizing["seed"])
+    if window is not None:
+        options["window"] = window
+    return ValidationCase(
+        suite,
+        case_id,
+        conjunction,
+        reference,
+        methods=("montecarlo",),
+        criterion=MONTE_CARLO,
+        options=options,
+        interval=interval,
+    )
+
+
+def alfano_cases(alfano: Sequence[AlfanoInput]) -> list[ValidationCase]:
+    """Alfano (2009) cases with a CARA 2-D reference (cases 1-11).
+
+    Case 12 has zero relative velocity; CARA gives no 2-D value for it.
+    """
+    cases: list[ValidationCase] = []
+    for item in alfano:
+        reference = _number(item.results, "CARA_Pc2D")
         if math.isnan(reference):
             continue
         cases.append(
             ValidationCase(
-                "Alfano (2009)",
-                str(number),
-                _alfano_conjunction(file, result, cache),
+                ALFANO,
+                str(item.number),
+                item.conjunction,
                 reference,
-                paper=_float(_field(result, "A09_PcLinear100")),
+                paper=_number(item.results, "A09_PcLinear100"),
             )
         )
     return cases
 
 
-def _alfano_results(cache: Path | None) -> dict[int, Mapping[str, Any]]:
-    """CARA's Alfano (2009) results table, by case number."""
-    return {
-        int(_float(_field(row, "Case"))): row
-        for row in cara.load_csv(cara.fetch(cara.ALFANO_2009_RESULTS, cache=cache))
-    }
+def alfano_3d_cases(
+    alfano: Sequence[AlfanoInput], windows: Mapping[int, float]
+) -> list[ValidationCase]:
+    """Alfano (2009) cases 1-12 with CARA's 3D-Nc reference.
+
+    The window is that of :func:`load_alfano_windows`, as in CARA's
+    ``AlfanoTestCases_Pc3D.m``: cases 9 and 10 have the same states and
+    differ only in it.
+    """
+    return [
+        ValidationCase(
+            ALFANO_3D,
+            str(item.number),
+            item.conjunction,
+            _number(item.results, "CARA_Pc3D"),
+            methods=("hall3d",),
+            criterion=HALL,
+            options={"window": _window(windows, item.number)},
+        )
+        for item in alfano
+    ]
 
 
-def _alfano_conjunction(
-    file: cara.CaraFile, result: Mapping[str, Any], cache: Path | None
-) -> Conjunction:
-    """The conjunction of one Alfano case, with the HBR of its results row."""
-    primary, secondary = alfano_objects(
-        cara.load_xls_rows(cara.fetch(file, cache=cache))
-    )
-    return Conjunction(primary, secondary, _float(_field(result, "HBR")))
+def alfano_monte_carlo_cases(
+    alfano: Sequence[AlfanoInput], windows: Mapping[int, float]
+) -> list[ValidationCase]:
+    """Alfano (2009) cases 1-12 with CARA's two-body Monte Carlo reference."""
+    return [
+        _monte_carlo_case(
+            ALFANO_MONTE_CARLO,
+            str(item.number),
+            item.conjunction,
+            _number(item.results, "CARA_PcMC"),
+            (
+                _number(item.results, "CARA_PcMCLo95"),
+                _number(item.results, "CARA_PcMCHi95"),
+            ),
+            _window(windows, item.number),
+        )
+        for item in alfano
+    ]
 
 
-def load_pc_method_cases(cache: Path | None = None) -> list[ValidationCase]:
+def pc_method_cases(pc_method: Sequence[PcMethodInput]) -> list[ValidationCase]:
     """The 53 real conjunctions of the CARA Pc method test set.
 
     The reference is CARA's ``Pc2D``: states moved to the true TCA before
@@ -224,12 +444,49 @@ def load_pc_method_cases(cache: Path | None = None) -> list[ValidationCase]:
     """
     return [
         ValidationCase(
-            "CARA Pc method test set",
-            conjunction_id,
-            conjunction,
-            _float(_field(row, "Pc2D")),
+            PC_METHOD_SET,
+            item.conjunction_id,
+            item.conjunction,
+            _number(item.row, "Pc2D"),
         )
-        for conjunction_id, conjunction, row in _pc_method_rows(cache)
+        for item in pc_method
+    ]
+
+
+def pc_method_3d_cases(pc_method: Sequence[PcMethodInput]) -> list[ValidationCase]:
+    """The 53 CARA test conjunctions with CARA's ``Nc3D`` (Hall 3D-Nc).
+
+    CARA's Coppola 3-D Pc is shown for information only: it is another
+    method, and CARA's own table flags where it underestimates.
+    """
+    return [
+        ValidationCase(
+            PC_METHOD_SET_3D,
+            item.conjunction_id,
+            item.conjunction,
+            _number(item.row, "Nc3D"),
+            methods=("hall3d",),
+            criterion=HALL_PC_SET,
+            informative=("Coppola 3-D Pc", _number(item.row, "Pc3DCoppola")),
+        )
+        for item in pc_method
+    ]
+
+
+def pc_method_monte_carlo_cases(
+    pc_method: Sequence[PcMethodInput],
+) -> list[ValidationCase]:
+    """Test-set conjunctions whose CARA Monte Carlo Pc is at least ``MC_MIN_PC``."""
+    return [
+        _monte_carlo_case(
+            PC_METHOD_SET_MONTE_CARLO,
+            item.conjunction_id,
+            item.conjunction,
+            reference,
+            (_number(item.row, "PcSDMCLo"), _number(item.row, "PcSDMCHi")),
+        )
+        for item in pc_method
+        if (reference := _number(item.row, "PcSDMC")) >= MC_MIN_PC
     ]
 
 
@@ -242,12 +499,96 @@ def load_non_pd_case(cache: Path | None = None) -> ValidationCase:
     path = cara.fetch(cara.NON_PD_CDM, cache=cache)
     conjunction = Conjunction.from_cdm(cdm.load(path), hard_body_radius=20.0)
     return ValidationCase(
-        "CARA unit tests",
+        UNIT_TESTS,
         "non-PD covariance CDM",
         conjunction,
         0.0,
         criterion=Criterion(absolute=1e-10),
     )
+
+
+_SIMILAR_STATES: Final = (
+    (
+        [-9.841950433215101e05, 3.932342044549424e05, 6.991223682230414e06],
+        [4.883696742000000e03, 5.689086045000000e03, 3.665361590000000e02],
+    ),
+    (
+        [-9.839696058965517e05, 3.936845951174244e05, 6.991219291625473e06],
+        [1.509562687000000e03, 7.372938617000000e03, -1.492509430000000e02],
+    ),
+)
+"""Primary and secondary ``(r, v)`` of CARA's inline ``testSimilarTo3D`` and
+``testSimilarTo2D`` cases (ECI, m, m/s)."""
+
+
+def _covariance(
+    position: list[list[float]],
+    cross: list[list[float]],
+    velocity: list[list[float]],
+) -> FloatArray:
+    """A symmetric 6x6 covariance from its position, position-velocity and
+    velocity blocks."""
+    cross_block = np.array(cross)
+    return np.block(
+        [[np.array(position), cross_block], [cross_block.T, np.array(velocity)]]
+    )
+
+
+_SIMILAR_COVARIANCES: Final = (
+    _covariance(
+        [
+            [4.976545641899520e04, 5.787130862568278e04, 3.370410320935015e03],
+            [5.787130862568278e04, 6.730377643610841e04, 3.926542932121541e03],
+            [3.370410320935015e03, 3.926542932121541e03, 2.461403197221289e02],
+        ],
+        [
+            [1.137272273949272e01, -4.325472616114674e00, -8.009705480233521e01],
+            [1.321992688238858e01, -5.035560720747812e00, -9.314985106902773e01],
+            [7.586865834476763e-01, -3.077848629905763e-01, -5.434034460756914e00],
+        ],
+        [
+            [2.608186227148725e-03, -9.804181796720670e-04, -1.829751672999786e-02],
+            [-9.804181796720670e-04, 3.895883508545853e-04, 6.968892326415779e-03],
+            [-1.829751672999786e-02, 6.968892326415779e-03, 1.289253320300791e-01],
+        ],
+    ),
+    _covariance(
+        [
+            [4.246862551076427e04, 2.066374367781032e05, -5.011108933888592e03],
+            [2.066374367781032e05, 1.005854717283451e06, -2.434876491048039e04],
+            [-5.011108933888592e03, -2.434876491048039e04, 6.131274993037449e02],
+        ],
+        [
+            [3.104606531932427e01, -1.201093683199582e01, -2.207975848324051e02],
+            [1.510022508670080e02, -5.850063541467530e01, -1.074752763805685e03],
+            [-3.667147183233717e00, 1.391769957262238e00, 2.601457791444154e01],
+        ],
+        [
+            [2.272826228568773e-02, -8.778253314778023e-03, -1.613538091053610e-01],
+            [-8.778253314778023e-03, 3.428801115804722e-03, 6.251148178133809e-02],
+            [-1.613538091053610e-01, 6.251148178133809e-02, 1.148404222181769e00],
+        ],
+    ),
+)
+"""Primary and secondary 6x6 covariances of ``testSimilarTo2D`` (ECI, m,
+m/s); ``testSimilarTo3D`` uses their position blocks."""
+
+
+def _similar_conjunction(
+    covariance: Callable[[FloatArray], Covariance],
+) -> Conjunction:
+    """The ``testSimilarTo*`` states with ``covariance`` of each 6x6 matrix,
+    HBR 20 m."""
+    primary, secondary = (
+        _gcrf_object(name, r, v, covariance(matrix))
+        for name, (r, v), matrix in zip(
+            ("PRIMARY", "SECONDARY"),
+            _SIMILAR_STATES,
+            _SIMILAR_COVARIANCES,
+            strict=True,
+        )
+    )
+    return Conjunction(primary, secondary, 20.0)
 
 
 def elrod_similar_to_3d_case() -> ValidationCase:
@@ -257,175 +598,12 @@ def elrod_similar_to_3d_case() -> ValidationCase:
     UnitTests/PcElrod_UnitTest.m`` lines 208-232 at the pinned commit
     (ECI, m, m/s, HBR 20 m); the reference has 8 significant digits.
     """
-    position_covariances = (
-        [
-            [4.976545641899520e04, 5.787130862568278e04, 3.370410320935015e03],
-            [5.787130862568278e04, 6.730377643610841e04, 3.926542932121541e03],
-            [3.370410320935015e03, 3.926542932121541e03, 2.461403197221289e02],
-        ],
-        [
-            [4.246862551076427e04, 2.066374367781032e05, -5.011108933888592e03],
-            [2.066374367781032e05, 1.005854717283451e06, -2.434876491048039e04],
-            [-5.011108933888592e03, -2.434876491048039e04, 6.131274993037449e02],
-        ],
-    )
-    states = (
-        (
-            [-9.841950433215101e05, 3.932342044549424e05, 6.991223682230414e06],
-            [4.883696742000000e03, 5.689086045000000e03, 3.665361590000000e02],
-        ),
-        (
-            [-9.839696058965517e05, 3.936845951174244e05, 6.991219291625473e06],
-            [1.509562687000000e03, 7.372938617000000e03, -1.492509430000000e02],
-        ),
-    )
-    primary, secondary = (
-        _gcrf_object(
-            name, r, v, Covariance.from_position(position, "GCRF", NOMINAL_EPOCH)
-        )
-        for name, (r, v), position in zip(
-            ("PRIMARY", "SECONDARY"), states, position_covariances, strict=True
-        )
+    conjunction = _similar_conjunction(
+        lambda matrix: Covariance.from_position(matrix[:3, :3], "GCRF", NOMINAL_EPOCH)
     )
     return ValidationCase(
-        "CARA unit tests",
-        "Elrod testSimilarTo3D",
-        Conjunction(primary, secondary, 20.0),
-        1.0281653e-02,
+        UNIT_TESTS, "Elrod testSimilarTo3D", conjunction, 1.0281653e-02
     )
-
-
-def _alfano_inputs(
-    cache: Path | None,
-) -> list[tuple[int, Conjunction, Mapping[str, Any], float]]:
-    """Every Alfano case: number, conjunction, results row and window [s]."""
-    results = _alfano_results(cache)
-    windows = {
-        int(_float(_field(row, "CaseNumber"))): _float(_field(row, "A09_FinalTime_s"))
-        for row in cara.load_xlsx(cara.fetch(cara.ALFANO_2009_SUPPLEMENT, cache=cache))
-    }
-    inputs: list[tuple[int, Conjunction, Mapping[str, Any], float]] = []
-    for number, file in enumerate(cara.ALFANO_2009_TCA, start=1):
-        if number not in results or number not in windows:
-            raise CaraFormatError(f"Alfano tables have no row for case {number}")
-        result = results[number]
-        conjunction = _alfano_conjunction(file, result, cache)
-        inputs.append((number, conjunction, result, windows[number]))
-    return inputs
-
-
-def load_alfano_3d_cases(cache: Path | None = None) -> list[ValidationCase]:
-    """Alfano (2009) cases 1-12 with CARA's 3D-Nc reference.
-
-    The window is +-``A09_FinalTime_s`` of CARA's supplementary table, as in
-    CARA's ``AlfanoTestCases_Pc3D.m``: cases 9 and 10 have the same states and
-    differ only in it.
-    """
-    return [
-        ValidationCase(
-            "Alfano (2009), 3-D",
-            str(number),
-            conjunction,
-            _float(_field(result, "CARA_Pc3D")),
-            methods=("hall3d",),
-            criterion=HALL,
-            options={"window": (-window, window)},
-        )
-        for number, conjunction, result, window in _alfano_inputs(cache)
-    ]
-
-
-def load_alfano_monte_carlo_cases(cache: Path | None = None) -> list[ValidationCase]:
-    """Alfano (2009) cases 1-12 with CARA's two-body Monte Carlo reference."""
-    suite = "Alfano (2009), Monte Carlo"
-    cases = []
-    for number, conjunction, result, window in _alfano_inputs(cache):
-        reference = _float(_field(result, "CARA_PcMC"))
-        interval = (
-            _float(_field(result, "CARA_PcMCLo95")),
-            _float(_field(result, "CARA_PcMCHi95")),
-        )
-        options = {
-            "window": (-window, window),
-            **monte_carlo_options(suite, str(number), reference),
-        }
-        cases.append(
-            ValidationCase(
-                suite,
-                str(number),
-                conjunction,
-                reference,
-                methods=("montecarlo",),
-                criterion=MONTE_CARLO,
-                options=options,
-                interval=interval,
-            )
-        )
-    return cases
-
-
-def _pc_method_rows(
-    cache: Path | None,
-) -> list[tuple[str, Conjunction, Mapping[str, Any]]]:
-    """Every CARA Pc method test conjunction: ID, conjunction and table row."""
-    table = cara.load_xlsx(cara.fetch(cara.PC_METHOD_TABLE, cache=cache))
-    rows: list[tuple[str, Conjunction, Mapping[str, Any]]] = []
-    for row in table:
-        conjunction_id = str(_field(row, "Conjunction_ID"))
-        if conjunction_id not in cara.PC_METHOD_CDMS:
-            raise CaraFormatError(f"no pinned CDM for conjunction {conjunction_id}")
-        path = cara.fetch(cara.PC_METHOD_CDMS[conjunction_id], cache=cache)
-        conjunction = Conjunction.from_cdm(
-            cdm.load(path), hard_body_radius=_float(_field(row, "HBR_m"))
-        )
-        rows.append((conjunction_id, conjunction, row))
-    return rows
-
-
-def load_pc_method_3d_cases(cache: Path | None = None) -> list[ValidationCase]:
-    """The 53 CARA test conjunctions with CARA's ``Nc3D`` (Hall 3D-Nc).
-
-    CARA's Coppola 3-D Pc is shown for information only: it is another
-    method, and CARA's own table flags where it underestimates.
-    """
-    return [
-        ValidationCase(
-            "CARA Pc method test set, 3-D",
-            conjunction_id,
-            conjunction,
-            _float(_field(row, "Nc3D")),
-            methods=("hall3d",),
-            criterion=HALL_PC_SET,
-            informative=("Coppola 3-D Pc", _float(_field(row, "Pc3DCoppola"))),
-        )
-        for conjunction_id, conjunction, row in _pc_method_rows(cache)
-    ]
-
-
-def load_pc_method_monte_carlo_cases(
-    cache: Path | None = None,
-) -> list[ValidationCase]:
-    """Test-set conjunctions whose CARA Monte Carlo Pc is at least ``MC_MIN_PC``."""
-    suite = "CARA Pc method test set, Monte Carlo"
-    cases = []
-    for conjunction_id, conjunction, row in _pc_method_rows(cache):
-        reference = _float(_field(row, "PcSDMC"))
-        if reference < MC_MIN_PC:
-            continue
-        interval = (_float(_field(row, "PcSDMCLo")), _float(_field(row, "PcSDMCHi")))
-        cases.append(
-            ValidationCase(
-                suite,
-                conjunction_id,
-                conjunction,
-                reference,
-                methods=("montecarlo",),
-                criterion=MONTE_CARLO,
-                options=monte_carlo_options(suite, conjunction_id, reference),
-                interval=interval,
-            )
-        )
-    return cases
 
 
 def hall_similar_to_2d_case() -> ValidationCase:
@@ -437,124 +615,13 @@ def hall_similar_to_2d_case() -> ValidationCase:
     lines 131-145 at the pinned commit (ECI, m, m/s, HBR 20 m); the
     reference has 8 significant digits and CARA's tolerance is 1e-3.
     """
-    covariances = (
-        [
-            [
-                4.976545641899520e04,
-                5.787130862568278e04,
-                3.370410320935015e03,
-                1.137272273949272e01,
-                -4.325472616114674e00,
-                -8.009705480233521e01,
-            ],
-            [
-                5.787130862568278e04,
-                6.730377643610841e04,
-                3.926542932121541e03,
-                1.321992688238858e01,
-                -5.035560720747812e00,
-                -9.314985106902773e01,
-            ],
-            [
-                3.370410320935015e03,
-                3.926542932121541e03,
-                2.461403197221289e02,
-                7.586865834476763e-01,
-                -3.077848629905763e-01,
-                -5.434034460756914e00,
-            ],
-            [
-                1.137272273949272e01,
-                1.321992688238858e01,
-                7.586865834476763e-01,
-                2.608186227148725e-03,
-                -9.804181796720670e-04,
-                -1.829751672999786e-02,
-            ],
-            [
-                -4.325472616114674e00,
-                -5.035560720747812e00,
-                -3.077848629905763e-01,
-                -9.804181796720670e-04,
-                3.895883508545853e-04,
-                6.968892326415779e-03,
-            ],
-            [
-                -8.009705480233521e01,
-                -9.314985106902773e01,
-                -5.434034460756914e00,
-                -1.829751672999786e-02,
-                6.968892326415779e-03,
-                1.289253320300791e-01,
-            ],
-        ],
-        [
-            [
-                4.246862551076427e04,
-                2.066374367781032e05,
-                -5.011108933888592e03,
-                3.104606531932427e01,
-                -1.201093683199582e01,
-                -2.207975848324051e02,
-            ],
-            [
-                2.066374367781032e05,
-                1.005854717283451e06,
-                -2.434876491048039e04,
-                1.510022508670080e02,
-                -5.850063541467530e01,
-                -1.074752763805685e03,
-            ],
-            [
-                -5.011108933888592e03,
-                -2.434876491048039e04,
-                6.131274993037449e02,
-                -3.667147183233717e00,
-                1.391769957262238e00,
-                2.601457791444154e01,
-            ],
-            [
-                3.104606531932427e01,
-                1.510022508670080e02,
-                -3.667147183233717e00,
-                2.272826228568773e-02,
-                -8.778253314778023e-03,
-                -1.613538091053610e-01,
-            ],
-            [
-                -1.201093683199582e01,
-                -5.850063541467530e01,
-                1.391769957262238e00,
-                -8.778253314778023e-03,
-                3.428801115804722e-03,
-                6.251148178133809e-02,
-            ],
-            [
-                -2.207975848324051e02,
-                -1.074752763805685e03,
-                2.601457791444154e01,
-                -1.613538091053610e-01,
-                6.251148178133809e-02,
-                1.148404222181769e00,
-            ],
-        ],
-    )
-    two_d = elrod_similar_to_3d_case().conjunction
-    primary, secondary = (
-        _gcrf_object(
-            item.object_id,
-            item.state.r,
-            item.state.v,
-            make_covariance(matrix, "GCRF", NOMINAL_EPOCH),
-        )
-        for item, matrix in zip(
-            (two_d.primary, two_d.secondary), covariances, strict=True
-        )
+    conjunction = _similar_conjunction(
+        lambda matrix: make_covariance(matrix, "GCRF", NOMINAL_EPOCH)
     )
     return ValidationCase(
-        "CARA unit tests",
+        UNIT_TESTS,
         "Hall testSimilarTo2D",
-        Conjunction(primary, secondary, 20.0),
+        conjunction,
         1.0289973e-02,
         methods=("hall3d",),
         criterion=HALL,
@@ -574,13 +641,13 @@ def load_hall_2d3d_cases(cache: Path | None = None) -> list[ValidationCase]:
     conjunction = Conjunction.from_cdm(cdm.load(path), hard_body_radius=20.0)
     return [
         ValidationCase(
-            "CARA unit tests",
+            UNIT_TESTS,
             "Hall test2D3DDisagreement (2-D)",
             conjunction,
             2.2660816e-20,
         ),
         ValidationCase(
-            "CARA unit tests",
+            UNIT_TESTS,
             "Hall test2D3DDisagreement (3-D)",
             conjunction,
             1.9271201e-05,
@@ -590,7 +657,7 @@ def load_hall_2d3d_cases(cache: Path | None = None) -> list[ValidationCase]:
     ]
 
 
-FRISBEE_REFERENCES = ((5.0, 4.3e-5), (10.0, 1.71e-4))
+FRISBEE_REFERENCES: Final = ((5.0, 4.3e-5), (10.0, 1.71e-4))
 """HBR [m] and max Pc of ``test12`` and ``test13`` in CARA's
 ``FrisbeeMaxPc_UnitTest.m`` (Frisbee's published example, rounded to 1e-6,
 hence CARA's absolute tolerance 5e-7), transcribed from
@@ -598,7 +665,7 @@ hence CARA's absolute tolerance 5e-7), transcribed from
 641-698 (``test12``: values on lines 642-645) and 700-757 (``test13``: lines
 701-704) at the pinned commit."""
 
-DILUTION_REFERENCES = {
+DILUTION_REFERENCES: Final[Mapping[str, tuple[float, float]]] = {
     "Test01_HighPc": (20.0, 0.999),
     "Test02_MaxRadialSigma": (100.0, 0.999),
     "Test03_MaxIntrackSigma": (100.0, 9.10e-2),
@@ -619,13 +686,12 @@ def load_max_pc_cases(cache: Path | None = None) -> list[ValidationCase]:
     they do not conform to CCSDS. Frisbee's secondary covariance is unknown,
     as CARA's test passes zeros for it.
     """
-    suite = "CARA unit tests, maximum Pc"
     primary, secondary = legacy_objects(
         cara.fetch(cara.FRISBEE_CDM, cache=cache), known=(True, False)
     )
     cases = [
         ValidationCase(
-            suite,
+            MAX_PC_UNIT_TESTS,
             f"Frisbee example, HBR {radius:g} m",
             Conjunction(primary, secondary, radius),
             reference,
@@ -638,7 +704,7 @@ def load_max_pc_cases(cache: Path | None = None) -> list[ValidationCase]:
         objects = legacy_objects(cara.fetch(cara.DILUTION_CDMS[name], cache=cache))
         cases.append(
             ValidationCase(
-                suite,
+                MAX_PC_UNIT_TESTS,
                 f"Omitron {name}",
                 Conjunction(*objects, radius),
                 reference,
@@ -652,11 +718,14 @@ def load_max_pc_cases(cache: Path | None = None) -> list[ValidationCase]:
 def load_all(cache: Path | None = None) -> list[ValidationCase]:
     """Every validation case except Monte Carlo, downloading CARA files as needed."""
     cara.prefetch(cara.MANIFEST, cache=cache)
+    alfano = load_alfano_inputs(cache)
+    windows = load_alfano_windows(cache)
+    pc_method = load_pc_method_inputs(cache)
     return [
-        *load_alfano_cases(cache),
-        *load_alfano_3d_cases(cache),
-        *load_pc_method_cases(cache),
-        *load_pc_method_3d_cases(cache),
+        *alfano_cases(alfano),
+        *alfano_3d_cases(alfano, windows),
+        *pc_method_cases(pc_method),
+        *pc_method_3d_cases(pc_method),
         load_non_pd_case(cache),
         elrod_similar_to_3d_case(),
         hall_similar_to_2d_case(),
@@ -670,8 +739,10 @@ def load_monte_carlo_cases(cache: Path | None = None) -> list[ValidationCase]:
     the interval confidence of :data:`MC_SUITE_ALPHA`."""
     cara.prefetch(cara.MANIFEST, cache=cache)
     cases = [
-        *load_alfano_monte_carlo_cases(cache),
-        *load_pc_method_monte_carlo_cases(cache),
+        *alfano_monte_carlo_cases(
+            load_alfano_inputs(cache), load_alfano_windows(cache)
+        ),
+        *pc_method_monte_carlo_cases(load_pc_method_inputs(cache)),
     ]
     confidence = 1.0 - MC_SUITE_ALPHA / max(len(cases), 1)
     return [

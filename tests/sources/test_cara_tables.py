@@ -6,6 +6,19 @@ import pytest
 from keepout.errors import CaraFormatError
 from keepout.sources import cara
 
+Cell = str | int | float | None
+"""A worksheet cell written by :func:`workbook_with`."""
+
+
+def workbook_with(path: Path, *rows: tuple[Cell, ...]) -> Path:
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    assert sheet is not None
+    for row in rows:
+        sheet.append(row)
+    workbook.save(path)
+    return path
+
 
 def test_alfano_urls_are_percent_encoded() -> None:
     url = cara.ALFANO_2009_TCA[0].url
@@ -35,28 +48,13 @@ def test_load_csv_rejects_an_empty_file(tmp_path: Path) -> None:
 
 
 def test_load_xlsx_returns_rows_by_header(tmp_path: Path) -> None:
-    path = tmp_path / "table.xlsx"
-    workbook = openpyxl.Workbook()
-    sheet = workbook.active
-    assert sheet is not None
-    for row in (
+    path = workbook_with(
+        tmp_path / "table.xlsx",
         ("Conjunction_ID", "HBR_m", "Pc2D"),
         ("A", 10, 1e-4),
         (None, None, None),
-    ):
-        sheet.append(row)
-    workbook.save(path)
+    )
     assert cara.load_xlsx(path) == [{"Conjunction_ID": "A", "HBR_m": 10, "Pc2D": 1e-4}]
-
-
-def workbook_with(path: Path, *rows: tuple[object, ...]) -> Path:
-    workbook = openpyxl.Workbook()
-    sheet = workbook.active
-    assert sheet is not None
-    for row in rows:
-        sheet.append(row)
-    workbook.save(path)
-    return path
 
 
 def test_load_xlsx_ignores_empty_cells_after_the_header(tmp_path: Path) -> None:
@@ -80,13 +78,7 @@ def test_load_xlsx_rejects_values_past_the_header(tmp_path: Path) -> None:
 def test_load_xlsx_rejects_empty_or_repeated_header_names(
     tmp_path: Path, header: tuple[str | None, ...]
 ) -> None:
-    path = tmp_path / "table.xlsx"
-    workbook = openpyxl.Workbook()
-    sheet = workbook.active
-    assert sheet is not None
-    sheet.append(header)
-    sheet.append((1, 2, 3))
-    workbook.save(path)
+    path = workbook_with(tmp_path / "table.xlsx", header, (1, 2, 3))
     with pytest.raises(CaraFormatError, match="empty or repeated names"):
         cara.load_xlsx(path)
 

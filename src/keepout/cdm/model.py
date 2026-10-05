@@ -9,14 +9,15 @@ their raw text and unit.
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import cached_property
-from typing import assert_never
+from typing import Final, assert_never
 
 import numpy as np
 from astropy.time import Time
 
-from keepout._types import FloatArray
+from keepout._types import FloatArray, read_only
 from keepout.cdm.keywords import (
     KEYWORDS,
     REQUIRED,
@@ -29,18 +30,32 @@ from keepout.cdm.keywords import (
     parse_value,
 )
 from keepout.covariance import Covariance, Policy, make_covariance
-from keepout.errors import GeometryError
-from keepout.frames import to_gcrf, to_gcrf_all
-from keepout.objects import ObjectState
-from keepout.state import REF_FRAMES, StateVector
+from keepout.objects import ObjectState, ReportedObject, gcrf_object_states
+from keepout.state import StateVector, as_ref_frame
 
-COMMENT = "COMMENT"
-USER_DEFINED_PREFIX = "USER_DEFINED_"
+__all__ = [
+    "COMMENT",
+    "KEYWORD_PATTERN",
+    "USER_DEFINED_PREFIX",
+    "Cdm",
+    "CdmObject",
+    "DuplicateKeyword",
+    "Field",
+    "Section",
+    "covariance_dimension",
+    "format_field",
+    "parse_field",
+]
 
-KEYWORD_PATTERN = re.compile(r"[A-Z][A-Z0-9_]*")
+COMMENT: Final = "COMMENT"
+USER_DEFINED_PREFIX: Final = "USER_DEFINED_"
+
+KEYWORD_PATTERN: Final = re.compile(r"[A-Z][A-Z0-9_]*")
 """What a keyword may look like: valid in KVN and as an XML element name."""
 
-_COVARIANCE_NAMES = {size: frozenset(covariance_names(size)) for size in range(6, 10)}
+_COVARIANCE_NAMES: Final[Mapping[int, frozenset[str]]] = {
+    size: frozenset(covariance_names(size)) for size in range(6, 10)
+}
 
 
 class DuplicateKeyword(ValueError):
@@ -208,7 +223,7 @@ class Section:
 
     @property
     def extras(self) -> dict[str, str]:
-        """Keywords not in the CCSDS 508.0-B-1 table (plus HBR), as text."""
+        """Keywords not in the :data:`~keepout.cdm.keywords.KEYWORDS` table, as text."""
         table = KEYWORDS[self.kind]
         return {
             f.keyword: str(f.value)
@@ -337,29 +352,29 @@ class CdmObject:
         """Velocity in ``ref_frame`` [m/s]."""
         return self._vector(("X_DOT", "Y_DOT", "Z_DOT"))
 
-    @property
+    @cached_property
     def covariance_rtn(self) -> FloatArray:
-        """Full symmetric RTN covariance as given (6x6 to 9x9), unvalidated."""
-        return covariance_matrix(
+        """Full symmetric RTN covariance as given (6x6 to 9x9), unvalidated;
+        read-only."""
+        matrix = covariance_matrix(
             covariance_dimension(self.section),
             lambda name: _number(self.section, name),
         )
+        read_only(matrix)
+        return matrix
 
     def state(self) -> StateVector:
         """State vector at TCA in ``ref_frame``.
 
         Raises
         ------
-        GeometryError
-            If ``REF_FRAME`` is not GCRF, EME2000 or ITRF.
+        UnsupportedFrame
+            If ``REF_FRAME`` is not GCRF, EME2000 or ITRF (a
+            :class:`~keepout.errors.GeometryError`).
         """
-        frame = self.ref_frame
-        if frame not in REF_FRAMES:
-            raise GeometryError(
-                f"unsupported REF_FRAME {frame!r}; keepout supports "
-                f"{', '.join(REF_FRAMES)}"
-            )
-        return StateVector(self.tca, self.position, self.velocity, frame)
+        return StateVector(
+            self.tca, self.position, self.velocity, as_ref_frame(self.ref_frame)
+        )
 
     def covariance(self, *, policy: Policy = "repair") -> Covariance:
         """Validated 6x6 RTN covariance at TCA; repairs are in its ``repairs``.
@@ -383,41 +398,36 @@ class CdmObject:
         """
         return bool(np.any(self.covariance_rtn[:6, :6]))
 
-    def object_state(self, *, policy: Policy = "repair") -> ObjectState:
-        """GCRF object state with covariance; RTN axes from the GCRF state.
+    def reported(self) -> ReportedObject:
+        """The object as reported: state in ``ref_frame``, 6x6 RTN covariance.
 
         The covariance is ``None`` when the CDM gives an all-zero matrix
         (see :attr:`has_covariance`).
 
-        Parameters
-        ----------
-        policy
-            Covariance policy, as in :meth:`covariance`.
+        Raises
+        ------
+        UnsupportedFrame
+            As :meth:`state`.
         """
-        return self.object_state_at(to_gcrf(self.state()), policy=policy)
-
-    def object_state_at(
-        self, state: StateVector, *, policy: Policy = "repair"
-    ) -> ObjectState:
-        """:meth:`object_state` with the GCRF state already converted.
-
-        :meth:`Cdm.object_states` uses it to convert both objects' ITRF
-        states in one transformation (:func:`keepout.frames.to_gcrf_all`).
-
-        Parameters
-        ----------
-        state
-            This object's state in GCRF; defines the RTN axes.
-        policy
-            Covariance policy, as in :meth:`covariance`.
-        """
-        matrix = self.covariance_rtn[:6, :6]
-        covariance = (
-            make_covariance(matrix, "RTN", self.tca, policy=policy).in_gcrf(state)
-            if np.any(matrix)
-            else None
+        return ReportedObject(
+            self.designator,
+            self.state(),
+            self.covariance_rtn[:6, :6] if self.has_covariance else None,
+            self.hbr,
         )
-        return ObjectState(self.designator, state, covariance, self.hbr)
+
+    def object_state(self, *, policy: Policy = "repair") -> ObjectState:
+        """GCRF object state with covariance; RTN axes from the GCRF state.
+
+        :meth:`Cdm.object_states` converts both objects at once.
+
+        Parameters
+        ----------
+        policy
+            Covariance policy, as in :meth:`covariance`.
+        """
+        (state,) = gcrf_object_states([self.reported()], policy=policy)
+        return state
 
 
 @dataclass(frozen=True)
@@ -517,12 +527,12 @@ class Cdm:
         """Pc reported by the originator, if given."""
         return _optional_number(self.relative, "COLLISION_PROBABILITY")
 
-    @property
+    @cached_property
     def object1(self) -> CdmObject:
         """Typed view of ``OBJECT1``."""
         return CdmObject(self.segments[0], self.tca)
 
-    @property
+    @cached_property
     def object2(self) -> CdmObject:
         """Typed view of ``OBJECT2``."""
         return CdmObject(self.segments[1], self.tca)
@@ -537,9 +547,7 @@ class Cdm:
         policy
             Covariance policy; see :func:`keepout.covariance.make_covariance`.
         """
-        objects = (self.object1, self.object2)
-        first, second = to_gcrf_all([item.state() for item in objects])
-        return (
-            objects[0].object_state_at(first, policy=policy),
-            objects[1].object_state_at(second, policy=policy),
+        first, second = gcrf_object_states(
+            [self.object1.reported(), self.object2.reported()], policy=policy
         )
+        return first, second

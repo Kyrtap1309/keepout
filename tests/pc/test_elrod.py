@@ -1,21 +1,38 @@
+import numpy as np
 import pytest
-from builders import head_on
+from builders import TYPICAL_HEAD_ON, head_on
 from reference_pc import isotropic_pc, principal_axes_pc
 
-from keepout.pc.elrod import MAX_ORDER, START_ORDER, elrod
+from keepout.pc._plane import plane_gaussian
+from keepout.pc.elrod import MAX_ORDER, START_ORDER, _refined, _terms, elrod
+
+CARA_ORDER = 64
 
 
 def test_adaptive_order_resolves_a_thin_covariance() -> None:
     # Narrow axis 0.3 m against a 15 m hard body: order 64 is not enough.
     conjunction = head_on(5.0, 100.0, 0.3, 15.0)
     adaptive = elrod(conjunction.plane, 15.0)
-    fixed = elrod(conjunction.plane, 15.0, order=START_ORDER)
+    fixed = elrod(conjunction.plane, 15.0, order=CARA_ORDER)
     # Miss along the wide (x) axis.
     reference = principal_axes_pc(5.0, 0.0, 100.0, 0.3, 15.0)
     assert adaptive.value == pytest.approx(reference, rel=1e-8)
     assert fixed.value != pytest.approx(reference, rel=1e-8)
     assert adaptive.details["order"] > START_ORDER
-    assert fixed.details["order"] == START_ORDER
+    assert fixed.details["order"] == CARA_ORDER
+
+
+def test_adaptive_orders_are_nested() -> None:
+    # Refining reuses the old terms as the even nodes of the next order, so it
+    # must give the terms evaluated from scratch, bit for bit: the angles
+    # 2j pi / (2n + 2) and j pi / (n + 1) differ only by powers of two.
+    plane = head_on(5.0, 100.0, 0.3, 15.0).plane
+    gaussian = plane_gaussian(plane.miss_vector, plane.covariance, 15.0)
+    coarse = _terms(gaussian, np.arange(1.0, START_ORDER + 1), START_ORDER)
+    fine = 2 * START_ORDER + 1
+    np.testing.assert_array_equal(
+        _refined(gaussian, coarse), _terms(gaussian, np.arange(1.0, fine + 1), fine)
+    )
 
 
 def test_fixed_order_too_low_for_the_covariance_is_reported() -> None:
@@ -28,13 +45,14 @@ def test_fixed_order_too_low_for_the_covariance_is_reported() -> None:
 def test_starting_order_follows_the_covariance() -> None:
     conjunction = head_on(19.0, 0.1, 0.1, 20.0)
     result = elrod(conjunction.plane, 20.0)
-    assert result.details["order"] >= 2048
+    # 2 pi R / sigma = 1257 nodes, rounded up to the nested order 2^11 - 1.
+    assert result.details["order"] >= 2047
     assert result.value == pytest.approx(isotropic_pc(19.0, 0.1, 20.0), rel=1e-8)
 
 
 def test_non_convergence_at_the_order_cap_is_reported() -> None:
-    # 1 mm against 1 km is floored to 0.1 m; orders 32768 and 65536 still
-    # differ by ~1e-9, so the cap is reached and reported.
+    # 1 mm against 1 km is floored to 0.1 m; orders 32767 and 65535 still
+    # differ by more than ELROD_RTOL, so the cap is reached and reported.
     conjunction = head_on(999.0, 1e-3, 1e-3, 1000.0)
     result = elrod(conjunction.plane, 1000.0)
     assert result.details["order"] == MAX_ORDER
@@ -44,6 +62,5 @@ def test_non_convergence_at_the_order_cap_is_reported() -> None:
 
 @pytest.mark.parametrize("order", [0, -64])
 def test_order_must_be_positive(order: int) -> None:
-    conjunction = head_on(30.0, 10.0, 20.0, 5.0)
     with pytest.raises(ValueError, match="order must be >= 1"):
-        elrod(conjunction.plane, 5.0, order=order)
+        elrod(TYPICAL_HEAD_ON.plane, 5.0, order=order)

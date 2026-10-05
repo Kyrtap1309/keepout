@@ -1,5 +1,18 @@
 """Exception hierarchy for keepout."""
 
+__all__ = [
+    "CaraFormatError",
+    "CdmParseError",
+    "CdmWriteError",
+    "ChecksumMismatch",
+    "CovarianceError",
+    "GeometryError",
+    "KeepoutError",
+    "PcConvergenceError",
+    "SourceUnavailable",
+    "UnsupportedFrame",
+]
+
 
 class KeepoutError(Exception):
     """Base class for all keepout errors."""
@@ -67,3 +80,11 @@ class PcConvergenceError(KeepoutError):
 
 class GeometryError(KeepoutError):
     """A reference frame or encounter geometry cannot be computed."""
+
+
+class UnsupportedFrame(GeometryError, ValueError):
+    """A state vector or covariance is given in a frame keepout does not support.
+
+    It is also a :class:`ValueError`, as raised for any other invalid argument
+    of :class:`~keepout.state.StateVector` or :class:`~keepout.covariance.Covariance`.
+    """

@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import math
+from typing import Final
 
 import numpy as np
 
 from keepout.state import StateVector
 
-EARTH_MU = 3.986004418e14
+__all__ = ["EARTH_MU", "orbital_period"]
+
+EARTH_MU: Final = 3.986004418e14
 """Earth's gravitational parameter [m^3/s^2] (WGS 84)."""
 
 

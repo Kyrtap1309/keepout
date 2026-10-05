@@ -18,35 +18,45 @@ approach is refined by Newton's method on ``r.v = 0`` (slope
 
 from __future__ import annotations
 
-import math
+from typing import Final
 
 import numpy as np
-import numpy.typing as npt
 from scipy import stats
 
-from keepout._types import FloatArray
+from keepout._types import BoolArray, FloatArray, IndexArray, require_positive
 from keepout.conjunction import Conjunction
 from keepout.equinoctial import Orbits
 from keepout.orbits import EARTH_MU
-from keepout.pc._orbit import OrbitUncertainty
-from keepout.pc._rate import check_fallbacks, collision_rate, encounter_scan
-from keepout.pc._timeline import RateScan
+from keepout.pc._rate import check_fallbacks
+from keepout.pc._timeline import RateScan, negligible_note
+from keepout.pc.hall3d import Encounters
 from keepout.pc.result import PcResult
 
-MC_RTOL = 0.1
+__all__ = [
+    "MC_BATCH",
+    "MC_CONFIDENCE",
+    "MC_MAX_SAMPLES",
+    "MC_RTOL",
+    "NEWTON_STEPS",
+    "SPEED_MARGIN",
+    "montecarlo",
+    "sample",
+]
+
+MC_RTOL: Final = 0.1
 """Default target: half-width of the confidence interval relative to Pc."""
 
-MC_MAX_SAMPLES = 10_000_000
+MC_MAX_SAMPLES: Final = 10_000_000
 """Default budget of trials when stopping on ``rtol``."""
 
-MC_CONFIDENCE = 0.99
+MC_CONFIDENCE: Final = 0.99
 
-MC_BATCH = 50_000
+MC_BATCH: Final = 50_000
 """Trials per batch: memory stays O(batch) whatever the sample count."""
 
-NEWTON_STEPS = 12
+NEWTON_STEPS: Final = 12
 
-SPEED_MARGIN = 1.5
+SPEED_MARGIN: Final = 1.5
 """Factor on the larger grid-point relative speed bounding the speed in between."""
 
 
@@ -55,56 +65,51 @@ def _converged(hits: int, trials: int, low: float, high: float, rtol: float) -> 
     return hits > 0 and 0.5 * (high - low) <= rtol * hits / trials
 
 
-class _Trials:
-    """A batch of sampled element pairs and their relative motion."""
+def _gravity(states: FloatArray) -> FloatArray:
+    """Two-body accelerations ``-mu r / |r|^3`` of states ``(m, 6)``."""
+    r = states[:, :3]
+    acceleration: FloatArray = -EARTH_MU * r / np.linalg.norm(r, axis=1)[:, None] ** 3
+    return acceleration
 
-    def __init__(
-        self,
-        primary: OrbitUncertainty,
-        secondary: OrbitUncertainty,
-        first: FloatArray,
-        second: FloatArray,
-    ) -> None:
-        self.first = Orbits(first, primary.fr)
-        self.second = Orbits(second, secondary.fr)
+
+class _Trials:
+    """A batch of sampled orbit pairs and their relative motion."""
+
+    def __init__(self, first: Orbits, second: Orbits) -> None:
+        self.first, self.second = first, second
 
     def _states(
-        self, t: float | FloatArray, rows: slice | npt.NDArray[np.intp]
+        self, t: float | FloatArray, rows: slice | IndexArray
     ) -> tuple[FloatArray, FloatArray]:
+        """Both objects' Cartesian states ``(m, 6)`` at ``t``."""
         return self.first.cartesian(t, rows), self.second.cartesian(t, rows)
 
     def motion(
-        self, t: float | FloatArray, rows: slice | npt.NDArray[np.intp] = slice(None)
+        self, t: float | FloatArray, rows: slice | IndexArray = slice(None)
     ) -> tuple[FloatArray, FloatArray]:
         """Relative position and velocity at ``t``."""
         one, two = self._states(t, rows)
-        return two[:, :3] - one[:, :3], two[:, 3:] - one[:, 3:]
+        relative = two - one
+        return relative[:, :3], relative[:, 3:]
 
     def relative(
-        self, t: float | FloatArray, rows: slice | npt.NDArray[np.intp] = slice(None)
+        self, t: float | FloatArray, rows: slice | IndexArray = slice(None)
     ) -> tuple[FloatArray, FloatArray, FloatArray]:
         """Relative position, velocity and acceleration at ``t``."""
         one, two = self._states(t, rows)
-        acceleration = [
-            -EARTH_MU * s[:, :3] / np.linalg.norm(s[:, :3], axis=1)[:, None] ** 3
-            for s in (one, two)
-        ]
-        return (
-            two[:, :3] - one[:, :3],
-            two[:, 3:] - one[:, 3:],
-            acceleration[1] - acceleration[0],
-        )
+        relative = two - one
+        return relative[:, :3], relative[:, 3:], _gravity(two) - _gravity(one)
 
     def closest_below(
-        self, rows: npt.NDArray[np.intp], start: float, end: float, radius: float
-    ) -> npt.NDArray[np.bool_]:
+        self, rows: IndexArray, start: float, end: float, radius: float
+    ) -> BoolArray:
         """Whether each trial in ``rows`` gets within ``radius`` in the interval.
 
         The distance is tested at every Newton iterate, not only the last, so
         an iteration that has not converged cannot lose a hit it passed.
         """
         t = np.full(rows.size, 0.5 * (start + end))
-        below: npt.NDArray[np.bool_] = np.zeros(rows.size, dtype=bool)
+        below: BoolArray = np.zeros(rows.size, dtype=bool)
         for _ in range(NEWTON_STEPS):
             r, v, a = self.relative(t, rows)
             below |= np.linalg.norm(r, axis=1) < radius
@@ -178,11 +183,9 @@ def _details(
 
 def _no_encounter(found: RateScan, confidence: float) -> PcResult:
     """The result when the rate scan finds no encounter: no trial is run."""
-    start, end = found.window
     note = (
-        f"no encounter: the collision rate is negligible over the whole window "
-        f"[{start:.6g}, {end:.6g}] s, so no trial can collide there; no trials "
-        "were run"
+        f"no encounter: {negligible_note(found)}, so no trial can collide there; "
+        "no trials were run"
     )
     details = _details(found, confidence, (0.0, 0.0), 0, 0, 0)
     return PcResult(0.0, "montecarlo", (note,), details)
@@ -247,15 +250,43 @@ def montecarlo(
     """
     if samples is not None and samples < 1:
         raise ValueError(f"samples must be >= 1, got {samples}")
-    if not (math.isfinite(rtol) and rtol > 0.0):
-        raise ValueError(f"rtol must be finite and > 0, got {rtol}")
+    require_positive(rtol, "rtol")
     if not (max_samples >= 1 and 0.0 < confidence < 1.0):
         raise ValueError("need max_samples >= 1 and 0 < confidence < 1")
-    rate = collision_rate(conjunction, "montecarlo")
-    found = encounter_scan(conjunction, rate, window)
+    encounters = Encounters.scan(conjunction, "montecarlo", window)
+    return sample(
+        conjunction,
+        encounters,
+        samples=samples,
+        rtol=rtol,
+        max_samples=max_samples,
+        confidence=confidence,
+        seed=seed,
+    )
+
+
+def sample(
+    conjunction: Conjunction,
+    encounters: Encounters,
+    *,
+    samples: int | None = None,
+    rtol: float = MC_RTOL,
+    max_samples: int = MC_MAX_SAMPLES,
+    confidence: float = MC_CONFIDENCE,
+    seed: int | None = None,
+) -> PcResult:
+    """Monte Carlo Pc over an encounter scan.
+
+    The core of :func:`montecarlo`, without its argument checks: for
+    :func:`~keepout.pc.compute_pc`, whose fallback reuses the scan of the
+    failed :func:`~keepout.pc.hall3d.hall3d`.
+    """
+    rate, found = encounters.rate, encounters.found
     # A peak-overlap failure inside a segment could have narrowed the
-    # segments searched; the same rule as Hall's applies.
-    check_fallbacks(rate.fallbacks, found)
+    # segments searched; the same rule as Hall's applies, checked before
+    # sampling since no rate is evaluated after the scan (only the scan's
+    # failures count: a reused rate also holds those at Hall's nodes).
+    check_fallbacks(encounters.scan_fallbacks, found)
     if not found.segments:
         return _no_encounter(found, confidence)
     rng = np.random.default_rng(seed)
@@ -266,10 +297,8 @@ def montecarlo(
     while done < budget:
         count = min(MC_BATCH, budget - done)
         trials = _Trials(
-            rate.primary,
-            rate.secondary,
-            rate.primary.sample(rng, count),
-            rate.secondary.sample(rng, count),
+            Orbits(rate.primary.sample(rng, count), rate.primary.fr),
+            Orbits(rate.secondary.sample(rng, count), rate.secondary.fr),
         )
         new_hits, new_inside = _collisions(trials, found, conjunction.hard_body_radius)
         hits, inside, done = hits + new_hits, inside + new_inside, done + count

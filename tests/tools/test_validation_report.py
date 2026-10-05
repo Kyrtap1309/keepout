@@ -31,9 +31,9 @@ def test_paper_values_are_compared_with_the_paper_method() -> None:
 
 
 def test_replace_summary_rewrites_only_the_marked_block() -> None:
-    readme = f"intro\n{report.SUMMARY_START}\nold\n{report.SUMMARY_END}\nrest\n"
+    readme = f"intro\n{report.MAIN.start}\nold\n{report.MAIN.end}\nrest\n"
     assert report.replace_summary(readme, "new") == (
-        f"intro\n{report.SUMMARY_START}\nnew\n{report.SUMMARY_END}\nrest\n"
+        f"intro\n{report.MAIN.start}\nnew\n{report.MAIN.end}\nrest\n"
     )
 
 
@@ -44,9 +44,7 @@ def test_replace_summary_needs_the_markers() -> None:
 
 def empty_readme(tmp_path: Path) -> Path:
     readme = tmp_path / "README.md"
-    readme.write_text(
-        f"{report.SUMMARY_START}\n{report.SUMMARY_END}\n", encoding="utf-8"
-    )
+    readme.write_text(f"{report.MAIN.start}\n{report.MAIN.end}\n", encoding="utf-8")
     return readme
 
 

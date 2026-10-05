@@ -1,9 +1,15 @@
+from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
 import pytest
+from astropy.time import Time
+from builders import known
 
+from keepout import frames
 from keepout.errors import CaraFormatError
+from keepout.frames import to_gcrf
+from keepout.state import StateVector
 from keepout.validation.legacy import legacy_objects
 
 COVARIANCE = """\
@@ -64,8 +70,7 @@ def test_states_and_covariances_are_read_in_si_units(tmp_path: Path) -> None:
     assert (primary.object_id, secondary.object_id) == ("28376", "1399")
     np.testing.assert_allclose(primary.state.r, [7000e3, 0.0, 0.0])
     np.testing.assert_allclose(secondary.state.v, [0.0, 0.0, 7500.0])
-    assert primary.covariance is not None
-    rtn = primary.covariance.in_rtn(primary.state).matrix
+    rtn = known(primary.covariance).in_rtn(primary.state).matrix
     np.testing.assert_allclose(
         np.diag(rtn), [100, 400, 25, 0.01, 0.04, 0.01], atol=1e-9
     )
@@ -74,8 +79,35 @@ def test_states_and_covariances_are_read_in_si_units(tmp_path: Path) -> None:
 def test_eme2000_states_are_converted_to_gcrf(tmp_path: Path) -> None:
     primary, _ = legacy_objects(write(tmp_path, legacy_cdm()))
     assert primary.state.frame == "GCRF"
-    # EME2000 and GCRF differ by a frame bias of about 23 mas.
-    assert np.linalg.norm(primary.state.r - [7000e3, 0.0, 0.0]) < 2.0
+    eme2000 = StateVector(
+        Time("2008-06-27T15:34:55.320", scale="utc"),
+        [7000e3, 0.0, 0.0],
+        [0.0, 7500.0, 0.0],
+        "EME2000",
+    )
+    expected = to_gcrf(eme2000)
+    np.testing.assert_allclose(primary.state.r, expected.r, rtol=0.0, atol=1e-6)
+    np.testing.assert_allclose(primary.state.v, expected.v, rtol=0.0, atol=1e-9)
+    # EME2000 and GCRF differ by a frame bias of about 23 mas: ~0.8 m at
+    # 7000 km, so an unconverted state is caught.
+    shift = float(np.linalg.norm(primary.state.r - eme2000.r))
+    assert 0.3 < shift < 2.0
+
+
+def test_itrf_objects_are_converted_together(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    batches: list[int] = []
+    convert = frames._itrf_to_gcrf
+
+    def counting(states: Sequence[StateVector]) -> list[StateVector]:
+        batches.append(len(states))
+        return convert(states)
+
+    monkeypatch.setattr(frames, "_itrf_to_gcrf", counting)
+    primary, secondary = legacy_objects(write(tmp_path, legacy_cdm("ITRF")))
+    assert batches == [2]
+    assert primary.state.frame == secondary.state.frame == "GCRF"
 
 
 def test_an_unused_covariance_is_unknown(tmp_path: Path) -> None:
@@ -88,7 +120,8 @@ def test_an_unused_covariance_is_unknown(tmp_path: Path) -> None:
     [
         (legacy_cdm().replace("TCA =", "XCA ="), "no TCA"),
         (legacy_cdm().replace("OBJECT = OBJECT2\n", ""), "expected 2 object sections"),
-        (legacy_cdm("TEME"), "unsupported REF_FRAME 'TEME'"),
+        (legacy_cdm("TEME"), "bad REF_FRAME .unsupported reference frame 'TEME'"),
+        (legacy_cdm().replace("REF_FRAME", "XREF_FRAME"), "bad REF_FRAME"),
         (legacy_cdm().replace("CN_N = 25.0", "CN_N = abc", 1), "no numeric CN_N"),
     ],
 )

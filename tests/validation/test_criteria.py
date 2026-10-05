@@ -53,7 +53,10 @@ def test_margin_is_the_bound_that_applies_at_the_reference(
     interval: tuple[float, float] | None,
     margin: float,
 ) -> None:
-    assert criterion.margin(reference, interval) == pytest.approx(margin)
+    # abs=0: the margins span 1e-15 to 1e-9, all below approx's default abs.
+    assert criterion.margin(reference, interval) == pytest.approx(
+        margin, rel=1e-12, abs=0.0
+    )
 
 
 def test_reproduces_within_a_fraction_of_the_margin() -> None:

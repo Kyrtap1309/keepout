@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import numpy.typing as npt
+import pytest
 from astropy.time import Time
 from hypothesis import assume
 from hypothesis import strategies as st
@@ -37,6 +38,20 @@ EARTH_ROTATION_RATE = 7.292115146706979e-5
 
 DIAGONAL_COVARIANCE = np.diag([100.0, 400.0, 25.0, 1e-2, 4e-2, 1e-2])
 """A valid 6x6 covariance [m, m/s]: sigmas 10, 20, 5 m and 0.1, 0.2, 0.1 m/s."""
+
+
+TINY = 1e-300
+"""Below this a relative comparison means nothing (near the float64 floor)."""
+
+
+def approx(expected: float, rel: float) -> object:
+    """``pytest.approx`` that is relative only.
+
+    ``pytest.approx(x, rel=r)`` also accepts anything within its default
+    ``abs=1e-12``, which makes every comparison with a tiny ``x`` vacuous; this
+    keeps an absolute slack of :data:`TINY` only.
+    """
+    return pytest.approx(expected, rel=rel, abs=TINY)
 
 
 def known(covariance: Covariance | None) -> Covariance:
@@ -123,6 +138,17 @@ def planar(
 def head_on(miss: float, sigma_x: float, sigma_z: float, radius: float) -> Conjunction:
     """:func:`planar` with the miss along x and covariance diag(sx^2, sz^2)."""
     return planar([miss, 0.0], np.diag([sigma_x**2, sigma_z**2]), radius)
+
+
+TYPICAL_HEAD_ON = head_on(30.0, 10.0, 20.0, 5.0)
+"""The workhorse encounter: a 15 km/s LEO head-on crossing, 30 m miss along
+x, encounter-plane sigmas 10 m (x) and 20 m (z), 5 m hard-body radius; 2-D
+Pc ~ 8.7e-4.
+
+Sharing it is safe: a :class:`~keepout.conjunction.Conjunction` is frozen,
+its states and covariances are read-only, and its cached plane depends on
+nothing a test patches.
+"""
 
 
 def case_with_reference(

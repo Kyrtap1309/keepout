@@ -7,7 +7,7 @@ and :mod:`keepout.cdm.xml` read and write a specific one.
 from pathlib import Path
 
 from keepout.cdm import kvn, xml
-from keepout.cdm._io import read_text
+from keepout.cdm._io import load_file
 from keepout.cdm.model import Cdm, CdmObject, Field, Section
 
 __all__ = ["Cdm", "CdmObject", "Field", "Section", "kvn", "load", "loads", "xml"]
@@ -33,4 +33,4 @@ def load(path: str | Path) -> Cdm:
     path
         File to read (UTF-8).
     """
-    return loads(read_text(path))
+    return load_file(path, loads)

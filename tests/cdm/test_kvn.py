@@ -1,23 +1,23 @@
 import dataclasses
 from pathlib import Path
 
+import cdm_builders
 import numpy as np
 import pytest
 from builders import B1_KVN as B1
-from builders import EARTH_ROTATION_RATE, known
+from builders import known
 from cdm_builders import TRACSS, assert_equivalent, cdms, minimal_cdm
 from hypothesis import given, settings
 
 from keepout.cdm import Cdm, Field, Section, kvn
 from keepout.cdm.keywords import format_epoch
-from keepout.encounter import encounter_plane
+from keepout.conjunction import Conjunction
 from keepout.errors import CdmParseError, CdmWriteError, CovarianceError
+from keepout.frames import to_gcrf
 
 
-def mutate(old: str, new: str) -> str:
-    text = B1.read_text(encoding="utf-8")
-    assert text.count(old) == 1, old
-    return text.replace(old, new)
+def mutate_b1(old: str, new: str) -> str:
+    return cdm_builders.mutate(B1.read_text(encoding="utf-8"), old, new)
 
 
 def line_of(text: str, fragment: str) -> int:
@@ -51,7 +51,7 @@ def test_reads_b1_example() -> None:
 
 def test_b1_example_geometry() -> None:
     primary, secondary = kvn.load(B1).object_states()
-    plane = encounter_plane(primary, secondary)
+    plane = Conjunction(primary, secondary, hard_body_radius=1.0).plane
     relative = secondary.state.r - primary.state.r
     assert plane.miss_distance == pytest.approx(
         float(np.linalg.norm(relative)), abs=0.01
@@ -84,16 +84,15 @@ def test_reads_tracss_cdm_version_2() -> None:
 
 
 def test_tracss_itrf_states_are_converted_to_gcrf() -> None:
-    primary, _ = kvn.load(TRACSS).object_states()
+    cdm = kvn.load(TRACSS)
+    primary, _ = cdm.object_states()
     assert known(primary.covariance).repairs == ()
-    r = np.array([6778137.0, 0.0, 0.0])
-    v = np.array([0.0, 5900.0, 4400.0])
-    inertial = v + np.cross([0.0, 0.0, EARTH_ROTATION_RATE], r)
+    # The ITRF -> GCRF physics is tested in test_frames; here the CDM state
+    # must reach the conversion unchanged.
+    expected = to_gcrf(cdm.object1.state())
     assert primary.state.frame == "GCRF"
-    assert np.linalg.norm(primary.state.r) == pytest.approx(np.linalg.norm(r), abs=1e-3)
-    assert np.linalg.norm(primary.state.v) == pytest.approx(
-        np.linalg.norm(inertial), abs=1e-2
-    )
+    np.testing.assert_array_equal(primary.state.r, expected.r)
+    np.testing.assert_array_equal(primary.state.v, expected.v)
     assert primary.hard_body_radius == 5.0
 
 
@@ -122,7 +121,7 @@ def test_writer_uses_ccsds_units() -> None:
 
 
 def test_bad_unit() -> None:
-    text = mutate("2570.097065 [km]", "2570.097065 [m]")
+    text = mutate_b1("2570.097065 [km]", "2570.097065 [m]")
     with pytest.raises(
         CdmParseError, match=r"unit \[m\] does not match expected \[km\]"
     ) as info:
@@ -133,25 +132,25 @@ def test_bad_unit() -> None:
 
 def test_bad_number() -> None:
     with pytest.raises(CdmParseError, match="invalid number 'seven'") as info:
-        kvn.loads(mutate("= 715 [m]", "= seven [m]"))
+        kvn.loads(mutate_b1("= 715 [m]", "= seven [m]"))
     assert info.value.keyword == "MISS_DISTANCE"
 
 
 def test_bad_epoch() -> None:
     with pytest.raises(CdmParseError, match="invalid CCSDS epoch") as info:
-        kvn.loads(mutate("2010-03-13T22:37:52.618", "2010-13-40T22:37:52.618"))
+        kvn.loads(mutate_b1("2010-03-13T22:37:52.618", "2010-13-40T22:37:52.618"))
     assert info.value.keyword == "TCA"
 
 
 def test_malformed_line() -> None:
-    text = mutate("MISS_DISTANCE ", "MISS DISTANCE ")
+    text = mutate_b1("MISS_DISTANCE ", "MISS DISTANCE ")
     with pytest.raises(CdmParseError, match="expected 'KEYWORD = value'") as info:
         kvn.loads(text)
     assert info.value.line == line_of(text, "MISS DISTANCE")
 
 
 def test_duplicate_keyword() -> None:
-    text = mutate("= 715 [m]\n", "= 715 [m]\nMISS_DISTANCE = 716 [m]\n")
+    text = mutate_b1("= 715 [m]\n", "= 715 [m]\nMISS_DISTANCE = 716 [m]\n")
     with pytest.raises(CdmParseError, match="duplicate keyword") as info:
         kvn.loads(text)
     assert info.value.keyword == "MISS_DISTANCE"
@@ -179,7 +178,7 @@ def test_missing_required_keyword() -> None:
 
 
 def test_empty_required_value_is_rejected() -> None:
-    text = mutate("= JSPOC\n", "=\n")
+    text = mutate_b1("= JSPOC\n", "=\n")
     with pytest.raises(
         CdmParseError,
         match=r"header section is missing required keyword\(s\): ORIGINATOR",
@@ -206,17 +205,17 @@ def test_empty_message_is_rejected(text: str) -> None:
 
 def test_objects_must_be_labelled_in_order() -> None:
     with pytest.raises(CdmParseError, match="segment 2 must have OBJECT = OBJECT2"):
-        kvn.loads(mutate("= OBJECT2", "= OBJECT1"))
+        kvn.loads(mutate_b1("= OBJECT2", "= OBJECT1"))
 
 
 def test_unknown_enumeration_values_are_kept() -> None:
-    cdm = kvn.loads(mutate("= PAYLOAD", "= SPACE STATION MODULE"))
+    cdm = kvn.loads(mutate_b1("= PAYLOAD", "= SPACE STATION MODULE"))
     assert cdm.object1.section.get("OBJECT_TYPE") == "SPACE STATION MODULE"
 
 
 def test_non_psd_covariance_parses_and_is_repaired() -> None:
-    cdm = kvn.loads(mutate("-8.579E+00", "-8.579E+04"))
-    with pytest.raises(CovarianceError):
+    cdm = kvn.loads(mutate_b1("-8.579E+00", "-8.579E+04"))
+    with pytest.raises(CovarianceError, match="not positive semi-definite"):
         cdm.object1.covariance(policy="raise")
     first, _ = cdm.object_states()
     assert known(first.covariance).repairs[0].startswith("clipped")
@@ -232,8 +231,9 @@ def test_file_round_trip_with_bom(tmp_path: Path) -> None:
 
 
 def test_comments_before_tca_and_object_open_the_new_section() -> None:
-    text = mutate("TCA ", "COMMENT screening option A\nTCA ")
-    text = text.replace(
+    text = mutate_b1("TCA ", "COMMENT screening option A\nTCA ")
+    text = cdm_builders.mutate(
+        text,
         "OBJECT                         = OBJECT2",
         "COMMENT about object 2\nOBJECT                         = OBJECT2",
     )
@@ -267,7 +267,7 @@ def test_multi_line_value_cannot_be_written() -> None:
 
 
 def test_keyword_must_start_with_a_letter() -> None:
-    text = mutate("MESSAGE_ID ", "1ABC = x\nMESSAGE_ID ")
+    text = mutate_b1("MESSAGE_ID ", "1ABC = x\nMESSAGE_ID ")
     with pytest.raises(CdmParseError, match="expected 'KEYWORD = value'") as info:
         kvn.loads(text)
     assert info.value.line == line_of(text, "1ABC")

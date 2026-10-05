@@ -14,7 +14,9 @@ days; the readers convert on input and the writers convert back on output.
 | `EME2000` | rotated to GCRF by the IAU 2006 frame bias (about 23 mas, ≈0.8 m at 7000 km), so a CDM whose objects use different frames stays consistent. |
 | `ITRF` | converted to GCRF with astropy (ITRS → GCRS), including the Earth-rotation term ω × r of the velocity |
 
-Any other frame is rejected with `GeometryError`.
+Any other frame is rejected with `UnsupportedFrame`, a `GeometryError` that
+is also a `ValueError`; so is a covariance in a frame other than those of
+`COVARIANCE_FRAMES`.
 
 ### Earth-orientation (IERS) data
 

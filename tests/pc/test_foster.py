@@ -1,7 +1,7 @@
 import math
 
 import pytest
-from builders import head_on
+from builders import TYPICAL_HEAD_ON, head_on
 from pc_builders import PlaneCase
 from reference_pc import principal_axes_pc
 
@@ -29,7 +29,7 @@ def test_huge_hard_body_gives_certain_collision() -> None:
 
 
 def test_details_report_the_quadrature() -> None:
-    conjunction = head_on(30.0, 10.0, 20.0, 5.0)
+    conjunction = TYPICAL_HEAD_ON
     result = foster(conjunction.plane, 5.0)
     assert result.details["evaluations"] > 0
     # QUADPACK's absolute error estimate must honour the relative tolerance.
@@ -57,9 +57,8 @@ def test_quadrature_trouble_is_reported() -> None:
     ],
 )
 def test_bad_arguments_are_rejected(radius: float, rtol: float, message: str) -> None:
-    conjunction = head_on(30.0, 10.0, 20.0, 5.0)
     with pytest.raises(ValueError, match=message):
-        foster(conjunction.plane, radius, rtol=rtol)
+        foster(TYPICAL_HEAD_ON.plane, radius, rtol=rtol)
 
 
 @pytest.mark.parametrize(

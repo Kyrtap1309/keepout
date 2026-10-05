@@ -16,15 +16,19 @@ unit vector perpendicular to ``v`` — Pc does not depend on that choice.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, TypeAlias
+from typing import TYPE_CHECKING, Literal, TypeAlias
 
 import numpy as np
 from astropy.time import Time
 
-from keepout._types import FloatArray, symmetric_part
+from keepout._types import FloatArray, read_only, symmetric_part
 from keepout.errors import GeometryError
 from keepout.frames import PARALLEL_RTOL
-from keepout.objects import ObjectState, require_same_epoch
+
+if TYPE_CHECKING:
+    from keepout.conjunction import Conjunction
+
+__all__ = ["EncounterPlane", "Role", "encounter_plane", "sigma_along"]
 
 Role: TypeAlias = Literal["primary", "secondary"]
 """Which object of a conjunction."""
@@ -46,8 +50,6 @@ class EncounterPlane:
         Secondary minus primary position, GCRF [m].
     relative_velocity
         Secondary minus primary velocity, GCRF [m/s].
-    relative_speed
-        Length of ``relative_velocity`` [m/s].
     combined_covariance
         Sum of the known 3x3 position covariances, GCRF [m^2].
     basis
@@ -55,6 +57,11 @@ class EncounterPlane:
     unknown_covariance
         Objects whose covariance is unknown; they contribute nothing to
         ``covariance`` and ``combined_covariance``.
+
+    Notes
+    -----
+    The arrays are stored as read-only float64 copies: the plane is cached on
+    :attr:`Conjunction.plane <keepout.conjunction.Conjunction.plane>`.
     """
 
     tca: Time
@@ -62,15 +69,32 @@ class EncounterPlane:
     covariance: FloatArray
     relative_position: FloatArray
     relative_velocity: FloatArray
-    relative_speed: float
     combined_covariance: FloatArray
     basis: FloatArray
     unknown_covariance: tuple[Role, ...] = ()
+
+    def __post_init__(self) -> None:
+        for name in (
+            "miss_vector",
+            "covariance",
+            "relative_position",
+            "relative_velocity",
+            "combined_covariance",
+            "basis",
+        ):
+            array = np.array(getattr(self, name), dtype=np.float64)
+            read_only(array)
+            object.__setattr__(self, name, array)
 
     @property
     def miss_distance(self) -> float:
         """Length of the miss vector [m]."""
         return float(np.linalg.norm(self.miss_vector))
+
+    @property
+    def relative_speed(self) -> float:
+        """Length of the relative velocity [m/s]."""
+        return float(np.linalg.norm(self.relative_velocity))
 
     @property
     def direction(self) -> FloatArray:
@@ -98,26 +122,19 @@ def _perpendicular(unit: FloatArray) -> FloatArray:
     return other / np.linalg.norm(other)
 
 
-def encounter_plane(primary: ObjectState, secondary: ObjectState) -> EncounterPlane:
+def encounter_plane(conjunction: Conjunction) -> EncounterPlane:
     """Project a conjunction onto the encounter plane.
 
-    Parameters
-    ----------
-    primary
-        The protected object.
-    secondary
-        The other object, at the same epoch.
+    Use :attr:`Conjunction.plane <keepout.conjunction.Conjunction.plane>`,
+    which caches the result.
 
     Raises
     ------
     GeometryError
-        If the epochs differ or the relative velocity is zero.
+        If the relative velocity is zero.
     """
-    require_same_epoch(
-        secondary.state.epoch, primary.state.epoch, "primary and secondary"
-    )
-    r = secondary.state.r - primary.state.r
-    v = secondary.state.v - primary.state.v
+    r = conjunction.relative_position
+    v = conjunction.relative_velocity
     speed = float(np.linalg.norm(v))
     if speed == 0.0:
         raise GeometryError(
@@ -132,25 +149,16 @@ def encounter_plane(primary: ObjectState, secondary: ObjectState) -> EncounterPl
         x = _perpendicular(y)
     basis = np.stack([x, np.cross(x, y)])
     combined = np.zeros((3, 3))
-    unknown: list[Role] = []
-    objects: tuple[tuple[Role, ObjectState], ...] = (
-        ("primary", primary),
-        ("secondary", secondary),
-    )
-    for role, item in objects:
-        if item.covariance is None:
-            unknown.append(role)
-        else:
+    for _, item in conjunction.objects:
+        if item.covariance is not None:
             combined = combined + item.covariance.position
-    projected = basis @ combined @ basis.T
     return EncounterPlane(
-        tca=primary.state.epoch,
+        tca=conjunction.tca,
         miss_vector=basis @ r,
-        covariance=symmetric_part(projected),
+        covariance=symmetric_part(basis @ combined @ basis.T),
         relative_position=r,
         relative_velocity=v,
-        relative_speed=speed,
         combined_covariance=combined,
         basis=basis,
-        unknown_covariance=tuple(unknown),
+        unknown_covariance=conjunction.unknown_covariance,
     )

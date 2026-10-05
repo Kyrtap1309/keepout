@@ -52,7 +52,17 @@ def test_rtn_rotation_is_proper_and_aligned(r: FloatArray, v: FloatArray) -> Non
     radial = rotation @ r
     assert radial[0] == pytest.approx(r_norm, rel=1e-12)
     np.testing.assert_allclose(radial[1:], 0.0, atol=1e-9 * r_norm)
-    assert abs((rotation @ v)[2]) <= 1e-9 * float(np.linalg.norm(v))
+    in_rtn = rotation @ v
+    assert abs(in_rtn[2]) <= 1e-9 * float(np.linalg.norm(v))
+    # T points along the motion and N along the angular momentum, so flipping
+    # both (still a proper rotation) is caught.
+    assert in_rtn[1] > 0.0
+    angular_momentum = np.cross(r, v)
+    np.testing.assert_allclose(
+        rotation[2],
+        angular_momentum / np.linalg.norm(angular_momentum),
+        atol=1e-9,
+    )
 
 
 @pytest.mark.parametrize(

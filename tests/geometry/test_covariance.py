@@ -7,7 +7,7 @@ from hypothesis.extra.numpy import arrays
 
 from keepout._types import FloatArray
 from keepout.covariance import Covariance, make_covariance, problems, repair
-from keepout.errors import CovarianceError, GeometryError
+from keepout.errors import CovarianceError, GeometryError, UnsupportedFrame
 from keepout.state import StateVector
 
 VALID = DIAGONAL_COVARIANCE
@@ -64,6 +64,22 @@ def test_an_invalid_position_block_is_repaired_first() -> None:
     np.testing.assert_allclose(fixed[3:, 3:], matrix[3:, 3:], rtol=1e-12)
 
 
+def test_a_correlation_too_large_to_condition_on_clips_the_whole_matrix() -> None:
+    # Position-velocity correlation 1e200: the conditional velocity covariance
+    # overflows, so the whole correlation matrix is clipped instead, which
+    # also changes the position block.
+    matrix = np.eye(6)
+    matrix[0, 3] = matrix[3, 0] = 1e200
+    fixed, repairs = repair(matrix)
+    assert repairs == (
+        "made positive semi-definite (min correlation-matrix eigenvalue -1e+200)",
+    )
+    assert problems(fixed) == ()
+    # [[1, c], [c, 1]] keeps its eigenvalue 1 + c on (1, 1) / sqrt(2).
+    np.testing.assert_allclose(fixed[np.ix_([0, 3], [0, 3])], 5e199, rtol=1e-12)
+    np.testing.assert_array_equal(np.diag(fixed)[[1, 2, 4, 5]], 1.0)
+
+
 def test_a_small_block_is_checked_for_symmetry_at_its_own_scale() -> None:
     matrix = np.diag([1e8, 1e8, 1e8, 1e-4, 1e-4, 1e-4])
     matrix[3, 4] = 1e-5  # correlation 0.1 on one side only
@@ -86,7 +102,7 @@ def test_invalid_covariance_is_rejected(matrix: FloatArray, message: str) -> Non
 
 
 def test_unknown_frame_is_rejected() -> None:
-    with pytest.raises(ValueError, match="unsupported covariance frame 'ECEF'"):
+    with pytest.raises(UnsupportedFrame, match="unsupported covariance frame 'ECEF'"):
         # The wrong literal is the point of the test.
         Covariance(VALID, "ECEF", EPOCH)  # type: ignore[arg-type]
 
@@ -123,7 +139,7 @@ def test_valid_matrix_is_not_touched_by_repair_policy() -> None:
 
 
 def test_make_covariance_rejects_an_unknown_frame() -> None:
-    with pytest.raises(ValueError, match="unsupported covariance frame 'ECEF'"):
+    with pytest.raises(UnsupportedFrame, match="unsupported covariance frame 'ECEF'"):
         make_covariance(VALID, "ECEF", EPOCH)  # type: ignore[arg-type]
 
 

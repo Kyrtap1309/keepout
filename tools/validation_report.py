@@ -20,7 +20,7 @@ from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TypeAlias
+from typing import Any, Final, TypeAlias
 
 from keepout.pc.result import Method
 from keepout.sources.cara import CARA_COMMIT
@@ -28,15 +28,15 @@ from keepout.validation.cases import load_all, load_monte_carlo_cases
 from keepout.validation.criteria import Criterion
 from keepout.validation.evaluation import Outcome, evaluate
 
-REPO = Path(__file__).resolve().parents[1]
+REPO: Final = Path(__file__).resolve().parents[1]
 
-PAPER_TOLERANCE = 1e-3
-"""Relative agreement with Alfano's published values (as in CARA's own tests)."""
+PAPER: Final = Criterion(relative=1e-3)
+"""Agreement with Alfano's published values (as in CARA's own tests)."""
 
-PAPER_METHOD: Method = "foster"
+PAPER_METHOD: Final[Method] = "foster"
 """Method compared with Alfano's published values."""
 
-METHOD_TITLES: dict[Method, str] = {
+METHOD_TITLES: Final[Mapping[Method, str]] = {
     "foster": "Foster",
     "elrod": "Elrod",
     "hall3d": "Hall 3D-Nc",
@@ -47,10 +47,10 @@ METHOD_TITLES: dict[Method, str] = {
 }
 """Column titles of the methods in the case tables."""
 
-PC_FORMAT = ".4e"
+PC_FORMAT: Final = ".4e"
 """Format of the Pc values and intervals on the pages."""
 
-NOT_COMPARED = """\
+NOT_COMPARED: Final = """\
 ## Not compared
 
 - **Alfano case 12, 2-D**: zero relative velocity leaves the encounter plane
@@ -85,7 +85,7 @@ NOT_COMPARED = """\
   [validation-monte-carlo.md](validation-monte-carlo.md).
 """
 
-NOT_COMPARED_MONTE_CARLO = """\
+NOT_COMPARED_MONTE_CARLO: Final = """\
 ## Not compared
 
 - **53-CDM cases with a CARA Monte Carlo Pc below 1e-4**: about 400 expected
@@ -105,22 +105,20 @@ class Report:
     not_compared: str
 
 
-MAIN = Report(
+MAIN: Final = Report(
     "Validation against NASA CARA",
     REPO / "docs/validation.md",
     "<!-- validation-summary:start -->",
     "<!-- validation-summary:end -->",
     NOT_COMPARED,
 )
-MONTE_CARLO = Report(
+MONTE_CARLO: Final = Report(
     "Monte Carlo validation against NASA CARA",
     REPO / "docs/validation-monte-carlo.md",
     "<!-- validation-monte-carlo-summary:start -->",
     "<!-- validation-monte-carlo-summary:end -->",
     NOT_COMPARED_MONTE_CARLO,
 )
-
-SUMMARY_START, SUMMARY_END = MAIN.start, MAIN.end
 
 
 @dataclass(frozen=True)
@@ -161,24 +159,23 @@ class Row:
     @classmethod
     def of(cls, outcome: Outcome) -> Row:
         """The row of an evaluated case."""
-        case, details = outcome.case, outcome.result.details
-        monte_carlo = outcome.method == "montecarlo"
+        case, result, ci = outcome.case, outcome.result, outcome.ci
         return cls(
             suite=case.suite,
             case_id=case.case_id,
             hard_body_radius=case.conjunction.hard_body_radius,
             reference=case.reference,
             criterion=case.criterion,
-            method=outcome.method,
-            value=outcome.value,
+            method=result.method,
+            value=result.value,
             error=outcome.verdict.error,
             relative=outcome.verdict.relative,
             passed=outcome.passed,
             paper=case.paper,
             interval=case.interval,
             informative=case.informative,
-            ci=(details["ci_low"], details["ci_high"]) if monte_carlo else None,
-            samples=int(details["samples"]) if monte_carlo else None,
+            ci=ci,
+            samples=int(result.details["samples"]) if ci else None,
         )
 
     @classmethod
@@ -340,8 +337,8 @@ def _paper_cells(case: Row, rows: Mapping[Method, Row]) -> list[str]:
     found = rows.get(PAPER_METHOD)
     if case.paper is None or found is None:
         return ["-", "-"]
-    error = abs(found.value - case.paper) / case.paper
-    return [_pc(case.paper), f"{error:.1e} {_mark(error <= PAPER_TOLERANCE)}"]
+    error, _, passed = PAPER.judge(found.value, case.paper)
+    return [_pc(case.paper), f"{error:.1e} {_mark(passed)}"]
 
 
 def _suite_table(members: Sequence[Row]) -> list[str]:
@@ -423,21 +420,19 @@ def render_page(record: Record, report: Report = MAIN) -> str:
     return "\n".join(parts)
 
 
-def replace_summary(
-    readme: str, summary: str, start: str = SUMMARY_START, end: str = SUMMARY_END
-) -> str:
-    """Put ``summary`` between the README's ``start`` and ``end`` markers.
+def replace_summary(readme: str, summary: str, report: Report = MAIN) -> str:
+    """Put ``summary`` between the README's markers of ``report``.
 
     Raises
     ------
     ValueError
         If the markers are missing or out of order.
     """
-    first = readme.find(start)
-    last = readme.find(end)
+    first = readme.find(report.start)
+    last = readme.find(report.end)
     if first < 0 or last < first:
-        raise ValueError(f"README needs {start} and {end}, in that order")
-    head = readme[: first + len(start)]
+        raise ValueError(f"README needs {report.start} and {report.end}, in that order")
+    head = readme[: first + len(report.start)]
     return f"{head}\n{summary}\n{readme[last:]}"
 
 
@@ -461,9 +456,7 @@ def rendered_files(
     return {
         data: record.dumps(),
         page: render_page(record, report),
-        readme: replace_summary(
-            readme.read_text(encoding="utf-8"), summary, report.start, report.end
-        ),
+        readme: replace_summary(readme.read_text(encoding="utf-8"), summary, report),
     }
 
 

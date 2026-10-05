@@ -1,7 +1,6 @@
 import importlib
 import math
 import re
-from typing import Any
 
 import numpy as np
 import pytest
@@ -9,25 +8,34 @@ from builders import (
     DRIFT_WINDOW,
     LEO_R,
     LEO_V,
+    TYPICAL_HEAD_ON,
     drifting,
     head_on,
     object_state,
     shifted_back,
 )
-from faults import Failure, failing_where, never_converges, not_converging, raising
+from faults import (
+    Failure,
+    WindowSearch,
+    failing_where,
+    never_converges,
+    not_converging,
+    raising,
+    searching_with,
+)
 from scipy.spatial.transform import Rotation
 
 from keepout.conjunction import Conjunction
 from keepout.errors import CovarianceError, GeometryError, PcConvergenceError
 from keepout.objects import ObjectState
 from keepout.orbits import orbital_period
+from keepout.pc import _rate as rate_module
+from keepout.pc import _timeline as timeline_module
 from keepout.pc import compute_pc, foster, hall3d
-from keepout.pc._timeline import RateIntegral, Segment
+from keepout.pc._timeline import RateIntegral, RateScan, Segment
 
 # The package exports the function hall3d under the module's name.
 hall3d_module = importlib.import_module("keepout.pc.hall3d")
-rate_module = importlib.import_module("keepout.pc._rate")
-timeline_module = importlib.import_module("keepout.pc._timeline")
 
 
 @pytest.mark.parametrize(
@@ -63,17 +71,17 @@ def test_velocity_uncertainty_changes_the_3d_pc() -> None:
     conjunction = drifting(velocity_sigma=0.5)
     two_d = foster(conjunction.plane, 5.0).value
     result = hall3d(conjunction, window=DRIFT_WINDOW)
-    assert result.value > 1.15 * two_d
+    assert 1.15 * two_d < result.value < 1.3 * two_d
 
 
 def test_swapping_the_objects_changes_nothing() -> None:
-    base = head_on(30.0, 10.0, 20.0, 5.0)
+    base = TYPICAL_HEAD_ON
     swapped = Conjunction(base.secondary, base.primary, 5.0)
     assert hall3d(swapped).value == pytest.approx(hall3d(base).value, rel=1e-8)
 
 
 def test_explicit_window_is_used() -> None:
-    conjunction = head_on(30.0, 10.0, 20.0, 5.0)
+    conjunction = TYPICAL_HEAD_ON
     result = hall3d(conjunction, window=(-0.002, 0.002))
     window = (result.details["window_start_s"], result.details["window_end_s"])
     assert window == (-0.002, 0.002)
@@ -82,11 +90,11 @@ def test_explicit_window_is_used() -> None:
 @pytest.mark.parametrize("bad", [(1.0, -1.0), (0.0, math.inf)])
 def test_invalid_window_is_rejected(bad: tuple[float, float]) -> None:
     with pytest.raises(ValueError, match="window"):
-        hall3d(head_on(30.0, 10.0, 20.0, 5.0), window=bad)
+        hall3d(TYPICAL_HEAD_ON, window=bad)
 
 
 def test_unknown_covariance_is_rejected() -> None:
-    base = head_on(30.0, 10.0, 20.0, 5.0)
+    base = TYPICAL_HEAD_ON
     conjunction = Conjunction(
         base.primary, ObjectState("S", base.secondary.state, None), 5.0
     )
@@ -127,18 +135,21 @@ def test_failed_iteration_where_it_matters_raises(
 ) -> None:
     monkeypatch.setattr(rate_module, "_iterate_overlap", never_converges)
     with pytest.raises(PcConvergenceError, match="did not converge"):
-        hall3d(head_on(30.0, 10.0, 20.0, 5.0))
+        hall3d(TYPICAL_HEAD_ON)
+
+
+def scan_of(times: list[float], values: list[float]) -> RateScan:
+    """A scan of one segment over the whole grid."""
+    return RateScan(np.array(times), np.array(values), ((0, len(times) - 1),))
 
 
 def test_several_encounters_and_nc_above_one_are_reported() -> None:
     integral = RateIntegral(
         nc=1.5,
         segments=(Segment(-10.0, -5.0, 0.9), Segment(5.0, 10.0, 0.6)),
-        window=(-20.0, 20.0),
-        edge=0.0,
-        peak=1.0,
+        scan=scan_of([-20.0, 0.0, 20.0], [0.0, 1.0, 0.0]),
     )
-    notes = hall3d_module._diagnostics(integral, window_given=True)
+    notes = hall3d_module._integral_notes(integral, window_given=True, rtol=1e-6)
     assert notes[0].startswith("expected number of collisions Nc = 1.5 exceeds 1")
     assert notes[1].startswith("2 encounters in the window")
 
@@ -147,13 +158,11 @@ def test_rate_at_the_edge_of_an_automatic_window_is_reported() -> None:
     integral = RateIntegral(
         nc=0.1,
         segments=(Segment(-10.0, 10.0, 0.1),),
-        window=(-10.0, 10.0),
-        edge=1e-3,
-        peak=1.0,
+        scan=scan_of([-10.0, 0.0, 10.0], [1e-3, 1.0, 0.0]),
     )
-    (note,) = hall3d_module._diagnostics(integral, window_given=False)
+    (note,) = hall3d_module._integral_notes(integral, window_given=False, rtol=1e-6)
     assert "pass window=" in note
-    assert hall3d_module._diagnostics(integral, window_given=True) == []
+    assert hall3d_module._integral_notes(integral, window_given=True, rtol=1e-6) == []
 
 
 @pytest.mark.parametrize(
@@ -164,7 +173,7 @@ def test_long_explicit_window_resolves_the_encounter(
 ) -> None:
     # The crossing takes 0.4 ms: a uniform grid of at most 20001 points over
     # these windows steps over it; the screen must still find and resolve it.
-    conjunction = head_on(30.0, 10.0, 20.0, 5.0)
+    conjunction = TYPICAL_HEAD_ON
     result = hall3d(conjunction, window=window)
     assert result.value == pytest.approx(foster(conjunction.plane, 5.0).value, rel=1e-4)
     assert result.details["encounters"] == 1.0
@@ -175,12 +184,12 @@ def test_unresolvable_window_raises() -> None:
     with pytest.raises(
         PcConvergenceError, match="cannot resolve the collision rate"
     ) as info:
-        hall3d(head_on(30.0, 10.0, 20.0, 5.0), window=(-1e5, 1e5))
+        hall3d(TYPICAL_HEAD_ON, window=(-1e5, 1e5))
     assert "'hall3d', window=(a, b)" in str(info.value)
 
 
 def test_window_without_an_encounter_is_reported() -> None:
-    result = hall3d(head_on(30.0, 10.0, 20.0, 5.0), window=(100.0, 101.0))
+    result = hall3d(TYPICAL_HEAD_ON, window=(100.0, 101.0))
     assert result.value == 0.0
     (note,) = result.diagnostics
     assert note.startswith("collision rate negligible over the whole window")
@@ -200,7 +209,7 @@ def test_failure_inside_the_encounter_raises(
         failing_where(lambda t: (t >= 4.2e-4) & (t <= 5.0e-4), failure),
     )
     with pytest.raises(PcConvergenceError, match="did not converge"):
-        hall3d(head_on(30.0, 10.0, 20.0, 5.0))
+        hall3d(TYPICAL_HEAD_ON)
 
 
 @pytest.mark.parametrize("failure", [not_converging, raising])
@@ -208,7 +217,7 @@ def test_failure_in_the_far_tail_is_allowed(
     monkeypatch: pytest.MonkeyPatch,
     failure: Failure,
 ) -> None:
-    conjunction = head_on(30.0, 10.0, 20.0, 5.0)
+    conjunction = TYPICAL_HEAD_ON
     monkeypatch.setattr(
         rate_module,
         "_iterate_overlap",
@@ -228,7 +237,7 @@ def test_failing_fallback_raises_a_convergence_error(
     monkeypatch.setattr(rate_module, "_iterate_overlap", never_converges)
     monkeypatch.setattr(rate_module.CollisionRate, "_rate", broken)
     with pytest.raises(PcConvergenceError, match="cannot be computed"):
-        hall3d(head_on(30.0, 10.0, 20.0, 5.0))
+        hall3d(TYPICAL_HEAD_ON)
 
 
 def test_non_finite_rate_raises_a_convergence_error(
@@ -236,20 +245,20 @@ def test_non_finite_rate_raises_a_convergence_error(
 ) -> None:
     monkeypatch.setattr(rate_module.CollisionRate, "_rate", lambda *_: math.nan)
     with pytest.raises(PcConvergenceError, match="not finite"):
-        hall3d(head_on(30.0, 10.0, 20.0, 5.0))
+        hall3d(TYPICAL_HEAD_ON)
 
 
 @pytest.mark.parametrize("rtol", [0.0, -1e-6, math.nan, math.inf])
 def test_rtol_is_checked(rtol: float) -> None:
     with pytest.raises(ValueError, match="rtol"):
-        hall3d(head_on(30.0, 10.0, 20.0, 5.0), rtol=rtol)
+        hall3d(TYPICAL_HEAD_ON, rtol=rtol)
 
 
 def test_unmet_rtol_is_reported(monkeypatch: pytest.MonkeyPatch) -> None:
     # Orders 4 and 8 cannot integrate a padded encounter to 1e-4.
-    monkeypatch.setattr(timeline_module, "START_ORDER", 4)
-    monkeypatch.setattr(timeline_module, "MAX_ORDER", 8)
-    result = hall3d(head_on(30.0, 10.0, 20.0, 5.0), rtol=1e-15)
+    monkeypatch.setattr(timeline_module, "CC_START_ORDER", 4)
+    monkeypatch.setattr(timeline_module, "CC_MAX_ORDER", 8)
+    result = hall3d(TYPICAL_HEAD_ON, rtol=1e-15)
     (note,) = result.diagnostics
     assert re.match(
         r"the time integral did not reach rtol: its worst piece agrees to "
@@ -260,8 +269,8 @@ def test_unmet_rtol_is_reported(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_small_rtol_shortfall_is_not_reported(monkeypatch: pytest.MonkeyPatch) -> None:
     # Orders 32 and 64 agree to far better than QUIET_AGREEMENT, not to 1e-15.
-    monkeypatch.setattr(timeline_module, "MAX_ORDER", 64)
-    result = hall3d(head_on(30.0, 10.0, 20.0, 5.0), rtol=1e-15)
+    monkeypatch.setattr(timeline_module, "CC_MAX_ORDER", 64)
+    result = hall3d(TYPICAL_HEAD_ON, rtol=1e-15)
     assert result.diagnostics == ()
 
 
@@ -290,18 +299,30 @@ def test_automatic_window_grows_to_hold_a_displaced_peak(
 ) -> None:
     conjunction = correlated_head_on(0.95)
     widths: list[float] = []
-    real = timeline_module.locate_auto
 
-    def spy(rate: Any, half: float, limit: float, screen: Any, **options: Any) -> Any:
-        widths.append(half)
-        return real(rate, half, limit, screen, **options)
+    def record(search: WindowSearch) -> WindowSearch:
+        widths.append(search.half_width)
+        return search
 
-    monkeypatch.setattr(rate_module, "locate_auto", spy)
+    monkeypatch.setattr(rate_module, "locate_auto", searching_with(record))
     result = hall3d(conjunction)
-    initial = widths[0]
-    assert result.details["window_end_s"] > initial  # the window doubled
+    # One call, centred on TCA (the straight-line closest approach): the
+    # window doubles once, to 17.2 sigma_y, which holds the 9.5 sigma_y peak.
+    [initial] = widths
+    assert result.details["window_end_s"] == pytest.approx(2.0 * initial, rel=1e-12)
+    assert result.details["window_start_s"] == pytest.approx(-2.0 * initial, rel=1e-12)
     assert result.diagnostics == ()
-    assert result.value == pytest.approx(foster(conjunction.plane, 5.0).value, rel=1e-4)
+    # Pc ~ 1.1e-22, ten sigma out radially, so abs=0. Hall's Gaussian lives
+    # in equinoctial elements linearised about the peak-overlap state; its
+    # curvilinear map lowers the Mahalanobis d^2 of the hard body by ~0.0086
+    # out of 100, which raises Pc by ~0.37% over the straight-line 2-D model.
+    # That gap is intended, not numerical (rtol and orders move it < 1e-5):
+    # it grows as ~3.7e-6 k^3 at k sigma (and as 1/r_orbit), and vanishes
+    # (~1e-6) with the mean-centred expansion. rel=1e-2 leaves a 2.7x margin
+    # and still catches a window cut short at its initial width (~30% lost).
+    assert result.value == pytest.approx(
+        foster(conjunction.plane, 5.0).value, rel=1e-2, abs=0.0
+    )
 
 
 def slow_crossing() -> Conjunction:
@@ -335,7 +356,7 @@ def test_automatic_window_stops_at_half_an_orbit() -> None:
 def test_states_before_closest_approach_find_the_encounter(dt: float) -> None:
     # The straight-line closest approach is dt after the states' epoch: the
     # automatic window must cover it, not only t = 0.
-    conjunction = shifted_back(head_on(30.0, 10.0, 20.0, 5.0), dt)
+    conjunction = shifted_back(TYPICAL_HEAD_ON, dt)
     expected = foster(conjunction.plane, 5.0).value
     auto = compute_pc(conjunction)
     assert auto.method == "hall3d"
@@ -348,13 +369,11 @@ def test_an_encounter_beyond_the_initial_window_is_searched_for(
 ) -> None:
     # Centre the window on t = 0 only: the rate is 0 there, and the window
     # keeps doubling until it reaches the encounter 1 s later.
-    real = timeline_module.locate_auto
+    def at_tca(search: WindowSearch) -> WindowSearch:
+        return search._replace(centre=(0.0, 0.0))
 
-    def at_tca(rate: Any, half: float, limit: float, screen: Any, **_: Any) -> Any:
-        return real(rate, half, limit, screen, centre=(0.0, 0.0))
-
-    monkeypatch.setattr(rate_module, "locate_auto", at_tca)
-    conjunction = shifted_back(head_on(30.0, 10.0, 20.0, 5.0), 1.0)
+    monkeypatch.setattr(rate_module, "locate_auto", searching_with(at_tca))
+    conjunction = shifted_back(TYPICAL_HEAD_ON, 1.0)
     assert hall3d(conjunction).value == pytest.approx(
         foster(conjunction.plane, 5.0).value, rel=1e-4
     )
@@ -365,13 +384,11 @@ def test_a_missed_straight_line_approach_is_reported(
 ) -> None:
     # Forbid any growth of a window about t = 0: the scan then finds nothing,
     # although the straight-line closest approach is 30 m away at t = 1 s.
-    real = timeline_module.locate_auto
+    def frozen(search: WindowSearch) -> WindowSearch:
+        return WindowSearch(search.half_width, search.half_width, (0.0, 0.0))
 
-    def frozen(rate: Any, half: float, limit: float, screen: Any, **_: Any) -> Any:
-        return real(rate, half, half, screen, centre=(0.0, 0.0))
-
-    monkeypatch.setattr(rate_module, "locate_auto", frozen)
-    result = hall3d(shifted_back(head_on(30.0, 10.0, 20.0, 5.0), 1.0))
+    monkeypatch.setattr(rate_module, "locate_auto", searching_with(frozen))
+    result = hall3d(shifted_back(TYPICAL_HEAD_ON, 1.0))
     assert result.value == 0.0
     assert result.diagnostics[0].startswith("collision rate negligible")
     assert result.diagnostics[1].startswith(
@@ -421,24 +438,22 @@ def test_automatic_window_never_spans_more_than_one_period(
     monkeypatch: pytest.MonkeyPatch, closest: float
 ) -> None:
     # A wider window would count the next revolution's encounter again.
-    captured: dict[str, Any] = {}
+    captured: list[tuple[float, tuple[float, float]]] = []
 
     class Captured(Exception):
         pass
 
-    def capture(
-        rate: Any, half: float, limit: float, screen: Any, centre: tuple[float, float]
-    ) -> Any:
-        captured.update(limit=limit, centre=centre)
+    def capture(search: WindowSearch) -> WindowSearch:
+        captured.append((search.limit, search.centre))
         raise Captured
 
     monkeypatch.setattr(rate_module, "straight_line_closest_time", lambda _: closest)
-    monkeypatch.setattr(rate_module, "locate_auto", capture)
-    conjunction = head_on(30.0, 10.0, 20.0, 5.0)
+    monkeypatch.setattr(rate_module, "locate_auto", searching_with(capture))
+    conjunction = TYPICAL_HEAD_ON
     rate = rate_module.collision_rate(conjunction, "hall3d")
     with pytest.raises(Captured):
         rate_module.encounter_scan(conjunction, rate, None)
     period = min(rate.primary.period, rate.secondary.period)
-    start, end = captured["centre"]
+    [(limit, (start, end))] = captured
     assert start <= 0.0 <= end
-    assert end - start + 2.0 * captured["limit"] == pytest.approx(period)
+    assert end - start + 2.0 * limit == pytest.approx(period)

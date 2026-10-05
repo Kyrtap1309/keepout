@@ -4,7 +4,17 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import NamedTuple
+from typing import Final, NamedTuple
+
+__all__ = [
+    "HALL",
+    "HALL_PC_SET",
+    "MONTE_CARLO",
+    "REPRODUCIBILITY_FRACTION",
+    "TWO_D",
+    "Criterion",
+    "Verdict",
+]
 
 
 class Verdict(NamedTuple):
@@ -16,7 +26,7 @@ class Verdict(NamedTuple):
     passed: bool
 
 
-REPRODUCIBILITY_FRACTION = 0.25
+REPRODUCIBILITY_FRACTION: Final = 0.25
 """Share of a criterion's margin within which two runs give the same result.
 Runs on different CPUs differ by up to ~1/20 of it (BLAS kernels, adaptive
 quadrature paths, Monte Carlo hits at the sphere boundary)."""
@@ -142,19 +152,19 @@ class Criterion:
         return text
 
 
-TWO_D = Criterion(relative=1e-6, absolute=1e-15, small=1e-10)
+TWO_D: Final = Criterion(relative=1e-6, absolute=1e-15, small=1e-10)
 """Spec section 5: 2-D and maximum Pc methods."""
 
-HALL = Criterion(relative=1e-3)
+HALL: Final = Criterion(relative=1e-3)
 """Hall 3D-Nc against CARA's Alfano and unit-test values: the tolerance of
 CARA's own ``Pc3D_Hall_UnitTest.m``."""
 
-HALL_PC_SET = Criterion(relative=3e-3)
+HALL_PC_SET: Final = Criterion(relative=3e-3)
 """Hall 3D-Nc against the 53-CDM set's ``Nc3D``: CARA's values there sit
 systematically above its own ``Nc2D`` on nearly straight-line encounters. On
 the 18 cases where keepout's 3D-Nc and 2-D Pc agree within 1e-3, CARA's
 ``Nc3D / Nc2D - 1`` averages +8.2e-4, while keepout's Hall / Foster - 1 spreads
 from -7.7e-4 to +7.0e-4 around a mean of -3e-5 (see docs/pc-3d.md)."""
 
-MONTE_CARLO = Criterion(interval=True)
+MONTE_CARLO: Final = Criterion(interval=True)
 """Spec section 5: the reference lies within the Monte Carlo interval."""

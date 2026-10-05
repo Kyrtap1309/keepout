@@ -9,17 +9,17 @@ it is not negligible.
 from __future__ import annotations
 
 import math
-from typing import TypeAlias
+from collections.abc import Sequence
+from typing import Final, NamedTuple
 
 import numpy as np
-import numpy.typing as npt
 from scipy import special
 
-from keepout._types import FloatArray
+from keepout._types import BoolArray, FloatArray, IndexArray, from_eigen
 from keepout.conjunction import Conjunction
 from keepout.errors import GeometryError, PcConvergenceError
 from keepout.pc._orbit import OrbitUncertainty
-from keepout.pc._plane import require_known_covariance
+from keepout.pc._plane import SIGMA_FLOOR, SQRT_2, SQRT_2PI, require_known_covariance
 from keepout.pc._sphere import sphere_rule_principal
 from keepout.pc._timeline import (
     Candidate,
@@ -31,47 +31,103 @@ from keepout.pc._timeline import (
 )
 from keepout.pc.result import Method
 
-OVERLAP_TOLERANCE = 1e-6
+OVERLAP_TOLERANCE: Final = 1e-6
 """Convergence of the peak-overlap iteration: squared Mahalanobis step of
 the peak position (Hall 2021, sec. VII.B step 7)."""
 
-OVERLAP_MAX_ITERATIONS = 100
+OVERLAP_MAX_ITERATIONS: Final = 100
 
-NEGLIGIBLE_DISTANCE = 1500.0
+NEGLIGIBLE_DISTANCE: Final = 1500.0
 """Squared Mahalanobis distance from the hard-body sphere to the mean relative
 position beyond which the rate underflows (``exp(-750)``) and is taken as 0."""
 
-FALLBACK_TOLERANCE = 1e-10
+FALLBACK_TOLERANCE: Final = 1e-10
 """Largest rate, relative to the peak, allowed where the peak-overlap
 iteration failed and the mean-centred expansion was used instead."""
-
-VARIANCE_FLOOR = 1e-4
-"""Smallest position standard deviation used when inverting a covariance, as
-a fraction of the hard-body radius (as in 2-D Pc and CARA's ``Fclip``): a
-perfectly known object then has a finite, tiny extent."""
 
 SCREEN_MIN_CELLS, SCREEN_MAX_CELLS = 64, 50_000
 """Bounds on the number of screen cells in a window."""
 
-SCREEN_PERIOD_FRACTION = 1.0 / 64.0
+SCREEN_PERIOD_FRACTION: Final = 1.0 / 64.0
 """Largest screen cell, as a fraction of the shorter orbital period."""
 
-SCREEN_VARIANCE_MARGIN = 2.0
+SCREEN_VARIANCE_MARGIN: Final = 2.0
 """Factor on the largest position variance of neighbouring screen cells."""
 
-SCREEN_CHUNK = 4096
+SCREEN_CHUNK: Final = 4096
 """Screen cells evaluated in one vectorised call."""
 
-_SQRT_PI = math.sqrt(math.pi)
-_SQRT_2 = math.sqrt(2.0)
-_SQRT_2PI = math.sqrt(2.0 * math.pi)
+_SQRT_PI: Final = math.sqrt(math.pi)
 
-_TINY_VARIANCE = 1e-300
+_TINY_VARIANCE: Final = 1e-300
 """Floor [m^2/s^2] of the conditional radial-velocity variance, which divides
 the mean radial velocity in the flux."""
 
-Gaussians: TypeAlias = tuple[FloatArray, FloatArray, FloatArray, FloatArray]
-"""Mean and covariance of both objects' states at one time: ``x1, p1, x2, p2``."""
+_RATE_ERRORS: Final = (np.linalg.LinAlgError, ArithmeticError, ValueError)
+"""Failures of the rate computation itself."""
+
+_ITERATION_ERRORS: Final = (*_RATE_ERRORS, GeometryError)
+"""Failures of the peak-overlap iteration that fall back to the mean-centred
+expansion instead of stopping the computation."""
+
+
+class Gaussians(NamedTuple):
+    """Means and covariances of both objects' states, at one time or a batch.
+
+    Batched: ``x1, x2`` ``(m, 6)`` and ``p1, p2`` ``(m, 6, 6)``.
+    """
+
+    x1: FloatArray
+    p1: FloatArray
+    x2: FloatArray
+    p2: FloatArray
+
+    def take(self, index: int | slice | IndexArray | BoolArray) -> Gaussians:
+        """The times ``index`` of a batch."""
+        return Gaussians(*(a[index] for a in self))
+
+    @property
+    def relative_position(self) -> FloatArray:
+        """Mean relative positions ``(m, 3)`` [m]."""
+        result: FloatArray = self.x2[:, :3] - self.x1[:, :3]
+        return result
+
+    @property
+    def relative_velocity(self) -> FloatArray:
+        """Mean relative velocities ``(m, 3)`` [m/s]."""
+        result: FloatArray = self.x2[:, 3:] - self.x1[:, 3:]
+        return result
+
+    @property
+    def position_covariance(self) -> FloatArray:
+        """Combined position covariances ``(m, 3, 3)`` [m^2]."""
+        result: FloatArray = self.p1[:, :3, :3] + self.p2[:, :3, :3]
+        return result
+
+
+class ScreenCells(NamedTuple):
+    """Mean-centred quantities at the centres of screen cells, each ``(m,)``.
+
+    Parameters
+    ----------
+    gap
+        Distance [m] from the hard-body sphere to the mean relative position.
+    speed
+        Mean relative speed [m/s].
+    largest
+        Largest combined position variance [m^2].
+    crossing
+        Straight-line crossing time [s] (infinite at zero relative speed).
+    width
+        Time standard deviation of the rate [s] (infinite at zero relative
+        speed).
+    """
+
+    gap: FloatArray
+    speed: FloatArray
+    largest: FloatArray
+    crossing: FloatArray
+    width: FloatArray
 
 
 def _floored_inverse(matrix: FloatArray, floor: float) -> FloatArray:
@@ -83,14 +139,13 @@ def _floored_inverse(matrix: FloatArray, floor: float) -> FloatArray:
     reconstructed matrix.
     """
     values, vectors = np.linalg.eigh(matrix)
-    scaled = vectors / np.maximum(values, floor)[..., None, :]
-    result: FloatArray = scaled @ np.swapaxes(vectors, -1, -2)
+    return from_eigen(1.0 / np.maximum(values, floor), vectors)
+
+
+def _apply(matrix: FloatArray, vector: FloatArray) -> FloatArray:
+    """Batched matrix-vector products ``(m, i, j) x (m, j) -> (m, i)``."""
+    result: FloatArray = (matrix @ vector[..., None])[..., 0]
     return result
-
-
-def _row(gaussians: Gaussians, index: int | slice) -> Gaussians:
-    x1, p1, x2, p2 = gaussians
-    return x1[index], p1[index], x2[index], p2[index]
 
 
 def _iterate_overlap(
@@ -99,59 +154,56 @@ def _iterate_overlap(
     times: FloatArray,
     floor: float,
     mean_centred: Gaussians,
-) -> tuple[Gaussians, npt.NDArray[np.bool_]]:
+) -> tuple[Gaussians, BoolArray]:
     """The peak-overlap iteration on a batch of times; may raise."""
-    result = tuple(a.copy() for a in mean_centred)
+    result = Gaussians(*(a.copy() for a in mean_centred))
     converged = np.zeros(times.size, dtype=bool)
     rows = np.arange(times.size)
-    x1, p1, x2, p2 = mean_centred
+    current = mean_centred
     previous: FloatArray | None = None
     for _ in range(OVERLAP_MAX_ITERATIONS):
+        x1, p1, x2, p2 = current
         inverse1 = _floored_inverse(p1[:, :3, :3], floor)
         inverse2 = _floored_inverse(p2[:, :3, :3], floor)
         precision = inverse1 + inverse2
-        rhs = np.einsum("mij,mj->mi", inverse1, x1[:, :3]) + np.einsum(
-            "mij,mj->mi", inverse2, x2[:, :3]
-        )
+        rhs = _apply(inverse1, x1[:, :3]) + _apply(inverse2, x2[:, :3])
         peak = np.linalg.solve(precision, rhs[..., None])[..., 0]
         if previous is not None:
             step = peak - previous
-            done = np.einsum("mi,mij,mj->m", step, precision, step) <= OVERLAP_TOLERANCE
-            for target, source in zip(result, (x1, p1, x2, p2), strict=True):
+            distance = np.einsum("mi,mi->m", _apply(precision, step), step)
+            done = distance <= OVERLAP_TOLERANCE
+            for target, source in zip(result, current, strict=True):
                 target[rows[done]] = source[done]
             converged[rows[done]] = True
             keep = ~done
-            rows, peak = rows[keep], peak[keep]
-            x1, p1, x2, p2 = x1[keep], p1[keep], x2[keep], p2[keep]
+            rows, peak, current = rows[keep], peak[keep], current.take(keep)
             inverse1, inverse2 = inverse1[keep], inverse2[keep]
             if rows.size == 0:
                 break
         previous = peak
-        centres = [
-            orbit.centre_at(
-                np.concatenate(
-                    [
-                        peak,
-                        x[:, 3:]
-                        + np.einsum(
-                            "mij,mjk,mk->mi", p[:, 3:, :3], inverse, peak - x[:, :3]
-                        ),
-                    ],
-                    axis=1,
-                ),
-                times[rows],
-            )
-            for orbit, x, p, inverse in (
-                (primary, x1, p1, inverse1),
-                (secondary, x2, p2, inverse2),
-            )
-        ]
-        (x1, p1), (x2, p2) = (
-            orbit.expansions(centre, times[rows])
-            for orbit, centre in zip((primary, secondary), centres, strict=True)
+        at = times[rows]
+        centre1 = primary.centre_at(
+            _conditioned_state(current.x1, current.p1, inverse1, peak), at
         )
-    x1, p1, x2, p2 = result
-    return (x1, p1, x2, p2), converged
+        centre2 = secondary.centre_at(
+            _conditioned_state(current.x2, current.p2, inverse2, peak), at
+        )
+        current = Gaussians(
+            *primary.expansions(centre1, at), *secondary.expansions(centre2, at)
+        )
+    return result, converged
+
+
+def _conditioned_state(
+    x: FloatArray, p: FloatArray, inverse: FloatArray, peak: FloatArray
+) -> FloatArray:
+    """States ``(m, 6)`` at the peak position, velocity conditioned on it.
+
+    ``[peak, v + P_vr A^-1 (peak - r)]`` with the object's mean ``(r, v)``,
+    covariance ``P`` and floored inverse position covariance ``A^-1``.
+    """
+    velocity = x[:, 3:] + _apply(p[:, 3:, :3], _apply(inverse, peak - x[:, :3]))
+    return np.concatenate([peak, velocity], axis=1)
 
 
 def _peak_overlap(
@@ -160,7 +212,7 @@ def _peak_overlap(
     times: FloatArray,
     floor: float,
     mean_centred: Gaussians,
-) -> tuple[Gaussians, npt.NDArray[np.bool_]]:
+) -> tuple[Gaussians, BoolArray]:
     """Expansion-centre Gaussians of both objects at ``times`` (Hall 2021,
     sec. VII.B), and where the iteration converged to finite values.
 
@@ -179,7 +231,9 @@ def _peak_overlap(
             _single_overlap(primary, secondary, times, floor, mean_centred, k)
             for k in range(times.size)
         ]
-        gaussians = tuple(np.stack([row[0][part] for row in rows]) for part in range(4))  # type: ignore[assignment]
+        gaussians = Gaussians(
+            *(np.stack(parts) for parts in zip(*(row[0] for row in rows), strict=True))
+        )
         converged = np.array([row[1] for row in rows], dtype=bool)
     finite = np.all(
         [np.isfinite(a).reshape(times.size, -1).all(axis=1) for a in gaussians], axis=0
@@ -195,19 +249,14 @@ def _single_overlap(
     mean_centred: Gaussians,
     k: int,
 ) -> tuple[Gaussians, bool]:
-    one = _row(mean_centred, slice(k, k + 1))
+    one = mean_centred.take(slice(k, k + 1))
     try:
         gaussians, converged = _iterate_overlap(
             primary, secondary, times[k : k + 1], floor, one
         )
     except _ITERATION_ERRORS:
-        return _row(one, 0), False
-    return _row(gaussians, 0), bool(converged[0])
-
-
-_ITERATION_ERRORS = (np.linalg.LinAlgError, ArithmeticError, ValueError, GeometryError)
-"""Failures of the peak-overlap iteration that fall back to the mean-centred
-expansion instead of stopping the computation."""
+        return one.take(0), False
+    return gaussians.take(0), bool(converged[0])
 
 
 class CollisionRate:
@@ -227,40 +276,65 @@ class CollisionRate:
         self, primary: OrbitUncertainty, secondary: OrbitUncertainty, radius: float
     ) -> None:
         self.primary, self.secondary, self.radius = primary, secondary, radius
-        self.floor = (VARIANCE_FLOOR * radius) ** 2
+        self.floor_variance = (SIGMA_FLOOR * radius) ** 2
+        """Smallest position variance [m^2] used when inverting a covariance:
+        :data:`~keepout.pc._plane.SIGMA_FLOOR` of the radius, squared (as in
+        2-D Pc and CARA's ``Fclip``), so a perfectly known object has a
+        finite, tiny extent."""
         self.evaluations = 0
-        self.floored = math.inf
-        """Smallest combined position variance [m^2] raised to :attr:`floor`
-        by :meth:`_rate` (infinite if the floor never engaged)."""
+        self.smallest_floored_variance = math.inf
+        """Smallest combined position variance [m^2] raised to
+        :attr:`floor_variance` by :meth:`_rate` (infinite if the floor never
+        engaged)."""
         self.fallbacks: list[tuple[float, float]] = []
         """Times [s] and rates where the peak-overlap iteration failed."""
 
-    def _negligible(self, gaussians: Gaussians) -> npt.NDArray[np.bool_]:
-        x1, p1, x2, p2 = gaussians
-        largest = np.linalg.eigvalsh(p1[:, :3, :3] + p2[:, :3, :3])[:, -1]
-        gap = np.maximum(
-            np.linalg.norm(x2[:, :3] - x1[:, :3], axis=1) - self.radius, 0.0
+    @property
+    def position_covariance(self) -> FloatArray:
+        """Combined Cartesian position covariance at TCA [m^2]."""
+        result: FloatArray = (
+            self.primary.position_covariance + self.secondary.position_covariance
         )
-        negligible: npt.NDArray[np.bool_] = gap * gap > NEGLIGIBLE_DISTANCE * largest
+        return result
+
+    def _mean_centred(self, times: FloatArray) -> Gaussians:
+        """Both objects' expansions about their mean orbits at ``times``."""
+        return Gaussians(
+            *self.primary.mean_expansions(times), *self.secondary.mean_expansions(times)
+        )
+
+    def _gap(self, gaussians: Gaussians) -> FloatArray:
+        """Distance [m] from the hard-body sphere to the mean relative positions."""
+        distance = np.linalg.norm(gaussians.relative_position, axis=1)
+        gap: FloatArray = np.maximum(distance - self.radius, 0.0)
+        return gap
+
+    def _negligible(self, gaussians: Gaussians) -> BoolArray:
+        largest = np.linalg.eigvalsh(gaussians.position_covariance)[:, -1]
+        gap = self._gap(gaussians)
+        negligible: BoolArray = gap * gap > NEGLIGIBLE_DISTANCE * largest
         return negligible
 
     def __call__(self, t: FloatArray) -> FloatArray:
         times = np.atleast_1d(np.asarray(t, dtype=np.float64))
         self.evaluations += times.size
-        x1, p1 = self.primary.mean_expansions(times)
-        x2, p2 = self.secondary.mean_expansions(times)
+        gaussians = self._mean_centred(times)
         values = np.zeros(times.size)
-        active = np.flatnonzero(~self._negligible((x1, p1, x2, p2)))
+        active = np.flatnonzero(~self._negligible(gaussians))
         if active.size == 0:
             return values
-        mean_centred = (x1[active], p1[active], x2[active], p2[active])
+        mean_centred = gaussians.take(active)
         converged, ok = _peak_overlap(
-            self.primary, self.secondary, times[active], self.floor, mean_centred
+            self.primary,
+            self.secondary,
+            times[active],
+            self.floor_variance,
+            mean_centred,
         )
         for k, index in enumerate(active):
             t_k = float(times[index])
             source = converged if ok[k] else mean_centred
-            values[index] = self._checked_rate(t_k, _row(source, k))
+            values[index] = self._checked_rate(t_k, source.take(k))
             if not ok[k]:
                 self.fallbacks.append((t_k, float(values[index])))
         return values
@@ -269,7 +343,7 @@ class CollisionRate:
         """:meth:`_rate`, with a failure raised as :class:`PcConvergenceError`."""
         try:
             value = self._rate(*gaussians)
-        except (np.linalg.LinAlgError, ArithmeticError, ValueError) as error:
+        except _RATE_ERRORS as error:
             raise PcConvergenceError(
                 f"Hall 3D-Nc: the collision rate at t = {t:.6g} s from TCA "
                 f"cannot be computed: {error}"
@@ -281,9 +355,7 @@ class CollisionRate:
             )
         return value
 
-    def _screen_cells(
-        self, times: FloatArray
-    ) -> tuple[FloatArray, FloatArray, FloatArray, FloatArray, FloatArray]:
+    def _screen_cells(self, times: FloatArray) -> ScreenCells:
         """Gap, relative speed, largest variance, crossing time and time width.
 
         All at ``times``, from the mean-centred expansion that
@@ -291,26 +363,24 @@ class CollisionRate:
         ``1 / (|v| sqrt(u' A^-1 u))`` of the straight-line passage through
         the density, with ``A`` floored as in :meth:`_rate`.
         """
-        x1, p1 = self.primary.mean_expansions(times)
-        x2, p2 = self.secondary.mean_expansions(times)
-        dr, dv = x2[:, :3] - x1[:, :3], x2[:, 3:] - x1[:, 3:]
-        a = p1[:, :3, :3] + p2[:, :3, :3]
-        gap = np.maximum(np.linalg.norm(dr, axis=1) - self.radius, 0.0)
+        gaussians = self._mean_centred(times)
+        dv = gaussians.relative_velocity
+        a = gaussians.position_covariance
+        gap = self._gap(gaussians)
         speed = np.linalg.norm(dv, axis=1)
         values, vectors = np.linalg.eigh(a)
         largest = values[:, -1]
         direction = dv / np.where(speed > 0.0, speed, 1.0)[:, None]
-        sigma = np.sqrt(
-            np.maximum(np.einsum("ij,ijk,ik->i", direction, a, direction), 0.0)
-        )
-        along = np.einsum("ij,ijk->ik", direction, vectors)
+        # u' A u and u' A^-1 u (A floored) in the principal axes of A.
+        along2 = np.einsum("ij,ijk->ik", direction, vectors) ** 2
+        sigma = np.sqrt(np.maximum(np.einsum("ik,ik->i", along2, values), 0.0))
         precision = np.einsum(
-            "ik,ik->i", along * along, 1.0 / np.maximum(values, self.floor)
+            "ik,ik->i", along2, 1.0 / np.maximum(values, self.floor_variance)
         )
         with np.errstate(divide="ignore"):
             crossing = np.where(speed > 0.0, (sigma + self.radius) / speed, math.inf)
             width = np.where(speed > 0.0, 1.0 / (speed * np.sqrt(precision)), math.inf)
-        return gap, speed, largest, crossing, width
+        return ScreenCells(gap, speed, largest, crossing, width)
 
     def screen(self, window: tuple[float, float]) -> list[Candidate]:
         """Candidate intervals of ``window``: where the rate may not be 0.
@@ -331,30 +401,20 @@ class CollisionRate:
         :data:`SCREEN_MIN_CELLS` and :data:`SCREEN_MAX_CELLS` cells.
         """
         start, end = window
-        span = end - start
-        middle = np.array([0.5 * (start + end)])
-        _, speed, largest, _, _ = self._screen_cells(middle)
-        extent = reach(float(largest[0]), self.radius)
-        natural = extent / float(speed[0]) if speed[0] > 0.0 else math.inf
-        longest = SCREEN_PERIOD_FRACTION * min(
-            self.primary.period, self.secondary.period
-        )
-        cell = max(
-            span / SCREEN_MAX_CELLS, min(natural, span / SCREEN_MIN_CELLS, longest)
-        )
-        count = math.ceil(span / cell)
-        cell = span / count
+        count = self._cell_count(window)
+        cell = (end - start) / count
         centres = start + (np.arange(count, dtype=np.float64) + 0.5) * cell
         parts = [
             self._screen_cells(centres[i : i + SCREEN_CHUNK])
             for i in range(0, count, SCREEN_CHUNK)
         ]
-        gap, speed, largest, crossing, width = (
-            np.concatenate(p) for p in zip(*parts, strict=True)
-        )
+        cells = ScreenCells(*(np.concatenate(p) for p in zip(*parts, strict=True)))
         half = 0.5 * cell
         acceleration = self.primary.max_acceleration + self.secondary.max_acceleration
-        closest = np.maximum(gap - speed * half - 0.5 * acceleration * half * half, 0.0)
+        closest = np.maximum(
+            cells.gap - cells.speed * half - 0.5 * acceleration * half * half, 0.0
+        )
+        largest = cells.largest
         padded = np.concatenate([largest[:1], largest, largest[-1:]])
         envelope = SCREEN_VARIANCE_MARGIN * np.maximum.reduce(
             [padded[:-2], padded[1:-1], padded[2:]]
@@ -364,11 +424,27 @@ class CollisionRate:
             Candidate(
                 start if first == 0 else start + first * cell,
                 end if last == count - 1 else start + (last + 1) * cell,
-                float(np.min(crossing[first : last + 1])),
-                float(np.min(width[first : last + 1])),
+                float(np.min(cells.crossing[first : last + 1])),
+                float(np.min(cells.width[first : last + 1])),
             )
             for first, last in regions(possible)
         ]
+
+    def _cell_count(self, window: tuple[float, float]) -> int:
+        """Number of screen cells in ``window`` (see :meth:`screen`)."""
+        start, end = window
+        span = end - start
+        centre = self._screen_cells(np.array([0.5 * (start + end)]))
+        speed = float(centre.speed[0])
+        extent = reach(float(centre.largest[0]), self.radius)
+        natural = extent / speed if speed > 0.0 else math.inf
+        longest = SCREEN_PERIOD_FRACTION * min(
+            self.primary.period, self.secondary.period
+        )
+        cell = max(
+            span / SCREEN_MAX_CELLS, min(natural, span / SCREEN_MIN_CELLS, longest)
+        )
+        return math.ceil(span / cell)
 
     def _rate(
         self, x1: FloatArray, p1: FloatArray, x2: FloatArray, p2: FloatArray
@@ -376,26 +452,25 @@ class CollisionRate:
         mean, covariance = x2 - x1, p1 + p2
         r_mean, v_mean = mean[:3], mean[3:]
         values, vectors = np.linalg.eigh(covariance[:3, :3])
-        if values[0] < self.floor:
-            self.floored = min(self.floored, float(values[0]))
+        if values[0] < self.floor_variance:
+            self.smallest_floored_variance = min(
+                self.smallest_floored_variance, float(values[0])
+            )
         # The floored position covariance A, used through its eigen-decomposition.
-        floored = np.maximum(values, self.floor)
-        a_inverse = (vectors / floored) @ vectors.T
+        floored = np.maximum(values, self.floor_variance)
+        a_inverse = from_eigen(1.0 / floored, vectors)
         log_det = float(np.sum(np.log(floored)))
         b, c = covariance[3:, :3], covariance[3:, 3:]
         gain = b @ a_inverse
         conditional = c - gain @ b.T
         nodes, weights = sphere_rule_principal(floored, vectors, r_mean, self.radius)
         offset = self.radius * nodes - r_mean
-        mahalanobis = np.einsum("ij,jk,ik->i", offset, a_inverse, offset)
+        mahalanobis = np.einsum("ij,ij->i", offset @ a_inverse, offset)
         density = np.exp(-0.5 * mahalanobis - 0.5 * log_det) / (2.0 * math.pi) ** 1.5
-        sigma = np.sqrt(
-            np.maximum(
-                np.einsum("ij,jk,ik->i", nodes, conditional, nodes), _TINY_VARIANCE
-            )
-        )
-        x = np.einsum("ij,ij->i", nodes, v_mean + offset @ gain.T) / (_SQRT_2 * sigma)
-        flux = sigma / _SQRT_2PI * (np.exp(-x * x) - _SQRT_PI * x * special.erfc(x))
+        variance = np.einsum("ij,ij->i", nodes @ conditional, nodes)
+        sigma = np.sqrt(np.maximum(variance, _TINY_VARIANCE))
+        x = np.einsum("ij,ij->i", nodes, v_mean + offset @ gain.T) / (SQRT_2 * sigma)
+        flux = sigma / SQRT_2PI * (np.exp(-x * x) - _SQRT_PI * x * special.erfc(x))
         return self.radius**2 * float(np.sum(weights * density * flux))
 
 
@@ -449,7 +524,7 @@ def encounter_scan(
         return locate(rate, (start, end), rate.screen)
     half = straight_line_half_window(
         conjunction.relative_velocity,
-        rate.primary.position_covariance + rate.secondary.position_covariance,
+        rate.position_covariance,
         conjunction.hard_body_radius,
     )
     period = min(rate.primary.period, rate.secondary.period)
@@ -474,7 +549,7 @@ def straight_line_closest_time(conjunction: Conjunction) -> float:
     return -float(conjunction.relative_position @ velocity) / speed2
 
 
-def check_fallbacks(fallbacks: list[tuple[float, float]], found: RateScan) -> None:
+def check_fallbacks(fallbacks: Sequence[tuple[float, float]], found: RateScan) -> None:
     """Raise if the peak-overlap iteration failed where the rate may matter.
 
     A failure inside an encounter segment, or within one grid step of it, is

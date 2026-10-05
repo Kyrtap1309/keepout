@@ -11,17 +11,18 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from functools import cached_property
 
 import numpy as np
 
-from keepout._types import FloatArray, symmetric_part
+from keepout._types import FloatArray, from_eigen, symmetric_part
+from keepout.covariance import to_correlation
 from keepout.equinoctial import (
-    COMPLEX_STEP,
     RetrogradeFactor,
     complex_step,
-    complex_step_jacobian,
     propagate,
     retrograde_factor,
+    semi_major_axis,
     to_cartesian,
     to_equinoctial,
     wrap_angle,
@@ -68,45 +69,20 @@ class OrbitUncertainty:
             raise CovarianceError(f"covariance of {item.object_id} is unknown")
         state = np.concatenate([item.state.r, item.state.v])
         fr = retrograde_factor(item.state.r, item.state.v)
-        elements = np.asarray(to_equinoctial(state, fr), dtype=np.float64)
-        to_elements = np.linalg.inv(
-            complex_step_jacobian(lambda e: to_cartesian(e, fr), elements)
-        )
+        elements, to_elements = complex_step(lambda x: to_equinoctial(x, fr), state)
         covariance = symmetric_part(
             to_elements @ item.covariance.matrix @ to_elements.T
         )
         return cls(elements, covariance, fr, item.covariance.position)
 
-    def cartesian(self, elements: FloatArray, t: float | FloatArray) -> FloatArray:
-        """Cartesian states ``(..., 6)`` at ``t`` [s from TCA] of TCA elements."""
-        state: FloatArray = np.asarray(
-            to_cartesian(propagate(elements, t), self.fr), dtype=np.float64
-        )
-        return state
-
-    def expansion(self, centre: FloatArray, t: float) -> tuple[FloatArray, FloatArray]:
-        """First-order Gaussian of the Cartesian state at ``t`` (Hall 2021, eq. 44).
-
-        Linearises the two-body motion about the TCA elements ``centre``,
-        which need not be the mean.
-
-        Returns
-        -------
-        tuple
-            Mean state ``X`` (6,) and covariance ``P`` (6x6) at ``t``.
-        """
-        state, jacobian = complex_step(
-            lambda e: to_cartesian(propagate(e, t), self.fr), centre
-        )
-        offset = self.elements - centre
-        offset[5] = wrap_angle(offset[5])
-        mean = state + jacobian @ offset
-        return mean, symmetric_part(jacobian @ self.covariance @ jacobian.T)
-
     def expansions(
         self, centres: FloatArray, t: FloatArray
     ) -> tuple[FloatArray, FloatArray]:
-        """:meth:`expansion` at many times at once, each about its own centre.
+        """First-order Gaussians of the Cartesian state (Hall 2021, eq. 44).
+
+        At each time the two-body motion is linearised about its own TCA
+        elements, which need not be the mean; the Jacobians come from one
+        batched complex-step evaluation.
 
         Parameters
         ----------
@@ -122,19 +98,13 @@ class OrbitUncertainty:
         """
         times = np.asarray(t, dtype=np.float64).ravel()
         centres = np.asarray(centres, dtype=np.float64).reshape(times.size, 6)
-        # The complex-step Jacobians of every time in one vectorised call.
-        shifted = centres[:, None, :] + 1j * COMPLEX_STEP * np.eye(6)
-        value = np.asarray(
-            to_cartesian(
-                propagate(shifted.reshape(-1, 6), np.repeat(times, 6)), self.fr
-            )
-        ).reshape(times.size, 6, 6)
-        jacobian = np.imag(value).transpose(0, 2, 1) / COMPLEX_STEP
+        # Each centre's perturbations arrive as axis 1, so its time broadcasts.
+        state, jacobian = complex_step(
+            lambda e: to_cartesian(propagate(e, times[:, None]), self.fr), centres
+        )
         offset = self.elements - centres
         offset[:, 5] = wrap_angle(offset[:, 5])
-        mean: FloatArray = np.real(value[:, 0, :]) + np.einsum(
-            "mij,mj->mi", jacobian, offset
-        )
+        mean: FloatArray = state + (jacobian @ offset[..., None])[..., 0]
         covariance = jacobian @ self.covariance @ jacobian.transpose(0, 2, 1)
         return mean, symmetric_part(covariance)
 
@@ -147,7 +117,7 @@ class OrbitUncertainty:
     def max_acceleration(self) -> float:
         """Largest two-body acceleration on the mean orbit (at perigee) [m/s^2]."""
         n, af, ag = (float(v) for v in self.elements[:3])
-        semi_major = (EARTH_MU / (n * n)) ** (1.0 / 3.0)
+        semi_major = semi_major_axis(n)
         perigee = semi_major * (1.0 - math.hypot(af, ag))
         return float(EARTH_MU / (perigee * perigee))
 
@@ -165,18 +135,24 @@ class OrbitUncertainty:
         result: FloatArray = propagate(elements, -np.asarray(t))
         return result
 
-    def sample(self, rng: np.random.Generator, count: int) -> FloatArray:
-        """``count`` TCA element vectors ``(count, 6)`` drawn from the Gaussian."""
+    @cached_property
+    def _factor(self) -> FloatArray:
+        """``L`` with ``L L^T`` the element covariance, for :meth:`sample`."""
         # Factor the correlation matrix: the elements differ in scale by many
         # orders of magnitude (n in rad/s, lambda_M in rad).
-        scale = np.sqrt(np.clip(np.diag(self.covariance), 0.0, None))
-        safe = np.where(scale > 0.0, scale, 1.0)
-        values, vectors = np.linalg.eigh(self.covariance / np.outer(safe, safe))
+        deviations, correlation = to_correlation(self.covariance)
+        values, vectors = np.linalg.eigh(correlation)
         # The symmetric square root, unlike vectors * sqrt(values), does not
         # depend on the eigenvector signs and bases LAPACK picks on each CPU.
-        root = (vectors * np.sqrt(np.clip(values, 0.0, None))) @ vectors.T
-        factor = scale[:, None] * root
-        drawn: FloatArray = self.elements + rng.standard_normal((count, 6)) @ factor.T
+        root = from_eigen(np.sqrt(np.clip(values, 0.0, None)), vectors)
+        factor: FloatArray = deviations[:, None] * root
+        return factor
+
+    def sample(self, rng: np.random.Generator, count: int) -> FloatArray:
+        """``count`` TCA element vectors ``(count, 6)`` drawn from the Gaussian."""
+        drawn: FloatArray = (
+            self.elements + rng.standard_normal((count, 6)) @ self._factor.T
+        )
         return drawn
 
     @property

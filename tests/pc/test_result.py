@@ -9,7 +9,7 @@ def test_result_is_read_only() -> None:
     details["order"] = 128.0
     assert result.details["order"] == 64.0
     assert result.diagnostics == ("note",)
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match="does not support item assignment"):
         result.details["order"] = 1.0  # type: ignore[index]
 
 

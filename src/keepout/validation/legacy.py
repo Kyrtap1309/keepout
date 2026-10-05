@@ -14,18 +14,22 @@ from __future__ import annotations
 import re
 from functools import partial
 from pathlib import Path
+from typing import Final
 
 from astropy.time import Time
 
 from keepout.cdm.keywords import covariance_matrix
-from keepout.covariance import make_covariance
-from keepout.errors import CaraFormatError
-from keepout.frames import to_gcrf
-from keepout.objects import ObjectState
-from keepout.state import REF_FRAMES, StateVector
+from keepout.errors import CaraFormatError, UnsupportedFrame
+from keepout.objects import ObjectState, ReportedObject, gcrf_object_states
+from keepout.state import StateVector, as_ref_frame
 
-_LINE = re.compile(r"^\s*([A-Z][A-Z0-9_]*)\s*=\s*(\S+)")
-_STATE = ("X", "Y", "Z", "X_DOT", "Y_DOT", "Z_DOT")
+__all__ = ["legacy_objects"]
+
+_LINE: Final = re.compile(r"^\s*([A-Z][A-Z0-9_]*)\s*=\s*(\S+)")
+_OBJECT: Final = re.compile(r"^\s*OBJECT\s*=")
+_UNKNOWN_DESIGNATOR: Final = "?"
+"""Object ID of a section without ``OBJECT_DESIGNATOR``."""
+_STATE: Final = ("X", "Y", "Z", "X_DOT", "Y_DOT", "Z_DOT")
 
 
 def _fields(lines: list[str]) -> dict[str, str]:
@@ -42,6 +46,22 @@ def _number(fields: dict[str, str], keyword: str, path: Path) -> float:
         return float(fields[keyword])
     except (KeyError, ValueError) as exc:
         raise CaraFormatError(f"{path}: no numeric {keyword}") from exc
+
+
+def _reported(
+    fields: dict[str, str], tca: Time, path: Path, known: bool
+) -> ReportedObject:
+    """One object section; its covariance only if ``known``."""
+    try:
+        frame = as_ref_frame(fields.get("REF_FRAME"))
+    except UnsupportedFrame as exc:
+        raise CaraFormatError(f"{path}: bad REF_FRAME ({exc})") from exc
+    values = [1e3 * _number(fields, k, path) for k in _STATE]  # km, km/s
+    return ReportedObject(
+        fields.get("OBJECT_DESIGNATOR", _UNKNOWN_DESIGNATOR),
+        StateVector(tca, values[:3], values[3:], frame),
+        covariance_matrix(6, partial(_number, fields, path=path)) if known else None,
+    )
 
 
 def legacy_objects(
@@ -64,27 +84,18 @@ def legacy_objects(
         is missing.
     """
     lines = path.read_text(encoding="latin-1").splitlines()
-    starts = [i for i, line in enumerate(lines) if re.match(r"^\s*OBJECT\s*=", line)]
+    starts = [i for i, line in enumerate(lines) if _OBJECT.match(line)]
     if len(starts) != 2:
         raise CaraFormatError(f"{path}: expected 2 object sections, got {len(starts)}")
     header = _fields(lines[: starts[0]])
     if "TCA" not in header:
         raise CaraFormatError(f"{path}: no TCA")
     tca = Time(header["TCA"], scale="utc")
-    objects = []
-    for section, use in zip(
-        (lines[starts[0] : starts[1]], lines[starts[1] :]), known, strict=True
-    ):
-        fields = _fields(section)
-        frame = fields.get("REF_FRAME")
-        if frame not in REF_FRAMES:
-            raise CaraFormatError(f"{path}: unsupported REF_FRAME {frame!r}")
-        values = [1e3 * _number(fields, k, path) for k in _STATE]  # km, km/s
-        state = to_gcrf(StateVector(tca, values[:3], values[3:], frame))
-        covariance = None
-        if use:
-            matrix = covariance_matrix(6, partial(_number, fields, path=path))
-            covariance = make_covariance(matrix, "RTN", tca).in_gcrf(state)
-        designator = fields.get("OBJECT_DESIGNATOR", "?")
-        objects.append(ObjectState(designator, state, covariance))
-    return objects[0], objects[1]
+    sections = (lines[starts[0] : starts[1]], lines[starts[1] :])
+    first, second = gcrf_object_states(
+        [
+            _reported(_fields(section), tca, path, use)
+            for section, use in zip(sections, known, strict=True)
+        ]
+    )
+    return first, second

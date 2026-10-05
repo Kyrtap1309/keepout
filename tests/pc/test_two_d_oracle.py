@@ -3,7 +3,7 @@
 from collections.abc import Callable
 
 import pytest
-from builders import head_on
+from builders import approx, head_on
 from pc_builders import ANISOTROPIC, PlaneCase
 from reference_pc import isotropic_pc, principal_axes_pc
 
@@ -32,7 +32,7 @@ def test_isotropic_covariance_matches_the_rice_integral(
     conjunction = head_on(miss, sigma, sigma, radius)
     result = method(conjunction.plane, radius)
     assert result.method == method.__name__
-    assert result.value == pytest.approx(isotropic_pc(miss, sigma, radius), rel=1e-9)
+    assert result.value == approx(isotropic_pc(miss, sigma, radius), rel=1e-9)
     assert result.diagnostics == ()
 
 
@@ -45,5 +45,5 @@ def test_correlated_off_axis_covariance_matches_the_oracle(
     expected = principal_axes_pc(
         case.miss_u, case.miss_v, case.sigma_u, case.sigma_v, case.radius
     )
-    assert result.value == pytest.approx(expected, rel=1e-8)
+    assert result.value == approx(expected, rel=1e-8)
     assert result.diagnostics == ()

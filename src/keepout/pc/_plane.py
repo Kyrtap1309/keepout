@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Any
+from typing import Final, overload
 
 import numpy as np
 from scipy import special
@@ -18,11 +18,12 @@ from scipy import special
 from keepout._types import FloatArray, require_positive
 from keepout.encounter import Role
 from keepout.errors import CovarianceError, GeometryError
+from keepout.pc.result import Method
 
-_SQRT_2 = math.sqrt(2.0)
-_SQRT_2PI = math.sqrt(2.0 * math.pi)
+SQRT_2: Final = math.sqrt(2.0)
+SQRT_2PI: Final = math.sqrt(2.0 * math.pi)
 
-SIGMA_FLOOR = 1e-4
+SIGMA_FLOOR: Final = 1e-4
 """Smallest standard deviation kept on the encounter plane, as a fraction of
 the hard-body radius. Smaller ones are raised to it, with a diagnostic, so a
 degenerate (line-like) covariance still gives a finite, well-defined Pc."""
@@ -59,20 +60,27 @@ class PlaneGaussian:
     def density_u(self, u: FloatArray) -> FloatArray:
         """1-D Gaussian density along ``u`` [1/m]."""
         z = (u - self.miss_u) / self.sigma_u
-        density: FloatArray = np.exp(-0.5 * z * z) / (_SQRT_2PI * self.sigma_u)
+        density: FloatArray = np.exp(-0.5 * z * z) / (SQRT_2PI * self.sigma_u)
         return density
 
     def density_u_at(self, u: float) -> float:
         """:meth:`density_u` at one point (no NumPy overhead, for quadrature)."""
         z = (u - self.miss_u) / self.sigma_u
-        return math.exp(-0.5 * z * z) / (_SQRT_2PI * self.sigma_u)
+        return math.exp(-0.5 * z * z) / (SQRT_2PI * self.sigma_u)
 
     # P(-h < v < h) for v ~ N(miss_v, sigma_v^2). The mass is symmetric in the sign of
     # miss_v, so with miss_v >= 0 the lower limit is always <= 0; when the upper one
     # is too, erfc of the far tail keeps tiny masses precise.
 
-    def _limits(self, half_chord: FloatArray | float) -> tuple[Any, Any]:
-        scale = _SQRT_2 * self.sigma_v
+    @overload
+    def _limits(self, half_chord: float) -> tuple[float, float]: ...
+    @overload
+    def _limits(self, half_chord: FloatArray) -> tuple[FloatArray, FloatArray]: ...
+    def _limits(
+        self, half_chord: FloatArray | float
+    ) -> tuple[FloatArray | float, FloatArray | float]:
+        """Standardised upper and lower limits of ``v`` over ``+-half_chord``."""
+        scale = SQRT_2 * self.sigma_v
         offset = abs(self.miss_v)
         return (half_chord - offset) / scale, (-half_chord - offset) / scale
 
@@ -94,7 +102,7 @@ class PlaneGaussian:
         return 0.5 * (math.erf(upper) - math.erf(lower))
 
 
-def require_known_covariance(unknown: tuple[Role, ...], method: str) -> None:
+def require_known_covariance(unknown: tuple[Role, ...], method: Method) -> None:
     """Raise :class:`CovarianceError` if a covariance is unknown.
 
     Parameters

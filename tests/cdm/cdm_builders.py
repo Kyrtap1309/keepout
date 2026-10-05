@@ -20,6 +20,14 @@ B1_XML = CDM_DATA / "b1_example.xml"
 TRACSS = CDM_DATA / "tracss_v2.kvn"
 TCA = EPOCH
 CREATED = parse_epoch("2010-03-12T22:31:12.000")
+
+
+def mutate(text: str, old: str, new: str, count: int = 1) -> str:
+    """``text`` with ``old`` replaced, asserting it occurs exactly ``count`` times."""
+    assert text.count(old) == count, old
+    return text.replace(old, new)
+
+
 POSITIONS = {1: (7000e3, 0.0, 0.0), 2: (7000e3, 0.0, 500.0)}
 VELOCITIES = {1: (0.0, 7500.0, 0.0), 2: (0.0, 0.0, 7500.0)}
 
@@ -106,9 +114,21 @@ def assert_equivalent(actual: Cdm, expected: Cdm) -> None:
 
 
 words = (
-    st.text(alphabet=string.ascii_uppercase + string.digits + " -._", max_size=16)
+    # Mixed case, punctuation (including KVN's "=", "[" and "]" and XML's
+    # "<", "&" and quotes) and non-ASCII letters. No line breaks, tabs or
+    # control characters (KVN is line-based; XML 1.0 forbids most controls),
+    # and no edge whitespace, which neither format keeps. A trailing "[...]"
+    # is excluded too: KVN reads it as the field's unit, so it cannot be told
+    # apart from text.
+    st.text(
+        alphabet=string.ascii_letters
+        + string.digits
+        + " -._/:,;()+#'\"&<>=[]!?*%@"
+        + "\u00c4\u00e9\u00df\u00f8\u00c5\u00f1\u00b0\u00b5",
+        max_size=16,
+    )
     .map(str.strip)
-    .filter(bool)
+    .filter(lambda text: bool(text) and not text.endswith("]"))
 )
 reals = st.floats(
     min_value=-1e12, max_value=1e12, allow_nan=False, allow_subnormal=False

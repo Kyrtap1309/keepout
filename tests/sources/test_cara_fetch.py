@@ -6,6 +6,7 @@ import urllib.error
 import urllib.request
 from email.message import Message
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -72,6 +73,55 @@ def test_fetch_replaces_corrupted_cache(tmp_path: Path) -> None:
     assert download.urls == [FILE.url]
 
 
+class DigestCounter:
+    """Counts the files :func:`hashlib.file_digest` hashes."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self.calls = 0
+        digest = hashlib.file_digest
+
+        def counting(stream: Any, name: str) -> Any:
+            self.calls += 1
+            return digest(stream, name)
+
+        monkeypatch.setattr(hashlib, "file_digest", counting)
+
+
+def test_a_verified_cache_is_not_hashed_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = cached_path(tmp_path, FILE)
+    target.parent.mkdir(parents=True)
+    target.write_bytes(PAYLOAD)  # cached by an earlier process
+    hashed = DigestCounter(monkeypatch)
+    cara.prefetch([FILE], cache=tmp_path, download=FakeDownloader(b"unused"))
+    assert fetch(FILE, cache=tmp_path, download=FakeDownloader(b"unused")) == target
+    assert hashed.calls == 1
+
+
+def test_a_downloaded_file_is_not_hashed_from_disk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    hashed = DigestCounter(monkeypatch)
+    fetch(FILE, cache=tmp_path, download=FakeDownloader(PAYLOAD))
+    download = FakeDownloader(b"must not be used")
+    fetch(FILE, cache=tmp_path, download=download)
+    assert hashed.calls == 0
+    assert download.urls == []
+
+
+def test_a_cache_changed_after_verification_is_checked_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = fetch(FILE, cache=tmp_path, download=FakeDownloader(PAYLOAD))
+    target.write_bytes(b"truncated")
+    hashed = DigestCounter(monkeypatch)
+    download = FakeDownloader(PAYLOAD)
+    assert fetch(FILE, cache=tmp_path, download=download).read_bytes() == PAYLOAD
+    assert hashed.calls == 1
+    assert download.urls == [FILE.url]
+
+
 def test_fetch_rejects_checksum_mismatch_without_writing(tmp_path: Path) -> None:
     with pytest.raises(ChecksumMismatch, match="expected sha256"):
         fetch(FILE, cache=tmp_path, download=FakeDownloader(b"tampered"))
@@ -105,7 +155,7 @@ def test_prefetch_caches_every_file(tmp_path: Path) -> None:
 
 
 def test_prefetch_reports_a_failed_file(tmp_path: Path) -> None:
-    with pytest.raises(ChecksumMismatch):
+    with pytest.raises(ChecksumMismatch, match="expected sha256"):
         cara.prefetch([FILE], cache=tmp_path, download=FakeDownloader(b"tampered"))
 
 

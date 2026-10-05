@@ -6,15 +6,18 @@ Used by :mod:`keepout.pc.api` (the applicability warning) and by
 
 from __future__ import annotations
 
-from keepout.conjunction import Conjunction
-from keepout.encounter import sigma_along
+from typing import Final
 
-SIGMA_EXTENT = 5.0
+from keepout.conjunction import Conjunction
+from keepout.orbits import orbital_period
+from keepout.pc._timeline import straight_line_half_window
+
+SIGMA_EXTENT: Final = 5.0
 """Standard deviations of the combined position covariance along the
 relative velocity that the encounter is taken to span when estimating its
 duration."""
 
-DURATION_LIMIT = 0.01
+DURATION_LIMIT: Final = 0.01
 """Largest encounter duration, as a fraction of the primary's orbital
 period, for which the 2-D (straight-line) model is considered sound."""
 
@@ -27,6 +30,23 @@ def encounter_duration(conjunction: Conjunction) -> float:
     relative velocity: only that extent is crossed during the encounter.
     """
     plane = conjunction.plane
-    sigma = sigma_along(plane.direction, plane.combined_covariance)
-    extent = SIGMA_EXTENT * sigma + conjunction.hard_body_radius
-    return 2.0 * extent / plane.relative_speed
+    return 2.0 * straight_line_half_window(
+        plane.relative_velocity,
+        plane.combined_covariance,
+        conjunction.hard_body_radius,
+        sigmas=SIGMA_EXTENT,
+    )
+
+
+def long_encounter(conjunction: Conjunction, duration: float) -> float | None:
+    """``duration`` as a fraction of the primary's orbital period, if too long.
+
+    ``None`` if it is within :data:`DURATION_LIMIT`, or if the primary is
+    unbound (no period). The period is the two-body one of the primary's
+    state, which needs no covariance, so the check holds with a covariance
+    unknown too.
+    """
+    period = orbital_period(conjunction.primary.state)
+    if period is None or duration <= DURATION_LIMIT * period:
+        return None
+    return duration / period

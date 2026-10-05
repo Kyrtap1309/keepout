@@ -4,28 +4,32 @@ import dataclasses
 import math
 
 import numpy as np
-from builders import rotate, rotations
+import pytest
+from builders import TINY, rotate, rotations
+from builders import approx as relative_approx
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 from pc_builders import PlaneCase, conjunctions, plane_cases
 from reference_pc import principal_axes_pc
+from scipy import special
 
 from keepout._types import FloatArray
 from keepout.conjunction import Conjunction
 from keepout.pc import compute_pc, elrod, foster
+from keepout.pc._plane import SIGMA_FLOOR
 from keepout.pc.result import Method, PcResult
 
 METHODS: tuple[Method, ...] = ("foster", "elrod")
+EACH_METHOD = pytest.mark.parametrize("method", METHODS)
 
 # Geometric invariants hold far tighter than the 1e-6 CARA acceptance
 # criterion: only the quadrature tolerance (1e-10) and round-off separate the
-# two sides. Below TINY a relative comparison means nothing.
+# two sides.
 RTOL = 1e-8
-TINY = 1e-300
 
 
-def close(a: float, b: float, rtol: float = RTOL) -> bool:
-    return abs(a - b) <= rtol * max(abs(a), abs(b)) + TINY
+def approx(expected: float, rtol: float = RTOL) -> object:
+    return relative_approx(expected, rel=rtol)
 
 
 def pc(conjunction: Conjunction, method: Method = "foster") -> float:
@@ -46,39 +50,60 @@ def unfloored(case: PlaneCase) -> bool:
 
 
 @settings(max_examples=50)
-@given(plane_cases())
-def test_both_methods_match_the_independent_oracle(case: PlaneCase) -> None:
+@given(plane_cases(), st.sampled_from(METHODS))
+def test_both_methods_match_the_independent_oracle(
+    case: PlaneCase, method: Method
+) -> None:
     assume(unfloored(case))
     expected = principal_axes_pc(
         case.miss_u, case.miss_v, case.sigma_u, case.sigma_v, case.radius
     )
     assume(expected > 1e-250)
-    for method in METHODS:
-        assert close(on_plane(case, method).value, expected, rtol=1e-7)
+    assert on_plane(case, method).value == approx(expected, rtol=1e-7)
 
 
-@given(plane_cases())
-def test_pc_is_bounded_by_the_peak_density(case: PlaneCase) -> None:
-    # Pc is at most pi R^2 times the largest plane density, 1 / (2 pi sigma_u sigma_v).
-    bound = case.radius**2 / (
-        2.0 * max(case.sigma_u, 1e-4 * case.radius) * case.sigma_v
+def interval_mass(low: float, high: float, sigma: float) -> float:
+    """Mass of ``N(0, sigma^2)`` on ``[low, high]``, accurate in either tail."""
+    if low > 0.0:
+        return float(special.ndtr(-low / sigma) - special.ndtr(-high / sigma))
+    return float(special.ndtr(high / sigma) - special.ndtr(low / sigma))
+
+
+@settings(max_examples=50)
+@given(plane_cases(), st.sampled_from(METHODS))
+def test_pc_is_bounded_by_the_peak_density_and_the_strips(
+    case: PlaneCase, method: Method
+) -> None:
+    """Pc is at most pi R^2 times the peak plane density 1 / (2 pi sigma_u
+    sigma_v), and at most the mass of either strip ``|u - miss_u| <= R`` and
+    ``|v - miss_v| <= R``, which contain the disk."""
+    floor = SIGMA_FLOOR * case.radius  # keepout raises smaller sigmas to it
+    sigma_u, sigma_v = max(case.sigma_u, floor), max(case.sigma_v, floor)
+    radius = case.radius
+    bound = min(
+        radius**2 / (2.0 * sigma_u * sigma_v),
+        interval_mass(case.miss_u - radius, case.miss_u + radius, sigma_u),
+        interval_mass(case.miss_v - radius, case.miss_v + radius, sigma_v),
     )
-    for method in METHODS:
-        value = on_plane(case, method).value
-        assert 0.0 <= value <= bound * (1.0 + 1e-9)
+    value = on_plane(case, method).value
+    assert 0.0 <= value <= bound * (1.0 + 1e-9) + TINY
 
 
+@EACH_METHOD
 @given(plane_cases(), st.floats(1e-3, 1e3))
 def test_pc_does_not_depend_on_the_unit_of_length(
-    case: PlaneCase, scale: float
+    method: Method, case: PlaneCase, scale: float
 ) -> None:
-    assert close(on_plane(case, scale=scale).value, on_plane(case).value)
+    assert on_plane(case, method, scale=scale).value == approx(
+        on_plane(case, method).value
+    )
 
 
+@EACH_METHOD
 @given(plane_cases())
-def test_mirrored_miss_gives_the_same_pc(case: PlaneCase) -> None:
+def test_mirrored_miss_gives_the_same_pc(method: Method, case: PlaneCase) -> None:
     mirrored = dataclasses.replace(case, miss_u=-case.miss_u, miss_v=-case.miss_v)
-    assert close(on_plane(mirrored).value, on_plane(case).value)
+    assert on_plane(mirrored, method).value == approx(on_plane(case, method).value)
 
 
 @settings(max_examples=50)
@@ -122,36 +147,38 @@ def test_small_hard_body_sees_the_density_at_the_miss(
     ) / (2.0 * math.pi * case.sigma_u * case.sigma_v)
     expected = math.pi * small.radius**2 * density
     assume(expected > 1e-250)
-    assert close(on_plane(small, method).value, expected, rtol=1e-6)
+    assert on_plane(small, method).value == approx(expected, rtol=1e-6)
 
 
+@EACH_METHOD
 @given(conjunctions())
 def test_pc_does_not_depend_on_which_object_is_primary(
-    conjunction: Conjunction,
+    method: Method, conjunction: Conjunction
 ) -> None:
     swapped = Conjunction(
         conjunction.secondary, conjunction.primary, conjunction.hard_body_radius
     )
-    assert close(pc(swapped), pc(conjunction))
+    assert pc(swapped, method) == approx(pc(conjunction, method))
 
 
+@EACH_METHOD
 @given(conjunctions(), rotations())
 def test_pc_is_invariant_under_rotation_of_the_scene(
-    conjunction: Conjunction, rotation: FloatArray
+    method: Method, conjunction: Conjunction, rotation: FloatArray
 ) -> None:
     rotated = Conjunction(
         rotate(conjunction.primary, rotation),
         rotate(conjunction.secondary, rotation),
         conjunction.hard_body_radius,
     )
-    assert close(pc(rotated), pc(conjunction))
+    assert pc(rotated, method) == approx(pc(conjunction, method))
 
 
 @given(plane_cases())
 def test_foster_and_elrod_agree(case: PlaneCase) -> None:
     by_elrod = on_plane(case, "elrod")
     assert not any("Elrod" in d for d in by_elrod.diagnostics)
-    assert close(by_elrod.value, on_plane(case, "foster").value, rtol=1e-7)
+    assert by_elrod.value == approx(on_plane(case, "foster").value, rtol=1e-7)
 
 
 def test_plane_case_conjunction_has_the_same_plane() -> None:

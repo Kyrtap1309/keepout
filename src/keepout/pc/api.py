@@ -3,20 +3,34 @@
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Callable
-from typing import Any, Literal, TypeAlias
+from collections.abc import Callable, Mapping
+from typing import (
+    Any,
+    Concatenate,
+    Final,
+    Literal,
+    NamedTuple,
+    TypeAlias,
+    overload,
+)
 
 import numpy as np
 
+from keepout._types import require_positive
 from keepout.conjunction import Conjunction
 from keepout.errors import GeometryError, PcConvergenceError
 from keepout.orbits import orbital_period
-from keepout.pc._duration import DURATION_LIMIT, SIGMA_EXTENT, encounter_duration
+from keepout.pc._duration import (
+    DURATION_LIMIT,
+    SIGMA_EXTENT,
+    encounter_duration,
+    long_encounter,
+)
 from keepout.pc.elrod import elrod
 from keepout.pc.foster import foster
-from keepout.pc.hall3d import hall3d
+from keepout.pc.hall3d import HALL_RTOL, Encounters, integrate
 from keepout.pc.maxpc import alfano, dilution, frisbee
-from keepout.pc.montecarlo import montecarlo
+from keepout.pc.montecarlo import montecarlo, sample
 from keepout.pc.result import Method, PcResult
 
 __all__ = [
@@ -34,25 +48,15 @@ __all__ = [
 MethodChoice: TypeAlias = Literal["auto"] | Method
 """Methods :func:`compute_pc` accepts; ``"auto"`` picks one."""
 
-_METHODS: dict[str, Callable[..., PcResult]] = {
-    "foster": lambda c, **o: foster(c.plane, c.hard_body_radius, **o),
-    "elrod": lambda c, **o: elrod(c.plane, c.hard_body_radius, **o),
-    "frisbee": lambda c, **o: frisbee(c.plane, c.hard_body_radius, **o),
-    "dilution": lambda c, **o: dilution(c.plane, c.hard_body_radius, **o),
-    "alfano": lambda c, **o: alfano(c.plane, c.hard_body_radius, **o),
-    "hall3d": hall3d,
-    "montecarlo": montecarlo,
-}
-
-TCA_OFFSET_LIMIT = 0.01
+TCA_OFFSET_LIMIT: Final = 0.01
 """Largest relative-position component along the relative velocity, as a
 fraction of the relative distance, before the states are reported as not
 being at the time of closest approach."""
 
-AUTO_MC_SAMPLES = 1_000_000
+AUTO_MC_SAMPLES: Final = 1_000_000
 """Trial budget of ``auto``'s Monte Carlo fallback (seconds to a minute)."""
 
-AUTO_MC_SEED = 0
+AUTO_MC_SEED: Final = 0
 """Seed of ``auto``'s Monte Carlo fallback, so ``auto`` is reproducible."""
 
 
@@ -71,13 +75,19 @@ def applicability(conjunction: Conjunction, duration: float) -> tuple[str, ...]:
     duration
         Its :func:`encounter_duration` [s].
     """
+    return _warnings(conjunction, duration, long_encounter(conjunction, duration))
+
+
+def _warnings(
+    conjunction: Conjunction, duration: float, fraction: float | None
+) -> tuple[str, ...]:
+    """:func:`applicability`, given the :func:`long_encounter` fraction."""
     warnings: list[str] = []
-    period = orbital_period(conjunction.primary.state)
-    if period is not None and duration > DURATION_LIMIT * period:
+    if fraction is not None:
         lasts = "at least about" if conjunction.unknown_covariance else "about"
         warnings.append(
             f"2-D Pc assumptions questionable: the encounter lasts {lasts} "
-            f"{duration:.3g} s, {100.0 * duration / period:.2g}% of the primary's "
+            f"{duration:.3g} s, {100.0 * fraction:.2g}% of the primary's "
             f"orbital period (limit {100.0 * DURATION_LIMIT:g}%); a 3-D Pc may "
             "differ"
         )
@@ -91,6 +101,80 @@ def applicability(conjunction: Conjunction, duration: float) -> tuple[str, ...]:
     return tuple(warnings)
 
 
+class _Assessment(NamedTuple):
+    """What :func:`compute_pc` adds to every method's result."""
+
+    notes: tuple[str, ...]
+    """Applicability warnings."""
+    details: dict[str, float]
+    """``encounter_duration_s``, when it is meaningful."""
+    long: bool
+    """Whether the encounter is too long for 2-D Pc (a sample can then leave
+    the hard body and enter it again: Hall's Nc says so)."""
+
+
+def _assess(conjunction: Conjunction) -> _Assessment:
+    """Applicability notes and encounter duration, when they are meaningful.
+
+    Only with an encounter plane (non-zero relative velocity). The notes are
+    kept with a covariance unknown (see :func:`applicability`); the duration
+    detail is not, since it is then only a lower bound.
+    """
+    if conjunction.relative_speed == 0.0:
+        return _Assessment((), {}, long=False)
+    duration = encounter_duration(conjunction)
+    fraction = long_encounter(conjunction, duration)
+    notes = _warnings(conjunction, duration, fraction)
+    details = (
+        {} if conjunction.unknown_covariance else {"encounter_duration_s": duration}
+    )
+    return _Assessment(notes, details, long=fraction is not None)
+
+
+_Runner: TypeAlias = Callable[Concatenate[Conjunction, bool, ...], PcResult]
+"""A method run on a conjunction whose encounter :func:`_assess` tested for
+length (the ``bool``), with the method's keyword options."""
+
+
+def _on_plane(method: Callable[..., PcResult]) -> _Runner:
+    """Adapt a 2-D method ``f(plane, radius, **options)`` to a conjunction."""
+
+    def run(conjunction: Conjunction, long: bool, /, **options: Any) -> PcResult:
+        return method(conjunction.plane, conjunction.hard_body_radius, **options)
+
+    return run
+
+
+def _hall3d(
+    conjunction: Conjunction,
+    long: bool,
+    /,
+    *,
+    window: tuple[float, float] | None = None,
+    rtol: float = HALL_RTOL,
+) -> PcResult:
+    """:func:`~keepout.pc.hall3d.hall3d`, with the length test already made."""
+    require_positive(rtol, "rtol")
+    encounters = Encounters.scan(conjunction, "hall3d", window)
+    return integrate(conjunction, encounters, rtol=rtol, long=long)
+
+
+def _montecarlo(conjunction: Conjunction, long: bool, /, **options: Any) -> PcResult:
+    """:func:`~keepout.pc.montecarlo.montecarlo`; the length test is unused."""
+    return montecarlo(conjunction, **options)
+
+
+_METHODS: Final[Mapping[Method, _Runner]] = {
+    "foster": _on_plane(foster),
+    "elrod": _on_plane(elrod),
+    "frisbee": _on_plane(frisbee),
+    "dilution": _on_plane(dilution),
+    "alfano": _on_plane(alfano),
+    "hall3d": _hall3d,
+    "montecarlo": _montecarlo,
+}
+
+
 _Choice: TypeAlias = tuple[PcResult, tuple[str, ...], dict[str, float]]
 """A method's result, applicability notes and extra details."""
 
@@ -102,30 +186,14 @@ def _bound(conjunction: Conjunction) -> bool:
     )
 
 
-def _notes(conjunction: Conjunction) -> tuple[tuple[str, ...], dict[str, float]]:
-    """Applicability notes and encounter duration, when they are meaningful.
-
-    Only with an encounter plane (non-zero relative velocity). The notes are
-    kept with a covariance unknown (see :func:`applicability`); the duration
-    detail is not, since it is then only a lower bound.
-    """
-    if conjunction.relative_speed == 0.0:
-        return (), {}
-    duration = encounter_duration(conjunction)
-    notes = applicability(conjunction, duration)
-    if conjunction.unknown_covariance:
-        return notes, {}
-    return notes, {"encounter_duration_s": duration}
-
-
 def _auto(conjunction: Conjunction) -> _Choice:
     """Pick and run a method; return its result, applicability notes and details."""
     if conjunction.relative_speed == 0.0:
         _require_three_d(conjunction)
         notes: tuple[str, ...] = ("relative velocity is zero: 2-D Pc is undefined",)
-        return _three_d(conjunction, notes, {})
+        return _three_d(conjunction, notes, {}, long=False)
     unknown = conjunction.unknown_covariance
-    notes, details = _notes(conjunction)
+    notes, details, long = _assess(conjunction)
     if len(unknown) == 2:
         return alfano(conjunction.plane, conjunction.hard_body_radius), notes, details
     if unknown:
@@ -133,7 +201,7 @@ def _auto(conjunction: Conjunction) -> _Choice:
     if not notes or not _bound(conjunction):
         return foster(conjunction.plane, conjunction.hard_body_radius), notes, details
     two_d = foster(conjunction.plane, conjunction.hard_body_radius).value
-    return _three_d(conjunction, notes, {**details, "pc_2d": two_d})
+    return _three_d(conjunction, notes, {**details, "pc_2d": two_d}, long=long)
 
 
 def _require_three_d(conjunction: Conjunction) -> None:
@@ -155,17 +223,71 @@ def _require_three_d(conjunction: Conjunction) -> None:
 
 
 def _three_d(
-    conjunction: Conjunction, notes: tuple[str, ...], details: dict[str, float]
+    conjunction: Conjunction,
+    notes: tuple[str, ...],
+    details: dict[str, float],
+    *,
+    long: bool,
 ) -> _Choice:
+    """Hall's 3D-Nc, or Monte Carlo over the same encounter scan if it fails."""
+    encounters = Encounters.scan(conjunction, "hall3d", None)
     try:
-        return hall3d(conjunction), notes, details
+        return integrate(conjunction, encounters, long=long), notes, details
     except PcConvergenceError as error:
         fallback = (
             f"{error}; Monte Carlo used instead (seed {AUTO_MC_SEED}, at most "
             f"{AUTO_MC_SAMPLES:,} trials)"
         )
-        result = montecarlo(conjunction, max_samples=AUTO_MC_SAMPLES, seed=AUTO_MC_SEED)
+        result = sample(
+            conjunction, encounters, max_samples=AUTO_MC_SAMPLES, seed=AUTO_MC_SEED
+        )
         return result, (*notes, fallback), details
+
+
+@overload
+def compute_pc(conjunction: Conjunction, method: Literal["auto"] = ...) -> PcResult: ...
+
+
+@overload
+def compute_pc(
+    conjunction: Conjunction, method: Literal["foster"], *, rtol: float = ...
+) -> PcResult: ...
+
+
+@overload
+def compute_pc(
+    conjunction: Conjunction, method: Literal["elrod"], *, order: int | None = ...
+) -> PcResult: ...
+
+
+@overload
+def compute_pc(
+    conjunction: Conjunction, method: Literal["frisbee", "dilution", "alfano"]
+) -> PcResult: ...
+
+
+@overload
+def compute_pc(
+    conjunction: Conjunction,
+    method: Literal["hall3d"],
+    *,
+    window: tuple[float, float] | None = ...,
+    rtol: float = ...,
+) -> PcResult: ...
+
+
+@overload
+def compute_pc(
+    conjunction: Conjunction,
+    method: Literal["montecarlo"],
+    *,
+    window: tuple[float, float] | None = ...,
+    samples: int | None = ...,
+    rtol: float = ...,
+    max_samples: int = ...,
+    confidence: float = ...,
+    seed: int | None = ...,
+) -> PcResult: ...
 
 
 def compute_pc(
@@ -195,13 +317,15 @@ def compute_pc(
         not finite), ``"auto"`` falls back to ``"montecarlo"`` with at most
         ``AUTO_MC_SAMPLES`` trials and the seed ``AUTO_MC_SEED``, so
         ``"auto"`` is reproducible. A failure of the encounter scan itself
-        is not covered: Monte Carlo runs the same scan
-        (:func:`~keepout.pc._rate.encounter_scan`) and re-raises it. The 2-D and
+        is not covered: Monte Carlo reuses that scan
+        (:func:`~keepout.pc._rate.encounter_scan`), so its error propagates.
+        The 2-D and
         maximum-Pc methods take milliseconds; ``"hall3d"`` about 1-60 s and the
         Monte Carlo fallback up to about a minute.
     **options
-        Passed to an explicitly chosen method (e.g. ``rtol``, ``order``,
-        ``window``, ``samples``, ``seed``); not accepted with ``"auto"``.
+        The keyword-only parameters of an explicitly chosen method (e.g.
+        ``rtol``, ``order``, ``window``, ``samples``, ``seed``), as typed by
+        the overloads; none with ``"auto"`` or the maximum-Pc methods.
 
     Returns
     -------
@@ -236,17 +360,19 @@ def compute_pc(
         screen ruled it negligible, or the rate cannot be computed on the scan
         grid), since the Monte Carlo fallback shares that scan.
     """
-    if method != "auto" and method not in _METHODS:
-        raise ValueError(
-            f"unknown Pc method {method!r}; expected 'auto' or one of {tuple(_METHODS)}"
-        )
     if method == "auto":
         if options:
             raise ValueError(f"options {sorted(options)} need an explicit method")
         result, notes, details = _auto(conjunction)
     else:
-        result = _METHODS[method](conjunction, **options)
-        notes, details = _notes(conjunction)
+        run = _METHODS.get(method)
+        if run is None:
+            raise ValueError(
+                f"unknown Pc method {method!r}; expected 'auto' or one of "
+                f"{tuple(_METHODS)}"
+            )
+        notes, details, long = _assess(conjunction)
+        result = run(conjunction, long, **options)
     return dataclasses.replace(
         result,
         diagnostics=conjunction.diagnostics + notes + result.diagnostics,

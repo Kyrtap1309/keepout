@@ -23,56 +23,65 @@ All three are upper bounds, not estimates; each says so in its diagnostics.
 
 from __future__ import annotations
 
-import dataclasses
 import math
 from collections.abc import Callable
+from typing import Final
 
 import numpy as np
-from scipy import optimize, special
+from scipy import optimize
 
 from keepout._types import FloatArray, require_positive
 from keepout.encounter import EncounterPlane
 from keepout.pc._plane import plane_gaussian, require_known_covariance
-from keepout.pc.foster import foster
+from keepout.pc.foster import gaussian_pc
 from keepout.pc.result import PcResult
 
-SEARCH_DECADES = 4.0
+__all__ = [
+    "DILUTION_TOLERANCE",
+    "SEARCH_DECADES",
+    "SEARCH_GAIN_RTOL",
+    "SEARCH_XATOL",
+    "SEED_SCALE_FLOOR",
+    "alfano",
+    "dilution",
+    "frisbee",
+]
+
+SEARCH_DECADES: Final = 4.0
 """Half-width, in decades, of the bounded searches about the small-body
 optima (the added variance of :func:`frisbee`, the scale factor of
 :func:`dilution`)."""
 
-SEARCH_GAIN_RTOL = 1e-8
+SEARCH_GAIN_RTOL: Final = 1e-8
 """Relative Pc gain a searched point needs to replace the seed point. The
 optima are flat and Foster's quadrature is accurate to about
 :data:`~keepout.pc.foster.FOSTER_RTOL` (1e-10), so a smaller gain is noise;
 keeping the seed then keeps its exact added variance or scale factor."""
 
-SEARCH_XATOL = 1e-9
+SEARCH_XATOL: Final = 1e-9
 """Convergence of the bounded searches, in decades of the searched variable."""
 
-SEED_SCALE_FLOOR = 1e-300
+SEED_SCALE_FLOOR: Final = 1e-300
 """Smallest dilution seed scale: keeps its logarithm finite for a zero miss."""
 
-DILUTION_TOLERANCE = 1e-3
+DILUTION_TOLERANCE: Final = 1e-3
 """Relative excess of the maximum over the nominal Pc that marks a
 conjunction as diluted (as in CARA's ``PcDilution``)."""
 
-_INSIDE = (
+_INSIDE: Final = (
     "miss distance {miss:.3g} m is inside the hard body ({radius:.3g} m): "
     "Pc tends to 1 as the covariance shrinks"
 )
 
-_EDGE = (
+_EDGE: Final = (
     "miss distance {miss:.3g} m is on the hard-body edge: "
     "Pc tends to 1/2 as the covariance shrinks"
 )
 
 
-def _foster_with(plane: EncounterPlane, covariance: FloatArray, radius: float) -> float:
-    return foster(
-        dataclasses.replace(plane, covariance=covariance, unknown_covariance=()),
-        radius,
-    ).value
+def _pc(miss_vector: FloatArray, covariance: FloatArray, radius: float) -> float:
+    """Foster's Pc of a miss vector under a trial covariance."""
+    return gaussian_pc(plane_gaussian(miss_vector, covariance, radius)).value
 
 
 def _search_log_max(pc: Callable[[float], float], centre: float) -> tuple[float, float]:
@@ -132,7 +141,6 @@ def frisbee(plane: EncounterPlane, hard_body_radius: float) -> PcResult:
     CovarianceError
         If the known covariance has no positive eigenvalue on the plane.
     """
-    require_positive(hard_body_radius, "hard_body_radius")
     if len(plane.unknown_covariance) != 1:
         raise ValueError(
             "frisbee needs exactly one unknown covariance; unknown: "
@@ -147,7 +155,7 @@ def frisbee(plane: EncounterPlane, hard_body_radius: float) -> PcResult:
         *gaussian.diagnostics,
     ]
     analytic = miss * miss * (k2 - 1.0) / k2 if k2 > 1.0 else 0.0
-    pc_zero = _foster_with(plane, plane.covariance, hard_body_radius)
+    pc_zero = gaussian_pc(gaussian).value
     # A zero miss centres the hard body on the Gaussian: any added variance
     # lowers Pc (Anderson's theorem) and there is no miss direction.
     best = (0.0, pc_zero)
@@ -157,8 +165,8 @@ def frisbee(plane: EncounterPlane, hard_body_radius: float) -> PcResult:
         outer = np.outer(unit, unit)
 
         def pc(added: float) -> float:
-            return _foster_with(
-                plane, plane.covariance + added * outer, hard_body_radius
+            return _pc(
+                plane.miss_vector, plane.covariance + added * outer, hard_body_radius
             )
 
         seed = best
@@ -208,20 +216,19 @@ def dilution(plane: EncounterPlane, hard_body_radius: float) -> PcResult:
     CovarianceError
         If a covariance is unknown or the plane covariance is degenerate.
     """
-    require_positive(hard_body_radius, "hard_body_radius")
     require_known_covariance(plane.unknown_covariance, "dilution")
-    nominal = foster(plane, hard_body_radius).value
+    gaussian = plane_gaussian(plane.miss_vector, plane.covariance, hard_body_radius)
+    nominal = gaussian_pc(gaussian).value
     miss = plane.miss_distance
     note = "maximum Pc over covariance scaling (dilution): an upper bound"
     if miss < hard_body_radius:
         details = {"pc_nominal": nominal, "scale_factor": 0.0, "diluted": 1.0}
         inside = _INSIDE.format(miss=miss, radius=hard_body_radius)
         return PcResult(1.0, "dilution", (note, inside), details)
-    gaussian = plane_gaussian(plane.miss_vector, plane.covariance, hard_body_radius)
     seed_scale = max(gaussian.mahalanobis2 / 2.0, SEED_SCALE_FLOOR)
 
     def pc(scale: float) -> float:
-        return _foster_with(plane, scale * plane.covariance, hard_body_radius)
+        return _pc(plane.miss_vector, scale * plane.covariance, hard_body_radius)
 
     seed = _prefer((1.0, nominal), (seed_scale, pc(seed_scale)))
     scale, value = _prefer(seed, _search_log_max(pc, math.log10(seed_scale)))
@@ -267,7 +274,5 @@ def alfano(plane: EncounterPlane, hard_body_radius: float) -> PcResult:
         return PcResult(0.5, "alfano", (note, edge), {"sigma_m": 0.0})
     sigma = math.sqrt(2.0 * d * radius / math.log1p(2.0 * radius / (d - radius)))
     scale = math.sqrt(2.0) * sigma
-    value = 0.5 * (
-        special.erfc((d - radius) / scale) - special.erfc((d + radius) / scale)
-    )
+    value = 0.5 * (math.erfc((d - radius) / scale) - math.erfc((d + radius) / scale))
     return PcResult.clamped(value, "alfano", (note,), {"sigma_m": sigma})

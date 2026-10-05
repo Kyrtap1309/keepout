@@ -26,13 +26,15 @@ diagnostic says so.
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
+from typing import Final
 
 import numpy as np
 
 from keepout._types import require_positive
 from keepout.conjunction import Conjunction
 from keepout.errors import PcConvergenceError
-from keepout.pc._duration import DURATION_LIMIT, encounter_duration
+from keepout.pc._duration import encounter_duration, long_encounter
 from keepout.pc._rate import (
     CollisionRate,
     check_fallbacks,
@@ -41,10 +43,29 @@ from keepout.pc._rate import (
     reach,
     straight_line_closest_time,
 )
-from keepout.pc._timeline import QUAD_RTOL, RATE_FLOOR, RateIntegral, integrate_segments
-from keepout.pc.result import PcResult
+from keepout.pc._timeline import (
+    RATE_FLOOR,
+    RateIntegral,
+    RateScan,
+    integrate_segments,
+    negligible_note,
+)
+from keepout.pc.result import Method, PcResult
 
-QUIET_AGREEMENT = 1e-4
+__all__ = [
+    "HALL_RTOL",
+    "QUIET_AGREEMENT",
+    "Encounters",
+    "hall3d",
+    "integrate",
+    "is_long",
+]
+
+HALL_RTOL: Final = 1e-6
+"""Default relative tolerance of the time integral: the agreement of two
+nested Clenshaw-Curtis rules."""
+
+QUIET_AGREEMENT: Final = 1e-4
 """Time-integral agreement below which a missed ``rtol`` is not reported. It
 is per piece (the last two Clenshaw-Curtis rules of one piece of an
 encounter segment, relative to the total Nc) and 10 times inside Hall's
@@ -52,17 +73,16 @@ tightest validation criterion (1e-3 relative to CARA), so it cannot affect
 a result at that accuracy."""
 
 
-def _diagnostics(
-    integral: RateIntegral, window_given: bool, rtol: float = QUAD_RTOL
+def _integral_notes(
+    integral: RateIntegral, window_given: bool, rtol: float
 ) -> list[str]:
+    """Diagnostics on the time integral: negligible rate, Nc above 1, several
+    encounters, a non-negligible window edge and a missed ``rtol``."""
     notes: list[str] = []
     nc = integral.nc
-    if integral.peak <= 0.0:
-        start, end = integral.window
-        notes.append(
-            f"collision rate negligible over the whole window [{start:.6g}, "
-            f"{end:.6g}] s"
-        )
+    scan = integral.scan
+    if scan.peak <= 0.0:
+        notes.append(negligible_note(scan))
     if nc > 1.0:
         notes.append(
             f"expected number of collisions Nc = {nc:.4g} exceeds 1; Pc set to 1"
@@ -74,9 +94,9 @@ def _diagnostics(
             f"the largest one's Nc ({largest:.3g}) and the total Nc ({nc:.3g}); "
             "the value is Nc (Hall 2021)"
         )
-    if not window_given and integral.edge >= RATE_FLOOR:
+    if not window_given and scan.edge >= RATE_FLOOR:
         notes.append(
-            f"the collision rate is {integral.edge:.1e} of its peak at the window "
+            f"the collision rate is {scan.edge:.1e} of its peak at the window "
             "edge (the window spans an orbital period): the encounter may be "
             "longer; pass window="
         )
@@ -92,7 +112,7 @@ def hall3d(
     conjunction: Conjunction,
     *,
     window: tuple[float, float] | None = None,
-    rtol: float = QUAD_RTOL,
+    rtol: float = HALL_RTOL,
 ) -> PcResult:
     """3-D Pc of a conjunction by Hall's 3D-Nc method.
 
@@ -134,16 +154,98 @@ def hall3d(
         finite and positive.
     """
     require_positive(rtol, "rtol")
-    rate = collision_rate(conjunction, "hall3d")
-    found = encounter_scan(conjunction, rate, window)
+    encounters = Encounters.scan(conjunction, "hall3d", window)
+    return integrate(conjunction, encounters, rtol=rtol, long=is_long(conjunction))
+
+
+@dataclass(frozen=True, eq=False)
+class Encounters:
+    """A conjunction's 3D-Nc collision rate and the scan locating its encounters.
+
+    :func:`hall3d` integrates the rate over the scan's segments and
+    :func:`~keepout.pc.montecarlo.montecarlo` samples trials only inside them,
+    so one scan serves both (``compute_pc`` falls back from one to the other).
+
+    Parameters
+    ----------
+    rate
+        The collision rate.
+    found
+        Its scan over the window.
+    window_given
+        Whether the window was passed rather than sized automatically.
+    scan_fallbacks
+        Times [s] and rates where the peak-overlap iteration failed during
+        the scan; ``rate.fallbacks`` also collects later failures (at Hall's
+        quadrature nodes).
+    """
+
+    rate: CollisionRate
+    found: RateScan
+    window_given: bool
+    scan_fallbacks: tuple[tuple[float, float], ...]
+
+    @classmethod
+    def scan(
+        cls,
+        conjunction: Conjunction,
+        method: Method,
+        window: tuple[float, float] | None,
+    ) -> Encounters:
+        """Scan the rate over ``window``, or an automatic one if ``None``.
+
+        Raises
+        ------
+        CovarianceError
+            If a covariance is unknown; the message names ``method``.
+        GeometryError
+            If an orbit is not elliptic.
+        ValueError
+            If ``window`` is not finite with ``start < end``.
+        PcConvergenceError
+            If the encounters cannot be resolved (see
+            :func:`~keepout.pc._rate.encounter_scan`).
+        """
+        rate = collision_rate(conjunction, method)
+        found = encounter_scan(conjunction, rate, window)
+        return cls(rate, found, window is not None, tuple(rate.fallbacks))
+
+
+def is_long(conjunction: Conjunction) -> bool:
+    """Whether the encounter is long (see
+    :func:`~keepout.pc._duration.long_encounter`), so that a sample can leave
+    the hard-body sphere and enter it again."""
+    if conjunction.relative_speed == 0.0:
+        return False
+    return long_encounter(conjunction, encounter_duration(conjunction)) is not None
+
+
+def integrate(
+    conjunction: Conjunction,
+    encounters: Encounters,
+    *,
+    long: bool,
+    rtol: float = HALL_RTOL,
+) -> PcResult:
+    """Hall's 3D-Nc over an encounter scan.
+
+    The core of :func:`hall3d`, without its argument checks: for
+    :func:`~keepout.pc.compute_pc`, which has already scanned the rate or
+    tested the encounter's duration. ``long`` is :func:`is_long`; a long
+    encounter only adds the note that Nc counts repeated entries (the
+    duration itself is in ``compute_pc``'s applicability warning).
+    """
+    rate, found = encounters.rate, encounters.found
     integral = integrate_segments(rate, found, rtol=rtol)
+    # Checked after integrating (Monte Carlo checks before sampling), so a
+    # failure of the iteration at a quadrature node is caught too.
     check_fallbacks(rate.fallbacks, found)
     if not math.isfinite(integral.nc):
         raise PcConvergenceError(f"Hall 3D-Nc: Nc is not finite ({integral.nc})")
     details = {
         "nc": integral.nc,
-        "window_start_s": integral.window[0],
-        "window_end_s": integral.window[1],
+        "window_start_s": found.window[0],
+        "window_end_s": found.window[1],
         "encounters": float(len(integral.segments)),
         "largest_encounter_nc": max((s.nc for s in integral.segments), default=0.0),
         "evaluations": float(rate.evaluations),
@@ -151,23 +253,24 @@ def hall3d(
     }
     notes = [
         *_floor_notes(rate),
-        *_diagnostics(integral, window is not None, rtol),
-        *_entry_notes(conjunction, rate, integral, window is not None),
+        *_integral_notes(integral, encounters.window_given, rtol),
+        *_entry_notes(conjunction, rate, integral, encounters.window_given, long),
     ]
     return PcResult.clamped(min(integral.nc, 1.0), "hall3d", tuple(notes), details)
 
 
 def _floor_notes(rate: CollisionRate) -> list[str]:
-    """Where :data:`VARIANCE_FLOOR` raised the combined covariance.
+    """Where :data:`~keepout.pc._plane.SIGMA_FLOOR` raised the combined covariance.
 
     As in the 2-D methods, an object whose position covariance is zero is
     perfectly known (only an all-zero 6x6 CDM covariance means unknown), and
     only the floor on the combined covariance is reported.
     """
-    if rate.floored < rate.floor:
+    if rate.smallest_floored_variance < rate.floor_variance:
         return [
-            f"combined position covariance: smallest variance {rate.floored:.3g} "
-            f"m^2 raised to {rate.floor:.3g} m^2"
+            "combined position covariance: smallest variance "
+            f"{rate.smallest_floored_variance:.3g} m^2 raised to "
+            f"{rate.floor_variance:.3g} m^2"
         ]
     return []
 
@@ -177,6 +280,7 @@ def _entry_notes(
     rate: CollisionRate,
     integral: RateIntegral,
     window_given: bool,
+    long: bool,
 ) -> list[str]:
     """Notes on what ``Nc`` counts and on an encounter the scan did not find."""
     notes: list[str] = []
@@ -187,20 +291,12 @@ def _entry_notes(
     if conjunction.relative_speed == 0.0:
         notes.append(f"relative velocity is zero: {repeated}")
     else:
-        duration = encounter_duration(conjunction)
-        period = rate.primary.period
-        if duration > DURATION_LIMIT * period:
-            notes.append(
-                f"long encounter (about {duration:.3g} s, "
-                f"{100.0 * duration / period:.2g}% of the primary's orbital "
-                f"period): {repeated}"
-            )
-        if integral.peak <= 0.0 and not window_given:
-            covariance = (
-                rate.primary.position_covariance + rate.secondary.position_covariance
-            )
+        if long:
+            notes.append(f"long encounter: {repeated}")
+        if integral.scan.peak <= 0.0 and not window_given:
             extent = reach(
-                float(np.linalg.eigvalsh(covariance)[-1]), conjunction.hard_body_radius
+                float(np.linalg.eigvalsh(rate.position_covariance)[-1]),
+                conjunction.hard_body_radius,
             )
             miss = conjunction.plane.miss_distance
             if miss <= extent:

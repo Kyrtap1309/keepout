@@ -32,6 +32,8 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: uv sync --locked
       - run: uv run pytest --cov --cov-report=term-missing
+        env:
+          HYPOTHESIS_PROFILE: ci
 
   validation:
     runs-on: ubuntu-latest

@@ -13,15 +13,21 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Sequence
 from pathlib import Path
+from typing import Final
 from xml.etree import ElementTree
 
-from keepout.cdm._io import read_text, write_text
+from keepout.cdm._io import (
+    Location,
+    build_cdm,
+    build_section,
+    dump_file,
+    load_file,
+)
 from keepout.cdm.keywords import KEYWORDS, SectionKind
 from keepout.cdm.model import (
     COMMENT,
     USER_DEFINED_PREFIX,
     Cdm,
-    DuplicateKeyword,
     Field,
     Section,
     format_field,
@@ -29,14 +35,18 @@ from keepout.cdm.model import (
 )
 from keepout.errors import CdmParseError
 
-NDM_NAMESPACE = "urn:ccsds:schema:ndmxml"
-_XSI = "http://www.w3.org/2001/XMLSchema-instance"
-_SCHEMA_1_0 = (
+__all__ = ["NDM_NAMESPACE", "dump", "dumps", "load", "loads"]
+
+NDM_NAMESPACE: Final = "urn:ccsds:schema:ndmxml"
+_XSI: Final = "http://www.w3.org/2001/XMLSchema-instance"
+# Schema of CDM 1.0 messages ("1.0" is the CDM version): the master schema of
+# the NDM/XML 2.0.0 suite, which includes CDM 1.0.
+_CDM_1_0_SCHEMA_LOCATION: Final = (
     "https://sanaregistry.org/r/ndmxml_unqualified/ndmxml-2.0.0-master-2.0.xsd"
 )
-_USER_DEFINED = "USER_DEFINED"
-_USER_GROUP = ("data", "userDefinedParameters")
-_GROUPS = frozenset(
+_USER_DEFINED: Final = "USER_DEFINED"
+_USER_GROUP: Final = ("data", "userDefinedParameters")
+_GROUPS: Final = frozenset(
     {
         name
         for table in KEYWORDS.values()
@@ -90,7 +100,7 @@ def _section(
     leading: Sequence[Field] = (),
 ) -> Section:
     fields = list(leading)
-    paths = [path] * len(fields)
+    locations = [Location(path=path)] * len(fields)
     for leaf, leaf_path in _leaves(element, path):
         keyword = _keyword(leaf, leaf_path)
         text = (leaf.text or "").strip()
@@ -102,15 +112,8 @@ def _section(
             )
         except ValueError as exc:
             raise CdmParseError(str(exc), path=leaf_path, keyword=keyword) from exc
-        paths.append(leaf_path)
-    try:
-        return Section(kind, tuple(fields))
-    except DuplicateKeyword as exc:
-        raise CdmParseError(
-            "duplicate keyword", path=paths[exc.index], keyword=exc.keyword
-        ) from exc
-    except ValueError as exc:
-        raise CdmParseError(str(exc), path=path) from exc
+        locations.append(Location(path=leaf_path))
+    return build_section(kind, fields, locations, Location(path=path))
 
 
 def loads(text: str) -> Cdm:
@@ -145,20 +148,14 @@ def loads(text: str) -> Cdm:
         raise CdmParseError(
             f"expected 2 <segment> elements, found {len(segments)}", path="cdm/body"
         )
-    first, second = (
-        _section("segment", segment, f"cdm/body/segment[{index}]")
-        for index, segment in enumerate(segments, start=1)
+    return build_cdm(
+        _section("header", header, "cdm/header", [Field("CCSDS_CDM_VERS", version)]),
+        _section("relative", relative, "cdm/body/relativeMetadataData"),
+        [
+            _section("segment", segment, f"cdm/body/segment[{index}]")
+            for index, segment in enumerate(segments, start=1)
+        ],
     )
-    try:
-        return Cdm(
-            _section(
-                "header", header, "cdm/header", [Field("CCSDS_CDM_VERS", version)]
-            ),
-            _section("relative", relative, "cdm/body/relativeMetadataData"),
-            (first, second),
-        )
-    except ValueError as exc:
-        raise CdmParseError(str(exc)) from exc
 
 
 def _groups(
@@ -255,7 +252,7 @@ def dumps(cdm: Cdm) -> str:
     root = ElementTree.Element("cdm", {"id": "CCSDS_CDM_VERS", "version": cdm.version})
     if cdm.version == "1.0":
         root.set("xmlns:xsi", _XSI)
-        root.set("xsi:noNamespaceSchemaLocation", _SCHEMA_1_0)
+        root.set("xsi:noNamespaceSchemaLocation", _CDM_1_0_SCHEMA_LOCATION)
     header_fields = [f for f in cdm.header.fields if f.keyword != "CCSDS_CDM_VERS"]
     _write(ElementTree.SubElement(root, "header"), header_fields, "header", cdm.version)
     body = ElementTree.SubElement(root, "body")
@@ -279,7 +276,7 @@ def load(path: str | Path) -> Cdm:
     path
         File to read.
     """
-    return loads(read_text(path))
+    return load_file(path, loads)
 
 
 def dump(cdm: Cdm, path: str | Path) -> None:
@@ -292,4 +289,4 @@ def dump(cdm: Cdm, path: str | Path) -> None:
     path
         File to write.
     """
-    write_text(path, dumps(cdm))
+    dump_file(cdm, path, dumps)

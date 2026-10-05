@@ -1,9 +1,10 @@
-"""Private helpers shared by the package: the array alias and argument checks."""
+"""Private helpers shared by the package: array aliases, argument checks and
+symmetric-matrix algebra."""
 
 from __future__ import annotations
 
 import math
-from typing import TypeAlias
+from typing import Any, TypeAlias
 
 import numpy as np
 import numpy.typing as npt
@@ -11,10 +12,44 @@ import numpy.typing as npt
 FloatArray: TypeAlias = npt.NDArray[np.float64]
 """A float64 NumPy array."""
 
+ComplexArray: TypeAlias = npt.NDArray[np.complex128]
+"""A complex128 NumPy array."""
+
+BoolArray: TypeAlias = npt.NDArray[np.bool_]
+"""A boolean NumPy mask."""
+
+IndexArray: TypeAlias = npt.NDArray[np.intp]
+"""A NumPy array of indices."""
+
+
+def read_only(*arrays: npt.NDArray[Any]) -> None:
+    """Mark arrays read-only in place."""
+    for array in arrays:
+        array.flags.writeable = False
+
 
 def symmetric_part(matrix: FloatArray) -> FloatArray:
     """``(M + M^T) / 2`` of a matrix or a stack of matrices ``(..., n, n)``."""
     result: FloatArray = 0.5 * (matrix + np.swapaxes(matrix, -1, -2))
+    return result
+
+
+def from_eigen(values: FloatArray, vectors: FloatArray) -> FloatArray:
+    """``V diag(values) V^T`` of symmetric matrices, batched over leading axes.
+
+    Applies a function to a symmetric matrix through its eigen-decomposition:
+    pass ``f(eigenvalues)`` with the eigenvectors (columns), as
+    :func:`numpy.linalg.eigh` returns them, to get ``f(M)`` (e.g. ``1 /
+    values`` for the inverse, ``sqrt`` for the symmetric square root).
+
+    Parameters
+    ----------
+    values
+        Mapped eigenvalues, shape ``(..., n)``.
+    vectors
+        Unit eigenvectors as columns, shape ``(..., n, n)``.
+    """
+    result: FloatArray = (vectors * values[..., None, :]) @ np.swapaxes(vectors, -1, -2)
     return result
 
 
@@ -38,7 +73,7 @@ def as_vector(value: npt.ArrayLike, name: str) -> FloatArray:
         raise ValueError(f"{name} must have shape (3,), got {array.shape}")
     if not np.all(np.isfinite(array)):
         raise ValueError(f"{name} must be finite")
-    array.flags.writeable = False
+    read_only(array)
     return array
 
 
@@ -46,3 +81,9 @@ def require_positive(value: float, name: str) -> None:
     """Raise ``ValueError`` unless ``value`` is finite and positive."""
     if not (math.isfinite(value) and value > 0.0):
         raise ValueError(f"{name} must be finite and > 0, got {value}")
+
+
+def require_non_negative(value: float, name: str) -> None:
+    """Raise ``ValueError`` unless ``value`` is finite and non-negative."""
+    if not (math.isfinite(value) and value >= 0.0):
+        raise ValueError(f"{name} must be finite and >= 0, got {value}")

@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Final
 
 import astropy.units as u
 import erfa
@@ -18,16 +19,27 @@ import numpy as np
 import numpy.typing as npt
 from astropy.time import Time
 
-from keepout._types import FloatArray
+from keepout._types import FloatArray, read_only
 from keepout.errors import GeometryError
 from keepout.state import StateVector
 
-_J2000_JD = 2451545.0
+__all__ = [
+    "FRAME_BIAS",
+    "PARALLEL_RTOL",
+    "inertial_to_rtn_covariance",
+    "rtn_rotation",
+    "rtn_to_inertial_covariance",
+    "to_gcrf",
+    "to_gcrf_all",
+]
+
+_J2000_JD: Final = 2451545.0
 # GCRS -> mean J2000 (EME2000) frame bias; constant, so any date gives it.
-FRAME_BIAS: FloatArray = np.asarray(erfa.bp06(_J2000_JD, 0.0)[0], dtype=np.float64)
+FRAME_BIAS: Final[FloatArray] = np.array(erfa.bp06(_J2000_JD, 0.0)[0], dtype=np.float64)
+read_only(FRAME_BIAS)
 """Rotation from GCRF to EME2000 (``x_eme2000 = FRAME_BIAS @ x_gcrf``)."""
 
-PARALLEL_RTOL = 1e-12
+PARALLEL_RTOL: Final = 1e-12
 """Relative size below which a vector's component perpendicular to another
 is taken as zero: position and velocity are then parallel."""
 

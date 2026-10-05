@@ -16,24 +16,25 @@ from __future__ import annotations
 import math
 from functools import lru_cache
 from itertools import pairwise
+from typing import Final
 
 import numpy as np
 
-from keepout._types import FloatArray
+from keepout._types import FloatArray, read_only
 
-PANEL_ORDER = 16
+PANEL_ORDER: Final = 16
 """Gauss-Legendre nodes per theta panel."""
 
-BAND_WIDTHS = (0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0)
+BAND_WIDTHS: Final = (0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0)
 """Panel breakpoints about the band, in smallest standard deviations."""
 
-PHI_RESOLUTION = 0.25
+PHI_RESOLUTION: Final = 0.25
 """Trapezoid spacing in phi, as a fraction of (second sigma) / R."""
 
 MIN_PHI, MAX_PHI = 64, 16384
 """Bounds on the number of phi nodes."""
 
-_MIN_SIGMA = 1e-12
+_MIN_SIGMA: Final = 1e-12
 """Standard deviation [m] below which the phi spacing no longer shrinks (a
 degenerate axis would otherwise ask for infinitely many nodes)."""
 
@@ -42,24 +43,31 @@ degenerate axis would otherwise ask for infinitely many nodes)."""
 def gauss_legendre(order: int) -> tuple[FloatArray, FloatArray]:
     """Read-only Gauss-Legendre nodes and weights on ``[-1, 1]``."""
     nodes, weights = np.polynomial.legendre.leggauss(order)
-    nodes.flags.writeable = weights.flags.writeable = False
+    read_only(nodes, weights)
     return nodes, weights
 
 
-def sphere_rule(
-    covariance: FloatArray,
+def sphere_rule_principal(
+    values: FloatArray,
+    axes: FloatArray,
     mean: FloatArray,
     radius: float,
     *,
     order: int = PANEL_ORDER,
     phi_resolution: float = PHI_RESOLUTION,
 ) -> tuple[FloatArray, FloatArray]:
-    """Nodes and weights on the unit sphere for ``N(radius * x; mean, covariance)``.
+    """Nodes and weights on the unit sphere for ``N(radius * x; mean, A)``.
+
+    The covariance ``A`` is given by its eigen-decomposition, which the
+    caller has at hand (it also floors the eigenvalues).
 
     Parameters
     ----------
-    covariance
-        3x3 position covariance [m^2], positive definite.
+    values
+        Eigenvalues of the 3x3 position covariance [m^2], ascending.
+    axes
+        Their unit eigenvectors (columns), as :func:`numpy.linalg.eigh`
+        returns them.
     mean
         Mean relative position [m].
     radius
@@ -75,26 +83,6 @@ def sphere_rule(
         Unit vectors ``(k, 3)`` and weights ``(k,)`` (solid angle, summing to
         ``4 pi``).
     """
-    values, axes = np.linalg.eigh(covariance)
-    return sphere_rule_principal(
-        values, axes, mean, radius, order=order, phi_resolution=phi_resolution
-    )
-
-
-def sphere_rule_principal(
-    values: FloatArray,
-    axes: FloatArray,
-    mean: FloatArray,
-    radius: float,
-    *,
-    order: int = PANEL_ORDER,
-    phi_resolution: float = PHI_RESOLUTION,
-) -> tuple[FloatArray, FloatArray]:
-    """:func:`sphere_rule` from the covariance's eigen-decomposition.
-
-    ``values`` ascending and ``axes`` their unit eigenvectors (columns), as
-    :func:`numpy.linalg.eigh` returns them.
-    """
     sigmas = np.sqrt(np.clip(values, 0.0, None))
     along = float(axes[:, 0] @ mean)
     breaks = {0.0, math.pi}
@@ -105,17 +93,15 @@ def sphere_rule_principal(
     panels = list(pairwise(sorted(breaks)))
     x, w = gauss_legendre(order)
     theta = np.concatenate([0.5 * (b - a) * x + 0.5 * (a + b) for a, b in panels])
-    theta_weight = np.concatenate([0.5 * (b - a) * w for a, b in panels]) * np.sin(
-        theta
-    )
+    sin_theta = np.sin(theta)
+    theta_weight = np.concatenate([0.5 * (b - a) * w for a, b in panels]) * sin_theta
     spacing = phi_resolution * max(float(sigmas[1]), _MIN_SIGMA) / radius
     count = int(min(MAX_PHI, max(MIN_PHI, math.ceil(2.0 * math.pi / spacing))))
     phi = (np.arange(count) + 0.5) * (2.0 * math.pi / count)
-    sin_theta = np.sin(theta)[:, None]
     nodes = (
         np.cos(theta)[:, None, None] * axes[:, 0]
-        + (sin_theta * np.cos(phi))[..., None] * axes[:, 1]
-        + (sin_theta * np.sin(phi))[..., None] * axes[:, 2]
+        + (sin_theta[:, None] * np.cos(phi))[..., None] * axes[:, 1]
+        + (sin_theta[:, None] * np.sin(phi))[..., None] * axes[:, 2]
     ).reshape(-1, 3)
     weights = np.repeat(theta_weight, count) * (2.0 * math.pi / count)
     return nodes, weights

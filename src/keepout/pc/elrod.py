@@ -9,57 +9,78 @@ which Gauss-Chebyshev quadrature of the second kind integrates with fixed
 nodes (Elrod 2019, as used by NASA CARA). ``M(h) / h`` stays finite at the
 edge because ``M`` vanishes linearly there.
 
-By default the order adapts: it starts high enough to resolve the Gaussian
-along ``u`` and doubles until two orders agree to :data:`ELROD_RTOL`.
+The ``n`` nodes are ``t_k = cos(theta_k)``, ``theta_k = k pi / (n + 1)``, with
+weights ``pi / (n + 1) sin^2(theta_k)``. With ``h_k = R sin(theta_k)`` the rule
+reads
+
+    Pc ~ R pi / (n + 1) * sum of N(R cos theta_k) M(R sin theta_k) sin theta_k
+
+so no division by ``h`` is needed. The nodes of order ``n`` are the even ones of
+order ``2n + 1``: by default the order adapts along that nested sequence,
+starting high enough to resolve the Gaussian along ``u``, and each step only
+evaluates the new nodes, until two orders agree to :data:`ELROD_RTOL`.
 """
 
 from __future__ import annotations
 
 import math
-from functools import lru_cache
+from typing import Final
 
 import numpy as np
-from scipy import special
 
 from keepout._types import FloatArray
 from keepout.encounter import EncounterPlane
 from keepout.pc._plane import PlaneGaussian, plane_gaussian, require_known_covariance
 from keepout.pc.result import PcResult
 
-START_ORDER = 64
-"""Smallest order tried in adaptive mode (the CARA default)."""
+__all__ = ["ELROD_RTOL", "MAX_ORDER", "START_ORDER", "elrod"]
 
-MAX_ORDER = 65536
-"""Largest order tried in adaptive mode."""
+START_ORDER: Final = 63
+"""Smallest order tried in adaptive mode: ``2^6 - 1``, so the nested orders
+``n -> 2n + 1`` stay of the form ``2^j - 1``."""
 
-ELROD_RTOL = 1e-10
+MAX_ORDER: Final = 65535
+"""Largest order tried in adaptive mode (``2^16 - 1``)."""
+
+ELROD_RTOL: Final = 1e-10
 """Relative agreement of two successive orders that ends adaptive mode."""
 
 
-@lru_cache(maxsize=16)
-def _nodes(order: int) -> tuple[FloatArray, FloatArray]:
-    """Gauss-Chebyshev (second kind) nodes and weights on ``[-1, 1]``, read-only."""
-    nodes, weights = special.roots_chebyu(order)
-    nodes.flags.writeable = weights.flags.writeable = False
-    return nodes, weights
-
-
-def _sum(gaussian: PlaneGaussian, order: int) -> float:
-    t, weights = _nodes(order)
+def _terms(gaussian: PlaneGaussian, k: FloatArray, order: int) -> FloatArray:
+    """``N(R cos theta) M(R sin theta) sin theta`` at ``theta = k pi / (order + 1)``."""
+    theta = k * (math.pi / (order + 1))
     radius = gaussian.radius
-    half_chord = radius * np.sqrt(1.0 - t * t)
-    terms = (
-        gaussian.density_u(radius * t) * gaussian.chord_mass(half_chord) / half_chord
+    sin_theta = np.sin(theta)
+    terms: FloatArray = (
+        gaussian.density_u(radius * np.cos(theta))
+        * gaussian.chord_mass(radius * sin_theta)
+        * sin_theta
     )
-    return radius * radius * float(np.sum(weights * terms))
+    return terms
+
+
+def _sum(gaussian: PlaneGaussian, terms: FloatArray) -> float:
+    """The rule of order ``terms.size`` from its terms (see the module docstring)."""
+    return gaussian.radius * math.pi / (terms.size + 1) * float(np.sum(terms))
+
+
+def _refined(gaussian: PlaneGaussian, terms: FloatArray) -> FloatArray:
+    """Terms of order ``2n + 1`` from those of order ``n``: only the odd nodes
+    are new."""
+    order = 2 * terms.size + 1
+    refined = np.empty(order)
+    refined[1::2] = terms
+    refined[0::2] = _terms(gaussian, np.arange(1.0, order + 1, 2.0), order)
+    return refined
 
 
 def _resolving_order(gaussian: PlaneGaussian) -> int:
-    """Order whose node spacing near the centre (~ pi R / n) is below sigma_u / 2."""
+    """Order whose node spacing near the centre (~ pi R / (n + 1)) is below
+    sigma_u / 2, of the form ``2^j - 1``."""
     needed = 2.0 * math.pi * gaussian.radius / gaussian.sigma_u
-    if needed <= START_ORDER:
+    if needed <= START_ORDER + 1:
         return START_ORDER
-    return 1 << math.ceil(math.log2(needed))
+    return (1 << math.ceil(math.log2(needed))) - 1
 
 
 def elrod(
@@ -74,8 +95,9 @@ def elrod(
     hard_body_radius
         Combined hard-body radius [m].
     order
-        Number of quadrature nodes. ``None`` (default) adapts the order;
-        an integer fixes it (CARA uses 64).
+        Number of quadrature nodes. ``None`` (default) adapts the order
+        along ``n -> 2n + 1`` from :data:`START_ORDER` up to
+        :data:`MAX_ORDER`; an integer fixes it (CARA uses 64).
 
     Returns
     -------
@@ -104,14 +126,16 @@ def elrod(
                 f"Elrod order {order} may be too low: about {resolving} nodes "
                 "are needed to resolve the covariance; use order=None"
             )
-        value = _sum(gaussian, order)
+        value = _sum(gaussian, _terms(gaussian, np.arange(1.0, order + 1), order))
     else:
         # Start below MAX_ORDER so that at least two orders are compared.
         order = min(resolving, MAX_ORDER // 2)
-        value = _sum(gaussian, order)
+        terms = _terms(gaussian, np.arange(1.0, order + 1), order)
+        value = _sum(gaussian, terms)
         while order < MAX_ORDER:
-            order *= 2
-            previous, value = value, _sum(gaussian, order)
+            terms = _refined(gaussian, terms)
+            order = terms.size
+            previous, value = value, _sum(gaussian, terms)
             if abs(value - previous) <= ELROD_RTOL * abs(value):
                 break
         else:

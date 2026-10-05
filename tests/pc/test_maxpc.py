@@ -6,6 +6,7 @@ import pytest
 from pc_builders import ANISOTROPIC, PlaneCase
 from scipy import optimize, special
 
+from keepout._types import FloatArray
 from keepout.encounter import EncounterPlane, Role
 from keepout.errors import CovarianceError
 from keepout.pc import foster
@@ -16,7 +17,7 @@ def with_unknown(case: PlaneCase, *roles: Role) -> EncounterPlane:
     return dataclasses.replace(case.plane(), unknown_covariance=roles)
 
 
-def pc_with(plane: EncounterPlane, covariance: np.ndarray, radius: float) -> float:
+def pc_with(plane: EncounterPlane, covariance: FloatArray, radius: float) -> float:
     return foster(
         dataclasses.replace(plane, covariance=covariance, unknown_covariance=()),
         radius,
@@ -39,17 +40,19 @@ def test_frisbee_is_the_maximum_over_added_covariances(case: PlaneCase) -> None:
         )
 
 
-def test_frisbee_adds_variance_along_the_miss() -> None:
+def test_frisbee_adds_the_small_body_optimum_along_the_miss() -> None:
     case = PlaneCase(400.0, 0.0, 20.0, 10.0, 0.0, 5.0)
     plane = with_unknown(case, "primary")
     result = frisbee(plane, case.radius)
     k2 = (400.0 / 20.0) ** 2
+    analytic = 400.0**2 * (k2 - 1.0) / k2
     assert result.details["mahalanobis"] == pytest.approx(20.0)
-    assert result.details["added_variance_m2"] == pytest.approx(
-        400.0**2 * (k2 - 1.0) / k2
-    )
+    assert result.details["added_variance_m2"] == pytest.approx(analytic)
+    pc_analytic = pc_with(plane, np.diag([20.0**2 + analytic, 10.0**2]), 5.0)
+    assert result.details["pc_analytic"] == pytest.approx(pc_analytic, rel=1e-12)
     along = np.diag([20.0**2 + result.details["added_variance_m2"], 10.0**2])
     assert result.value == pytest.approx(pc_with(plane, along, 5.0), rel=1e-12)
+    assert result.value >= result.details["pc_analytic"]
 
 
 def test_frisbee_with_a_miss_inside_one_sigma_adds_nothing() -> None:
@@ -80,18 +83,7 @@ def test_frisbee_is_an_upper_bound_for_a_large_hard_body(case: PlaneCase) -> Non
     plane = with_unknown(case, "secondary")
     result = frisbee(plane, case.radius)
     assert result.value >= along_miss_grid_max(plane, case.radius) * (1.0 - 1e-9)
-    assert result.value >= result.details["pc_analytic"]
     assert result.value > result.details["pc_analytic"] * (1.0 + 1e-3)
-
-
-def test_frisbee_analytic_value_is_the_small_body_optimum() -> None:
-    case = PlaneCase(400.0, 0.0, 20.0, 10.0, 0.0, 5.0)
-    plane = with_unknown(case, "primary")
-    result = frisbee(plane, case.radius)
-    k2 = (400.0 / 20.0) ** 2
-    analytic = np.diag([20.0**2 + 400.0**2 * (k2 - 1.0) / k2, 10.0**2])
-    assert result.details["pc_analytic"] == pc_with(plane, analytic, 5.0)
-    assert result.value >= result.details["pc_analytic"]
 
 
 def test_frisbee_with_a_zero_miss_adds_nothing() -> None:
@@ -184,7 +176,7 @@ def test_alfano_bounds_every_covariance() -> None:
 def test_alfano_far_miss_follows_the_small_body_limit() -> None:
     plane = PlaneCase(1e5, 0.0, 1.0, 1.0, 0.0, 1.0).plane()
     limit = 1.0 / 1e5 * math.sqrt(2.0 / (math.pi * math.e))
-    assert alfano(plane, 1.0).value == pytest.approx(limit, rel=1e-8)
+    assert alfano(plane, 1.0).value == pytest.approx(limit, rel=1e-8, abs=0.0)
 
 
 def test_alfano_miss_inside_the_hard_body_is_one() -> None:

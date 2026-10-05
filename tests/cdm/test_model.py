@@ -1,6 +1,8 @@
+from collections.abc import Callable
+
 import numpy as np
 import pytest
-from builders import DIAGONAL_COVARIANCE, known
+from builders import DIAGONAL_COVARIANCE, EPOCH, known
 from cdm_builders import (
     CREATED,
     TCA,
@@ -10,10 +12,11 @@ from cdm_builders import (
     without,
 )
 
+from keepout.cdm import model
 from keepout.cdm.keywords import covariance_names
-from keepout.cdm.model import Cdm, DuplicateKeyword, Field, Section
-from keepout.encounter import encounter_plane
-from keepout.errors import CovarianceError, GeometryError
+from keepout.cdm.model import Cdm, CdmObject, DuplicateKeyword, Field, Section
+from keepout.conjunction import Conjunction
+from keepout.errors import CovarianceError, UnsupportedFrame
 
 
 def test_typed_accessors() -> None:
@@ -142,13 +145,15 @@ def test_nine_by_nine_covariance() -> None:
 
 def test_unsupported_ref_frame() -> None:
     cdm = minimal_cdm(segment1=replace(segment_fields(1), "REF_FRAME", "TOD"))
-    with pytest.raises(GeometryError, match="unsupported REF_FRAME 'TOD'"):
+    with pytest.raises(UnsupportedFrame, match="unsupported reference frame 'TOD'"):
         cdm.object1.state()
+    with pytest.raises(UnsupportedFrame):
+        cdm.object_states()
 
 
 def test_covariance_policies() -> None:
     cdm = minimal_cdm(segment1=replace(segment_fields(1), "CT_R", 1e6))
-    with pytest.raises(CovarianceError):
+    with pytest.raises(CovarianceError, match="not positive semi-definite"):
         cdm.object1.covariance(policy="raise")
     covariance = cdm.object1.covariance()
     assert covariance.frame == "RTN"
@@ -171,7 +176,7 @@ def test_object_states() -> None:
         atol=1e-9,
     )
     # r = (0, 0, 500), v = (0, -7500, 7500): half of r lies along v.
-    plane = encounter_plane(primary, secondary)
+    plane = Conjunction(primary, secondary, hard_body_radius=1.0).plane
     assert plane.miss_distance == pytest.approx(500.0 / np.sqrt(2.0), rel=1e-12)
 
 
@@ -219,3 +224,26 @@ def test_all_zero_covariance_means_unknown() -> None:
     primary, secondary = cdm.object_states()
     assert primary.covariance is not None
     assert secondary.covariance is None
+
+
+BARE_OBJECT = CdmObject(Section("segment", (Field("OBJECT", "OBJECT1"),)), EPOCH)
+"""An object section outside a CDM, which would check its required keywords."""
+
+
+@pytest.mark.parametrize(
+    ("read", "keyword"),
+    [
+        (lambda: BARE_OBJECT.designator, "OBJECT_DESIGNATOR"),
+        (lambda: BARE_OBJECT.ref_frame, "REF_FRAME"),
+        (lambda: BARE_OBJECT.position, "X"),
+        (lambda: BARE_OBJECT.velocity, "X_DOT"),
+        # A Cdm requires its epochs, so only a bare section lacks one.
+        (lambda: model._epoch(Section("relative", ()), "TCA"), "TCA"),
+    ],
+    ids=["text", "frame", "position", "velocity", "epoch"],
+)
+def test_reading_an_absent_keyword_is_a_key_error(
+    read: Callable[[], object], keyword: str
+) -> None:
+    with pytest.raises(KeyError, match=f"^'{keyword}'$"):
+        read()

@@ -6,13 +6,19 @@ import dataclasses
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Final
 
-from keepout.cdm._io import read_text, write_text
+from keepout.cdm._io import (
+    Location,
+    build_cdm,
+    build_section,
+    dump_file,
+    load_file,
+)
 from keepout.cdm.keywords import KEYWORDS, SectionKind
 from keepout.cdm.model import (
     COMMENT,
     Cdm,
-    DuplicateKeyword,
     Field,
     Section,
     format_field,
@@ -20,11 +26,13 @@ from keepout.cdm.model import (
 )
 from keepout.errors import CdmParseError, CdmWriteError
 
-_ASSIGNMENT = re.compile(r"^(?P<keyword>[A-Z][A-Z0-9_]*)\s*=\s*(?P<value>.*)$")
-_UNIT = re.compile(r"^(?P<value>.*?)\s*\[(?P<unit>[^\[\]]*)\]$")
-_COMMENT = re.compile(r"^COMMENT(?:\s+(?P<text>.*))?$")
-_KEYWORD_WIDTH = 30
-_LAYOUT: list[SectionKind] = ["header", "relative", "segment", "segment"]
+__all__ = ["dump", "dumps", "load", "loads"]
+
+_ASSIGNMENT: Final = re.compile(r"^(?P<keyword>[A-Z][A-Z0-9_]*)\s*=\s*(?P<value>.*)$")
+_UNIT: Final = re.compile(r"^(?P<value>.*?)\s*\[(?P<unit>[^\[\]]*)\]$")
+_COMMENT: Final = re.compile(r"^COMMENT(?:\s+(?P<text>.*))?$")
+_KEYWORD_WIDTH: Final = 30
+_LAYOUT: Final[tuple[SectionKind, ...]] = ("header", "relative", "segment", "segment")
 
 
 def _split_unit(text: str) -> tuple[str, str | None]:
@@ -43,26 +51,6 @@ def _field(kind: SectionKind, keyword: str, text: str, line: int) -> Field:
         raise CdmParseError(str(exc), line=line, keyword=keyword) from exc
 
 
-def _opens(kinds: list[SectionKind], keyword: str) -> SectionKind | None:
-    """The section a keyword starts, if it starts one."""
-    if keyword == "OBJECT":
-        return "segment"
-    if kinds[-1] == "header" and keyword in KEYWORDS["relative"]:
-        return "relative"
-    return None
-
-
-def _section(kind: SectionKind, fields: list[Field], lines: list[int]) -> Section:
-    try:
-        return Section(kind, tuple(fields))
-    except DuplicateKeyword as exc:
-        raise CdmParseError(
-            "duplicate keyword", line=lines[exc.index], keyword=exc.keyword
-        ) from exc
-    except ValueError as exc:
-        raise CdmParseError(str(exc)) from exc
-
-
 @dataclass
 class _Building:
     """A section being read: its fields and the line of each."""
@@ -75,9 +63,16 @@ class _Building:
         self.fields.append(item)
         self.lines.append(line)
 
+    def build(self) -> Section:
+        locations = [Location(line=line) for line in self.lines]
+        return build_section(self.kind, self.fields, locations)
+
 
 def _opened(kinds: list[SectionKind], keyword: str, line: int) -> SectionKind | None:
-    """The section ``keyword`` opens after sections ``kinds``, checking order.
+    """The section ``keyword`` opens after sections ``kinds``, if it opens one.
+
+    ``CCSDS_CDM_VERS`` opens the header, the first relative-metadata keyword
+    (``TCA``) the relative metadata and ``OBJECT`` an object section.
 
     Raises
     ------
@@ -91,19 +86,19 @@ def _opened(kinds: list[SectionKind], keyword: str, line: int) -> SectionKind | 
                 "CCSDS_CDM_VERS must be the first keyword", line=line, keyword=keyword
             )
         return "header"
-    opened = _opens(kinds, keyword)
-    if opened == "segment":
-        if kinds[-1] == "header":
-            raise CdmParseError(
-                "object section before relative metadata (TCA)",
-                line=line,
-                keyword=keyword,
-            )
-        if kinds.count("segment") == 2:
-            raise CdmParseError(
-                "more than two object sections", line=line, keyword=keyword
-            )
-    return opened
+    if keyword != "OBJECT":
+        if kinds[-1] == "header" and keyword in KEYWORDS["relative"]:
+            return "relative"
+        return None
+    if kinds[-1] == "header":
+        raise CdmParseError(
+            "object section before relative metadata (TCA)",
+            line=line,
+            keyword=keyword,
+        )
+    if kinds.count("segment") == 2:
+        raise CdmParseError("more than two object sections", line=line, keyword=keyword)
+    return "segment"
 
 
 def loads(text: str) -> Cdm:
@@ -154,18 +149,13 @@ def loads(text: str) -> Cdm:
         current.add(_field(current.kind, keyword, value, number), number)
     for item, at in pending:
         building[-1].add(item, at)
-    if [b.kind for b in building] != _LAYOUT:
+    if tuple(b.kind for b in building) != _LAYOUT:
         raise CdmParseError(
             "a CDM needs a header, relative metadata (starting at TCA) and "
             "OBJECT1 and OBJECT2 sections"
         )
-    header, relative, first, second = (
-        _section(b.kind, b.fields, b.lines) for b in building
-    )
-    try:
-        return Cdm(header, relative, (first, second))
-    except ValueError as exc:
-        raise CdmParseError(str(exc)) from exc
+    header, relative, *segments = (b.build() for b in building)
+    return build_cdm(header, relative, segments)
 
 
 def dumps(cdm: Cdm) -> str:
@@ -211,7 +201,7 @@ def load(path: str | Path) -> Cdm:
     path
         File to read.
     """
-    return loads(read_text(path))
+    return load_file(path, loads)
 
 
 def dump(cdm: Cdm, path: str | Path) -> None:
@@ -224,4 +214,4 @@ def dump(cdm: Cdm, path: str | Path) -> None:
     path
         File to write.
     """
-    write_text(path, dumps(cdm))
+    dump_file(cdm, path, dumps)

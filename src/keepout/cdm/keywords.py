@@ -13,15 +13,36 @@ from __future__ import annotations
 import math
 import re
 import warnings
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Literal, TypeAlias, assert_never
+from typing import Final, Literal, TypeAlias, assert_never
 
 import numpy as np
 from astropy.time import Time
 from erfa import ErfaWarning
 
 from keepout._types import FloatArray
+
+__all__ = [
+    "COVARIANCE_AXES",
+    "HEADER",
+    "KEYWORDS",
+    "RELATIVE",
+    "REQUIRED",
+    "SEGMENT",
+    "FieldValue",
+    "Keyword",
+    "SectionKind",
+    "ValueKind",
+    "covariance_entries",
+    "covariance_matrix",
+    "covariance_names",
+    "format_epoch",
+    "format_value",
+    "normalize_unit",
+    "parse_epoch",
+    "parse_value",
+]
 
 ValueKind: TypeAlias = Literal["str", "int", "float", "time"]
 SectionKind: TypeAlias = Literal["header", "relative", "segment"]
@@ -63,16 +84,26 @@ def _many(
     return [Keyword(name, kind, unit, scale, group) for name in names.split()]
 
 
-def _table(*groups: list[Keyword]) -> dict[str, Keyword]:
+def _table(*groups: Sequence[Keyword]) -> Mapping[str, Keyword]:
     return {keyword.name: keyword for group in groups for keyword in group}
 
 
-COVARIANCE_AXES = ("R", "T", "N", "RDOT", "TDOT", "NDOT", "DRG", "SRP", "THR")
+COVARIANCE_AXES: Final[tuple[str, ...]] = (
+    "R",
+    "T",
+    "N",
+    "RDOT",
+    "TDOT",
+    "NDOT",
+    "DRG",
+    "SRP",
+    "THR",
+)
 """Covariance axes in CCSDS order: position, velocity, drag, SRP, thrust."""
 
 # P position, V velocity, D drag, S solar radiation pressure, T thrust.
-_AXIS_CLASS = "PPPVVVDST"
-_COVARIANCE_UNITS = {
+_AXIS_CLASS: Final = "PPPVVVDST"
+_COVARIANCE_UNITS: Final[Mapping[tuple[str, str], str]] = {
     ("P", "P"): "m**2",
     ("V", "P"): "m**2/s",
     ("V", "V"): "m**2/s**2",
@@ -136,8 +167,8 @@ def covariance_names(dimension: int) -> tuple[str, ...]:
     return tuple(name for name, _, _ in covariance_entries(dimension))
 
 
-_COVARIANCE_GROUP = ("data", "covarianceMatrix")
-_COVARIANCE = [
+_COVARIANCE_GROUP: Final = ("data", "covarianceMatrix")
+_COVARIANCE: Final = tuple(
     Keyword(
         name,
         "float",
@@ -145,20 +176,20 @@ _COVARIANCE = [
         group=_COVARIANCE_GROUP,
     )
     for name, row, column in covariance_entries(len(COVARIANCE_AXES))
-]
+)
 
-_RELATIVE_STATE = ("relativeStateVector",)
-_METADATA = ("metadata",)
-_OD = ("data", "odParameters")
-_ADDITIONAL = ("data", "additionalParameters")
-_STATE = ("data", "stateVector")
+_RELATIVE_STATE: Final = ("relativeStateVector",)
+_METADATA: Final = ("metadata",)
+_OD: Final = ("data", "odParameters")
+_ADDITIONAL: Final = ("data", "additionalParameters")
+_STATE: Final = ("data", "stateVector")
 
-HEADER = _table(
+HEADER: Final = _table(
     _many("CCSDS_CDM_VERS ORIGINATOR MESSAGE_FOR MESSAGE_ID CONJUNCTION_ID", "str"),
     _many("CREATION_DATE", "time"),
 )
 
-RELATIVE = _table(
+RELATIVE: Final = _table(
     _many(
         "TCA START_SCREEN_PERIOD STOP_SCREEN_PERIOD SCREEN_ENTRY_TIME SCREEN_EXIT_TIME",
         "time",
@@ -185,7 +216,7 @@ RELATIVE = _table(
     _many("COLLISION_PROBABILITY", "float"),
 )
 
-SEGMENT = _table(
+SEGMENT: Final = _table(
     _many(
         "OBJECT OBJECT_DESIGNATOR CATALOG_NAME OBJECT_NAME INTERNATIONAL_DESIGNATOR "
         "OBJECT_TYPE OPERATOR_CONTACT_POSITION OPERATOR_ORGANIZATION OPERATOR_PHONE "
@@ -211,13 +242,13 @@ SEGMENT = _table(
     _COVARIANCE,
 )
 
-KEYWORDS: dict[SectionKind, dict[str, Keyword]] = {
+KEYWORDS: Final[Mapping[SectionKind, Mapping[str, Keyword]]] = {
     "header": HEADER,
     "relative": RELATIVE,
     "segment": SEGMENT,
 }
 
-REQUIRED: dict[SectionKind, tuple[str, ...]] = {
+REQUIRED: Final[Mapping[SectionKind, tuple[str, ...]]] = {
     "header": ("CCSDS_CDM_VERS", "CREATION_DATE", "ORIGINATOR", "MESSAGE_ID"),
     "relative": ("TCA", "MISS_DISTANCE"),
     "segment": (
@@ -240,10 +271,10 @@ REQUIRED: dict[SectionKind, tuple[str, ...]] = {
     ),
 }
 
-_UNITLESS = {"", "n/a"}
-_INTEGER = re.compile(r"^[+-]?[0-9]+$")
-_REAL = re.compile(r"^[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$")
-_EPOCH = re.compile(
+_UNITLESS: Final = frozenset({"", "n/a"})
+_INTEGER: Final = re.compile(r"^[+-]?[0-9]+$")
+_REAL: Final = re.compile(r"^[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$")
+_EPOCH: Final = re.compile(
     r"^(?P<year>\d{4})-(?:(?P<month>\d{2})-(?P<day>\d{2})|(?P<doy>\d{3}))"
     r"T(?P<hour>\d{2}):(?P<minute>\d{2}):(?P<second>\d{2})(?:\.(?P<fraction>\d+))?Z?$"
 )

@@ -2,32 +2,49 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Literal, TypeAlias, get_args
+from typing import Final, Literal, NamedTuple, TypeAlias, get_args
 
 import numpy as np
 import numpy.typing as npt
 from astropy.time import Time
 
-from keepout._types import FloatArray, symmetric_part
-from keepout.errors import CovarianceError, GeometryError
+from keepout._types import FloatArray, from_eigen, read_only, symmetric_part
+from keepout.errors import CovarianceError, GeometryError, UnsupportedFrame
 from keepout.frames import inertial_to_rtn_covariance, rtn_to_inertial_covariance
 from keepout.state import StateVector
+
+__all__ = [
+    "COVARIANCE_FRAMES",
+    "NEGLIGIBLE_VARIANCE",
+    "POLICIES",
+    "PSD_RTOL",
+    "RANK_RTOL",
+    "SYMMETRY_RTOL",
+    "Covariance",
+    "CovarianceFrame",
+    "Policy",
+    "make_covariance",
+    "problems",
+    "repair",
+    "to_correlation",
+]
 
 CovarianceFrame: TypeAlias = Literal["RTN", "GCRF"]
 """Frames a :class:`Covariance` can be expressed in."""
 
-COVARIANCE_FRAMES: tuple[CovarianceFrame, ...] = get_args(CovarianceFrame)
+COVARIANCE_FRAMES: Final[tuple[CovarianceFrame, ...]] = get_args(CovarianceFrame)
 
 Policy: TypeAlias = Literal["raise", "repair"]
 """What to do with an invalid covariance: raise, or repair with a diagnostic."""
 
-POLICIES: tuple[Policy, ...] = get_args(Policy)
+POLICIES: Final[tuple[Policy, ...]] = get_args(Policy)
 
-SYMMETRY_RTOL = 1e-9
+SYMMETRY_RTOL: Final = 1e-9
 """Allowed asymmetry of ``C[i, j]``, relative to ``sqrt(|C[i, i] C[j, j]|)``."""
 
-PSD_RTOL = 1e-10
+PSD_RTOL: Final = 1e-10
 """Allowed negative eigenvalue of the correlation matrix ``D^-1 C D^-1``.
 
 ``D = diag(sqrt|C[i, i]|)`` (1 where a variance is negligible, see
@@ -35,19 +52,19 @@ PSD_RTOL = 1e-10
 velocity variance of 1e-4 m^2/s^2 is checked as strictly as a position
 variance of 1e8 m^2."""
 
-NEGLIGIBLE_VARIANCE = 1e-200
+NEGLIGIBLE_VARIANCE: Final = 1e-200
 """Variance, relative to the largest absolute entry, below which it is taken
 as 0 when forming the correlation matrix. Dividing by its square root would
 otherwise overflow; real covariances span far less (a mm/s velocity next to
 a 10 km position is 1e-16)."""
 
 
-RANK_RTOL = 1e-8
+RANK_RTOL: Final = 1e-8
 """Position-block correlation eigenvalue below which :func:`repair` treats
 the direction as unknown: velocity correlations along it are dropped rather
 than divided by a vanishing variance."""
 
-_SMALLEST_NORMAL = float(np.finfo(np.float64).tiny)
+_SMALLEST_NORMAL: Final = float(np.finfo(np.float64).tiny)
 
 
 def _eigh(matrix: FloatArray) -> tuple[FloatArray, FloatArray]:
@@ -72,20 +89,49 @@ def _as_matrix(matrix: npt.ArrayLike) -> FloatArray:
     return array
 
 
-def _inspect(array: FloatArray) -> tuple[FloatArray, float, FloatArray, FloatArray]:
-    """Standard deviations ``D``, relative asymmetry, and the eigen-decomposition
-    of the symmetric part of the correlation matrix ``D^-1 C D^-1``."""
-    variances = np.abs(np.diag(array))
-    floor = max(_SMALLEST_NORMAL, NEGLIGIBLE_VARIANCE * float(np.max(np.abs(array))))
+class _Inspection(NamedTuple):
+    """A matrix ``C`` judged at the scale of its standard deviations ``D``."""
+
+    scale: FloatArray
+    """``D D^T``: the outer product of the standard deviations."""
+    correlation: FloatArray
+    """Symmetric part of the correlation matrix ``D^-1 C D^-1``."""
+    asymmetry: float
+    """Relative asymmetry: the largest ``|R[i, j] - R[j, i]|``, ``R = D^-1 C D^-1``."""
+    eigenvalues: FloatArray
+    """Eigenvalues of ``correlation``, ascending."""
+
+
+def to_correlation(matrix: FloatArray) -> tuple[FloatArray, FloatArray]:
+    """Scale a square matrix ``C`` to correlation units ``D^-1 C D^-1``.
+
+    ``D = diag(sqrt|C[i, i]|)``, with 1 where a variance is negligible (see
+    :data:`NEGLIGIBLE_VARIANCE`), so that row and column are left as they are
+    instead of being divided by a vanishing deviation.
+
+    Returns
+    -------
+    tuple
+        The deviations (diagonal of ``D``) and the scaled matrix.
+    """
+    variances = np.abs(np.diag(matrix))
+    floor = max(_SMALLEST_NORMAL, NEGLIGIBLE_VARIANCE * float(np.max(np.abs(matrix))))
     deviations = np.where(variances >= floor, np.sqrt(variances), 1.0)
-    scaled = array / np.outer(deviations, deviations)
+    scaled: FloatArray = matrix / np.outer(deviations, deviations)
+    return deviations, scaled
+
+
+def _inspect(array: FloatArray) -> _Inspection:
+    deviations, scaled = to_correlation(array)
+    scale = np.outer(deviations, deviations)
     asymmetry = float(np.max(np.abs(scaled - scaled.T)))
-    eigenvalues, eigenvectors = _eigh(symmetric_part(scaled))
-    return deviations, asymmetry, eigenvalues, eigenvectors
+    correlation = symmetric_part(scaled)
+    eigenvalues, _ = _eigh(correlation)
+    return _Inspection(scale, correlation, asymmetry, eigenvalues)
 
 
 def _problems(array: FloatArray) -> tuple[str, ...]:
-    _, asymmetry, eigenvalues, _ = _inspect(array)
+    _, _, asymmetry, eigenvalues = _inspect(array)
     found: list[str] = []
     if asymmetry > SYMMETRY_RTOL:
         found.append(f"not symmetric (max relative asymmetry {asymmetry:.3g})")
@@ -119,15 +165,28 @@ def problems(matrix: npt.ArrayLike) -> tuple[str, ...]:
     return _problems(_as_matrix(matrix))
 
 
-def _clipped(block: FloatArray) -> tuple[FloatArray, int, float]:
-    """A symmetric block with its negative eigenvalues set to 0.
+class _Clipped(NamedTuple):
+    """A symmetric block's eigen-decomposition with negative eigenvalues set to 0."""
 
-    Returns the block, how many eigenvalues were below ``-PSD_RTOL`` and the
-    most negative one.
-    """
-    values, vectors = _eigh(block)
-    result: FloatArray = (vectors * np.clip(values, 0.0, None)) @ vectors.T
-    return result, int(np.count_nonzero(values < -PSD_RTOL)), float(values[0])
+    values: FloatArray
+    """Eigenvalues, ascending, clipped to be non-negative."""
+    vectors: FloatArray
+    """Unit eigenvectors (columns)."""
+    negatives: int
+    """How many eigenvalues were below ``-PSD_RTOL``."""
+    lowest: float
+    """The most negative eigenvalue before clipping (the smallest, if none is)."""
+
+    @classmethod
+    def of(cls, block: FloatArray) -> _Clipped:
+        values, vectors = _eigh(block)
+        negatives = int(np.count_nonzero(values < -PSD_RTOL))
+        return cls(np.clip(values, 0.0, None), vectors, negatives, float(values[0]))
+
+    @property
+    def matrix(self) -> FloatArray:
+        """The clipped block."""
+        return from_eigen(self.values, self.vectors)
 
 
 def _repaired_correlation(scaled: FloatArray) -> tuple[FloatArray, list[str]]:
@@ -142,28 +201,30 @@ def _repaired_correlation(scaled: FloatArray) -> tuple[FloatArray, list[str]]:
     """
     position, cross, velocity = scaled[:3, :3], scaled[3:, :3], scaled[3:, 3:]
     notes: list[str] = []
-    position, count, lowest = _clipped(position)
-    if count:
+    spectrum = _Clipped.of(position)
+    if spectrum.negatives:
         notes.append(
-            f"clipped {count} negative position-block eigenvalue(s) to zero "
-            f"(most negative {lowest:.3g} in correlation units)"
+            f"clipped {spectrum.negatives} negative position-block eigenvalue(s) to "
+            f"zero (most negative {spectrum.lowest:.3g} in correlation units)"
         )
+    if spectrum.lowest < 0.0:
+        position = spectrum.matrix
     # B P^+ B^T over the directions the position block resolves; velocity
     # correlations along the others have nothing to condition on.
-    values, vectors = _eigh(position)
+    values, vectors = spectrum.values, spectrum.vectors
     resolved = values > RANK_RTOL * max(float(values[-1]), 1.0)
     known, variances = vectors[:, resolved], values[resolved]
     cross = cross @ known @ known.T
     explained = (cross @ known / variances) @ (known.T @ cross.T)
-    conditional, count, lowest = _clipped(symmetric_part(velocity - explained))
-    if count:
+    conditional = _Clipped.of(symmetric_part(velocity - explained))
+    if conditional.negatives:
         notes.append(
-            f"clipped {count} negative eigenvalue(s) of the velocity covariance "
-            f"conditional on position to zero (most negative {lowest:.3g} in "
-            "correlation units)"
+            f"clipped {conditional.negatives} negative eigenvalue(s) of the velocity "
+            "covariance conditional on position to zero (most negative "
+            f"{conditional.lowest:.3g} in correlation units)"
         )
     repaired = np.block(
-        [[position, cross.T], [cross, symmetric_part(conditional + explained)]]
+        [[position, cross.T], [cross, symmetric_part(conditional.matrix + explained)]]
     )
     return repaired, notes
 
@@ -203,7 +264,7 @@ def repair(matrix: npt.ArrayLike) -> tuple[FloatArray, tuple[str, ...]]:
         if the matrix was already valid).
     """
     array = _as_matrix(matrix)
-    deviations, asymmetry, eigenvalues, _ = _inspect(array)
+    scale, correlation, asymmetry, eigenvalues = _inspect(array)
     diagnostics: list[str] = []
     if asymmetry > SYMMETRY_RTOL:
         diagnostics.append(
@@ -211,15 +272,12 @@ def repair(matrix: npt.ArrayLike) -> tuple[FloatArray, tuple[str, ...]]:
         )
     if eigenvalues[0] >= -PSD_RTOL:
         return symmetric_part(array), tuple(diagnostics)
-    scale = np.outer(deviations, deviations)
-    correlation = symmetric_part(array / scale)
     structured = _structured_repair(correlation, scale)
     notes: list[str] = []
     if structured is None:
         # Correlations far outside [-1, 1] defeat the conditioning; clipping
         # the whole correlation matrix always works.
-        clipped, _, _ = _clipped(correlation)
-        fixed = symmetric_part(clipped * scale)
+        fixed = symmetric_part(_Clipped.of(correlation).matrix * scale)
     else:
         fixed, notes = structured
     # Each block's own eigenvalues may be within tolerance while the matrix
@@ -239,9 +297,17 @@ def _require_gcrf(state: StateVector) -> None:
         )
 
 
+def _require_frame(frame: str) -> None:
+    if frame not in COVARIANCE_FRAMES:
+        raise UnsupportedFrame(
+            f"unsupported covariance frame {frame!r}; "
+            f"expected one of {', '.join(COVARIANCE_FRAMES)}"
+        )
+
+
 def _frozen(array: FloatArray) -> FloatArray:
     symmetric = symmetric_part(array)
-    symmetric.flags.writeable = False
+    read_only(symmetric)
     return symmetric
 
 
@@ -266,6 +332,8 @@ class Covariance:
     CovarianceError
         If the matrix is not 6x6, not finite, not symmetric or not positive
         semi-definite within tolerance.
+    UnsupportedFrame
+        If ``frame`` is not one of :data:`COVARIANCE_FRAMES`.
     """
 
     matrix: FloatArray
@@ -274,8 +342,7 @@ class Covariance:
     repairs: tuple[str, ...] = field(default=(), kw_only=True)
 
     def __post_init__(self) -> None:
-        if self.frame not in COVARIANCE_FRAMES:
-            raise ValueError(f"unsupported covariance frame {self.frame!r}")
+        _require_frame(self.frame)
         array = _as_matrix(self.matrix)
         found = _problems(array)
         if found:
@@ -291,7 +358,8 @@ class Covariance:
         epoch: Time,
         repairs: tuple[str, ...] = (),
     ) -> Covariance:
-        """Wrap a matrix already known to be valid, skipping the checks."""
+        """Wrap a matrix already known to be valid, skipping its checks."""
+        _require_frame(frame)
         covariance = object.__new__(cls)
         for name, value in (
             ("matrix", _frozen(matrix)),
@@ -342,11 +410,7 @@ class Covariance:
         state
             GCRF state of the object; defines the RTN axes.
         """
-        _require_gcrf(state)
-        if self.frame == "GCRF":
-            return self
-        matrix = rtn_to_inertial_covariance(self.matrix, state.r, state.v)
-        return Covariance._trusted(matrix, "GCRF", self.epoch, self.repairs)
+        return self._in_frame("GCRF", state, rtn_to_inertial_covariance)
 
     def in_rtn(self, state: StateVector) -> Covariance:
         """Return this covariance in the object's RTN frame.
@@ -356,11 +420,19 @@ class Covariance:
         state
             GCRF state of the object; defines the RTN axes.
         """
+        return self._in_frame("RTN", state, inertial_to_rtn_covariance)
+
+    def _in_frame(
+        self,
+        target: CovarianceFrame,
+        state: StateVector,
+        rotate: Callable[[FloatArray, FloatArray, FloatArray], FloatArray],
+    ) -> Covariance:
         _require_gcrf(state)
-        if self.frame == "RTN":
+        if self.frame == target:
             return self
-        matrix = inertial_to_rtn_covariance(self.matrix, state.r, state.v)
-        return Covariance._trusted(matrix, "RTN", self.epoch, self.repairs)
+        matrix = rotate(self.matrix, state.r, state.v)
+        return Covariance._trusted(matrix, target, self.epoch, self.repairs)
 
 
 def make_covariance(
@@ -385,13 +457,22 @@ def make_covariance(
         invalid matrix; ``"repair"`` (default, as in operational practice)
         symmetrises it and clips negative eigenvalues, recording what it did
         in :attr:`Covariance.repairs`.
+
+    Raises
+    ------
+    CovarianceError
+        If the matrix is not 6x6 or not finite, or, with ``policy="raise"``,
+        not a valid covariance.
+    UnsupportedFrame
+        If ``frame`` is not one of :data:`COVARIANCE_FRAMES`.
+    ValueError
+        If ``policy`` is not one of :data:`POLICIES`.
     """
     if policy not in POLICIES:
         raise ValueError(f"unknown covariance policy {policy!r}")
-    if frame not in COVARIANCE_FRAMES:
-        raise ValueError(f"unsupported covariance frame {frame!r}")
+    _require_frame(frame)
     array = _as_matrix(matrix)
     if policy == "raise":
         return Covariance(array, frame, epoch)
     fixed, repairs = repair(array)
-    return Covariance._trusted(fixed if repairs else array, frame, epoch, repairs)
+    return Covariance._trusted(fixed, frame, epoch, repairs)

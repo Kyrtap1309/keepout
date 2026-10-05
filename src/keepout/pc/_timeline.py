@@ -19,36 +19,37 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from functools import lru_cache
 from itertools import pairwise
-from typing import TypeAlias
+from typing import Final, TypeAlias
 
 import numpy as np
-import numpy.typing as npt
 
-from keepout._types import FloatArray
+from keepout._types import BoolArray, FloatArray, read_only
 from keepout.encounter import sigma_along
 from keepout.errors import PcConvergenceError
 
-RATE_FLOOR = 1e-16
+RATE_FLOOR: Final = 1e-16
 """Rate, relative to the peak, below which the rate is negligible."""
 
-SIGMA_REACH = math.sqrt(2.0 * math.log(1.0 / RATE_FLOOR))
+SIGMA_REACH: Final = math.sqrt(2.0 * math.log(1.0 / RATE_FLOOR))
 """Standard deviations after which a Gaussian falls to :data:`RATE_FLOOR`."""
 
-MIN_SCAN_POINTS = 401
+MIN_SCAN_POINTS: Final = 401
 """Points of a scan over the whole window: the coarsest spacing is
 ``window / (MIN_SCAN_POINTS - 1)``."""
 
-MAX_SCAN_POINTS = 20001
+MAX_SCAN_POINTS: Final = 20001
 """Largest number of detection-grid points over all candidate intervals."""
 
-MAX_REFINED_POINTS = 20001
+MAX_REFINED_POINTS: Final = 20001
 """Largest number of points added by refinement; beyond it the refinement is
 coarser (detection is already guaranteed by the detection grid)."""
 
-DETECTION_LEVEL = 1e-8
+DETECTION_LEVEL: Final = 1e-8
 """Smallest encounter peak, relative to the largest, the scan must detect."""
 
-DETECTION_SIGMAS = 0.5 * 2.0 * math.sqrt(2.0 * math.log(DETECTION_LEVEL / RATE_FLOOR))
+DETECTION_SIGMAS: Final = (
+    0.5 * 2.0 * math.sqrt(2.0 * math.log(DETECTION_LEVEL / RATE_FLOOR))
+)
 """Detection-grid spacing in time standard deviations of the rate (6.07).
 
 Over one straight-line crossing the rate is, as a function of time, a
@@ -65,13 +66,14 @@ for the departure of curved two-body motion from a straight line is a
 heuristic margin, not a bound. A missed encounter contributes at most
 ~``DETECTION_LEVEL`` of the Nc of the largest one."""
 
-QUAD_RTOL = 1e-6
-"""Default relative agreement of two Clenshaw-Curtis rules."""
-
-MAX_BREAKPOINTS = 50
+MAX_BREAKPOINTS: Final = 50
 """Largest number of local maxima a segment is split at."""
 
-_ROUNDING_SLACK = 1e-9
+REFINE_CROSSING_FRACTION: Final = 1.0 / 8.0
+"""Refinement spacing around significant nodes, as a fraction of the
+crossing time."""
+
+_ROUNDING_SLACK: Final = 1e-9
 """Relative slack on grid gaps: a grid already at its refinement spacing
 gains no node from rounding."""
 
@@ -103,12 +105,8 @@ class RateIntegral:
         Integral over the whole window.
     segments
         Where the rate is not negligible.
-    window
-        Integration window [s from TCA].
-    edge
-        Largest rate at the window edges, relative to the peak.
-    peak
-        Largest rate on the scan grid [1/s].
+    scan
+        The scan the integral was computed on (its window, peak and edge).
     agreement
         Largest difference of the last two Clenshaw-Curtis rules of a piece
         that never agreed to ``rtol``, relative to ``nc`` (0 if every piece
@@ -117,9 +115,7 @@ class RateIntegral:
 
     nc: float
     segments: tuple[Segment, ...]
-    window: tuple[float, float]
-    edge: float
-    peak: float
+    scan: RateScan
     agreement: float = 0.0
 
 
@@ -153,22 +149,26 @@ Screen: TypeAlias = Callable[[tuple[float, float]], list[Candidate]]
 
 
 def straight_line_half_window(
-    relative_velocity: FloatArray, position_covariance: FloatArray, radius: float
+    relative_velocity: FloatArray,
+    position_covariance: FloatArray,
+    radius: float,
+    sigmas: float = SIGMA_REACH,
 ) -> float:
     """Half-window of a straight-line encounter [s].
 
     With ``sigma_v`` the combined position standard deviation along the
     relative velocity, the rate is negligible beyond
-    ``(SIGMA_REACH sigma_v + R) / |v|``; infinite for zero relative velocity.
+    ``(sigmas * sigma_v + R) / |v|`` (``sigmas`` defaults to
+    :data:`SIGMA_REACH`); infinite for zero relative velocity.
     """
     speed = float(np.linalg.norm(relative_velocity))
     if speed == 0.0:
         return math.inf
     sigma = sigma_along(relative_velocity / speed, position_covariance)
-    return (SIGMA_REACH * sigma + radius) / speed
+    return (sigmas * sigma + radius) / speed
 
 
-def regions(significant: npt.NDArray[np.bool_]) -> list[tuple[int, int]]:
+def regions(significant: BoolArray) -> list[tuple[int, int]]:
     """Index ranges ``[first, last]`` of consecutive True values."""
     indices = np.flatnonzero(significant)
     if indices.size == 0:
@@ -217,6 +217,12 @@ class RateScan:
         return _edge(self.values)
 
 
+def negligible_note(scan: RateScan) -> str:
+    """Diagnostic for a scan on which the rate is 0 everywhere."""
+    start, end = scan.window
+    return f"collision rate negligible over the whole window [{start:.6g}, {end:.6g}] s"
+
+
 def _edge(values: FloatArray) -> float:
     """Largest of the first and last value, relative to the largest (0 if none)."""
     peak = float(values.max())
@@ -249,7 +255,9 @@ def _detection_grids(
         spacing = min(DETECTION_SIGMAS * candidate.width, coarsest)
         finest = min(finest, spacing)
         count = math.ceil((b - a) / spacing) + 1
-        plan.append((a, b, count, min(candidate.crossing / 8.0, spacing)))
+        plan.append(
+            (a, b, count, min(candidate.crossing * REFINE_CROSSING_FRACTION, spacing))
+        )
     if sum(count for _, _, count, _ in plan) > MAX_SCAN_POINTS:
         raise PcConvergenceError(
             f"cannot resolve the collision rate over the window [{start:.6g}, "
@@ -425,14 +433,14 @@ def locate_auto(
         half = min(2.0 * half, limit)
 
 
-START_ORDER = 32
+CC_START_ORDER: Final = 32
 """Intervals of the first Clenshaw-Curtis rule of the time integral of one
-piece (``START_ORDER + 1`` nodes)."""
+piece (``CC_START_ORDER + 1`` nodes)."""
 
-MAX_ORDER = 1024
+CC_MAX_ORDER: Final = 1024
 """Intervals of the finest Clenshaw-Curtis rule of one piece."""
 
-STAGNATION_RTOL = 1e-4
+STAGNATION_RTOL: Final = 1e-4
 """Relative difference of two rules below which a difference that no longer
 halves is taken as the rate's own noise (its sphere quadrature, ~1e-5 of the
 peak): doubling further would not reduce it."""
@@ -453,7 +461,7 @@ def clenshaw_curtis(order: int) -> tuple[FloatArray, FloatArray]:
     weights = np.where((angles == 0.0) | (angles == np.pi), 1.0, 2.0) / order
     weights = weights * (1.0 - sums)
     nodes = np.cos(angles)
-    nodes.flags.writeable = weights.flags.writeable = False
+    read_only(nodes, weights)
     return nodes, weights
 
 
@@ -462,27 +470,28 @@ def _nested_integral(
 ) -> tuple[float, float]:
     """Integral of ``rate`` over ``[start, end]`` by nested Clenshaw-Curtis rules.
 
-    The order doubles from :data:`START_ORDER` until two rules agree to
+    The order doubles from :data:`CC_START_ORDER` until two rules agree to
     ``rtol``, their difference stops halving below :data:`STAGNATION_RTOL`
-    (the rate's noise floor), or :data:`MAX_ORDER` is reached. Each doubling
+    (the rate's noise floor), or :data:`CC_MAX_ORDER` is reached. Each doubling
     evaluates the rate only at the new nodes.
 
     Returns
     -------
     tuple
         The integral and the difference of the last two rules (infinite if
-        :data:`MAX_ORDER` allows a single rule).
+        :data:`CC_MAX_ORDER` allows a single rule).
     """
     half, middle = 0.5 * (end - start), 0.5 * (end + start)
 
     def at(nodes: FloatArray) -> FloatArray:
         return rate(middle + half * nodes)
 
-    order = START_ORDER
-    values = at(clenshaw_curtis(order)[0])
-    value = half * float(clenshaw_curtis(order)[1] @ values)
+    order = CC_START_ORDER
+    nodes, weights = clenshaw_curtis(order)
+    values = at(nodes)
+    value = half * float(weights @ values)
     difference = previous_difference = math.inf
-    while order < MAX_ORDER:
+    while order < CC_MAX_ORDER:
         order *= 2
         nodes, weights = clenshaw_curtis(order)
         merged = np.empty(order + 1)
@@ -500,23 +509,19 @@ def _nested_integral(
     return value, difference
 
 
-def integrate_segments(
-    rate: Rate, found: RateScan, *, rtol: float = QUAD_RTOL
-) -> RateIntegral:
+def integrate_segments(rate: Rate, found: RateScan, *, rtol: float) -> RateIntegral:
     """Integrate ``rate`` over the segments of a scan.
 
     Each segment is split at the local maxima of the scan and every piece is
-    integrated by nested Clenshaw-Curtis rules of doubling order.
+    integrated by nested Clenshaw-Curtis rules of doubling order until two
+    agree to ``rtol``.
     """
     segments: list[Segment] = []
     shortfalls: list[float] = []
     for lo, hi in found.segments:
         inner = found.values[lo : hi + 1]
-        cuts = [
-            float(found.times[lo + j])
-            for j in range(1, inner.size - 1)
-            if inner[j] > inner[j - 1] and inner[j] >= inner[j + 1]
-        ][:MAX_BREAKPOINTS]
+        maxima = (inner[1:-1] > inner[:-2]) & (inner[1:-1] >= inner[2:])
+        cuts = found.times[lo + 1 + np.flatnonzero(maxima)][:MAX_BREAKPOINTS].tolist()
         start, end = float(found.times[lo]), float(found.times[hi])
         pieces = [
             _nested_integral(rate, a, b, rtol) for a, b in pairwise([start, *cuts, end])
@@ -526,6 +531,4 @@ def integrate_segments(
     total = math.fsum(s.nc for s in segments)
     worst = max(shortfalls, default=0.0)
     agreement = worst / abs(total) if total != 0.0 else (math.inf if worst else 0.0)
-    return RateIntegral(
-        total, tuple(segments), found.window, found.edge, found.peak, agreement
-    )
+    return RateIntegral(total, tuple(segments), found, agreement)

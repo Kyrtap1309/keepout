@@ -1,18 +1,27 @@
 import importlib
-from typing import Any
 
 import numpy as np
 import pytest
-from builders import DRIFT_WINDOW, LEO_R, LEO_V, drifting, head_on, object_state
+from builders import (
+    DRIFT_WINDOW,
+    LEO_R,
+    LEO_V,
+    TYPICAL_HEAD_ON,
+    drifting,
+    head_on,
+    object_state,
+)
 from faults import failing_where, not_converging
 
+from keepout._types import FloatArray, IndexArray
 from keepout.conjunction import Conjunction
 from keepout.errors import CovarianceError, PcConvergenceError
 from keepout.objects import ObjectState
+from keepout.pc import _rate as rate_module
 from keepout.pc import foster, hall3d, montecarlo
 from keepout.pc.montecarlo import _Trials
 
-rate_module = importlib.import_module("keepout.pc._rate")
+# The package exports the function montecarlo under the module's name.
 montecarlo_module = importlib.import_module("keepout.pc.montecarlo")
 
 
@@ -87,7 +96,7 @@ def test_trials_already_inside_at_the_window_start_do_not_count() -> None:
 
 
 def test_unknown_covariance_is_rejected() -> None:
-    base = head_on(30.0, 10.0, 20.0, 5.0)
+    base = TYPICAL_HEAD_ON
     conjunction = Conjunction(
         ObjectState("P", base.primary.state, None), base.secondary, 5.0
     )
@@ -98,20 +107,27 @@ def test_unknown_covariance_is_rejected() -> None:
 
 
 @pytest.mark.parametrize(
-    "options",
-    [{"samples": 0}, {"rtol": 0.0}, {"max_samples": 0}, {"confidence": 1.0}],
+    ("options", "message"),
+    [
+        ({"samples": 0}, "samples must be >= 1"),
+        ({"rtol": 0.0}, "rtol must be finite and > 0"),
+        ({"max_samples": 0}, "need max_samples >= 1"),
+        ({"confidence": 1.0}, "0 < confidence < 1"),
+    ],
 )
-def test_bad_arguments_are_rejected(options: dict[str, float]) -> None:
-    with pytest.raises(ValueError, match=r"samples|rtol|confidence"):
-        montecarlo(head_on(30.0, 10.0, 20.0, 5.0), **options)  # type: ignore[arg-type]
+def test_bad_arguments_are_rejected(options: dict[str, float], message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        montecarlo(TYPICAL_HEAD_ON, **options)  # type: ignore[arg-type]
 
 
 def test_no_encounter_in_the_window_runs_no_trial() -> None:
-    result = montecarlo(head_on(30.0, 10.0, 20.0, 5.0), window=(100.0, 101.0))
+    result = montecarlo(TYPICAL_HEAD_ON, window=(100.0, 101.0))
     assert result.value == 0.0
     assert result.details["samples"] == 0.0
     (note,) = result.diagnostics
-    assert note.startswith("no encounter: the collision rate is negligible")
+    assert note.startswith(
+        "no encounter: collision rate negligible over the whole window"
+    )
 
 
 def test_failed_iteration_inside_an_encounter_raises(
@@ -122,7 +138,7 @@ def test_failed_iteration_inside_an_encounter_raises(
     failing = failing_where(lambda t: (t >= 4.2e-4) & (t <= 5.0e-4), not_converging)
     monkeypatch.setattr(rate_module, "_iterate_overlap", failing)
     with pytest.raises(PcConvergenceError, match="inside an encounter segment"):
-        montecarlo(head_on(30.0, 10.0, 20.0, 5.0), samples=1_000, seed=1)
+        montecarlo(TYPICAL_HEAD_ON, samples=1_000, seed=1)
 
 
 class _Line(_Trials):
@@ -137,7 +153,9 @@ class _Line(_Trials):
     def __init__(self) -> None:
         pass
 
-    def relative(self, t: Any, rows: Any = None) -> Any:
+    def relative(
+        self, t: float | FloatArray, rows: slice | IndexArray = slice(None)
+    ) -> tuple[FloatArray, FloatArray, FloatArray]:
         t = np.asarray(t, dtype=np.float64)
         one = np.ones_like(t)
         r = np.stack([one, t - 0.1, 0.0 * t], axis=1)
@@ -153,7 +171,7 @@ def test_newton_keeps_a_hit_it_passed() -> None:
 
 def test_confidence_is_printed_with_its_digits() -> None:
     result = montecarlo(
-        head_on(30.0, 10.0, 20.0, 5.0),
+        TYPICAL_HEAD_ON,
         rtol=1e-6,
         max_samples=1_000,
         confidence=0.995,

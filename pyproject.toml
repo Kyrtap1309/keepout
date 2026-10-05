@@ -43,15 +43,26 @@ ignore = ["N818"]
 strict = true
 files = ["src", "tests", "tools"]
 mypy_path = ["tools"]
+warn_unreachable = true
+enable_error_code = [
+    "ignore-without-code",
+    "redundant-expr",
+    "truthy-bool",
+    "truthy-iterable",
+    "possibly-undefined",
+    "redundant-self",
+    "mutable-override",
+]
 
 [[tool.mypy.overrides]]
-module = ["scipy.*", "astropy.*", "erfa.*", "xlrd.*", "openpyxl.*"]
+module = ["astropy.*", "erfa.*", "xlrd.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["tools"]
 addopts = ["-ra", "--strict-markers", "-m", "not validation"]
+filterwarnings = ["error"]
 markers = [
     "validation: needs NASA CARA reference data (downloads on first run)",
 ]
@@ -75,5 +86,7 @@ dev = [
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
     "ruff>=0.16.8",
+    "scipy-stubs>=1.17.1.5",
+    "types-openpyxl>=3.1.5.20260827",
     "xmlschema>=4.3.2",
 ]

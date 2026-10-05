@@ -5,7 +5,14 @@ from xml.etree import ElementTree
 import pytest
 import xmlschema
 from builders import B1_KVN
-from cdm_builders import B1_XML, TRACSS, assert_equivalent, cdms, minimal_cdm
+from cdm_builders import (
+    B1_XML,
+    TRACSS,
+    assert_equivalent,
+    cdms,
+    minimal_cdm,
+    mutate,
+)
 from hypothesis import given, settings
 
 from keepout.cdm import Cdm, Field, Section, kvn, xml
@@ -22,11 +29,6 @@ def qualify(text: str) -> str:
     for element in root.iter():
         element.tag = f"{{{xml.NDM_NAMESPACE}}}{element.tag}"
     return ElementTree.tostring(root, encoding="unicode")
-
-
-def with_segment2(cdm: Cdm, *extra: Field) -> Cdm:
-    segment = Section("segment", (*cdm.segments[1].fields, *extra))
-    return dataclasses.replace(cdm, segments=(cdm.segments[0], segment))
 
 
 def b1_xml() -> str:
@@ -88,28 +90,37 @@ def test_user_defined_parameters_use_the_parameter_attribute() -> None:
         ("USER_DEFINED", "RUN_ID"),
         ("USER_DEFINED", "MEETS_ALERTABLE_CRITERIA"),
     ]
-    assert xml.loads(xml.dumps(cdm)).object1.user_defined == cdm.object1.user_defined
-
-
-def test_several_user_defined_parameters_are_read() -> None:
-    text = xml.dumps(kvn.load(TRACSS))
-    assert text.count("<USER_DEFINED ") == 2
-    assert xml.loads(text).object1.user_defined == {
+    assert xml.loads(xml.dumps(cdm)).object1.user_defined == {
         "USER_DEFINED_RUN_ID": "8e815679-b659-48df-957e-9c5b4921af52",
         "USER_DEFINED_MEETS_ALERTABLE_CRITERIA": "NO",
     }
 
 
 def test_user_defined_without_parameter_is_rejected() -> None:
-    text = xml.dumps(kvn.load(TRACSS)).replace(' parameter="RUN_ID"', "", 1)
+    text = mutate(xml.dumps(kvn.load(TRACSS)), ' parameter="RUN_ID"', "")
     with pytest.raises(CdmParseError, match="USER_DEFINED has no parameter") as info:
         xml.loads(text)
     assert info.value.path is not None
     assert info.value.path.endswith("userDefinedParameters/USER_DEFINED")
 
 
+def test_an_invalid_user_defined_keyword_is_a_parse_error() -> None:
+    # The parameter makes the keyword USER_DEFINED_run id, which no section
+    # may hold: reported at the section, not as a duplicate.
+    text = mutate(
+        xml.dumps(kvn.load(TRACSS)), ' parameter="RUN_ID"', ' parameter="run id"'
+    )
+    with pytest.raises(
+        CdmParseError, match="keyword 'USER_DEFINED_run id' must be"
+    ) as info:
+        xml.loads(text)
+    assert isinstance(info.value.__cause__, ValueError)
+    assert info.value.path == "cdm/body/segment[1]"
+    assert info.value.keyword is None
+
+
 def test_empty_group_is_structure_not_a_keyword() -> None:
-    text = b1_xml().replace("<data>", "<data><userDefinedParameters/>", 1)
+    text = mutate(b1_xml(), "<data>", "<data><userDefinedParameters/>", count=2)
     assert_equivalent(xml.loads(text), xml.load(B1_XML))
 
 
@@ -169,8 +180,8 @@ def test_one_segment_is_rejected() -> None:
 
 
 def test_bad_unit_reports_the_element_path() -> None:
-    text = b1_xml().replace(
-        '<X units="km">2570.097065</X>', '<X units="m">2570.097065</X>'
+    text = mutate(
+        b1_xml(), '<X units="km">2570.097065</X>', '<X units="m">2570.097065</X>'
     )
     with pytest.raises(CdmParseError, match=r"does not match expected \[km\]") as info:
         xml.loads(text)
@@ -179,7 +190,8 @@ def test_bad_unit_reports_the_element_path() -> None:
 
 
 def test_duplicate_keyword() -> None:
-    text = b1_xml().replace(
+    text = mutate(
+        b1_xml(),
         '<MISS_DISTANCE units="m">715</MISS_DISTANCE>',
         '<MISS_DISTANCE units="m">715</MISS_DISTANCE>'
         '<MISS_DISTANCE units="m">1</MISS_DISTANCE>',
@@ -191,7 +203,7 @@ def test_duplicate_keyword() -> None:
 
 
 def test_missing_required_keyword() -> None:
-    text = b1_xml().replace('<X_DOT units="km/s">-2.888612500</X_DOT>', "")
+    text = mutate(b1_xml(), '<X_DOT units="km/s">-2.888612500</X_DOT>', "")
     with pytest.raises(
         CdmParseError, match=r"OBJECT2 section is missing required keyword\(s\): X_DOT"
     ):

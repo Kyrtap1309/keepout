@@ -1,8 +1,9 @@
 import dataclasses
 
+import astropy.units as u
 import numpy as np
 import pytest
-from builders import EPOCH, LEO_R, LEO_V, head_on, object_state
+from builders import EPOCH, LEO_R, LEO_V, TYPICAL_HEAD_ON, head_on, object_state
 
 from keepout.conjunction import Conjunction, combined_hard_body_radius
 from keepout.covariance import make_covariance
@@ -39,29 +40,38 @@ def test_zero_relative_velocity_has_no_encounter_plane() -> None:
         _ = conjunction.plane
 
 
+def test_mismatched_epochs_are_rejected() -> None:
+    primary = object_state([7000e3, 0.0, 0.0], [0.0, 7500.0, 0.0])
+    secondary = object_state(
+        [7000e3, 100.0, 0.0], [0.0, 0.0, 7500.0], epoch=EPOCH + 1 * u.s
+    )
+    with pytest.raises(GeometryError, match="epochs differ"):
+        Conjunction(primary, secondary, 5.0)
+
+
 def test_explicit_radius_wins() -> None:
-    base = head_on(miss=30.0, sigma_x=10.0, sigma_z=20.0, radius=5.0)
+    base = TYPICAL_HEAD_ON
     primary = with_radius(base.primary, 3.0)
     secondary = with_radius(base.secondary, 4.0)
     assert combined_hard_body_radius(primary, secondary, 10.0) == 10.0
 
 
 def test_radius_is_the_sum_of_object_radii() -> None:
-    base = head_on(miss=30.0, sigma_x=10.0, sigma_z=20.0, radius=5.0)
+    base = TYPICAL_HEAD_ON
     primary = with_radius(base.primary, 3.0)
     secondary = with_radius(base.secondary, 4.0)
     assert combined_hard_body_radius(primary, secondary) == 7.0
 
 
 def test_missing_radius_is_an_error_not_a_default() -> None:
-    base = head_on(miss=30.0, sigma_x=10.0, sigma_z=20.0, radius=5.0)
+    base = TYPICAL_HEAD_ON
     primary = with_radius(base.primary, 3.0)
     with pytest.raises(ValueError, match="no hard-body radius for SEC"):
         combined_hard_body_radius(primary, base.secondary)
 
 
 def test_diagnostics_label_each_objects_covariance_repairs() -> None:
-    base = head_on(miss=30.0, sigma_x=10.0, sigma_z=20.0, radius=5.0)
+    base = TYPICAL_HEAD_ON
     assert base.diagnostics == ()
     negative = np.diag([1.0, 1.0, 1.0, 1.0, 1.0, -1.0])
     secondary = ObjectState(
@@ -76,7 +86,7 @@ def test_diagnostics_label_each_objects_covariance_repairs() -> None:
 
 
 def test_unknown_covariance_is_reported() -> None:
-    base = head_on(30.0, 10.0, 20.0, 5.0)
+    base = TYPICAL_HEAD_ON
     secondary = ObjectState("99999", base.secondary.state, None)
     conjunction = Conjunction(base.primary, secondary, 5.0)
     assert conjunction.diagnostics == ("secondary (99999): covariance unknown",)

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import math
 import sys
+from typing import Final
 
 from scipy import integrate
 
@@ -21,24 +22,35 @@ from keepout.encounter import EncounterPlane
 from keepout.pc._plane import PlaneGaussian, plane_gaussian, require_known_covariance
 from keepout.pc.result import PcResult
 
-FOSTER_RTOL = 1e-10
+__all__ = [
+    "BREAKPOINT_GAP",
+    "FOSTER_RTOL",
+    "MIN_RTOL",
+    "QUAD_LIMIT",
+    "STEP_SIGMAS",
+    "TAIL_SIGMAS",
+    "foster",
+    "gaussian_pc",
+]
+
+FOSTER_RTOL: Final = 1e-10
 """Default relative tolerance of the adaptive quadrature."""
 
-MIN_RTOL = 50.0 * sys.float_info.epsilon
+MIN_RTOL: Final = 50.0 * sys.float_info.epsilon
 """Smallest relative tolerance QUADPACK accepts."""
 
-STEP_SIGMAS = 10.0
+STEP_SIGMAS: Final = 10.0
 """Half-width, in narrow-axis standard deviations, of the chord-mass step
 around ``h = |miss_v|`` whose ends are given to the quadrature as breakpoints."""
 
-BREAKPOINT_GAP = 1e-6
+BREAKPOINT_GAP: Final = 1e-6
 """Breakpoints closer than this fraction of the band to its ends are dropped."""
 
-TAIL_SIGMAS = 12.0
+TAIL_SIGMAS: Final = 12.0
 """Half-width, in standard deviations, of the band along the wide axis that
 is integrated; outside it the density is below exp(-72) of its peak."""
 
-QUAD_LIMIT = 200
+QUAD_LIMIT: Final = 200
 """Largest number of QUADPACK subintervals."""
 
 
@@ -113,6 +125,16 @@ def foster(
         raise ValueError(f"rtol must be >= {MIN_RTOL:.3g}, got {rtol}")
     require_known_covariance(plane.unknown_covariance, "foster")
     gaussian = plane_gaussian(plane.miss_vector, plane.covariance, hard_body_radius)
+    return gaussian_pc(gaussian, rtol=rtol)
+
+
+def gaussian_pc(gaussian: PlaneGaussian, *, rtol: float = FOSTER_RTOL) -> PcResult:
+    """Foster's quadrature of a principal-axes Gaussian over its hard body.
+
+    The core of :func:`foster`, without its argument checks: for callers that
+    integrate covariances other than the plane's own (see
+    :mod:`keepout.pc.maxpc`).
+    """
     diagnostics = list(gaussian.diagnostics)
     band = _band(gaussian)
     if band is None:

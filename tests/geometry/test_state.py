@@ -2,7 +2,8 @@ import numpy as np
 import pytest
 from builders import EPOCH
 
-from keepout.state import StateVector
+from keepout.errors import UnsupportedFrame
+from keepout.state import REF_FRAMES, StateVector, as_ref_frame
 
 
 def test_state_vector_copies_and_freezes_arrays() -> None:
@@ -15,16 +16,37 @@ def test_state_vector_copies_and_freezes_arrays() -> None:
         state.r[0] = 1.0
 
 
+GOOD = [1.0, 0.0, 0.0]
+
+
 @pytest.mark.parametrize(
-    ("r", "message"),
-    [([1.0, 2.0], r"shape \(3,\)"), ([1.0, float("nan"), 0.0], "finite")],
+    ("r", "v", "message"),
+    [
+        ([1.0, 2.0], GOOD, r"r must have shape \(3,\)"),
+        ([1.0, float("nan"), 0.0], GOOD, "r must be finite"),
+        (GOOD, [1.0, 2.0], r"v must have shape \(3,\)"),
+        (GOOD, [0.0, float("inf"), 0.0], "v must be finite"),
+    ],
 )
-def test_state_vector_rejects_bad_position(r: list[float], message: str) -> None:
+def test_state_vector_rejects_bad_vectors(
+    r: list[float], v: list[float], message: str
+) -> None:
     with pytest.raises(ValueError, match=message):
-        StateVector(EPOCH, r, [0.0, 0.0, 0.0], "GCRF")
+        StateVector(EPOCH, r, v, "GCRF")
 
 
 def test_state_vector_rejects_unknown_frame() -> None:
-    with pytest.raises(ValueError, match="unsupported frame 'TEME'"):
+    with pytest.raises(UnsupportedFrame, match="unsupported reference frame 'TEME'"):
         # The wrong literal is the point of the test.
         StateVector(EPOCH, [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], "TEME")  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("frame", REF_FRAMES)
+def test_as_ref_frame_accepts_supported_frames(frame: str) -> None:
+    assert as_ref_frame(frame) == frame
+
+
+@pytest.mark.parametrize("name", ["TEME", "gcrf", "", None])
+def test_as_ref_frame_rejects_other_names(name: str | None) -> None:
+    with pytest.raises(UnsupportedFrame, match="expected one of GCRF, EME2000, ITRF"):
+        as_ref_frame(name)
