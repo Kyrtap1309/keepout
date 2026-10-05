@@ -93,8 +93,10 @@ class Criterion:
         relative = self._relative_at(reference)
         if relative is not None:
             error = difference / reference
-            return Verdict(error, True, error <= relative)
-        return Verdict(difference, False, difference <= self.margin(reference))
+            return Verdict(error, relative=True, passed=error <= relative)
+        return Verdict(
+            difference, relative=False, passed=difference <= self.margin(reference)
+        )
 
     def margin(
         self, reference: float, interval: tuple[float, float] | None = None

@@ -1,4 +1,4 @@
-name: Nightly Monte Carlo validation
+name: Nightly Monte Carlo validation and Kelvins risk report
 
 on:
   schedule:
@@ -21,7 +21,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - uses: actions/cache@v4
         with:
-          path: ~/.cache/keepout
+          path: ~/.cache/keepout/cara
           key: cara-${{ hashFiles('src/keepout/sources/cara_manifest.sha256') }}
       - run: uv sync --locked
       - run: uv run python tools/validation_report.py --monte-carlo
@@ -34,3 +34,21 @@ jobs:
             docs/validation-monte-carlo.json
             docs/validation-monte-carlo.md
             README.md
+
+  risk-kelvins:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --locked
+      - id: kelvins
+        # Keyed by the pinned table, so editing the loader keeps the 221 MB cache.
+        run: >-
+          echo "key=kelvins-$(uv run python -c 'from keepout.sources import kelvins;
+          print(kelvins.ZENODO_RECORD, kelvins.RAW_SHA256, sep="-")')" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/keepout/kelvins
+          key: ${{ steps.kelvins.outputs.key }}
+      - run: uv run python tools/risk_report.py --check

@@ -3,6 +3,8 @@ symmetric-matrix algebra."""
 
 from __future__ import annotations
 
+import enum
+import functools
 import math
 from typing import Any, TypeAlias
 
@@ -20,6 +22,20 @@ BoolArray: TypeAlias = npt.NDArray[np.bool_]
 
 IndexArray: TypeAlias = npt.NDArray[np.intp]
 """A NumPy array of indices."""
+
+
+@functools.total_ordering
+class OrderedEnum(enum.Enum):
+    """An enum whose members are ordered by value, only against each other.
+
+    Unlike :class:`enum.IntEnum`, members are not ints: they never compare
+    equal to a number and are always true in a boolean context.
+    """
+
+    def __lt__(self, other: object) -> bool:
+        if type(other) is not type(self):
+            return NotImplemented
+        return bool(self.value < other.value)
 
 
 def read_only(*arrays: npt.NDArray[Any]) -> None:

@@ -22,6 +22,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final, TypeAlias
 
+from generated import replace_block, write_or_check
+
 from keepout.pc.result import Method
 from keepout.sources.cara import CARA_COMMIT
 from keepout.validation.cases import load_all, load_monte_carlo_cases
@@ -264,7 +266,7 @@ def _error(row: Row) -> str:
     return f"{row.error:.1e}" if row.relative else f"{row.error:.1e} (abs)"
 
 
-def _mark(passed: bool) -> str:
+def _mark(*, passed: bool) -> str:
     return "pass" if passed else "**FAIL**"
 
 
@@ -324,7 +326,7 @@ def _method_columns(method: Method) -> _Columns:
         found = rows.get(method)
         if found is None:
             return ["-"] * len(titles)
-        values = [_pc(found.value), f"{_error(found)} {_mark(found.passed)}"]
+        values = [_pc(found.value), f"{_error(found)} {_mark(passed=found.passed)}"]
         if monte_carlo:
             low, high = found.ci or (0.0, 0.0)
             values += [f"[{_pc(low)}, {_pc(high)}]", f"{found.samples}"]
@@ -338,7 +340,7 @@ def _paper_cells(case: Row, rows: Mapping[Method, Row]) -> list[str]:
     if case.paper is None or found is None:
         return ["-", "-"]
     error, _, passed = PAPER.judge(found.value, case.paper)
-    return [_pc(case.paper), f"{error:.1e} {_mark(passed)}"]
+    return [_pc(case.paper), f"{error:.1e} {_mark(passed=passed)}"]
 
 
 def _suite_table(members: Sequence[Row]) -> list[str]:
@@ -428,12 +430,7 @@ def replace_summary(readme: str, summary: str, report: Report = MAIN) -> str:
     ValueError
         If the markers are missing or out of order.
     """
-    first = readme.find(report.start)
-    last = readme.find(report.end)
-    if first < 0 or last < first:
-        raise ValueError(f"README needs {report.start} and {report.end}, in that order")
-    head = readme[: first + len(report.start)]
-    return f"{head}\n{summary}\n{readme[last:]}"
+    return replace_block(readme, report.start, report.end, summary)
 
 
 def published(fresh: Record, data: Path) -> tuple[Record, list[str]]:
@@ -485,18 +482,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     page = args.page if args.page is not None else report.page
     data = page.with_suffix(".json")
     record, differences = published(fresh, data)
-    status = 0
     files = rendered_files(record, data, page, args.readme, report)
-    for path, text in files.items():
-        current = path.read_text(encoding="utf-8") if path.exists() else None
-        if current == text:
-            continue
-        if args.check:
-            print(f"{path} is out of date; run tools/validation_report.py")
-            status = 1
-        else:
-            path.write_text(text, encoding="utf-8")
-            print(f"wrote {path}")
+    status = write_or_check(files, check=args.check, tool="tools/validation_report.py")
     for difference in differences:
         print(f"not reproduced: {difference}")
     failed = [r for r in fresh.rows if not r.passed]

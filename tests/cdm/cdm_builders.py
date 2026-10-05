@@ -175,8 +175,7 @@ _REQUIRED_TEXT = tuple(
 def segments(draw: st.DrawFn, index: int) -> Section:
     # Comments open the section, where both KVN and NDM/XML put them.
     fields = [*draw(comments()), Field("OBJECT", f"OBJECT{index}")]
-    for name in _REQUIRED_TEXT:
-        fields.append(Field(name, draw(words)))
+    fields += [Field(name, draw(words)) for name in _REQUIRED_TEXT]
     fields.append(
         Field("REF_FRAME", draw(st.sampled_from(["EME2000", "GCRF", "ITRF"])))
     )
@@ -186,10 +185,12 @@ def segments(draw: st.DrawFn, index: int) -> Section:
         fields.append(Field("OBS_USED", draw(st.integers(0, 10**6))))
     if draw(st.booleans()):
         fields.append(Field("HBR", draw(reals)))
-    for name in ("X", "Y", "Z", "X_DOT", "Y_DOT", "Z_DOT"):
-        fields.append(Field(name, draw(reals)))
-    for name in covariance_names(draw(st.integers(6, 9))):
-        fields.append(Field(name, draw(reals)))
+    fields += [
+        Field(name, draw(reals)) for name in ("X", "Y", "Z", "X_DOT", "Y_DOT", "Z_DOT")
+    ]
+    fields += [
+        Field(name, draw(reals)) for name in covariance_names(draw(st.integers(6, 9)))
+    ]
     fields += draw(extras("USER_DEFINED_TEST"))
     fields += draw(extras("X_KEEPOUT_SEG"))
     return Section("segment", tuple(fields))
@@ -215,8 +216,9 @@ def cdms(draw: st.DrawFn) -> Cdm:
         Field("MISS_DISTANCE", draw(reals)),
     ]
     if draw(st.booleans()):
-        for axis in "RTN":
-            relative_fields.append(Field(f"RELATIVE_POSITION_{axis}", draw(reals)))
+        relative_fields += [
+            Field(f"RELATIVE_POSITION_{axis}", draw(reals)) for axis in "RTN"
+        ]
     if draw(st.booleans()):
         relative_fields.append(Field("COLLISION_PROBABILITY", draw(reals)))
     relative_fields += draw(extras("X_KEEPOUT_REL"))

@@ -1,0 +1,252 @@
+import itertools
+import math
+
+import pytest
+from builders import CDM_DATA
+from risk_builders import b1_cdm
+
+import keepout.cdm
+from keepout import Conjunction, PcConvergenceError, compute_pc
+from keepout.cdm import Cdm
+from keepout.risk import DAY, Action, assess
+from keepout.risk.event import ConjunctionEvent, group_events, time_to_tca
+
+HBR = 20.0
+B1_TIME_TO_TCA = DAY + 6 * 60 + 40.618
+"""From the annex example's creation to its TCA [s]."""
+
+
+def test_cdms_are_kept_oldest_first() -> None:
+    late = b1_cdm("B", created="2010-03-13T10:00:00.000")
+    early = b1_cdm("A", created="2010-03-12T10:00:00.000")
+    event = ConjunctionEvent("E", (late, early))
+    assert [cdm.message_id for cdm in event.cdms] == ["A", "B"]
+    assert event.latest is late
+    assert (event.primary_id, event.secondary_id) == ("12345", "30337")
+
+
+def test_simultaneous_cdms_are_ordered_by_message_id() -> None:
+    event = ConjunctionEvent("E", (b1_cdm("B"), b1_cdm("A")))
+    assert [cdm.message_id for cdm in event.cdms] == ["A", "B"]
+
+
+def test_time_to_tca_runs_from_creation_to_tca() -> None:
+    assert time_to_tca(b1_cdm()) == pytest.approx(B1_TIME_TO_TCA, abs=1e-6)
+    after = b1_cdm(created="2010-03-13T23:37:52.618")
+    assert time_to_tca(after) == pytest.approx(-3600.0, abs=1e-6)
+
+
+def test_event_id_defaults_to_the_objects_and_the_first_tca() -> None:
+    event = ConjunctionEvent.from_cdms([b1_cdm()])
+    assert event.event_id == "12345/30337/2010-03-13T22:37:52.618"
+
+
+def test_event_id_defaults_to_the_conjunction_id() -> None:
+    event = ConjunctionEvent.from_cdms(
+        [b1_cdm("A", conjunction_id="EVT-9"), b1_cdm("B")]
+    )
+    assert event.event_id == "EVT-9"
+
+
+def test_an_explicit_event_id_wins() -> None:
+    event = ConjunctionEvent.from_cdms([b1_cdm(conjunction_id="EVT-9")], event_id="X")
+    assert event.event_id == "X"
+
+
+@pytest.mark.parametrize(
+    ("cdms", "tolerance", "message"),
+    [
+        ((), 600.0, "at least one CDM"),
+        ((b1_cdm("A"), b1_cdm("A")), 600.0, "MESSAGE_ID repeated: A"),
+        (
+            (b1_cdm("A"), b1_cdm("B", secondary="40000")),
+            600.0,
+            "must share both objects, got 12345/30337, 12345/40000",
+        ),
+        (
+            (b1_cdm("A"), b1_cdm("B", tca="2010-03-13T22:48:00.000")),
+            600.0,
+            "TCAs spread over 607 s, more than tca_tolerance",
+        ),
+        (
+            (b1_cdm("A", conjunction_id="X"), b1_cdm("B", conjunction_id="Y")),
+            600.0,
+            "different CONJUNCTION_ID values: X, Y",
+        ),
+        ((b1_cdm(),), -1.0, "tca_tolerance must be finite and >= 0"),
+        ((b1_cdm(),), math.nan, "tca_tolerance must be finite and >= 0"),
+    ],
+)
+def test_invalid_events_are_refused(
+    cdms: tuple[keepout.cdm.Cdm, ...], tolerance: float, message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        ConjunctionEvent.from_cdms(cdms, tca_tolerance=tolerance)
+
+
+def test_an_empty_event_id_is_refused() -> None:
+    with pytest.raises(ValueError, match="event_id must not be empty"):
+        ConjunctionEvent("", (b1_cdm(),))
+
+
+def test_observations_are_keepouts_pc_of_each_cdm() -> None:
+    first = b1_cdm("A", created="2010-03-11T22:37:52.618")
+    second = b1_cdm("B")
+    seen = ConjunctionEvent("E", (second, first)).observations(hard_body_radius=HBR)
+    expected = compute_pc(Conjunction.from_cdm(first, hard_body_radius=HBR))
+    assert [o.message_id for o in seen] == ["A", "B"]
+    assert seen[0].pc == expected.value
+    assert seen[0].source == "keepout (foster)"  # what "auto" chose
+    assert seen[0].time_to_tca == pytest.approx(2 * DAY, abs=1e-6)
+    assert seen[1].time_to_tca == pytest.approx(B1_TIME_TO_TCA, abs=1e-6)
+    assert seen[0].reported_pc == 4.835e-05
+
+
+def test_a_named_method_is_used() -> None:
+    (seen,) = ConjunctionEvent("E", (b1_cdm(),)).observations(
+        method="elrod", hard_body_radius=HBR
+    )
+    assert seen.source == "keepout (elrod)"
+    assert seen.result is not None
+    assert seen.result.method == "elrod"
+
+
+def test_a_computation_with_options_is_used() -> None:
+    def montecarlo(conjunction: Conjunction) -> keepout.PcResult:
+        return compute_pc(conjunction, "montecarlo", samples=2_000, seed=1)
+
+    (seen,) = ConjunctionEvent("E", (b1_cdm(),)).observations(
+        method=montecarlo, hard_body_radius=HBR
+    )
+    assert seen.source == "keepout (montecarlo)"
+    assert seen.ci_high is not None
+
+
+def test_a_failed_cdm_is_kept_with_its_error() -> None:
+    def stuck(conjunction: Conjunction) -> keepout.PcResult:
+        raise PcConvergenceError("rate not computable")
+
+    (seen,) = ConjunctionEvent("E", (b1_cdm(),)).observations(
+        method=stuck, hard_body_radius=HBR
+    )
+    assert not seen.ok
+    assert seen.error == "PcConvergenceError: rate not computable"
+    assert (seen.source, seen.message_id, seen.reported_pc) == (
+        "keepout",
+        "B1-1",
+        4.835e-05,
+    )
+
+
+def test_a_missing_hbr_is_reported_before_any_computation() -> None:
+    def refuse(conjunction: Conjunction) -> keepout.PcResult:
+        raise AssertionError("computed")
+
+    event = ConjunctionEvent("E", (b1_cdm("A"), b1_cdm("B")))
+    with pytest.raises(ValueError, match="no HBR for both objects in A, B"):
+        event.observations(method=refuse)
+
+
+def test_a_cdm_without_hbr_is_named() -> None:
+    message = keepout.cdm.load(CDM_DATA / "tracss_v2.kvn")
+    with pytest.raises(ValueError, match="TRACSS-TEST-0001"):
+        ConjunctionEvent("E", (message,)).observations(method="foster")
+
+
+def test_hbr_from_the_cdms() -> None:
+    text = (CDM_DATA / "tracss_v2.kvn").read_text(encoding="utf-8")
+    secondary = "MANEUVERABLE                   = NO\n"
+    assert text.count(secondary) == 1
+    message = keepout.cdm.loads(
+        text.replace(
+            secondary, f"{secondary}HBR                            = 1.00 [m]\n"
+        )
+    )
+    (seen,) = ConjunctionEvent("E", (message,)).observations(method="foster")
+    conjunction = Conjunction.from_cdm(message)
+    assert conjunction.hard_body_radius == 6.0
+    assert seen.pc == compute_pc(conjunction, "foster").value
+
+
+def test_an_invalid_reported_pc_is_noted_not_used() -> None:
+    (seen,) = ConjunctionEvent("E", (b1_cdm(reported_pc="2.0"),)).observations(
+        hard_body_radius=HBR
+    )
+    assert seen.reported_pc is None
+    assert seen.diagnostics == ("reported COLLISION_PROBABILITY 2.0 is not in [0, 1]",)
+
+
+def test_an_event_is_assessed_from_its_observations() -> None:
+    event = ConjunctionEvent("E", (b1_cdm(),))
+    assessment = assess(event.observations(hard_body_radius=HBR))
+    assert assessment.decision.action is Action.MONITOR  # 4.7e-7: yellow
+
+
+def test_group_events_splits_by_objects_and_encounter() -> None:
+    cdms = [
+        b1_cdm("A2", created="2010-03-13T00:00:00.000", tca="2010-03-13T22:37:53.000"),
+        b1_cdm("B1", secondary="40000"),
+        b1_cdm("A1"),
+        b1_cdm("A3", tca="2010-03-14T00:10:00.000"),  # one orbit later
+    ]
+    events = group_events(cdms)
+    assert [[c.message_id for c in e.cdms] for e in events] == [
+        ["A1", "A2"],
+        ["B1"],
+        ["A3"],
+    ]
+    assert [e.event_id for e in events] == [
+        "12345/30337/2010-03-13T22:37:52.618",
+        "12345/40000/2010-03-13T22:37:52.618",
+        "12345/30337/2010-03-14T00:10:00.000",
+    ]
+
+
+def test_group_events_anchors_the_tolerance_at_the_first_tca() -> None:
+    cdms = [
+        b1_cdm("A", tca="2010-03-13T22:30:00.000"),
+        b1_cdm("B", tca="2010-03-13T22:38:00.000"),
+        b1_cdm("C", tca="2010-03-13T22:46:00.000"),
+    ]
+    assert [len(e.cdms) for e in group_events(cdms)] == [2, 1]
+
+
+def test_group_events_does_not_depend_on_the_input_order() -> None:
+    cdms = [
+        b1_cdm("A2", created="2010-03-13T00:00:00.000", tca="2010-03-13T22:37:53.000"),
+        b1_cdm("B1", secondary="40000"),
+        b1_cdm("A1"),
+        b1_cdm("A3", tca="2010-03-14T00:10:00.000"),
+    ]
+
+    def grouped(order: tuple[Cdm, ...]) -> list[tuple[str, list[str]]]:
+        return [
+            (e.event_id, [c.message_id for c in e.cdms]) for e in group_events(order)
+        ]
+
+    expected = grouped(tuple(cdms))
+    for order in itertools.permutations(cdms):
+        assert grouped(order) == expected
+
+
+def test_group_events_keeps_tcas_exactly_the_tolerance_apart_together() -> None:
+    cdms = [
+        b1_cdm("A", tca="2010-03-13T22:30:00.000"),
+        b1_cdm("B", tca="2010-03-13T22:40:00.000"),
+    ]
+    assert [len(e.cdms) for e in group_events(cdms, tca_tolerance=600.0)] == [2]
+
+
+def test_group_events_refuses_different_conjunction_ids_in_one_group() -> None:
+    cdms = [b1_cdm("A", conjunction_id="C1"), b1_cdm("B", conjunction_id="C2")]
+    with pytest.raises(ValueError, match="different CONJUNCTION_ID values: C1, C2"):
+        group_events(cdms)
+
+
+def test_group_events_of_nothing_is_empty() -> None:
+    assert group_events([]) == []
+
+
+def test_group_events_refuses_an_invalid_tolerance() -> None:
+    with pytest.raises(ValueError, match="tca_tolerance must be finite and >= 0"):
+        group_events([b1_cdm()], tca_tolerance=-5.0)

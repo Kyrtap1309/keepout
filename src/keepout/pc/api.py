@@ -133,13 +133,20 @@ def _assess(conjunction: Conjunction) -> _Assessment:
 
 _Runner: TypeAlias = Callable[Concatenate[Conjunction, bool, ...], PcResult]
 """A method run on a conjunction whose encounter :func:`_assess` tested for
-length (the ``bool``), with the method's keyword options."""
+length (the ``bool``), with the method's keyword options. Every runner takes
+the length test positionally, whether it uses it or not (hence the ``noqa``
+on their definitions)."""
 
 
 def _on_plane(method: Callable[..., PcResult]) -> _Runner:
     """Adapt a 2-D method ``f(plane, radius, **options)`` to a conjunction."""
 
-    def run(conjunction: Conjunction, long: bool, /, **options: Any) -> PcResult:
+    def run(
+        conjunction: Conjunction,
+        long: bool,  # noqa: FBT001, ARG001
+        /,
+        **options: Any,
+    ) -> PcResult:
         return method(conjunction.plane, conjunction.hard_body_radius, **options)
 
     return run
@@ -147,7 +154,7 @@ def _on_plane(method: Callable[..., PcResult]) -> _Runner:
 
 def _hall3d(
     conjunction: Conjunction,
-    long: bool,
+    long: bool,  # noqa: FBT001
     /,
     *,
     window: tuple[float, float] | None = None,
@@ -159,7 +166,12 @@ def _hall3d(
     return integrate(conjunction, encounters, rtol=rtol, long=long)
 
 
-def _montecarlo(conjunction: Conjunction, long: bool, /, **options: Any) -> PcResult:
+def _montecarlo(
+    conjunction: Conjunction,
+    long: bool,  # noqa: FBT001, ARG001
+    /,
+    **options: Any,
+) -> PcResult:
     """:func:`~keepout.pc.montecarlo.montecarlo`; the length test is unused."""
     return montecarlo(conjunction, **options)
 

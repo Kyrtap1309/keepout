@@ -8,7 +8,9 @@ __all__ = [
     "CovarianceError",
     "GeometryError",
     "KeepoutError",
+    "KelvinsFormatError",
     "PcConvergenceError",
+    "SourceFormatError",
     "SourceUnavailable",
     "UnsupportedFrame",
 ]
@@ -26,8 +28,16 @@ class ChecksumMismatch(KeepoutError):
     """Downloaded data does not match its expected SHA-256 digest."""
 
 
-class CaraFormatError(KeepoutError):
+class SourceFormatError(KeepoutError):
+    """A reference data file from an external source could not be parsed."""
+
+
+class CaraFormatError(SourceFormatError):
     """A NASA CARA data file could not be parsed."""
+
+
+class KelvinsFormatError(SourceFormatError):
+    """ESA's Kelvins collision avoidance data could not be parsed."""
 
 
 class CdmParseError(KeepoutError):

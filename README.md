@@ -3,8 +3,8 @@
 Spacecraft conjunction assessment in Python: CCSDS CDM ingest, probability of
 collision (Pc), risk trends and collision-avoidance manoeuvre planning.
 
-> **Status:** pre-alpha (milestone M3 — 3-D, Monte Carlo and maximum
-> probability of collision).
+> **Status:** pre-alpha (milestone M4 — risk levels, trends and decisions
+> over a conjunction event).
 
 Pc algorithms are implemented from the published literature and validated
 against the public test cases of the
@@ -68,14 +68,48 @@ mc = compute_pc(conjunction, "montecarlo", samples=100_000, seed=1)
 print(mc.value, mc.details["ci_low"], mc.details["ci_high"])
 ```
 
+## Risk of an event
+
+```python
+from pathlib import Path
+
+import keepout.cdm
+from keepout import ConjunctionEvent, assess
+
+cdms = [keepout.cdm.load(path) for path in Path("event").glob("*.cdm")]
+event = ConjunctionEvent.from_cdms(cdms)  # one encounter, oldest CDM first
+assessment = assess(event.observations(hard_body_radius=20.0))
+print(assessment.decision.action.name, assessment.decision.reasons)
+print(assessment.trend.direction, assessment.level)
+```
+
+<!-- risk-kelvins-summary:start -->
+keepout's decision for each of the 15321 events of ESA's Kelvins data, from ESA's Pc of every CDM ([report](docs/risk-kelvins.md)):
+
+| Decision | Events | Share |
+|---|---|---|
+| ignore | 13823 | 90.2% |
+| monitor | 1468 | 9.6% |
+| monitor, prepare manoeuvre | 6 | <0.1% |
+| manoeuvre | 24 | 0.2% |
+
+![Kelvins event 734: manoeuvre](docs/img/risk-kelvins/event-734.svg)
+<!-- risk-kelvins-summary:end -->
+
+Kelvins data: ESA, *Collision Avoidance Challenge dataset*, Zenodo, 2021,
+[doi:10.5281/zenodo.4463683](https://doi.org/10.5281/zenodo.4463683); © ESA,
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+
 ## Development
 
 ```bash
 uv sync
+uv run pre-commit install     # ruff, mypy and the lock checked on commit
 uv run pytest                 # offline test suite
-uv run pytest -m validation   # downloads CARA reference data
+uv run pytest -m validation   # downloads CARA and Kelvins data
 uv run python tools/validation_report.py   # regenerate the validation report
 uv run python tools/validation_report.py --monte-carlo   # Monte Carlo (slow)
+uv run python tools/risk_report.py   # Kelvins risk report (downloads 221 MB once)
 uv run ruff check && uv run ruff format --check
 uv run mypy
 ```
