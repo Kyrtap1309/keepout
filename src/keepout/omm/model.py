@@ -18,13 +18,14 @@ from astropy.time import Time
 from sgp4 import omm as sgp4_omm
 from sgp4.api import Satrec
 
-from keepout.cdm.keywords import format_epoch, format_value
+from keepout.cdm.keywords import format_epoch, format_value, parse_epoch
 from keepout.omm.keywords import ATTRIBUTES, KEYWORDS, SGP4_EPHEMERIS_TYPE
 
 __all__ = [
     "MAX_CATALOG_NUMBER",
     "MAX_ELEMENT_SET_NO",
     "MAX_SATREC_NUMBER",
+    "SGP4_EPOCH_DIGITS",
     "InvalidElement",
     "Omm",
 ]
@@ -50,8 +51,12 @@ _REALS: Final = (
     "mean_motion_ddot",
 )
 
-_SGP4_EPOCH_DIGITS: Final = 6
-"""Fractional-second digits of the epoch :func:`sgp4.omm.initialize` reads."""
+SGP4_EPOCH_DIGITS: Final = 6
+"""Fractional-second digits of the epoch :func:`sgp4.omm.initialize` reads:
+microseconds, the resolution of CelesTrak's epochs."""
+
+_MAX_EPOCH_DIGITS: Final = 9
+"""Most fractional-second digits astropy writes (nanoseconds)."""
 
 
 class InvalidElement(ValueError):
@@ -166,7 +171,7 @@ class Omm:
                 "inclination", f"must be in [0, pi], got {self.inclination}"
             )
 
-    def keywords(self) -> dict[str, str]:
+    def keywords(self, *, epoch_digits: int | None = None) -> dict[str, str]:
         """The message text of every keyword, in CCSDS units.
 
         Keys are in CelesTrak's CSV column order (see
@@ -174,11 +179,28 @@ class Omm:
         text that reads back as the stored value, so the values of a message
         read by keepout are given back as written, up to formatting
         (``.00245948`` becomes ``0.00245948``).
+
+        The ``EPOCH`` text does not depend on the ``precision`` of the
+        stored :class:`~astropy.time.Time`. By default it has the fewest
+        fractional-second digits, at least six (microseconds), that read
+        back as the stored epoch exactly; an epoch that no text of up to
+        nine digits (nanoseconds, the most astropy writes) holds exactly is
+        written to the nanosecond.
+
+        Parameters
+        ----------
+        epoch_digits
+            Write the epoch with exactly this many fractional-second digits
+            (0 to 9) instead, rounded: :data:`SGP4_EPOCH_DIGITS` for the
+            microseconds :func:`sgp4.omm.initialize` and CelesTrak's formats
+            take.
         """
         values = {
             keyword: format_value(KEYWORDS[keyword], getattr(self, attribute))[0]
             for keyword, attribute in ATTRIBUTES.items()
+            if keyword != "EPOCH"
         }
+        values["EPOCH"] = _epoch_text(self.epoch, epoch_digits)
         values["EPHEMERIS_TYPE"] = str(SGP4_EPHEMERIS_TYPE)
         return {keyword: values[keyword] for keyword in KEYWORDS}
 
@@ -204,14 +226,24 @@ class Omm:
                 f"catalog number {self.catalog_number} is above "
                 f"{MAX_SATREC_NUMBER}, the largest an SGP4 record holds"
             )
-        values = self.keywords()
-        epoch = format_epoch(Time(self.epoch, precision=_SGP4_EPOCH_DIGITS))
+        values = self.keywords(epoch_digits=SGP4_EPOCH_DIGITS)
+        epoch = values["EPOCH"]
         if epoch[17:19] == "60":
             raise ValueError(f"epoch {epoch} falls in a leap second")
-        values["EPOCH"] = epoch
         satrec = Satrec()
         sgp4_omm.initialize(satrec, values)
         return satrec
+
+
+def _epoch_text(epoch: Time, digits: int | None) -> str:
+    """CCSDS text of an epoch, whatever its ``precision`` (see :meth:`Omm.keywords`)."""
+    if digits is not None:
+        return format_epoch(Time(epoch, precision=digits))
+    for fewest in range(SGP4_EPOCH_DIGITS, _MAX_EPOCH_DIGITS):
+        text = format_epoch(Time(epoch, precision=fewest))
+        if parse_epoch(text) == epoch:
+            return text
+    return format_epoch(Time(epoch, precision=_MAX_EPOCH_DIGITS))
 
 
 def _check_integer(omm: Omm, name: str, maximum: int | None = None) -> None:

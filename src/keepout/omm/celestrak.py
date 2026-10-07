@@ -11,7 +11,11 @@ more keywords: the extra ones are ignored, except that the metadata of
 :data:`~keepout.omm.keywords.FIXED_METADATA` must match if present.
 
 The writers give back what the readers take: reading a written file gives
-equal :class:`~keepout.omm.model.Omm` objects.
+equal :class:`~keepout.omm.model.Omm` objects. Epochs are written to the
+microsecond, as CelesTrak writes them and as :func:`sgp4.omm.initialize`
+reads them: an epoch with a finer part (none read from CelesTrak's formats
+has one) is rounded to the microsecond, as :meth:`~keepout.omm.model.Omm.satrec`
+rounds it.
 """
 
 from __future__ import annotations
@@ -25,7 +29,7 @@ from pathlib import Path
 from keepout.errors import OmmParseError
 from keepout.omm._io import load_file, parse_record
 from keepout.omm.keywords import KEYWORDS
-from keepout.omm.model import Omm
+from keepout.omm.model import SGP4_EPOCH_DIGITS, Omm
 
 __all__ = [
     "dumps_csv",
@@ -163,6 +167,8 @@ def load_json(path: str | Path) -> tuple[Omm, ...]:
 def dumps_csv(omms: Iterable[Omm]) -> str:
     """Write CelesTrak CSV: the header, then one row per object.
 
+    Epochs are written to the microsecond (see the module notes).
+
     Parameters
     ----------
     omms
@@ -171,12 +177,14 @@ def dumps_csv(omms: Iterable[Omm]) -> str:
     stream = io.StringIO()
     writer = csv.writer(stream, lineterminator="\n")
     writer.writerow(KEYWORDS)
-    writer.writerows(omm.keywords().values() for omm in omms)
+    writer.writerows(_texts(omm).values() for omm in omms)
     return stream.getvalue()
 
 
 def dumps_json(omms: Iterable[Omm]) -> str:
     """Write CelesTrak JSON: an array of objects, numbers as JSON numbers.
+
+    Epochs are written to the microsecond (see the module notes).
 
     Parameters
     ----------
@@ -188,7 +196,7 @@ def dumps_json(omms: Iterable[Omm]) -> str:
 
 def _json_object(omm: Omm) -> dict[str, str | int | float]:
     values: dict[str, str | int | float] = {}
-    for keyword, text in omm.keywords().items():
+    for keyword, text in _texts(omm).items():
         match KEYWORDS[keyword].kind:
             case "int":
                 values[keyword] = int(text)
@@ -198,3 +206,8 @@ def _json_object(omm: Omm) -> dict[str, str | int | float]:
             case _:
                 values[keyword] = text
     return values
+
+
+def _texts(omm: Omm) -> dict[str, str]:
+    """Keyword texts of an object, the epoch to the microsecond."""
+    return omm.keywords(epoch_digits=SGP4_EPOCH_DIGITS)

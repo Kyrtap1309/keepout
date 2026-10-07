@@ -208,3 +208,21 @@ def test_a_file_is_read(tmp_path: Path) -> None:
 def test_written_elements_read_back_equal(values: list[dict[str, str]]) -> None:
     omms = loads_csv(csv_text(values))
     assert kvn.loads(kvn.dumps(omms, creation_date=CREATED)) == omms
+
+
+@pytest.mark.parametrize("precision", [3, 9])
+def test_written_epochs_do_not_depend_on_the_time_precision(precision: int) -> None:
+    (iss,) = loads_csv(csv_text([ISS]))
+    omm = dataclasses.replace(iss, epoch=Time(iss.epoch, precision=precision))
+    text = kvn.dumps([omm], creation_date=CREATED)
+    assert text == kvn.dumps([iss], creation_date=CREATED)
+    assert kvn.loads(text) == (omm,)
+
+
+def test_an_epoch_finer_than_microseconds_is_written_and_read_exactly() -> None:
+    (iss,) = loads_csv(csv_text([ISS]))
+    epoch = "2026-10-06T00:20:47.860512345"
+    omm = dataclasses.replace(iss, epoch=Time(epoch, scale="utc", precision=3))
+    text = kvn.dumps([omm], creation_date=CREATED)
+    assert f"EPOCH               = {epoch}\n" in text
+    assert kvn.loads(text) == (omm,)

@@ -7,6 +7,7 @@ import pytest
 from astropy.time import Time
 from omm_builders import ISS, assert_same_satrec, sgp4_record
 
+from keepout.cdm.keywords import parse_epoch
 from keepout.omm._io import parse_record
 from keepout.omm.keywords import DEGREE, KEYWORDS, REVOLUTION_PER_DAY
 from keepout.omm.model import (
@@ -191,3 +192,45 @@ def test_the_extreme_valid_values_are_accepted() -> None:
         object_name="",
     )
     assert omm.catalog_number == MAX_CATALOG_NUMBER
+
+
+@pytest.mark.parametrize("precision", [0, 3, 9])
+def test_the_written_epoch_does_not_depend_on_the_time_precision(
+    precision: int,
+) -> None:
+    omm = dataclasses.replace(ISS_OMM, epoch=Time(ISS_OMM.epoch, precision=precision))
+    assert omm.keywords() == ISS_OMM.keywords()
+    assert omm.keywords()["EPOCH"] == ISS["EPOCH"]
+    assert_same_satrec(omm.satrec(), ISS_OMM.satrec())
+
+
+@pytest.mark.parametrize(
+    ("text", "written"),
+    [
+        ("2026-10-06T00:20:47.86", "2026-10-06T00:20:47.860000"),
+        ("2026-10-06T00:20:47.8605123", "2026-10-06T00:20:47.8605123"),
+        ("2026-10-06T00:20:47.860512345", "2026-10-06T00:20:47.860512345"),
+    ],
+)
+def test_the_written_epoch_keeps_every_digit_to_the_nanosecond(
+    text: str, written: str
+) -> None:
+    omm = dataclasses.replace(ISS_OMM, epoch=Time(text, scale="utc", precision=3))
+    assert omm.keywords()["EPOCH"] == written
+    assert parse_epoch(written) == omm.epoch
+
+
+def test_an_epoch_finer_than_nanoseconds_is_written_to_the_nanosecond() -> None:
+    # One double of Julian date: no decimal of up to nine digits holds it.
+    epoch = Time(ISS_OMM.epoch.jd, format="jd", scale="utc")
+    written = dataclasses.replace(ISS_OMM, epoch=epoch).keywords()["EPOCH"]
+    assert len(written.partition(".")[2]) == 9
+    assert abs((parse_epoch(written) - epoch).sec) <= 0.5e-9
+
+
+def test_keywords_round_the_epoch_to_the_requested_digits() -> None:
+    omm = dataclasses.replace(
+        ISS_OMM, epoch=Time("2026-10-06T00:20:47.8605126", scale="utc", precision=9)
+    )
+    assert omm.keywords(epoch_digits=6)["EPOCH"] == "2026-10-06T00:20:47.860513"
+    assert omm.keywords(epoch_digits=0)["EPOCH"] == "2026-10-06T00:20:48"

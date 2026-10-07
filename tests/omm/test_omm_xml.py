@@ -194,3 +194,20 @@ def test_written_elements_are_valid_and_read_back_equal(
     text = xml.dumps(omms, creation_date=CREATED)
     assert_valid(text)
     assert xml.loads(text) == omms
+
+
+@pytest.mark.parametrize("precision", [3, 9])
+def test_written_epochs_do_not_depend_on_the_time_precision(precision: int) -> None:
+    omm = dataclasses.replace(ISS_OMM, epoch=Time(ISS_OMM.epoch, precision=precision))
+    text = xml.dumps([omm], creation_date=CREATED)
+    assert text == ISS_XML
+    assert xml.loads(text) == (omm,)
+
+
+def test_an_epoch_finer_than_microseconds_is_written_and_read_exactly() -> None:
+    epoch = "2026-10-06T00:20:47.860512345"
+    omm = dataclasses.replace(ISS_OMM, epoch=Time(epoch, scale="utc", precision=3))
+    text = xml.dumps([omm], creation_date=CREATED)
+    assert_valid(text)
+    assert f"<EPOCH>{epoch}</EPOCH>" in text
+    assert xml.loads(text) == (omm,)

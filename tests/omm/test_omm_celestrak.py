@@ -1,7 +1,10 @@
+import dataclasses
+import io
 import json
 from pathlib import Path
 
 import pytest
+from astropy.time import Time
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from omm_builders import (
@@ -217,3 +220,26 @@ def test_written_elements_read_back_equal(values: list[dict[str, str]]) -> None:
     omms: tuple[Omm, ...] = loads_csv(csv_text(values))
     assert loads_csv(dumps_csv(omms)) == omms
     assert loads_json(dumps_json(omms)) == omms
+
+
+@pytest.mark.parametrize("precision", [3, 9])
+def test_written_epochs_do_not_depend_on_the_time_precision(precision: int) -> None:
+    (iss,) = loads_csv(csv_text([ISS]))
+    omm = dataclasses.replace(iss, epoch=Time(iss.epoch, precision=precision))
+    text = dumps_csv([omm])
+    assert text == dumps_csv([iss])
+    assert dumps_json([omm]) == dumps_json([iss])
+    assert loads_csv(text) == (omm,)
+    assert loads_json(dumps_json([omm])) == (omm,)
+    # sgp4 reads the written CSV, and makes the same record of it.
+    (fields,) = sgp4_omm.parse_csv(io.StringIO(text))
+    assert_same_satrec(omm.satrec(), sgp4_record(fields))
+
+
+def test_an_epoch_finer_than_microseconds_is_written_rounded() -> None:
+    (iss,) = loads_csv(csv_text([ISS]))
+    finer = dataclasses.replace(
+        iss, epoch=Time("2026-10-06T00:20:47.8605118", scale="utc", precision=7)
+    )
+    assert dumps_csv([finer]) == dumps_csv([iss])
+    assert dumps_json([finer]) == dumps_json([iss])
