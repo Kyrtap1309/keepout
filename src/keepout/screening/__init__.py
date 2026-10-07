@@ -9,10 +9,21 @@ pairs whose distances from the Earth's centre never come within a primary's
 volume, before anything is propagated. :class:`ApproachSearch` finds, on a
 time grid (:func:`time_grid`), every local minimum of the range of the
 remaining pairs inside the volumes, with its time of closest approach
-(:class:`RangeMinimum`, :class:`SearchResult`).
+(:class:`RangeMinimum`, :class:`SearchResult`). :func:`screen` does it all
+for element sets: it returns a :class:`ScreeningResult` of close approaches
+(:class:`CloseApproach`, in GCRF) and the element sets it left out
+(:class:`SkippedObject`, with a :class:`SkipReason`).
 """
 
 from keepout.screening.filters import apogee_perigee_filter
+from keepout.screening.pipeline import screen
+from keepout.screening.result import (
+    CloseApproach,
+    ScreeningResult,
+    ScreeningRole,
+    SkippedObject,
+    SkipReason,
+)
 from keepout.screening.tca import (
     ApproachSearch,
     ObjectFailure,
@@ -34,13 +45,19 @@ __all__ = [
     "DEFAULT_VOLUME",
     "SFS_HANDBOOK_VOLUMES",
     "ApproachSearch",
+    "CloseApproach",
     "ObjectFailure",
     "RangeMinimum",
+    "ScreeningResult",
+    "ScreeningRole",
     "ScreeningVolume",
     "SearchResult",
     "SfsRegime",
+    "SkipReason",
+    "SkippedObject",
     "VolumeRule",
     "apogee_perigee_filter",
+    "screen",
     "sfs_regime",
     "time_grid",
     "volume_for",

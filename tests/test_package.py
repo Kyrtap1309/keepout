@@ -18,6 +18,7 @@ def test_core_api_is_importable_from_the_package() -> None:
     from keepout.conjunction import Conjunction
     from keepout.pc import compute_pc
     from keepout.risk import ConjunctionEvent, assess
+    from keepout.screening import CloseApproach, ScreeningResult, screen
     from keepout.state import StateVector
 
     assert keepout.Conjunction is Conjunction
@@ -25,6 +26,9 @@ def test_core_api_is_importable_from_the_package() -> None:
     assert keepout.StateVector is StateVector
     assert keepout.ConjunctionEvent is ConjunctionEvent
     assert keepout.assess is assess
+    assert keepout.screen is screen
+    assert keepout.CloseApproach is CloseApproach
+    assert keepout.ScreeningResult is ScreeningResult
     assert [name for name in keepout.__all__ if not hasattr(keepout, name)] == []
 
 
