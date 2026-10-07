@@ -8,6 +8,7 @@ import itertools
 import math
 import pickle
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Self
 
 import astropy.units as u
@@ -531,6 +532,17 @@ def test_a_search_pickles() -> None:
     original = search(MISSES)
     copy = pickle.loads(pickle.dumps(original))
     assert summary(copy.run()) == summary(original.run())
+
+
+def test_a_result_pickles_with_its_failures() -> None:
+    fail = np.full((len(MISSES), 2), np.inf)
+    fail[1] = (3000.0, np.inf)
+    catalog = StraightLines(MISSES.r0, MISSES.v0, fail)
+    result = search(catalog).run()
+    assert dict(result.catalog_failures) == {1: ObjectFailure(3000.0, 6)}
+    copy = pickle.loads(pickle.dumps(result))
+    assert summary(copy) == summary(result)
+    assert isinstance(copy.catalog_failures, MappingProxyType)
 
 
 def test_the_search_keeps_its_arguments() -> None:

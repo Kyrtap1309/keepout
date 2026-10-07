@@ -321,6 +321,14 @@ class SearchResult:
             failures = dict(sorted(getattr(self, name).items()))
             object.__setattr__(self, name, MappingProxyType(failures))
 
+    def __reduce__(
+        self,
+    ) -> tuple[type[SearchResult], tuple[object, object, object]]:
+        # Mapping proxies do not pickle; results come back from worker
+        # processes, so pickle the plain contents.
+        primary, catalog = dict(self.primary_failures), dict(self.catalog_failures)
+        return type(self), (self.minima, primary, catalog)
+
     @classmethod
     def merge(cls, results: Iterable[SearchResult]) -> SearchResult:
         """One result from the results of runs over parts of a grid.
