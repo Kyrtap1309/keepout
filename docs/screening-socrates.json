@@ -1,0 +1,189 @@
+{
+  "retrieved": "2026-10-06",
+  "socrates": {
+    "approaches": 186229,
+    "both_in_catalog": 146018,
+    "comparable": 1275,
+    "first_tca": "2026-10-06T00:00:02.186",
+    "last_tca": "2026-10-12T23:59:59.684",
+    "newest_epoch": "2026-10-05T22:51"
+  },
+  "settings": {
+    "start": "2026-10-06T00:00:00.000",
+    "days": 7.0,
+    "volume": "5 km sphere (as CelesTrak SOCRATES)",
+    "max_age_days": 30.0,
+    "max_lead_days": 3.0,
+    "match_window": 60.0,
+    "fast_from": 1000.0,
+    "primaries": 192,
+    "objects": 306
+  },
+  "tolerances": {
+    "fast": {
+      "tca": 0.001,
+      "miss_distance": 0.501,
+      "relative_speed": 0.501
+    },
+    "slow": {
+      "tca": 0.5,
+      "miss_distance": 0.501,
+      "relative_speed": 0.501
+    }
+  },
+  "groups": {
+    "fast": {
+      "compared": 266,
+      "agree": 261,
+      "worst": {
+        "tca": 0.000493,
+        "miss_distance": 0.49565,
+        "relative_speed": 0.49797,
+        "range_change": 0.036
+      }
+    },
+    "slow": {
+      "compared": 1008,
+      "agree": 1008,
+      "worst": {
+        "tca": 0.324653,
+        "miss_distance": 0.49998,
+        "relative_speed": 0.49897,
+        "range_change": 0.0003
+      }
+    }
+  },
+  "differences": [
+    {
+      "primary": 47834,
+      "secondary": 38513,
+      "tca": "2026-10-11 23:25:37.317",
+      "group": "fast",
+      "miss_distance": 2452.0,
+      "relative_speed": 14152.0,
+      "keepout": {
+        "tca_difference": 0.354374,
+        "miss_distance": 3092.53858,
+        "relative_speed": 14152.101
+      },
+      "reported": true,
+      "cause": 47834
+    },
+    {
+      "primary": 47804,
+      "secondary": 100379,
+      "tca": "2026-10-09 20:20:04.903",
+      "group": "fast",
+      "miss_distance": 3605.0,
+      "relative_speed": 14765.0,
+      "keepout": {
+        "tca_difference": -0.227884,
+        "miss_distance": 3579.70582,
+        "relative_speed": 14764.92768
+      },
+      "reported": true,
+      "cause": 100379
+    },
+    {
+      "primary": 66193,
+      "secondary": 100379,
+      "tca": "2026-10-10 22:57:49.178",
+      "group": "fast",
+      "miss_distance": 4252.0,
+      "relative_speed": 14751.0,
+      "keepout": {
+        "tca_difference": -0.306241,
+        "miss_distance": 3496.82764,
+        "relative_speed": 14751.02175
+      },
+      "reported": true,
+      "cause": 100379
+    },
+    {
+      "primary": 66193,
+      "secondary": 100379,
+      "tca": "2026-10-10 23:44:42.575",
+      "group": "fast",
+      "miss_distance": 4475.0,
+      "relative_speed": 14759.0,
+      "keepout": {
+        "tca_difference": -0.30873,
+        "miss_distance": 5174.44563,
+        "relative_speed": 14758.5311
+      },
+      "reported": false,
+      "cause": 100379
+    },
+    {
+      "primary": 63707,
+      "secondary": 100379,
+      "tca": "2026-10-09 12:28:05.695",
+      "group": "fast",
+      "miss_distance": 4902.0,
+      "relative_speed": 14701.0,
+      "keepout": {
+        "tca_difference": -0.206732,
+        "miss_distance": 5140.81325,
+        "relative_speed": 14701.44848
+      },
+      "reported": false,
+      "cause": 100379
+    }
+  ],
+  "keepout_only": [
+    {
+      "primary": 56155,
+      "secondary": 56156,
+      "tca": "2026-10-06 04:18:26.173",
+      "miss_distance": 412.54319,
+      "relative_speed": 0.42007,
+      "nearest_other": 571.275
+    },
+    {
+      "primary": 56154,
+      "secondary": 56156,
+      "tca": "2026-10-06 17:08:58.695",
+      "miss_distance": 510.58956,
+      "relative_speed": 0.45317,
+      "nearest_other": 748.59
+    },
+    {
+      "primary": 58199,
+      "secondary": 58201,
+      "tca": "2026-10-11 05:06:17.238",
+      "miss_distance": 543.72506,
+      "relative_speed": 0.61878,
+      "nearest_other": 693.939
+    },
+    {
+      "primary": 58199,
+      "secondary": 58201,
+      "tca": "2026-10-11 06:42:17.605",
+      "miss_distance": 546.99033,
+      "relative_speed": 0.60857,
+      "nearest_other": 622.612
+    },
+    {
+      "primary": 58199,
+      "secondary": 58201,
+      "tca": "2026-10-11 08:17:49.442",
+      "miss_distance": 550.05233,
+      "relative_speed": 0.59171,
+      "nearest_other": 522.799
+    }
+  ],
+  "not_compared": {
+    "outside_catalog": 40211,
+    "other_element_sets": 144743,
+    "skipped": [
+      {
+        "primary": 55823,
+        "secondary": 38495,
+        "tca": "2026-10-09 12:31:57.055",
+        "object": 38495,
+        "reason": "stale",
+        "detail": "the window ends 30.76 days after the epoch 2026-09-12T05:44:43.931040 (max_age 30 days)"
+      }
+    ]
+  }
+}

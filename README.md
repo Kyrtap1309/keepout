@@ -43,6 +43,17 @@ Monte Carlo against CARA's two-body Monte Carlo
 | CARA Pc method test set, Monte Carlo | montecarlo | 21 / 21 | 1.6e-01 |
 <!-- validation-monte-carlo-summary:end -->
 
+<!-- screening-socrates-summary:start -->
+Close approaches from `screen` against CelesTrak's SOCRATES, on the 1275 SOCRATES approaches computed from the same element sets ([report](docs/screening-socrates.md)):
+
+| Approaches | Compared | Within tolerance | Worst TCA | Worst range |
+|---|---|---|---|---|
+| fast (>= 1 km/s) | 266 | 261 | 0.493 ms | 0.49565 m |
+| slow (< 1 km/s) | 1008 | 1008 | 324.653 ms | 0.49998 m |
+
+5 approaches outside tolerance involve 2 objects whose element sets evidently differ from SOCRATES's. keepout also reports 5 minima of these pairs that SOCRATES does not list.
+<!-- screening-socrates-summary:end -->
+
 ## Reading a CDM
 
 ```python
@@ -110,6 +121,7 @@ uv run pytest -m validation   # downloads CARA and Kelvins data
 uv run python tools/validation_report.py   # regenerate the validation report
 uv run python tools/validation_report.py --monte-carlo   # Monte Carlo (slow)
 uv run python tools/risk_report.py   # Kelvins risk report (downloads 221 MB once)
+uv run python tools/screening_report.py   # SOCRATES screening report (offline)
 uv run ruff check && uv run ruff format --check
 uv run mypy
 ```

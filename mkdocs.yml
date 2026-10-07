@@ -50,6 +50,7 @@ nav:
   - Validation report: validation.md
   - Monte Carlo validation report: validation-monte-carlo.md
   - Risk on ESA's Kelvins data: risk-kelvins.md
+  - Screening against SOCRATES: screening-socrates.md
   - Reference:
       - Probability of collision: reference/pc.md
       - Risk: reference/risk.md
