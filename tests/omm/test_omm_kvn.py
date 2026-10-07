@@ -16,7 +16,6 @@ from omm_builders import (
     sgp4_record,
 )
 
-from keepout.cdm.keywords import parse_epoch
 from keepout.errors import OmmParseError
 from keepout.omm import kvn
 from keepout.omm.celestrak import load_csv, loads_csv
@@ -78,13 +77,18 @@ def test_writer_layout_and_units() -> None:
     assert kvn.loads(ISS_KVN) == (iss,)
 
 
-def test_the_writer_names_the_originator_and_defaults_to_now() -> None:
+def test_the_writer_names_the_originator_and_defaults_to_now(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_now(cls: type[Time]) -> Time:
+        return cls("2026-10-06T12:34:56.25", scale="utc")
+
+    monkeypatch.setattr(Time, "now", classmethod(fake_now))
     (iss,) = kvn.loads(ISS_KVN)
     text = kvn.dumps([iss], originator="18 SDS")
     assert "ORIGINATOR          = 18 SDS\n" in text
     created = text.splitlines()[1].split("=")[1].strip()
-    assert len(created) == len("2026-10-06T12:00:00")
-    assert abs((parse_epoch(created) - Time.now()).sec) < 60.0
+    assert created == "2026-10-06T12:34:56"  # the clock's time, whole seconds
 
 
 def test_several_messages_are_read_in_order() -> None:
