@@ -2,7 +2,6 @@
 the propagated radius."""
 
 import dataclasses
-from collections.abc import Callable
 from typing import Any
 
 import astropy.units as u
@@ -98,9 +97,15 @@ def test_drag_terms_are_sgp4inits() -> None:
 def lunisolar_changes(monkeypatch: pytest.MonkeyPatch) -> list[float]:
     """Every change of the eccentricity by SGP4's lunisolar periodic terms."""
     changes: list[float] = []
-    original: Callable[..., Any] = python_sgp4._dpper
+    original = python_sgp4._dpper
 
-    def recording(satrec: Any, inclo: float, init: str, ep: float, *rest: Any) -> Any:
+    def recording(
+        satrec: PythonSatrec,
+        inclo: float,
+        init: str,
+        ep: float,
+        *rest: *tuple[float, float, float, float, str],
+    ) -> tuple[float, float, float, float, float]:
         result = original(satrec, inclo, init, ep, *rest)
         changes.append(result[0] - ep)
         return result

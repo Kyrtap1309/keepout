@@ -90,7 +90,7 @@ def checksum(line: str) -> int:
     line
         The line; only its first 68 columns count.
     """
-    return int(compute_checksum(line))
+    return compute_checksum(line)
 
 
 def _match(pattern: re.Pattern[str], text: str) -> re.Match[str]:

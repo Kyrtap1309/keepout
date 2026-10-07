@@ -65,10 +65,11 @@ def test_a_gzip_file_is_read_whatever_its_name(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("data", "message"),
     [
-        (gzip.compress(b"OBJECT_NAME")[:-4], "invalid gzip data"),
+        (gzip.compress(b"OBJECT_NAME", mtime=0)[:-4], "invalid gzip data"),
         (b"\x1f\x8bnot gzip", "invalid gzip data"),
         (b"OBJECT_NAME,\xff\n", "not UTF-8 text"),
     ],
+    ids=["truncated gzip", "not gzip", "not UTF-8"],
 )
 def test_broken_files_are_refused(tmp_path: Path, data: bytes, message: str) -> None:
     path = tmp_path / "broken"

@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import pytest
@@ -48,7 +47,7 @@ def verification_pairs() -> list[tuple[str, str]]:
     return list(zip(lines[::2], lines[1::2], strict=True))
 
 
-def assert_close_to_twoline2rv(record: Any, line_1: str, line_2: str) -> None:
+def assert_close_to_twoline2rv(record: Satrec, line_1: str, line_2: str) -> None:
     """Initialised alike to rounding; positions within the tolerance."""
     expected = Satrec.twoline2rv(line_1, line_2)
     assert record.satnum == expected.satnum

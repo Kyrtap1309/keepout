@@ -60,11 +60,13 @@ convention = "numpy"
 # Tests: named test functions need no docstrings; fixtures and fakes take
 # arguments they do not use, and parametrized tests take booleans.
 "tests/**" = ["D", "ARG", "FBT"]
+# Stubs mirror the names sgp4 gives its attributes (jdsatepochF).
+"stubs/**" = ["N815"]
 
 [tool.mypy]
 strict = true
 files = ["src", "tests", "tools"]
-mypy_path = ["tools"]
+mypy_path = ["tools", "stubs"]
 warn_unreachable = true
 enable_error_code = [
     "ignore-without-code",
@@ -77,8 +79,14 @@ enable_error_code = [
 ]
 
 [[tool.mypy.overrides]]
-module = ["astropy.*", "erfa.*", "sgp4.*", "xlrd.*"]
+module = ["astropy.*", "erfa.*", "xlrd.*"]
 ignore_missing_imports = true
+
+[tool.codespell]
+# Data, generated and locked files; test data holds verbatim external records.
+skip = "*.csv,*.gz,*.xsd,*.json,uv.lock,./site,*tests/*/data*"
+# AAS: American Astronautical Society; oint: LaTeX \oint; precesses: precession.
+ignore-words-list = "aas,oint,precesses"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -90,7 +98,7 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["keepout"]
+source = ["keepout", "tools"]
 omit = ["*/keepout/cli/*", "*/keepout/dashboard/*"]
 
 [tool.coverage.report]
@@ -99,6 +107,7 @@ show_missing = true
 
 [dependency-groups]
 dev = [
+    "codespell>=2.4.3",
     "hypothesis>=6.168.1",
     "keepout[validation]",
     "matplotlib>=3.11.2",
@@ -110,6 +119,7 @@ dev = [
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
     "pytest-randomly>=5.0.0",
+    "pytest-xdist>=3.8.0",
     "ruff>=0.16.8",
     "scipy-stubs>=1.17.1.5",
     "types-openpyxl>=3.1.5.20260827",

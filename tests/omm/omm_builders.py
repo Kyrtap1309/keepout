@@ -6,7 +6,6 @@ import io
 import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 from hypothesis import strategies as st
@@ -205,14 +204,14 @@ MINUTES = (0.0, 97.0, 1440.0, 10080.0, -4320.0)
 """Times from epoch [min] at which records are compared."""
 
 
-def sgp4_record(values: Mapping[str, str]) -> Any:
+def sgp4_record(values: Mapping[str, str]) -> Satrec:
     """A new record initialised by :func:`sgp4.omm.initialize` itself."""
     record = Satrec()
     sgp4_omm.initialize(record, values)
     return record
 
 
-def assert_same_satrec(actual: Any, expected: Any) -> None:
+def assert_same_satrec(actual: Satrec, expected: Satrec) -> None:
     """Two new SGP4 records are initialised and propagate bit for bit alike.
 
     Propagating changes a record's ``error``: compare records never used.
