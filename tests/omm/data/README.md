@@ -21,3 +21,12 @@ number is the CSV value written as a JSON number.
 This data is basic space situational awareness data that Space-Track's user
 agreement allows to redistribute with citation. It is not covered by
 keepout's MIT licence.
+
+`ccsds_omm_g7.kvn`, `ccsds_omm_g8.kvn`, `ccsds_omm_g9.kvn` and
+`ccsds_omm_g10.xml` are figures G-7 to G-10 of CCSDS 502.0-B-3, *Orbit Data
+Messages* (Blue Book, April 2023, https://public.ccsds.org/Pubs/502x0b3e1.pdf):
+the standard's OMM examples for GOES 9 in KVN (without and with a covariance,
+and with units and a user-defined parameter) and in XML. They are copied
+unchanged except for trailing blanks and, in the XML, the schema location,
+which the document breaks over two lines. Figure G-6, the TLE they are based
+on, is in `tests/omm/omm_builders.py`.

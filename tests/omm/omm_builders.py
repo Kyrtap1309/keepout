@@ -11,13 +11,42 @@ from typing import Any
 import numpy as np
 from hypothesis import strategies as st
 from sgp4 import omm as sgp4_omm
+from sgp4.alpha5 import to_alpha5
 from sgp4.api import Satrec
+from sgp4.io import compute_checksum
 
 from keepout.omm.keywords import KEYWORDS
+from keepout.omm.model import MAX_SATREC_NUMBER
 
 OMM_DATA = Path(__file__).parent / "data"
 SAMPLE_CSV = OMM_DATA / "celestrak_sample.csv"
 SAMPLE_JSON = OMM_DATA / "celestrak_sample.json"
+CCSDS_KVN = tuple(OMM_DATA / f"ccsds_omm_g{figure}.kvn" for figure in (7, 8, 9))
+"""CCSDS 502.0-B-3 figures G-7 to G-9: GOES 9 in KVN (G-8 with a covariance,
+G-9 with units and a user-defined parameter)."""
+CCSDS_XML = OMM_DATA / "ccsds_omm_g10.xml"
+"""CCSDS 502.0-B-3 figure G-10: GOES-9 in XML."""
+
+GOES_9 = {
+    "OBJECT_NAME": "GOES 9",
+    "OBJECT_ID": "1995-025A",
+    "EPOCH": "2020-03-04T10:34:41.426400",
+    "MEAN_MOTION": "1.00273272",
+    "ECCENTRICITY": "0.0005013",
+    "INCLINATION": "3.0539",
+    "RA_OF_ASC_NODE": "81.7939",
+    "ARG_OF_PERICENTER": "249.2363",
+    "MEAN_ANOMALY": "150.1602",
+    "EPHEMERIS_TYPE": "0",
+    "CLASSIFICATION_TYPE": "U",
+    "NORAD_CAT_ID": "23581",
+    "ELEMENT_SET_NO": "0925",
+    "REV_AT_EPOCH": "4316",
+    "BSTAR": "0.0001",
+    "MEAN_MOTION_DOT": "-0.00000113",
+    "MEAN_MOTION_DDOT": "0.0",
+}
+"""The CCSDS examples' values in CelesTrak's form (epoch to microseconds)."""
 
 ISS = {
     "OBJECT_NAME": "ISS (ZARYA)",
@@ -190,3 +219,99 @@ def assert_same_satrec(actual: Any, expected: Any) -> None:
             strict=True,
         )
         assert actual.sgp4_tsince(minutes)[0] == expected.sgp4_tsince(minutes)[0]
+
+
+GOES_9_TLE = (
+    "GOES 9 [P]\n"
+    "1 23581U 95025A   07064.44075725 -.00000113  00000-0  10000-3 0  9250\n"
+    "2 23581   3.0539  81.7939 0005013 249.2363 150.1602  1.00273272 43169\n"
+)
+"""CCSDS 502.0-B-3 figure G-6: the TLE the OMM examples are based on."""
+
+GOES_9_TLE_VALUES = {
+    **GOES_9,
+    "OBJECT_NAME": "GOES 9 [P]",
+    "EPOCH": "2007-03-05T10:34:41.426400",
+    "ELEMENT_SET_NO": "925",
+    "BSTAR": ".10000E-3",
+    "MEAN_MOTION_DOT": "-.00000113",
+    "MEAN_MOTION_DDOT": ".00000E-0",
+    "ECCENTRICITY": ".0005013",
+}
+"""Figure G-6 in CelesTrak's form."""
+
+
+def with_checksum(line: str) -> str:
+    """A 68-column TLE line with its checksum, computed by :mod:`sgp4`."""
+    return line + str(compute_checksum(line))
+
+
+@st.composite
+def element_sets(draw: st.DrawFn) -> tuple[str, dict[str, str]]:
+    """A TLE (two lines, a name line or not) and its values in CelesTrak's form."""
+    number = draw(st.integers(0, MAX_SATREC_NUMBER))
+    satnum = to_alpha5(number)
+    classification = draw(st.sampled_from("UCS "))
+    year = draw(st.integers(0, 99))
+    full_year = year + (1900 if year >= 57 else 2000)
+    leap = full_year % 4 == 0 and (full_year % 100 != 0 or full_year % 400 == 0)
+    day = draw(st.integers(1, 366 if leap else 365))
+    fraction = draw(st.integers(0, 99_999_999))
+    epoch = datetime.datetime(
+        full_year, 1, 1, tzinfo=datetime.UTC
+    ) + datetime.timedelta(days=day - 1, microseconds=fraction * 864)
+    launch_year, launch = draw(st.integers(0, 99)), draw(st.integers(1, 999))
+    piece = draw(st.sampled_from(["A", "BZ", "CYA"]))
+    sign = st.sampled_from(" -")
+    dot_sign, dot = draw(sign), draw(st.integers(0, 99_999_999))
+    exponents = [
+        (
+            draw(sign),
+            draw(st.integers(0, 99_999)),
+            draw(st.sampled_from("-+")),
+            draw(st.integers(0, 9)),
+        )
+        for _ in range(2)
+    ]
+    element_set_no = draw(st.integers(0, 9999))
+    angles = [draw(st.integers(0, 3_599_999)) for _ in range(3)]
+    inclination = draw(st.integers(0, 1_800_000))
+    eccentricity = draw(st.integers(0, 9_999_999))
+    mean_motion = draw(st.integers(10_000_000, 1_700_000_000))
+    rev = draw(st.integers(0, 99_999))
+    nddot, bstar = (f"{s}{m:05d}{e}{x}" for s, m, e, x in exponents)
+    line_1 = with_checksum(
+        f"1 {satnum}{classification} {launch_year:02d}{launch:03d}{piece:<3} "
+        f"{year:02d}{day:03d}.{fraction:08d} {dot_sign}.{dot:08d} {nddot} {bstar} "
+        f"0 {element_set_no:4d}"
+    )
+    line_2 = with_checksum(
+        f"2 {satnum} {inclination / 1e4:8.4f} {angles[0] / 1e4:8.4f} "
+        f"{eccentricity:07d} {angles[1] / 1e4:8.4f} {angles[2] / 1e4:8.4f} "
+        f"{mean_motion / 1e8:11.8f}{rev:5d}"
+    )
+    name = draw(st.one_of(st.none(), _NAME))
+    full_launch_year = launch_year + (1900 if launch_year >= 57 else 2000)
+    values = {
+        "OBJECT_NAME": "UNKNOWN" if name is None else name,
+        "OBJECT_ID": f"{full_launch_year}-{launch:03d}{piece}",
+        "EPOCH": epoch.strftime("%Y-%m-%dT%H:%M:%S.%f"),
+        "MEAN_MOTION": f"{mean_motion / 1e8:.8f}",
+        "ECCENTRICITY": f".{eccentricity:07d}",
+        "INCLINATION": f"{inclination / 1e4:.4f}",
+        "RA_OF_ASC_NODE": f"{angles[0] / 1e4:.4f}",
+        "ARG_OF_PERICENTER": f"{angles[1] / 1e4:.4f}",
+        "MEAN_ANOMALY": f"{angles[2] / 1e4:.4f}",
+        "EPHEMERIS_TYPE": "0",
+        "CLASSIFICATION_TYPE": classification.strip() or "U",
+        "NORAD_CAT_ID": str(number),
+        "ELEMENT_SET_NO": str(element_set_no),
+        "REV_AT_EPOCH": str(rev),
+        "BSTAR": "{}.{:05d}E{}{}".format(exponents[1][0].strip(), *exponents[1][1:]),
+        "MEAN_MOTION_DOT": f"{dot_sign.strip()}.{dot:08d}",
+        "MEAN_MOTION_DDOT": "{}.{:05d}E{}{}".format(
+            exponents[0][0].strip(), *exponents[0][1:]
+        ),
+    }
+    title = "" if name is None else draw(st.sampled_from(["", "0 "])) + name + "\n"
+    return f"{title}{line_1}\n{line_2}\n", values

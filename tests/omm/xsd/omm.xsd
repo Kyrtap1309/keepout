@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Entry point for validating unqualified OMM 3.0 messages: the <omm> root
+     element exactly as ndmxml-4.0.0-master-4.0.xsd declares it, importing only
+     the OMM and common modules of NDM/XML 4.0.0 (copied unchanged from
+     https://sanaregistry.org/r/ndmxml_unqualified/ on 2026-10-06). -->
+<xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+            xmlns:ndm="urn:ccsds:schema:ndmxml"
+            elementFormDefault="unqualified"
+            attributeFormDefault="unqualified">
+   <xsd:import namespace="urn:ccsds:schema:ndmxml"
+               schemaLocation="./ndmxml-4.0.0-omm-3.0.xsd"/>
+   <xsd:element name="omm" type="ndm:ommType"/>
+</xsd:schema>

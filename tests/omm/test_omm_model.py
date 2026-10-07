@@ -9,7 +9,12 @@ from omm_builders import ISS, assert_same_satrec, sgp4_record
 
 from keepout.omm._io import parse_record
 from keepout.omm.keywords import DEGREE, KEYWORDS, REVOLUTION_PER_DAY
-from keepout.omm.model import MAX_CATALOG_NUMBER, MAX_SATREC_NUMBER, InvalidElement
+from keepout.omm.model import (
+    MAX_CATALOG_NUMBER,
+    MAX_ELEMENT_SET_NO,
+    MAX_SATREC_NUMBER,
+    InvalidElement,
+)
 
 ISS_OMM = parse_record(ISS)
 
@@ -150,7 +155,8 @@ def test_equal_elements_are_equal() -> None:
             {"catalog_number": MAX_CATALOG_NUMBER + 1},
             r"catalog_number must be in \[0, 999999999\]",
         ),
-        ({"element_set_no": -1}, "element_set_no must be >= 0"),
+        ({"element_set_no": -1}, r"element_set_no must be in \[0, 9999\]"),
+        ({"element_set_no": 10_000}, r"element_set_no must be in \[0, 9999\]"),
         ({"rev_at_epoch": -1}, "rev_at_epoch must be >= 0"),
         ({"epoch": "2026-10-06T00:20:47"}, "epoch must be a scalar astropy Time"),
         (
@@ -180,7 +186,7 @@ def test_the_extreme_valid_values_are_accepted() -> None:
         catalog_number=MAX_CATALOG_NUMBER,
         eccentricity=0.0,
         inclination=math.pi,
-        element_set_no=0,
+        element_set_no=MAX_ELEMENT_SET_NO,
         rev_at_epoch=0,
         object_name="",
     )

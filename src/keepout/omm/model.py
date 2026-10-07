@@ -21,10 +21,19 @@ from sgp4.api import Satrec
 from keepout.cdm.keywords import format_epoch, format_value
 from keepout.omm.keywords import ATTRIBUTES, KEYWORDS, SGP4_EPHEMERIS_TYPE
 
-__all__ = ["MAX_CATALOG_NUMBER", "MAX_SATREC_NUMBER", "InvalidElement", "Omm"]
+__all__ = [
+    "MAX_CATALOG_NUMBER",
+    "MAX_ELEMENT_SET_NO",
+    "MAX_SATREC_NUMBER",
+    "InvalidElement",
+    "Omm",
+]
 
 MAX_CATALOG_NUMBER: Final = 999_999_999
 """Largest ``NORAD_CAT_ID`` of an OMM (nine digits)."""
+
+MAX_ELEMENT_SET_NO: Final = 9999
+"""Largest ``ELEMENT_SET_NO`` (four digits, as in a TLE and the OMM schema)."""
 
 MAX_SATREC_NUMBER: Final = 339_999
 """Largest catalog number SGP4's satellite record holds (Alpha-5 ``Z9999``)."""
@@ -103,7 +112,7 @@ class Omm:
         Security classification, one character: ``U`` (unclassified), ``C``
         or ``S`` (``CLASSIFICATION_TYPE``).
     element_set_no
-        Element set number (``ELEMENT_SET_NO``).
+        Element set number (``ELEMENT_SET_NO``), 0 to 9999.
     rev_at_epoch
         Revolution number at epoch (``REV_AT_EPOCH``).
 
@@ -139,7 +148,7 @@ class Omm:
                 "classification", f"must be one character, got {self.classification!r}"
             )
         _check_integer(self, "catalog_number", MAX_CATALOG_NUMBER)
-        _check_integer(self, "element_set_no")
+        _check_integer(self, "element_set_no", MAX_ELEMENT_SET_NO)
         _check_integer(self, "rev_at_epoch")
         if not (isinstance(self.epoch, Time) and self.epoch.isscalar):
             raise InvalidElement("epoch", "must be a scalar astropy Time")

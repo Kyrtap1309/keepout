@@ -21,11 +21,14 @@ from keepout.cdm.keywords import Keyword
 
 __all__ = [
     "ATTRIBUTES",
+    "DEFAULTS",
     "DEGREE",
     "FIXED_METADATA",
     "KEYWORDS",
     "REVOLUTION_PER_DAY",
     "SGP4_EPHEMERIS_TYPE",
+    "VERSION",
+    "VERSIONS",
 ]
 
 DEGREE: Final = math.pi / 180.0
@@ -99,11 +102,26 @@ ATTRIBUTES: Final[Mapping[str, str]] = {
 """The :class:`~keepout.omm.model.Omm` attribute of each keyword but
 ``EPHEMERIS_TYPE``, which is always :data:`SGP4_EPHEMERIS_TYPE`."""
 
-FIXED_METADATA: Final[Mapping[str, str]] = {
-    "CENTER_NAME": "EARTH",
-    "REF_FRAME": "TEME",
-    "TIME_SYSTEM": "UTC",
-    "MEAN_ELEMENT_THEORY": "SGP4",
+FIXED_METADATA: Final[Mapping[str, tuple[str, ...]]] = {
+    "CENTER_NAME": ("EARTH",),
+    "REF_FRAME": ("TEME",),
+    "TIME_SYSTEM": ("UTC",),
+    "MEAN_ELEMENT_THEORY": ("SGP4", "SGP/SGP4"),
 }
-"""Metadata every SGP4 element set has; a message that states one must state
-this value (CelesTrak's CSV and JSON state none of them)."""
+"""Metadata every SGP4 element set has, with the values accepted for each; a
+message that states one must state one of them (CelesTrak's CSV and JSON
+state none), and writers write the first. CCSDS 502.0-B-3's KVN examples
+(annex G) write the theory as ``SGP/SGP4``, its XML example and CelesTrak as
+``SGP4``."""
+
+DEFAULTS: Final[Mapping[str, str]] = {
+    "EPHEMERIS_TYPE": str(SGP4_EPHEMERIS_TYPE),
+    "CLASSIFICATION_TYPE": "U",
+}
+"""Values of the TLE parameters CCSDS 502.0-B-3 (table 4-3) lets an OMM omit."""
+
+VERSIONS: Final = ("2.0", "3.0")
+"""``CCSDS_OMM_VERS`` values read: CCSDS 502.0-B-2 and 502.0-B-3."""
+
+VERSION: Final = "3.0"
+"""``CCSDS_OMM_VERS`` written (CCSDS 502.0-B-3)."""
