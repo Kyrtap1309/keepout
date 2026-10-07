@@ -95,6 +95,21 @@ def test_refined_minima_are_socrates_approaches(
     )
 
 
+def test_refined_minima_are_minima_late_in_a_window() -> None:
+    # Bounded Brent's tolerance grows with its variable (sqrt(eps) |x|, 8 ms
+    # at 6 days): refining in the time since the earlier neighbour keeps it
+    # at the microsecond. A pass at 14.8 km/s, 6 days into the window.
+    primary, secondary = BY_NUMBER[100054], BY_NUMBER[60746]
+    oracle = brute_force([primary], [secondary], START, 7 * 86400.0, 100e3)
+    (minimum,) = (m for m in oracle.minima if abs(m.offset - 526453.6) < 10.0)
+    refined = refine(primary, secondary, oracle, minimum)
+    assert refined.distance == pytest.approx(2479.5205, abs=1e-4)
+    r, _ = positions(
+        [primary, secondary], START, refined.offset + np.array([-1e-3, 1e-3])
+    )
+    assert np.all(np.linalg.norm(r[1] - r[0], axis=-1) > refined.distance)
+
+
 def test_failing_objects_and_self_pairs_are_left_out() -> None:
     primaries = [BY_NUMBER[45665], FIXTURE[0], FIXTURE[100]]
     oracle = brute_force(primaries, FIXTURE, START, 7 * 86400.0, 1e9, step=3600.0)

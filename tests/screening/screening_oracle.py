@@ -230,25 +230,30 @@ def refine(
     """The minimum of the distance between a sampled minimum's neighbours.
 
     Bounded Brent (to 1 us) on the distance of the two objects' positions
-    from single ``Satrec`` at astropy's UTC dates.
+    from single ``Satrec`` at astropy's UTC dates. It searches the time since
+    the earlier neighbour: its tolerance grows with the size of the variable
+    (``sqrt(eps) |x|``), which would be milliseconds days into a window.
     """
     satrecs = (primary.satrec(), secondary.satrec())
     offsets = oracle.offsets
     lowest = offsets[max(0, minimum.sample - 1)]
     highest = offsets[min(len(offsets) - 1, minimum.sample + 1)]
 
-    def distance(offset: float) -> float:
-        time = (oracle.start + offset * u.s).utc
+    def distance(elapsed: float) -> float:
+        time = (oracle.start + (lowest + elapsed) * u.s).utc
         a, b = (satrec.sgp4(time.jd1, time.jd2)[1] for satrec in satrecs)
         return float(np.linalg.norm(np.subtract(b, a))) * 1e3
 
     if highest == lowest:
         return minimum
     result = minimize_scalar(
-        distance, bounds=(lowest, highest), method="bounded", options={"xatol": 1e-6}
+        distance,
+        bounds=(0.0, highest - lowest),
+        method="bounded",
+        options={"xatol": 1e-6},
     )
     best = min(
-        (float(result.x), float(result.fun)),
+        (lowest + float(result.x), float(result.fun)),
         (minimum.offset, minimum.distance),
         key=lambda pair: pair[1],
     )
