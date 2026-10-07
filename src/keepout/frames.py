@@ -30,6 +30,7 @@ __all__ = [
     "PARALLEL_RTOL",
     "TEME_RATE_STEP",
     "inertial_to_rtn_covariance",
+    "relative_position_rtn",
     "rtn_rotation",
     "rtn_to_inertial_covariance",
     "teme_to_gcrf",
@@ -89,6 +90,74 @@ def rtn_rotation(r: npt.ArrayLike, v: npt.ArrayLike) -> FloatArray:
     normal = angular_momentum / h_norm
     transverse = np.cross(normal, radial)
     return np.stack([radial, transverse, normal])
+
+
+def relative_position_rtn(
+    r: npt.ArrayLike, v: npt.ArrayLike, r_other: npt.ArrayLike
+) -> FloatArray:
+    """Positions of other objects relative to an object, in the object's RTN.
+
+    The vectorised form of ``rtn_rotation(r, v) @ (r_other - r)`` (same
+    axes as :func:`rtn_rotation`), for many pairs and times at once: e.g.
+    where a secondary is in the frame of the primary of a conjunction.
+
+    Parameters
+    ----------
+    r
+        Inertial positions of the object [m], shape ``(..., 3)``.
+    v
+        Inertial velocities of the object [m/s], shape ``(..., 3)``.
+    r_other
+        Inertial positions of the other objects [m], shape ``(..., 3)``, in
+        the same frame.
+
+    Returns
+    -------
+    FloatArray
+        Radial, transverse and normal components [m], shape ``(..., 3)``,
+        where ``...`` is the broadcast of the three inputs' leading shapes.
+        A row with a non-finite input is non-finite.
+
+    Raises
+    ------
+    ValueError
+        If an input does not have 3 components on its last axis, or the
+        shapes do not broadcast.
+    GeometryError
+        If a finite position is zero or parallel to its velocity.
+    """
+    position = _components(r, "r")
+    velocity = _components(v, "v")
+    other = _components(r_other, "r_other")
+    try:
+        np.broadcast_shapes(position.shape, velocity.shape, other.shape)
+    except ValueError:
+        raise ValueError(
+            f"r {position.shape}, v {velocity.shape} and r_other {other.shape} "
+            "do not broadcast"
+        ) from None
+    angular_momentum = np.cross(position, velocity)
+    r_norm = np.linalg.norm(position, axis=-1, keepdims=True)
+    h_norm = np.linalg.norm(angular_momentum, axis=-1, keepdims=True)
+    speed = np.linalg.norm(velocity, axis=-1, keepdims=True)
+    # NaN compares false: rows of failed states pass through as NaN.
+    if np.any((r_norm == 0.0) | (h_norm <= PARALLEL_RTOL * r_norm * speed)):
+        raise GeometryError(
+            "RTN frame is undefined: position is zero or parallel to velocity"
+        )
+    radial = position / r_norm
+    normal = angular_momentum / h_norm
+    transverse = np.cross(normal, radial)
+    offset = other - position
+    result: FloatArray = np.stack(
+        [
+            np.sum(offset * radial, axis=-1),
+            np.sum(offset * transverse, axis=-1),
+            np.sum(offset * normal, axis=-1),
+        ],
+        axis=-1,
+    )
+    return result
 
 
 def _rotate_covariance(covariance: npt.ArrayLike, rotation: FloatArray) -> FloatArray:
