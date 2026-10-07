@@ -84,6 +84,21 @@ def test_epochs_on_a_day_that_ends_in_a_utc_step_are_read_and_used(
     assert_same_satrec(omm.satrec(), sgp4_record(values))
 
 
+@pytest.mark.parametrize(
+    ("epoch", "sgp4_epoch"),
+    [
+        ("1964-12-31T23:59:60.0999999", "1965-01-01T00:00:00.000000"),
+        ("1968-01-31T23:59:59.8999996", "1968-02-01T00:00:00.000000"),
+    ],
+)
+def test_an_epoch_rounded_past_the_end_of_a_step_day_starts_the_next(
+    epoch: str, sgp4_epoch: str
+) -> None:
+    omm = parse_record({**ISS, "EPOCH": epoch})
+    assert omm.keywords()["EPOCH"] == epoch
+    assert_same_satrec(omm.satrec(), sgp4_record({**ISS, "EPOCH": sgp4_epoch}))
+
+
 def test_satrec_holds_a_six_digit_catalog_number() -> None:
     record = dataclasses.replace(ISS_OMM, catalog_number=MAX_SATREC_NUMBER).satrec()
     assert record.satnum == MAX_SATREC_NUMBER

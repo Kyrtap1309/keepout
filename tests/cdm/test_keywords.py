@@ -1,5 +1,9 @@
+import datetime
+from decimal import Decimal
+
 import pytest
-from hypothesis import given
+from astropy.time import Time
+from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
 from keepout.cdm.keywords import (
@@ -128,6 +132,8 @@ def test_ordinal_epoch_and_trailing_z() -> None:
         # that 1968-01-31 lacked.
         "1964-12-31T23:59:60.1",
         "1968-01-31T23:59:59.95",
+        # astropy writes years before 1000 with fewer digits.
+        "0999-365T12:00:00",
     ],
 )
 def test_invalid_epochs(text: str) -> None:
@@ -202,6 +208,78 @@ def test_epochs_on_a_day_that_ends_in_a_utc_step_are_read_as_written(
 def test_the_utc_step_ends_its_day(text: str, isot: str) -> None:
     # Like a leap second, the 0.1 s step is written as 23:59:60.0 to 60.1.
     assert format_epoch(parse_epoch(text)) == isot
+
+
+@pytest.mark.parametrize(
+    ("text", "precision", "isot"),
+    [
+        ("1964-12-31T23:59:60.0999999", 6, "1965-01-01T00:00:00.000000"),
+        ("1968-01-31T23:59:59.8999996", 6, "1968-02-01T00:00:00.000000"),
+        ("1968-01-31T23:59:59.6", 0, "1968-02-01T00:00:00"),
+        ("1964-12-31T23:59:60.06", 1, "1965-01-01T00:00:00.0"),
+        ("1964-12-31T23:59:60.04", 1, "1964-12-31T23:59:60.0"),
+        ("1964-366T23:59:60.0999999", 6, "1965-01-01T00:00:00.000000"),
+    ],
+)
+def test_a_time_rounded_past_the_end_of_a_step_day_is_the_next_day(
+    text: str, precision: int, isot: str
+) -> None:
+    # The date and the clock round together: the clock never reaches the
+    # day's length on the old date.
+    assert format_epoch(Time(parse_epoch(text), precision=precision)) == isot
+
+
+_STEPS = "0.005 -0.05 0.1 0.1 0.1 0.1 0.1 0.1 0.1 -0.1 0.107758"
+UTC_STEPS = dict(zip(UTC_STEP_DAYS, map(Decimal, _STEPS.split()), strict=True))
+"""Each step [s], from the TAI-UTC table (USNO tai-utc.dat), as ERFA has it."""
+
+
+def _step_day_reference(day: str, nanoseconds: Decimal, digits: int) -> str:
+    """Text of the time ``nanoseconds`` into a UTC step day, rounded to ``digits``.
+
+    A clock rounded to the day's length or past it does not exist on that
+    day: the time is the next day's 00:00:00.
+    """
+    length = 86_400 + UTC_STEPS[day]
+    clock = nanoseconds.scaleb(-9).quantize(Decimal(1).scaleb(-digits))
+    if clock >= length:
+        following = datetime.date.fromisoformat(day) + datetime.timedelta(days=1)
+        zeros = "." + "0" * digits if digits else ""
+        return f"{following.isoformat()}T00:00:00{zeros}"
+    # From 23:59 on, the seconds run on past 59 into a positive step.
+    minutes = min(int(clock), 86_340) // 60
+    hour, minute = divmod(minutes, 60)
+    seconds = clock - 3600 * hour - 60 * minute
+    width = 3 + digits if digits else 2
+    return f"{day}T{hour:02d}:{minute:02d}:{seconds:0{width}.{digits}f}"
+
+
+@settings(deadline=None)
+@given(
+    day=st.sampled_from(UTC_STEP_DAYS),
+    before_end=st.one_of(st.integers(0, 2_000_000), st.integers(0, 86_399_999_999_999)),
+    digits=st.integers(0, 9),
+)
+def test_times_on_a_step_day_round_to_the_nearest_written_time(
+    day: str, before_end: int, digits: int
+) -> None:
+    # Times in the last 2 ms of the day or anywhere in it, at every precision,
+    # against exact decimal arithmetic on the day's length. A quarter of a
+    # nanosecond off the grid keeps the rounding clear of ties.
+    length_ns = (86_400 + UTC_STEPS[day]).scaleb(9)
+    nanoseconds = length_ns - 1 - before_end + Decimal("0.25")
+    assume(nanoseconds >= 0)
+    start = Time(f"{day}T00:00:00", scale="utc")
+    fraction = float(nanoseconds / length_ns)
+    epoch = Time(start.jd1, start.jd2 + fraction, format="jd", scale="utc")
+    expected = _step_day_reference(day, nanoseconds, digits)
+    assert format_epoch(Time(epoch, precision=digits)) == expected
+    # The text reads back to itself, also with the day of year.
+    if expected.startswith(day):
+        doy = datetime.date.fromisoformat(day).timetuple().tm_yday
+        yday = f"{day[:4]}-{doy:03d}{expected[10:]}"
+        assert format_epoch(parse_epoch(expected)) == expected
+        assert format_epoch(parse_epoch(yday)) == expected
 
 
 def test_an_epoch_on_a_day_that_ends_in_a_utc_step_keeps_its_time() -> None:

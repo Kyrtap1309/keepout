@@ -360,7 +360,7 @@ def parse_epoch(text: str) -> Time:
         # year becomes 1 January): the parsed fields must survive unchanged.
         date = f"{year}:{doy}" if doy else f"{year}-{month}-{day}"
         isot = _utc_isot(epoch)
-        parsed = epoch.yday[:8] if doy else isot[:10]
+        parsed = _day_of_year(isot) if doy else isot[:10]
         if parsed != date or isot[11:19] != f"{hour}:{minute}:{second}":
             raise ValueError(f"invalid CCSDS epoch {text!r}: a field is out of range")
     return epoch
@@ -388,6 +388,11 @@ _UTC_STEP_FLOOR: Final = 1e-6
 """Smallest step [s] taken for one: ERFA's drift arithmetic leaves about
 1e-16 s on the other days before 1972; the smallest step is 5 ms."""
 
+_TICK_TOLERANCE: Final = 1e-3
+"""Fraction of a tick by which a day's length may come out of ERFA's float
+arithmetic too long (a length is a whole number of ticks or at least
+0.005 tick off one)."""
+
 
 def _utc_isot(epoch: Time) -> str:
     """``epoch.utc.isot``, also right on the days that end in a small UTC step.
@@ -401,23 +406,47 @@ def _utc_isot(epoch: Time) -> str:
     in a step of 5 to 108 ms, astropy therefore writes ``t`` as
     ``t 86400 / (86400 + s)``: 1 us off at 00:00:00.43, up to 0.1 s at the
     end of the day. Here the clock is the fraction times the day's length,
-    as ``d2dtf`` computes it on a leap-second day.
+    as ``d2dtf`` computes it on a leap-second day. The date is the day's
+    own, from the Julian date: a clock that rounds to the day's length or
+    past it does not exist on that day and is the next day's 00:00:00, as
+    ``d2dtf`` writes a time rounded past the end of a leap second.
     """
     utc = epoch.utc
-    text = str(utc.isot)
-    if not "1960" <= text[:4] < "1972":
-        return text
     year, month, day, fraction = erfa.jd2cal(utc.jd1, utc.jd2)
+    if not 1960 <= year < 1972:
+        return str(utc.isot)
     step = _utc_step(year, month, day)
     if abs(step) < _UTC_STEP_FLOOR:
-        return text
+        return str(utc.isot)
     digits = utc.precision
-    ticks = round(float(fraction) * (DAY + step) * 10**digits)
-    seconds, part = divmod(ticks, 10**digits)
+    scale = 10**digits
+    ticks = round(float(fraction) * (DAY + step) * scale)
+    # The first tick at or past the day's end; the tolerance covers the
+    # rounding of the step (about 1e-15 s), far below a tick.
+    if ticks >= math.ceil((DAY + step) * scale - _TICK_TOLERANCE):
+        zero, mjd = erfa.cal2jd(year, month, day)
+        year, month, day, _ = erfa.jd2cal(zero, mjd + 1.0)
+        ticks = 0
+    seconds, part = divmod(ticks, scale)
     # From 23:59 on, the seconds run on past 59 into a positive step.
     minutes = min(seconds, 86_340) // 60
     clock = f"{minutes // 60:02d}:{minutes % 60:02d}:{seconds - 60 * minutes:02d}"
-    return f"{text[:10]}T{clock}" + (f".{part:0{digits}d}" if digits else "")
+    date = f"{int(year):04d}-{int(month):02d}-{int(day):02d}"
+    return f"{date}T{clock}" + (f".{part:0{digits}d}" if digits else "")
+
+
+def _day_of_year(isot: str) -> str:
+    """``YYYY:DDD`` of the date of :func:`_utc_isot`'s text.
+
+    astropy writes years before 1000 with fewer digits; those come back
+    unchanged, so they never match a CCSDS date.
+    """
+    if not re.match(r"\d{4}-\d\d-\d\dT", isot):
+        return isot
+    year, month, day = int(isot[:4]), int(isot[5:7]), int(isot[8:10])
+    _, mjd = erfa.cal2jd(year, month, day)
+    _, mjd_first = erfa.cal2jd(year, 1, 1)
+    return f"{isot[:4]}:{int(mjd - mjd_first) + 1:03d}"
 
 
 def _utc_step(year: int, month: int, day: int) -> float:
