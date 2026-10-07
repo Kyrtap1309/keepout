@@ -1,14 +1,12 @@
 """Close approaches on a time grid: exact on straight-line motion, the same
-however the grid is cut, and on SGP4 every minimum the brute-force oracle and
-SOCRATES find."""
+however the grid is cut into chunks, and on SGP4 every minimum the
+brute-force oracle and SOCRATES find."""
 
 import dataclasses
 import gzip
-import itertools
 import math
 import pickle
 from dataclasses import dataclass, field
-from types import MappingProxyType
 from typing import Self
 
 import astropy.units as u
@@ -176,11 +174,25 @@ def search(
     *,
     start: Time = REFERENCE,
     primaries: StraightLines | None = None,
+    pairs: npt.ArrayLike | None = None,
     step: float = DEFAULT_STEP,
 ) -> ApproachSearch:
+    """A search of every pair (or of ``pairs``), with the objects' own radius
+    bounds."""
     primaries = lines(PRIMARY) if primaries is None else primaries
-    pairs = np.ones((len(primaries), len(catalog)), dtype=bool)
-    return ApproachSearch(primaries, catalog, start, duration, volume, pairs, step=step)
+    if pairs is None:
+        pairs = np.ones((len(primaries), len(catalog)), dtype=bool)
+    return ApproachSearch(
+        primaries,
+        catalog,
+        start,
+        duration,
+        volume,
+        pairs,
+        step=step,
+        primary_bounds=primaries.radius_bounds(start, duration),
+        catalog_bounds=catalog.radius_bounds(start, duration),
+    )
 
 
 def summary(result: SearchResult) -> list[object]:
@@ -431,7 +443,7 @@ def test_minima_closer_than_a_step_are_told_apart(radius: float) -> None:
     volume = ScreeningVolume.sphere(radius)
     found = search(companion, HOUR, volume).run().minima
     expected = (math.pi - phase) / rate + 200.0 * np.arange(18)
-    assert search(companion, HOUR).step == 120.0
+    assert DEFAULT_STEP == 120.0
     np.testing.assert_allclose([m.offset for m in found], expected, rtol=0, atol=1e-5)
     np.testing.assert_allclose([m.distance for m in found], 1 * KM, rtol=1e-12)
 
@@ -445,11 +457,7 @@ def test_every_pair_of_several_primaries_is_searched() -> None:
     near_other = (other[0] + [0.0, 0.0, 2 * KM] - across * 1500.0, other[1] + across)
     catalog = lines(passing(miss, FAST, 900.0), near_other, passing(miss, FAST, 300.0))
     pairs = np.array([[True, True, False], [True, True, True]])
-    found = (
-        ApproachSearch(primaries, catalog, REFERENCE, 2 * HOUR, DEFAULT_VOLUME, pairs)
-        .run()
-        .minima
-    )
+    found = search(catalog, primaries=primaries, pairs=pairs).run().minima
     assert [(m.primary, m.secondary) for m in found] == [(0, 0), (1, 1)]
     assert [m.offset for m in found] == pytest.approx([900.0, 1500.0], abs=1e-6)
 
@@ -551,13 +559,9 @@ interval of the minimum at 2890.45 s."""
 
 
 @settings(deadline=None, max_examples=30)
-@given(
-    max_states=st.integers(min_value=1, max_value=40),
-    cuts=st.lists(st.integers(min_value=0, max_value=60), max_size=4),
-)
-def test_chunks_and_runs_do_not_change_the_result(
-    max_states: int, cuts: list[int]
-) -> None:
+@given(max_states=st.integers(min_value=1, max_value=40))
+def test_chunks_do_not_change_the_result(max_states: int) -> None:
+    # 7 objects: chunks of 2 to 5 of the 61 samples, or all of them.
     searched = search(FAILING)
     whole = searched.run()
     # The failure loses the minimum of its own interval only.
@@ -566,19 +570,17 @@ def test_chunks_and_runs_do_not_change_the_result(
     np.testing.assert_allclose(companion, np.delete(expected, 14), rtol=0, atol=1e-5)
     assert len(whole.minima) == 4 + 35
     assert dict(whole.catalog_failures) == {5: ObjectFailure(2901.0, 6)}
-    assert searched.intervals == 60
-    bounds = [0, *sorted(cuts), searched.intervals]
+    assert summary(searched.run(max_states=max_states)) == summary(whole)
+
+
+def test_catalog_parts_merge_into_the_whole() -> None:
+    # Screening searches parts of the catalog apart, numbered alike.
+    whole = search(FAILING).run()
     parts = [
-        searched.run(first, last, max_states=max_states)
-        for first, last in itertools.pairwise(bounds)
+        search(FAILING, pairs=np.isin(np.arange(len(FAILING)), part)[None]).run()
+        for part in ([0, 2, 4], [1, 3, 5])
     ]
     assert summary(SearchResult.merge(parts)) == summary(whole)
-
-
-def test_a_search_pickles() -> None:
-    original = search(MISSES)
-    copy = pickle.loads(pickle.dumps(original))
-    assert summary(copy.run()) == summary(original.run())
 
 
 def test_a_result_pickles_with_its_failures() -> None:
@@ -589,17 +591,11 @@ def test_a_result_pickles_with_its_failures() -> None:
     assert dict(result.catalog_failures) == {1: ObjectFailure(3000.0, 6)}
     copy = pickle.loads(pickle.dumps(result))
     assert summary(copy) == summary(result)
-    assert isinstance(copy.catalog_failures, MappingProxyType)
 
 
 def test_the_search_keeps_its_arguments() -> None:
     found = search(MISSES, 600.0, step=200.0)
-    assert (found.duration, found.step, found.intervals) == (600.0, 200.0, 3)
-    assert found.offsets.tolist() == [0.0, 200.0, 400.0, 600.0]
-    assert found.start == REFERENCE
-    assert found.volumes == (DEFAULT_VOLUME,)
-    assert found.pairs.shape == (1, 5)
-    assert not found.pairs.flags.writeable
+    assert (found.start, found.duration) == (REFERENCE, 600.0)
     assert len(found.primaries) == 1
     assert len(found.catalog) == 5
 
@@ -607,12 +603,8 @@ def test_the_search_keeps_its_arguments() -> None:
 def test_nothing_to_search_finds_nothing() -> None:
     empty = SearchResult((), {}, {})
     nothing = np.zeros((1, 5), dtype=bool)
-    no_pairs = ApproachSearch(
-        lines(PRIMARY), MISSES, REFERENCE, HOUR, DEFAULT_VOLUME, nothing
-    )
-    assert summary(no_pairs.run()) == summary(empty)
+    assert summary(search(MISSES, HOUR, pairs=nothing).run()) == summary(empty)
     assert summary(search(MISSES, 0.0).run()) == summary(empty)
-    assert summary(search(MISSES).run(5, 5)) == summary(empty)
 
 
 @pytest.mark.parametrize(
@@ -647,25 +639,16 @@ def test_a_search_needs_consistent_arguments(
         "duration": HOUR,
         "volumes": DEFAULT_VOLUME,
         "pairs": np.ones((1, 5), dtype=bool),
+        "primary_bounds": lines(PRIMARY).radius_bounds(REFERENCE, HOUR),
+        "catalog_bounds": MISSES.radius_bounds(REFERENCE, HOUR),
     } | change
     with pytest.raises(ValueError, match=message):
         ApproachSearch(**arguments)  # type: ignore[arg-type]
 
 
-@pytest.mark.parametrize(
-    ("first", "last", "max_states", "message"),
-    [
-        (-1, None, 10, "0 <= first <= last <= 60, got -1 and None"),
-        (5, 4, 10, "got 5 and 4"),
-        (0, 61, 10, "got 0 and 61"),
-        (0, None, 0, "max_states must be at least 1, got 0"),
-    ],
-)
-def test_runs_cover_parts_of_the_grid(
-    first: int, last: int | None, max_states: int, message: str
-) -> None:
-    with pytest.raises(ValueError, match=message):
-        search(MISSES).run(first, last, max_states=max_states)
+def test_a_run_propagates_at_least_one_state_at_once() -> None:
+    with pytest.raises(ValueError, match="max_states must be at least 1, got 0"):
+        search(MISSES).run(max_states=0)
 
 
 def test_results_are_sorted_and_merge_the_earliest_failures() -> None:
@@ -698,8 +681,11 @@ def test_results_are_sorted_and_merge_the_earliest_failures() -> None:
         2: ObjectFailure(40.0, 3),
     }
     assert dict(merged.catalog_failures) == {7: ObjectFailure(30.0, 6)}
-    with pytest.raises(TypeError):
-        merged.primary_failures[5] = ObjectFailure(0.0, 1)  # type: ignore[index]
+    # The failures are copies of those given.
+    given = {7: ObjectFailure(30.0, 6)}
+    copied = SearchResult((), {}, given)
+    given.clear()
+    assert dict(copied.catalog_failures) == {7: ObjectFailure(30.0, 6)}
 
 
 def test_a_minimum_holds_read_only_states() -> None:
@@ -717,15 +703,16 @@ def test_a_minimum_holds_read_only_states() -> None:
 # SGP4 on the frozen fixture: the brute-force oracle and SOCRATES.
 
 
-def screen_fixture(
+def fixture_search(
     primaries: list[int],
     start: Time,
     duration: float,
     volume: ScreeningVolume | VolumeRule,
     step: float = DEFAULT_STEP,
-) -> tuple[ApproachSearch, SearchResult]:
-    """Search the fixture with some of its objects as primaries, as screening
-    will: the apogee/perigee filter, no self pairs."""
+) -> tuple[ApproachSearch, list[ScreeningVolume]]:
+    """A search of the fixture with some of its objects as primaries, as
+    screening does: the apogee/perigee filter, no self pairs. Returns it with
+    the primaries' volumes."""
     omms = [BY_NUMBER[number] for number in primaries]
     own, catalog = Sgp4Propagator(omms), Sgp4Propagator(FIXTURE)
     own_bounds = own.radius_bounds(start, duration)
@@ -745,7 +732,7 @@ def screen_fixture(
         primary_bounds=own_bounds,
         catalog_bounds=catalog_bounds,
     )
-    return found, found.run()
+    return found, volumes
 
 
 def range_at(
@@ -766,9 +753,9 @@ def check_against_oracle(
     """Every minimum the oracle finds inside the volume is found, at the same
     TCA and range; every minimum found is one, inside the volume. Returns the
     number of the oracle's minima inside the volumes."""
-    search_, result = screen_fixture(primaries, start, duration, volume, step)
+    search_, volumes = fixture_search(primaries, start, duration, volume, step)
+    result = search_.run()
     omms = [BY_NUMBER[number] for number in primaries]
-    volumes = search_.volumes
     # A pass at up to 20 km/s moves 100 km between two samples 10 s apart.
     reach = [v.bounding_radius + 100 * KM for v in volumes]
     oracle = brute_force(omms, FIXTURE, start, duration, reach)
@@ -867,7 +854,7 @@ def test_every_socrates_approach_of_the_fixture_is_found() -> None:
     start = first - HOUR * u.s
     duration = (max(approach.tca for approach in SOCRATES) - start).sec + HOUR
     primaries = sorted({approach.primary for approach in SOCRATES})
-    _, result = screen_fixture(primaries, start, duration, DEFAULT_VOLUME)
+    result = fixture_search(primaries, start, duration, DEFAULT_VOLUME)[0].run()
     found: dict[tuple[int, int], list[RangeMinimum]] = {}
     for minimum in result.minima:
         pair = (primaries[minimum.primary], FIXTURE[minimum.secondary].catalog_number)
@@ -886,28 +873,28 @@ def test_a_docked_spacecraft_has_no_minimum() -> None:
     # CelesTrak gives docked spacecraft their station's element set.
     station = PRIMARIES[0]
     docked = dataclasses.replace(station, catalog_number=99999)
+    own, catalog = Sgp4Propagator([station]), Sgp4Propagator([docked, PRIMARIES[1]])
     result = ApproachSearch(
-        Sgp4Propagator([station]),
-        Sgp4Propagator([docked, PRIMARIES[1]]),
+        own,
+        catalog,
         WEEK_START,
         86400.0,
         DEFAULT_VOLUME,
         np.array([[True, False]]),
+        primary_bounds=own.radius_bounds(WEEK_START, 86400.0),
+        catalog_bounds=catalog.radius_bounds(WEEK_START, 86400.0),
     ).run()
     assert summary(result) == summary(SearchResult((), {}, {}))
 
 
-def test_sgp4_results_do_not_depend_on_the_cut() -> None:
+def test_sgp4_results_do_not_depend_on_the_chunks() -> None:
     # Formation flyers (many slow minima) and a few fast passes.
     primaries = [68377, 56156, 58199, *(omm.catalog_number for omm in PRIMARIES[:3])]
-    search_, whole = screen_fixture(primaries, WEEK_START, 86400.0, DEFAULT_VOLUME)
+    search_, _ = fixture_search(primaries, WEEK_START, 86400.0, DEFAULT_VOLUME)
+    whole = search_.run()
     assert len(whole.minima) > 50
-    cuts = [0, 1, 77, 300, search_.intervals]
-    parts = [
-        search_.run(first, last, max_states=5000)
-        for first, last in itertools.pairwise(cuts)
-    ]
-    assert summary(SearchResult.merge(parts)) == summary(whole)
+    for max_states in (5000, 1):
+        assert summary(search_.run(max_states=max_states)) == summary(whole)
 
 
 @pytest.mark.validation

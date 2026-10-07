@@ -11,16 +11,18 @@ from hypothesis import strategies as st
 from hypothesis.extra.numpy import arrays
 
 from keepout._types import FloatArray
-from keepout.errors import GeometryError
+from keepout.errors import GeometryError, UnsupportedFrame
 from keepout.frames import (
     FRAME_BIAS,
+    frame_to_gcrf,
     inertial_to_rtn_covariance,
     rtn_rotation,
     rtn_to_inertial_covariance,
+    teme_to_gcrf,
     to_gcrf,
     to_gcrf_all,
 )
-from keepout.state import StateVector
+from keepout.state import RefFrame, StateVector
 
 MAS = np.pi / (180.0 * 3600.0 * 1000.0)
 
@@ -161,6 +163,31 @@ def test_batched_conversion_matches_one_at_a_time() -> None:
         assert together.epoch is state.epoch
         np.testing.assert_allclose(together.r, alone.r, rtol=0, atol=1e-6)
         np.testing.assert_allclose(together.v, alone.v, rtol=0, atol=1e-9)
+
+
+@pytest.mark.parametrize("frame", ["GCRF", "EME2000", "ITRF", "TEME"])
+def test_arrays_in_any_frame_convert_as_their_state_vectors(frame: RefFrame) -> None:
+    # Two epochs x three objects, as a propagator's (t, n, 3) grid.
+    epochs = Time([EPOCH, EPOCH + 60 * u.s]).reshape(-1, 1)
+    r = np.array([LEO_R, [7000e3, 1.0, 2.0], [0.0, 7e6, 1e5]])
+    v = np.array([LEO_V, [3.0, 7500.0, 4.0], [-7e3, 0.0, 1e3]])
+    gcrf_r, gcrf_v = frame_to_gcrf(frame, epochs, r, v)
+    assert gcrf_r.shape == gcrf_v.shape == (2, 3, 3)
+    for t, n in np.ndindex(2, 3):
+        alone = to_gcrf(StateVector(epochs[t, 0], r[n], v[n], frame))
+        np.testing.assert_allclose(gcrf_r[t, n], alone.r, rtol=0, atol=1e-6)
+        np.testing.assert_allclose(gcrf_v[t, n], alone.v, rtol=0, atol=1e-9)
+    if frame == "TEME":
+        expected = teme_to_gcrf(epochs, r, v)
+        np.testing.assert_array_equal(gcrf_r, expected[0])
+        np.testing.assert_array_equal(gcrf_v, expected[1])
+
+
+def test_array_conversion_needs_a_frame_and_matching_shapes() -> None:
+    with pytest.raises(UnsupportedFrame):
+        frame_to_gcrf("ICRF", EPOCH, LEO_R, LEO_V)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="do not broadcast"):
+        frame_to_gcrf("GCRF", Time([EPOCH] * 2), np.zeros((3, 3)), np.zeros((3, 3)))
 
 
 def angle_deg(a: FloatArray, b: FloatArray) -> float:

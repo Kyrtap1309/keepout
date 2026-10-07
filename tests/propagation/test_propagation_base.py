@@ -1,5 +1,6 @@
 """The propagator interface: ephemerides, error codes and chunked grids."""
 
+import itertools
 import math
 from dataclasses import dataclass, field
 from typing import Any, Self
@@ -224,52 +225,87 @@ def test_a_propagator_is_anything_with_the_protocol() -> None:
 
 
 @given(
-    count=st.integers(min_value=0, max_value=5),
+    counts=st.lists(st.integers(min_value=0, max_value=5), min_size=1, max_size=3),
     times=st.integers(min_value=0, max_value=30),
     max_states=st.integers(min_value=1, max_value=50),
+    overlap=st.booleans(),
 )
-def test_chunks_hold_the_whole_grid(count: int, times: int, max_states: int) -> None:
-    propagator = linear(count)
+def test_chunks_hold_the_whole_grid(
+    counts: list[int], times: int, max_states: int, overlap: bool
+) -> None:
+    propagators = [linear(count) for count in counts]
     offsets = np.arange(times) * 37.0 - 100.0
     chunks = list(
-        propagate_in_chunks(propagator, EPOCH, offsets, max_states=max_states)
+        propagate_in_chunks(
+            propagators, EPOCH, offsets, max_states=max_states, overlap=overlap
+        )
     )
-    length = max(1, max_states // max(1, count))
-    assert [len(chunk.offsets) for chunk in chunks] == [
-        min(length, times - start) for start in range(0, times, length)
-    ]
-    whole = propagator.propagate(EPOCH, offsets)
-    if chunks:
-        np.testing.assert_array_equal(
-            np.concatenate([chunk.offsets for chunk in chunks]), offsets
-        )
-        np.testing.assert_array_equal(
-            np.concatenate([c.r for c in chunks], axis=1), whole.r
-        )
-        np.testing.assert_array_equal(
-            np.concatenate([c.v for c in chunks], axis=1), whole.v
-        )
-        np.testing.assert_array_equal(
-            np.concatenate([c.errors for c in chunks], axis=1), whole.errors
-        )
-    else:
+    assert all(len(chunk) == len(propagators) for chunk in chunks)
+    size = max(2 if overlap else 1, max_states // max(1, sum(counts)))
+    lengths = [len(chunk[0].offsets) for chunk in chunks]
+    assert all(length <= size for length in lengths)
+    if not chunks:
         assert times == 0
-    assert all(chunk.epoch is EPOCH for chunk in chunks)
+        return
+    # Every chunk after the first starts at the last time of the one before
+    # with overlap: dropped, the chunks hold the grid once.
+    skip = 1 if overlap else 0
+    assert sum(lengths) - skip * (len(chunks) - 1) == times
+    for which, propagator in enumerate(propagators):
+        parts = [chunk[which] for chunk in chunks]
+        if overlap:
+            for before, after in itertools.pairwise(parts):
+                assert before.offsets[-1] == after.offsets[0]
+        whole = propagator.propagate(EPOCH, offsets)
+        np.testing.assert_array_equal(
+            np.concatenate([parts[0].offsets, *(p.offsets[skip:] for p in parts[1:])]),
+            whole.offsets,
+        )
+        for name in ("r", "v", "errors"):
+            pieces = [getattr(part, name) for part in parts]
+            joined = np.concatenate(
+                [pieces[0], *(piece[:, skip:] for piece in pieces[1:])], axis=1
+            )
+            np.testing.assert_array_equal(joined, getattr(whole, name))
+        assert all(part.epoch is EPOCH for part in parts)
+
+
+def test_overlapping_chunks_hold_every_interval() -> None:
+    (first, second, third) = propagate_in_chunks(
+        [linear(1)], EPOCH, np.arange(7.0), max_states=3, overlap=True
+    )
+    assert [chunk.offsets.tolist() for (chunk,) in (first, second, third)] == [
+        [0.0, 1.0, 2.0],
+        [2.0, 3.0, 4.0],
+        [4.0, 5.0, 6.0],
+    ]
+    # Two times at least, even above max_states; a grid of one time is one chunk.
+    pairs = propagate_in_chunks(
+        [linear(3)], EPOCH, np.arange(3.0), max_states=1, overlap=True
+    )
+    assert [chunk.offsets.tolist() for (chunk,) in pairs] == [[0.0, 1.0], [1.0, 2.0]]
+    (alone,) = propagate_in_chunks([linear(1)], EPOCH, [5.0], overlap=True)
+    assert alone[0].offsets.tolist() == [5.0]
 
 
 def test_the_default_chunk_bounds_memory() -> None:
     # CHUNK_STATES = 1 000 000 states: 2 times of 400 000 objects.
-    (chunk,) = propagate_in_chunks(linear(2), EPOCH, np.arange(10.0))
+    ((chunk,),) = propagate_in_chunks([linear(2)], EPOCH, np.arange(10.0))
     assert chunk.r.shape == (2, 10, 3)
-    first = next(propagate_in_chunks(linear(400_000), EPOCH, np.arange(10.0)))
-    assert first.r.shape == (400_000, 2, 3)
+    first = next(propagate_in_chunks([linear(400_000)], EPOCH, np.arange(10.0)))
+    assert first[0].r.shape == (400_000, 2, 3)
+    # The objects of every propagator count.
+    both = next(propagate_in_chunks([linear(200_000)] * 2, EPOCH, np.arange(10.0)))
+    assert [part.r.shape for part in both] == [(200_000, 2, 3)] * 2
     # A chunk has at least one time, even above max_states.
-    single = next(propagate_in_chunks(linear(3), EPOCH, np.arange(10.0), max_states=1))
-    assert single.r.shape == (3, 1, 3)
+    single = next(
+        propagate_in_chunks([linear(3)], EPOCH, np.arange(10.0), max_states=1)
+    )
+    assert single[0].r.shape == (3, 1, 3)
 
 
 def test_chunk_arguments_are_checked_at_the_call() -> None:
     with pytest.raises(ValueError, match="max_states must be at least 1, got 0"):
-        propagate_in_chunks(linear(1), EPOCH, [0.0], max_states=0)
+        propagate_in_chunks([linear(1)], EPOCH, [0.0], max_states=0)
     with pytest.raises(ValueError, match="offsets must be finite"):
-        propagate_in_chunks(linear(1), EPOCH, [math.nan])
+        propagate_in_chunks([linear(1)], EPOCH, [math.nan])

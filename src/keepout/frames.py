@@ -8,6 +8,9 @@
   at 7000 km), so objects given in different frames stay consistent.
 * TEME, the frame of SGP4 output, is rotated to GCRF with ERFA (see
   :func:`teme_to_gcrf`); no Earth-orientation data is needed.
+
+:func:`to_gcrf_all` converts state vectors in any of these frames, and
+:func:`frame_to_gcrf` arrays of states in one frame (as a propagator gives).
 """
 
 from __future__ import annotations
@@ -24,12 +27,13 @@ from astropy.time import Time
 from keepout._types import FloatArray, read_only
 from keepout._units import DAY
 from keepout.errors import GeometryError
-from keepout.state import StateVector
+from keepout.state import RefFrame, StateVector, as_ref_frame
 
 __all__ = [
     "FRAME_BIAS",
     "PARALLEL_RTOL",
     "TEME_RATE_STEP",
+    "frame_to_gcrf",
     "inertial_to_rtn_covariance",
     "relative_position_rtn",
     "rtn_rotation",
@@ -265,6 +269,21 @@ def _components(value: npt.ArrayLike, name: str) -> FloatArray:
     return array
 
 
+def _broadcast(
+    epochs: Time, position: FloatArray, velocity: FloatArray
+) -> tuple[int, ...]:
+    """The broadcast shape of states at ``epochs``, without the 3 components."""
+    try:
+        return np.broadcast_shapes(
+            epochs.shape, position.shape[:-1], velocity.shape[:-1]
+        )
+    except ValueError:
+        raise ValueError(
+            f"epochs {epochs.shape}, r {position.shape} and v {velocity.shape} "
+            "do not broadcast"
+        ) from None
+
+
 def teme_to_gcrf(
     epochs: Time, r: npt.ArrayLike, v: npt.ArrayLike
 ) -> tuple[FloatArray, FloatArray]:
@@ -316,13 +335,7 @@ def teme_to_gcrf(
     """
     position = _components(r, "r")
     velocity = _components(v, "v")
-    try:
-        np.broadcast_shapes(epochs.shape, position.shape[:-1], velocity.shape[:-1])
-    except ValueError:
-        raise ValueError(
-            f"epochs {epochs.shape}, r {position.shape} and v {velocity.shape} "
-            "do not broadcast"
-        ) from None
+    _broadcast(epochs, position, velocity)
     tt, utc = epochs.tt, epochs.utc
     tt1, tt2 = np.asarray(tt.jd1), np.asarray(tt.jd2)
     ut1, ut2 = np.asarray(utc.jd1), np.asarray(utc.jd2)
@@ -379,6 +392,65 @@ def to_gcrf_all(states: Sequence[StateVector]) -> list[StateVector]:
             ):
                 converted[i] = state
     return converted
+
+
+def frame_to_gcrf(
+    frame: RefFrame, epochs: Time, r: npt.ArrayLike, v: npt.ArrayLike
+) -> tuple[FloatArray, FloatArray]:
+    """Convert positions and velocities in one frame to GCRF, many at once.
+
+    TEME states go through :func:`teme_to_gcrf` in one call; EME2000 and
+    ITRF states as :class:`~keepout.state.StateVector` through
+    :func:`to_gcrf_all`; GCRF states are copied.
+
+    Parameters
+    ----------
+    frame
+        Frame of ``r`` and ``v``.
+    epochs
+        Epoch of each state; a scalar for states at one epoch.
+    r
+        Positions [m], shape ``(..., 3)``.
+    v
+        Velocities [m/s], shape ``(..., 3)``.
+
+    Returns
+    -------
+    tuple of FloatArray
+        GCRF positions [m] and velocities [m/s], shape ``(..., 3)``, where
+        ``...`` is the broadcast of ``epochs.shape``, ``r.shape[:-1]`` and
+        ``v.shape[:-1]``.
+
+    Raises
+    ------
+    ValueError
+        If ``r`` or ``v`` does not have 3 components on its last axis, the
+        shapes do not broadcast, or a state in EME2000 or ITRF is not finite.
+    UnsupportedFrame
+        If ``frame`` is not a supported reference frame.
+    """
+    frame = as_ref_frame(frame)
+    if frame == "TEME":
+        return teme_to_gcrf(epochs, r, v)
+    position = _components(r, "r")
+    velocity = _components(v, "v")
+    shape = _broadcast(epochs, position, velocity)
+    position = np.broadcast_to(position, (*shape, 3))
+    velocity = np.broadcast_to(velocity, (*shape, 3))
+    if frame == "GCRF":
+        return position.copy(), velocity.copy()
+    times = np.broadcast_to(epochs, shape).ravel()
+    states = to_gcrf_all(
+        [
+            StateVector(times[i], r_i, v_i, frame)
+            for i, (r_i, v_i) in enumerate(
+                zip(position.reshape(-1, 3), velocity.reshape(-1, 3), strict=True)
+            )
+        ]
+    )
+    gcrf_r = np.array([state.r for state in states]).reshape(*shape, 3)
+    gcrf_v = np.array([state.v for state in states]).reshape(*shape, 3)
+    return gcrf_r, gcrf_v
 
 
 def to_gcrf(state: StateVector) -> StateVector:

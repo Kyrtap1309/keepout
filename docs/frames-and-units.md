@@ -29,6 +29,8 @@ agrees with astropy's TEME → GCRS (which reads IERS data) to 10⁻¹⁰ of the
 radius.
 `teme_to_gcrf` converts arrays of states at one or many epochs in one call;
 `to_gcrf_all` converts all TEME `StateVector`s of a list together.
+`frame_to_gcrf` converts arrays of states in any one frame (as a propagator
+gives them), TEME through `teme_to_gcrf`.
 
 Any other frame is rejected with `UnsupportedFrame`, a `GeometryError` that
 is also a `ValueError`; so is a covariance in a frame other than those of

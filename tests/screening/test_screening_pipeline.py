@@ -89,13 +89,22 @@ def test_approaches_are_the_minima_of_the_search_in_gcrf() -> None:
     assert left_out == {STALE}
     catalog = without(*left_out)
     own, others = Sgp4Propagator(primaries), Sgp4Propagator(catalog)
-    pairs = apogee_perigee_filter(
-        own.radius_bounds(START, DAY), others.radius_bounds(START, DAY), DEFAULT_VOLUME
-    )
+    own_bounds = own.radius_bounds(START, DAY)
+    other_bounds = others.radius_bounds(START, DAY)
+    pairs = apogee_perigee_filter(own_bounds, other_bounds, DEFAULT_VOLUME)
     numbers = [omm.catalog_number for omm in catalog]
     for row, omm in enumerate(primaries):
         pairs[row, numbers.index(omm.catalog_number)] = False
-    found = ApproachSearch(own, others, START, DAY, DEFAULT_VOLUME, pairs).run()
+    found = ApproachSearch(
+        own,
+        others,
+        START,
+        DAY,
+        DEFAULT_VOLUME,
+        pairs,
+        primary_bounds=own_bounds,
+        catalog_bounds=other_bounds,
+    ).run()
 
     def ids(m: RangeMinimum) -> tuple[int, int]:
         return primaries[m.primary].catalog_number, numbers[m.secondary]

@@ -21,8 +21,9 @@ theory) and a window, and returns a
    left out, with every minimum it has: its states before the error are not
    trusted either. (An object the filter rules out of every pair is never
    propagated, so an error it would have is not seen.)
-4. **Approaches.** The states at each TCA are rotated from TEME to GCRF
-   (:func:`keepout.frames.teme_to_gcrf`) into a
+4. **Approaches.** The states at each TCA are converted from the
+   propagator's frame (TEME for SGP4) to GCRF
+   (:func:`keepout.frames.frame_to_gcrf`) into a
    :class:`~keepout.screening.result.CloseApproach`.
 
 **Element age.** The search's guarantee that no minimum is missed assumes
@@ -59,6 +60,7 @@ from typing import Final
 
 import astropy.units as u
 import numpy as np
+import numpy.typing as npt
 from astropy.time import Time
 
 from keepout._types import (
@@ -68,10 +70,15 @@ from keepout._types import (
     require_positive,
 )
 from keepout._units import DAY
-from keepout.errors import KeepoutError, UnsupportedElements
-from keepout.frames import teme_to_gcrf
+from keepout.errors import KeepoutError
+from keepout.frames import frame_to_gcrf
 from keepout.omm import Omm, deduplicate
-from keepout.propagation.base import CHUNK_STATES, RadiusBounds, describe_error
+from keepout.propagation.base import (
+    CHUNK_STATES,
+    Propagator,
+    RadiusBounds,
+    describe_error,
+)
 from keepout.propagation.sgp4_prop import Sgp4Propagator
 from keepout.screening.filters import apogee_perigee_filter
 from keepout.screening.result import (
@@ -94,7 +101,7 @@ from keepout.screening.volume import (
     VolumeRule,
     volume_for,
 )
-from keepout.state import StateVector
+from keepout.state import RefFrame, StateVector
 
 __all__ = ["DEFAULT_DURATION", "MAX_AGE", "MAX_LEAD", "screen"]
 
@@ -193,11 +200,13 @@ def screen(
     others = _current(catalog, "catalog", window, max_age, max_lead, skipped)
     propagator, volumes = _primaries(own, volume, skipped)
     bounds = propagator.radius_bounds(start, window.duration)
+    numbers = np.array([omm.catalog_number for omm in propagator.omms], dtype=np.int64)
     count = min(workers, len(others))
     parts = [
         _Part(
             window,
             propagator,
+            numbers,
             bounds,
             tuple(volumes),
             others[part::count],
@@ -229,7 +238,9 @@ def screen(
         if index not in gone_primaries
     }
     return ScreeningResult(
-        approaches=tuple(_approaches(minima, primary_omms, others, start)),
+        approaches=tuple(
+            _approaches(minima, primary_omms, others, start, propagator.frame)
+        ),
         skipped=tuple(skipped),
         start=start,
         duration=window.duration,
@@ -253,7 +264,9 @@ class _Part:
     """The primaries and one part of the catalog, to screen in one process."""
 
     window: _Window
-    primaries: Sgp4Propagator
+    primaries: Propagator
+    primary_numbers: npt.NDArray[np.int64]
+    """Catalog number of each primary."""
     primary_bounds: RadiusBounds
     volumes: tuple[ScreeningVolume, ...]
     catalog: tuple[Omm, ...]
@@ -320,9 +333,10 @@ def _primaries(
 ) -> tuple[Sgp4Propagator, list[ScreeningVolume]]:
     """SGP4 for the primaries it can be initialised with and that have a
     volume, and their volumes."""
-    initialised, _, unsupported = _propagator(omms)
-    lost = [(omms[index], message) for index, message in unsupported]
-    _skip_unsupported(lost, "primary", skipped)
+    initialised, _, rejected = Sgp4Propagator.from_omms(omms)
+    _skip_unsupported(
+        [(omms[index], str(error)) for index, error in rejected], "primary", skipped
+    )
     chosen: list[int] = []
     volumes: list[ScreeningVolume] = []
     for index, omm in enumerate(initialised.omms):
@@ -334,31 +348,6 @@ def _primaries(
             continue
         chosen.append(index)
     return initialised.subset(np.array(chosen, dtype=np.intp)), volumes
-
-
-def _propagator(
-    omms: Sequence[Omm],
-) -> tuple[Sgp4Propagator, IndexArray, list[tuple[int, str]]]:
-    """SGP4 for the element sets it can be initialised with.
-
-    Returns the propagator, the position of each of its objects in ``omms``
-    and the positions and errors of the others.
-    """
-    try:
-        return Sgp4Propagator(omms), np.arange(len(omms)), []
-    except UnsupportedElements:
-        pass  # find which, one by one
-    usable: list[int] = []
-    unsupported: list[tuple[int, str]] = []
-    for index, omm in enumerate(omms):
-        try:
-            omm.satrec()
-        except UnsupportedElements as error:
-            unsupported.append((index, str(error)))
-            continue
-        usable.append(index)
-    propagator = Sgp4Propagator(omms[index] for index in usable)
-    return propagator, np.array(usable, dtype=np.intp), unsupported
 
 
 def _skip_unsupported(
@@ -397,17 +386,16 @@ def _run(parts: Sequence[_Part], workers: int) -> list[_PartResult]:
 
 def _screen_part(part: _Part) -> _PartResult:
     """Initialise, filter and search one part of the catalog."""
-    catalog, usable, unsupported = _propagator(part.catalog)
-    columns = part.columns[usable]
-    lost = tuple((int(part.columns[index]), message) for index, message in unsupported)
+    catalog, kept, rejected = Sgp4Propagator.from_omms(part.catalog)
+    columns = part.columns[kept]
+    lost = tuple((int(part.columns[index]), str(error)) for index, error in rejected)
     window = part.window
     if len(part.primaries) == 0 or len(catalog) == 0:
         return _PartResult(SearchResult((), {}, {}), lost)
     bounds = catalog.radius_bounds(window.start, window.duration)
     pairs = apogee_perigee_filter(part.primary_bounds, bounds, part.volumes)
-    own = np.array([omm.catalog_number for omm in part.primaries.omms])
     numbers = np.array([omm.catalog_number for omm in catalog.omms])
-    pairs &= own[:, None] != numbers[None, :]
+    pairs &= part.primary_numbers[:, None] != numbers[None, :]
     search = ApproachSearch(
         part.primaries,
         catalog,
@@ -438,15 +426,16 @@ def _approaches(
     primaries: Sequence[Omm],
     catalog: Sequence[Omm],
     start: Time,
+    frame: RefFrame,
 ) -> list[CloseApproach]:
-    """The minima as close approaches, their TEME states rotated to GCRF."""
+    """The minima as close approaches, their states (in ``frame``) in GCRF."""
     if not minima:
         return []
     offsets = np.array([minimum.offset for minimum in minima])
     times = (start + offsets * u.s).utc
     r: FloatArray = np.array([[m.r_primary, m.r_secondary] for m in minima])
     v: FloatArray = np.array([[m.v_primary, m.v_secondary] for m in minima])
-    r_gcrf, v_gcrf = teme_to_gcrf(times.reshape(-1, 1), r, v)
+    r_gcrf, v_gcrf = frame_to_gcrf(frame, times.reshape(-1, 1), r, v)
     approaches: list[CloseApproach] = []
     for i, minimum in enumerate(minima):
         tca = times[i]

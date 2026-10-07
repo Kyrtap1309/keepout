@@ -84,18 +84,18 @@ other intervals are refined as if it had none.
 
 **Determinism.** Each interval is decided from the states of its own pair
 only, and so is each failure found while refining it, so the result does
-not depend on how the grid is cut into chunks or into runs
-(:meth:`ApproachSearch.run` over parts of the grid, e.g. one per worker,
-merged with :meth:`SearchResult.merge`).
+not depend on how the grid is cut into chunks (``max_states``), nor on how
+the catalog is cut into parts searched apart (e.g. one per worker) and
+merged with :meth:`SearchResult.merge`.
 """
 
 from __future__ import annotations
 
+import contextlib
 import math
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
-from types import MappingProxyType
-from typing import Final
+from dataclasses import dataclass, field
+from typing import Final, NamedTuple
 
 import numpy as np
 import numpy.typing as npt
@@ -117,6 +117,7 @@ from keepout.propagation.base import (
     ErrorArray,
     Propagator,
     RadiusBounds,
+    propagate_in_chunks,
 )
 from keepout.screening.volume import ScreeningVolume
 
@@ -320,7 +321,7 @@ def _earliest(
 
 @dataclass(frozen=True, eq=False)
 class SearchResult:
-    """What a search finds over its part of the grid.
+    """What a search finds.
 
     Parameters
     ----------
@@ -329,9 +330,9 @@ class SearchResult:
         offset.
     primary_failures, catalog_failures
         The earliest failed state seen of each primary and catalog object,
-        by position (read-only mappings, sorted by position). Screening
-        skips these objects: minima of a failed object are still listed
-        here, from the intervals in which both objects were propagated.
+        by position (copies, sorted by position). Screening skips these
+        objects: minima of a failed object are still listed here, from the
+        intervals in which both objects were propagated.
     """
 
     minima: tuple[RangeMinimum, ...]
@@ -340,25 +341,17 @@ class SearchResult:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "minima", tuple(sorted(self.minima, key=_order)))
-        primary = MappingProxyType(dict(sorted(self.primary_failures.items())))
-        catalog = MappingProxyType(dict(sorted(self.catalog_failures.items())))
+        primary = dict(sorted(self.primary_failures.items()))
+        catalog = dict(sorted(self.catalog_failures.items()))
         object.__setattr__(self, "primary_failures", primary)
         object.__setattr__(self, "catalog_failures", catalog)
 
-    def __reduce__(
-        self,
-    ) -> tuple[type[SearchResult], tuple[object, object, object]]:
-        # Mapping proxies do not pickle; results come back from worker
-        # processes, so pickle the plain contents.
-        primary, catalog = dict(self.primary_failures), dict(self.catalog_failures)
-        return type(self), (self.minima, primary, catalog)
-
     @classmethod
     def merge(cls, results: Iterable[SearchResult]) -> SearchResult:
-        """One result from the results of runs over parts of a grid.
+        """One result from the results of searches over parts of a catalog.
 
-        Merging the runs over consecutive parts gives exactly the result of
-        one run over the whole.
+        The minima are put together and each object keeps its earliest
+        failure; the results must number the objects alike.
         """
         minima: list[RangeMinimum] = []
         primary: dict[int, ObjectFailure] = {}
@@ -437,17 +430,31 @@ def _check(own: ErrorArray, other: ErrorArray, stamps: FloatArray) -> None:
         raise _Failed(*failed)
 
 
-def _note(
-    failures: tuple[dict[int, ObjectFailure], dict[int, ObjectFailure]],
-    primary: int,
-    secondary: int,
-    failed: _Failed,
-) -> None:
-    """Record a pair's failure found while refining it."""
-    if failed.primary is not None:
-        _earliest(failures[0], primary, failed.primary)
-    if failed.secondary is not None:
-        _earliest(failures[1], secondary, failed.secondary)
+@dataclass(frozen=True)
+class _Failures:
+    """The earliest failure seen of each primary and catalog object, by
+    position."""
+
+    primary: dict[int, ObjectFailure] = field(default_factory=dict)
+    catalog: dict[int, ObjectFailure] = field(default_factory=dict)
+
+    def note(self, primary: int, secondary: int, failed: _Failed) -> None:
+        """Record a pair's failure found while refining it."""
+        if failed.primary is not None:
+            _earliest(self.primary, primary, failed.primary)
+        if failed.secondary is not None:
+            _earliest(self.catalog, secondary, failed.secondary)
+
+
+def _stencil_sum(rho: FloatArray, weights: FloatArray) -> FloatArray:
+    """``sum_k weights[k] |rho_k|^2`` over each run of ``len(weights)``
+    consecutive relative positions, added term by term in order: the same
+    bits whatever the number of runs (a matrix product might not)."""
+    squared = _dot(rho, rho).reshape(-1, len(weights))
+    total: FloatArray = squared[:, 0] * weights[0]
+    for k in range(1, len(weights)):
+        total = total + squared[:, k] * weights[k]
+    return total
 
 
 class _Pair:
@@ -482,16 +489,10 @@ class _Pair:
         outside = (stamps < 0.0) | (stamps > self.duration)
         inside = ~outside
         _check(own.errors[0][inside], other.errors[0][inside], stamps[inside])
-        rho = other.r[0] - own.r[0]
-        squared = _dot(rho, rho).reshape(-1, len(_STENCIL))
-        derivative: FloatArray = (
-            squared[:, 0] * _WEIGHTS[0]
-            + squared[:, 1] * _WEIGHTS[1]
-            + squared[:, 2] * _WEIGHTS[2]
-            + squared[:, 3] * _WEIGHTS[3]
-        )
+        derivative = _stencil_sum(other.r[0] - own.r[0], _WEIGHTS)
         failed = (own.errors[0] != NO_ERROR) | (other.errors[0] != NO_ERROR)
-        edge = np.flatnonzero(np.any((failed & outside).reshape(squared.shape), axis=1))
+        reaching = (failed & outside).reshape(-1, len(_STENCIL))
+        edge = np.flatnonzero(np.any(reaching, axis=1))
         if edge.size > 0:
             derivative[edge] = self._one_sided(times[edge])
         return derivative
@@ -507,12 +508,7 @@ class _Pair:
         nodes = times[:, None] + spacing[:, None] * np.arange(len(_ONE_SIDED))
         stamps = np.clip(nodes, 0.0, self.duration).reshape(-1)
         r_own, _, r_other, _ = self.states(stamps)
-        rho = r_other - r_own
-        squared = _dot(rho, rho).reshape(-1, len(_ONE_SIDED))
-        total = squared[:, 0] * _ONE_SIDED[0]
-        for k in range(1, len(_ONE_SIDED)):
-            total = total + squared[:, k] * _ONE_SIDED[k]
-        derivative: FloatArray = total / spacing
+        derivative: FloatArray = _stencil_sum(r_other - r_own, _ONE_SIDED) / spacing
         return derivative
 
     def values(self, times: FloatArray) -> FloatArray:
@@ -534,9 +530,19 @@ class _Pair:
         return float(self.derivative(np.array([time]))[0])
 
 
-def _samples(first: float, last: float, *, quick: bool) -> FloatArray:
+class _Interval(NamedTuple):
+    """A grid interval of a pair that passed the sieves."""
+
+    first: float
+    last: float
+    quick: bool
+    """Whether ``f`` is monotone over it: its sign at the ends decides."""
+
+
+def _samples(interval: _Interval) -> FloatArray:
     """Where ``f`` is evaluated in an interval: its ends, or every SLOW_STEP."""
-    if quick:
+    first, last = interval.first, interval.last
+    if interval.quick:
         return np.array([first, last])
     count = math.ceil((last - first) / SLOW_STEP)
     samples = first + (last - first) * (np.arange(count + 1) / count)
@@ -563,9 +569,6 @@ class ApproachSearch:
     """The minima of the range of primary-catalog pairs inside the volumes.
 
     See the module's description for the method and what it guarantees.
-    A search pickles (to be run in worker processes) and can run over any
-    part of its grid; the runs over consecutive parts, merged
-    (:meth:`SearchResult.merge`), give exactly the result of one run.
 
     Parameters
     ----------
@@ -586,8 +589,8 @@ class ApproachSearch:
     step
         Longest time between grid samples [s] (:func:`time_grid`).
     primary_bounds, catalog_bounds
-        The objects' radius bounds over the window, if already known;
-        computed from the propagators otherwise.
+        The objects' radius bounds over the window
+        (:meth:`~keepout.propagation.base.Propagator.radius_bounds`).
 
     Raises
     ------
@@ -606,8 +609,8 @@ class ApproachSearch:
         pairs: npt.ArrayLike,
         *,
         step: float = DEFAULT_STEP,
-        primary_bounds: RadiusBounds | None = None,
-        catalog_bounds: RadiusBounds | None = None,
+        primary_bounds: RadiusBounds,
+        catalog_bounds: RadiusBounds,
     ) -> None:
         if primaries.frame != catalog.frame:
             raise ValueError(
@@ -623,17 +626,12 @@ class ApproachSearch:
                 f"pairs must be booleans of shape ({len(primaries)}, {len(catalog)}), "
                 f"got {mask.dtype} {mask.shape}"
             )
-        read_only(mask)
         if isinstance(volumes, ScreeningVolume):
             volumes = (volumes,) * len(primaries)
         if len(volumes) != len(primaries):
             raise ValueError(
                 f"{len(volumes)} volumes given for {len(primaries)} primaries"
             )
-        if primary_bounds is None:
-            primary_bounds = primaries.radius_bounds(start, duration)
-        if catalog_bounds is None:
-            catalog_bounds = catalog.radius_bounds(start, duration)
         if len(primary_bounds) != len(primaries) or len(catalog_bounds) != len(catalog):
             raise ValueError(
                 f"radius bounds of {len(primary_bounds)} primaries and "
@@ -644,7 +642,6 @@ class ApproachSearch:
         self._catalog = catalog
         self._start = start
         self._duration = float(duration)
-        self._step = float(step)
         self._volumes = tuple(volumes)
         self._pairs = mask
         self._speed_primary = speed_bounds(primary_bounds)
@@ -673,123 +670,93 @@ class ApproachSearch:
         """Length of the window [s]."""
         return self._duration
 
-    @property
-    def step(self) -> float:
-        """Longest time between grid samples [s]."""
-        return self._step
-
-    @property
-    def volumes(self) -> tuple[ScreeningVolume, ...]:
-        """The volume of each primary."""
-        return self._volumes
-
-    @property
-    def pairs(self) -> BoolArray:
-        """The pairs searched, ``(P, S)``, read-only."""
-        return self._pairs
-
-    @property
-    def offsets(self) -> FloatArray:
-        """The grid [s since the start], read-only."""
-        return self._offsets
-
-    @property
-    def intervals(self) -> int:
-        """Number of grid intervals (one less than the samples)."""
-        return len(self._offsets) - 1
-
-    def run(
-        self, first: int = 0, last: int | None = None, *, max_states: int = CHUNK_STATES
-    ) -> SearchResult:
-        """Search the grid intervals ``first`` to ``last - 1``.
+    def run(self, *, max_states: int = CHUNK_STATES) -> SearchResult:
+        """Search the whole grid.
 
         Parameters
         ----------
-        first, last
-            The intervals searched, ``[first, last)``; all by default.
-            Interval ``k`` runs from ``offsets[k]`` to ``offsets[k + 1]``.
         max_states
-            Most states (objects x times) propagated at once.
+            Most states (objects x times) propagated at once; the result
+            does not depend on it.
 
         Returns
         -------
         SearchResult
-            The minima inside the volumes whose TCA lies in the intervals
-            (each interval includes its end, not its start), and the failed
-            objects.
+            The minima inside the volumes whose TCA lies in the window, and
+            the failed objects.
 
         Raises
         ------
         ValueError
-            If ``0 <= first <= last <= intervals`` does not hold or
-            ``max_states`` is below 1.
+            If ``max_states`` is below 1.
         """
-        stop = self.intervals if last is None else last
-        if not 0 <= first <= stop <= self.intervals:
-            raise ValueError(
-                f"intervals must satisfy 0 <= first <= last <= {self.intervals}, "
-                f"got {first} and {last}"
-            )
         if max_states < 1:
             raise ValueError(f"max_states must be at least 1, got {max_states}")
-        failures: tuple[dict[int, ObjectFailure], dict[int, ObjectFailure]] = ({}, {})
         rows = np.flatnonzero(self._pairs.any(axis=1))
-        if first == stop or rows.size == 0:
+        if len(self._offsets) < 2 or rows.size == 0:
             return SearchResult((), {}, {})
-        candidates = self._candidates(rows, first, stop, max_states, failures)
+        failures = _Failures()
+        candidates = self._candidates(rows, max_states, failures)
         minima: list[RangeMinimum] = []
         for (primary, secondary), found in sorted(candidates.items()):
             minima.extend(self._refine(primary, secondary, found, failures))
-        return SearchResult(tuple(minima), *failures)
+        return SearchResult(tuple(minima), failures.primary, failures.catalog)
 
     def _candidates(
-        self,
-        rows: IndexArray,
-        first: int,
-        stop: int,
-        max_states: int,
-        failures: tuple[dict[int, ObjectFailure], dict[int, ObjectFailure]],
-    ) -> dict[tuple[int, int], list[tuple[int, bool]]]:
-        """Propagate the grid in chunks and sieve every pair's intervals."""
+        self, rows: IndexArray, max_states: int, failures: _Failures
+    ) -> dict[tuple[int, int], list[_Interval]]:
+        """Propagate the grid in chunks and sieve every pair's intervals.
+
+        Returns the intervals of each pair that pass, in time order.
+        """
         columns = np.flatnonzero(self._pairs.any(axis=0))
-        primaries = self._primaries.subset(rows)
-        catalog = self._catalog.subset(columns)
         own = [
             np.searchsorted(columns, np.flatnonzero(self._pairs[row])) for row in rows
         ]
-        samples = self._offsets[first : stop + 1]
-        per_chunk = max(1, max_states // (len(rows) + len(columns)))
-        found: dict[tuple[int, int], list[tuple[int, bool]]] = {}
-        carried: tuple[FloatArray, FloatArray, FloatArray] | None = None
-        for begin in range(0, len(samples), per_chunk):
-            times = samples[begin : begin + per_chunk]
-            ephemeris_p = primaries.propagate(self._start, times)
-            ephemeris_c = catalog.propagate(self._start, times)
-            _record(failures[0], rows, ephemeris_p.errors, times)
-            _record(failures[1], columns, ephemeris_c.errors, times)
-            r_p, r_c, offset = ephemeris_p.r, ephemeris_c.r, first + begin
-            if carried is not None:
-                r_p = np.concatenate([carried[0], r_p], axis=1)
-                r_c = np.concatenate([carried[1], r_c], axis=1)
-                times = np.concatenate([carried[2], times])
-                offset -= 1
-            carried = (r_p[:, -1:], r_c[:, -1:], times[-1:])
-            if len(times) < 2:
-                continue
+        chunks = propagate_in_chunks(
+            (self._primaries.subset(rows), self._catalog.subset(columns)),
+            self._start,
+            self._offsets,
+            max_states=max_states,
+            overlap=True,
+        )
+        found: dict[tuple[int, int], list[_Interval]] = {}
+        for primaries, catalog in chunks:
+            _record(failures.primary, rows, primaries.errors, primaries.offsets)
+            _record(failures.catalog, columns, catalog.errors, catalog.offsets)
             for i, row in enumerate(rows):
-                secondaries, intervals, quick = self._sieve(
-                    int(row), r_p[i], r_c[own[i]], columns[own[i]], times
+                self._collect(
+                    found,
+                    int(row),
+                    primaries.r[i],
+                    catalog.r[own[i]],
+                    columns[own[i]],
+                    primaries.offsets,
                 )
-                for secondary, interval, fast in zip(
-                    secondaries.tolist(),
-                    intervals.tolist(),
-                    quick.tolist(),
-                    strict=True,
-                ):
-                    found.setdefault((int(row), secondary), []).append(
-                        (offset + interval, fast)
-                    )
         return found
+
+    def _collect(
+        self,
+        found: dict[tuple[int, int], list[_Interval]],
+        row: int,
+        r_primary: FloatArray,
+        r_others: FloatArray,
+        others: IndexArray,
+        times: FloatArray,
+    ) -> None:
+        """Sieve one primary's pairs over a chunk; add the intervals that
+        pass to ``found``."""
+        secondaries, intervals, quick = self._sieve(
+            row, r_primary, r_others, others, times
+        )
+        for secondary, first, last, fast in zip(
+            secondaries.tolist(),
+            times[intervals].tolist(),
+            times[intervals + 1].tolist(),
+            quick.tolist(),
+            strict=True,
+        ):
+            found.setdefault((row, secondary), []).append(_Interval(first, last, fast))
 
     def _sieve(
         self,
@@ -842,8 +809,8 @@ class ApproachSearch:
         self,
         primary: int,
         secondary: int,
-        found: list[tuple[int, bool]],
-        failures: tuple[dict[int, ObjectFailure], dict[int, ObjectFailure]],
+        found: list[_Interval],
+        failures: _Failures,
     ) -> list[RangeMinimum]:
         """The minima of one pair in its intervals that passed the sieves.
 
@@ -851,20 +818,17 @@ class ApproachSearch:
         loses that interval's minima only.
         """
         pair = _Pair(self, primary, secondary)
-        grid = self._offsets
-        brackets = [_samples(grid[k], grid[k + 1], quick=quick) for k, quick in found]
-        points = np.unique(np.concatenate(brackets))
-        try:
-            derivative = pair.derivative(points)
-            pair.known = dict(zip(points.tolist(), derivative.tolist(), strict=True))
-        except _Failed:
-            pass  # each interval is evaluated, and its failure found, on its own
+        brackets = [_samples(interval) for interval in found]
+        # Every interval's samples in one evaluation, kept by the pair; after a
+        # failure, each interval is evaluated, and its failure found, on its own.
+        with contextlib.suppress(_Failed):
+            pair.values(np.unique(np.concatenate(brackets)))
         minima: list[RangeMinimum] = []
         for samples in brackets:
             try:
                 minima.extend(self._bracket(pair, primary, secondary, samples))
             except _Failed as failed:
-                _note(failures, primary, secondary, failed)
+                failures.note(primary, secondary, failed)
         return minima
 
     def _bracket(

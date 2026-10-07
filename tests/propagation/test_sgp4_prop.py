@@ -223,7 +223,12 @@ def test_the_propagator_pickles_and_follows_the_protocol() -> None:
 
 
 def test_chunked_propagation_of_the_fixture() -> None:
-    chunks = list(propagate_in_chunks(PROPAGATOR, START, OFFSETS, max_states=2000))
+    chunks = [
+        chunk
+        for (chunk,) in propagate_in_chunks(
+            [PROPAGATOR], START, OFFSETS, max_states=2000
+        )
+    ]
     assert [len(chunk.offsets) for chunk in chunks] == [9] * 11
     np.testing.assert_array_equal(
         np.concatenate([c.r for c in chunks], axis=1), WHOLE.r
@@ -248,6 +253,24 @@ def test_elements_sgp4_cannot_hold_are_named() -> None:
         r"catalog number 400000 is above 339999",
     ):
         Sgp4Propagator([OMMS[0], too_large])
+
+
+def test_from_omms_sets_aside_the_elements_sgp4_cannot_hold() -> None:
+    too_large = dataclasses.replace(OMMS[1], catalog_number=400_000)
+    propagator, kept, rejected = Sgp4Propagator.from_omms(
+        [OMMS[0], too_large, OMMS[2], too_large]
+    )
+    assert propagator.omms == (OMMS[0], OMMS[2])
+    assert kept.tolist() == [0, 2]
+    assert [index for index, _ in rejected] == [1, 3]
+    for _, error in rejected:
+        assert isinstance(error, UnsupportedElements)
+        assert str(error).startswith("catalog number 400000 is above 339999")
+    np.testing.assert_array_equal(
+        propagator.propagate(START, OFFSETS).r, WHOLE.r[[0, 2]]
+    )
+    nobody, none_kept, all_rejected = Sgp4Propagator.from_omms([too_large])
+    assert (len(nobody), none_kept.tolist(), len(all_rejected)) == (0, [], 1)
 
 
 @pytest.mark.parametrize(

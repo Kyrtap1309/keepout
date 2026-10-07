@@ -12,7 +12,7 @@ and a numerical propagator can be used alike.
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Final, Protocol, Self, TypeAlias, runtime_checkable
@@ -314,12 +314,13 @@ class Propagator(Protocol):
 
 
 def propagate_in_chunks(
-    propagator: Propagator,
+    propagators: Sequence[Propagator],
     epoch: Time,
     offsets: npt.ArrayLike,
     *,
     max_states: int = CHUNK_STATES,
-) -> Iterator[Ephemeris]:
+    overlap: bool = False,
+) -> Iterator[tuple[Ephemeris, ...]]:
     """Propagate on a time grid one chunk of consecutive times at a time.
 
     Memory stays bounded by ``max_states`` whatever the grid, and the chunks
@@ -327,21 +328,27 @@ def propagate_in_chunks(
 
     Parameters
     ----------
-    propagator
-        The objects.
+    propagators
+        The objects, in one or more propagators: each chunk holds the states
+        of all of them at the same times.
     epoch
         Reference epoch of the grid.
     offsets
         Seconds elapsed since ``epoch``; see :func:`time_offsets`.
     max_states
-        Most states (objects x times) in one chunk; a chunk always has at
-        least one time.
+        Most states (objects of all the propagators x times) in one chunk; a
+        chunk always has at least one time (two with ``overlap``).
+    overlap
+        Whether each chunk after the first starts at the last time of the one
+        before (propagated again), so that every two consecutive times of the
+        grid lie in one chunk.
 
     Returns
     -------
-    Iterator[Ephemeris]
-        The states at consecutive parts of ``offsets``, in order, each
-        computed when the iterator reaches it; nothing for an empty grid.
+    Iterator[tuple[Ephemeris, ...]]
+        The states at consecutive parts of ``offsets``, in order, one
+        :class:`Ephemeris` per propagator, each chunk computed when the
+        iterator reaches it; nothing for an empty grid.
 
     Raises
     ------
@@ -352,8 +359,15 @@ def propagate_in_chunks(
     if max_states < 1:
         raise ValueError(f"max_states must be at least 1, got {max_states}")
     seconds = time_offsets(epoch, offsets)
-    step = max(1, max_states // max(1, len(propagator)))
+    objects = sum(len(propagator) for propagator in propagators)
+    size = max(2 if overlap else 1, max_states // max(1, objects))
+    advance = size - 1 if overlap else size
+    # With overlap, the last time starts no chunk: the one before holds it.
+    end = len(seconds) - 1 if overlap and len(seconds) > 1 else len(seconds)
     return (
-        propagator.propagate(epoch, seconds[start : start + step])
-        for start in range(0, len(seconds), step)
+        tuple(
+            propagator.propagate(epoch, seconds[start : start + size])
+            for propagator in propagators
+        )
+        for start in range(0, end, advance)
     )

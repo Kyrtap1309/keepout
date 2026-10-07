@@ -109,6 +109,48 @@ class Sgp4Propagator:
                 ) from error
         self._set(elements, tuple(satrecs))
 
+    @classmethod
+    def from_omms(
+        cls, omms: Iterable[Omm]
+    ) -> tuple[Self, IndexArray, list[tuple[int, UnsupportedElements]]]:
+        """A propagator of the element sets SGP4 can be initialised with.
+
+        Unlike the constructor, an element set SGP4 cannot be initialised
+        with is set aside instead of failing the others; each is initialised
+        once.
+
+        Parameters
+        ----------
+        omms
+            Element sets of the objects.
+
+        Returns
+        -------
+        propagator : Sgp4Propagator
+            The objects SGP4 was initialised for, in the order given.
+        kept : IndexArray
+            Position of each of them in ``omms``.
+        rejected : list of tuple of int and UnsupportedElements
+            Position in ``omms`` of every other element set, with the error
+            :meth:`keepout.omm.Omm.satrec` raised for it.
+        """
+        kept: list[int] = []
+        elements: list[Omm] = []
+        satrecs: list[Satrec] = []
+        rejected: list[tuple[int, UnsupportedElements]] = []
+        for index, omm in enumerate(omms):
+            try:
+                satrec = omm.satrec()
+            except UnsupportedElements as error:
+                rejected.append((index, error))
+                continue
+            kept.append(index)
+            elements.append(omm)
+            satrecs.append(satrec)
+        propagator = object.__new__(cls)
+        propagator._set(tuple(elements), tuple(satrecs))
+        return propagator, np.array(kept, dtype=np.intp), rejected
+
     def _set(self, omms: tuple[Omm, ...], satrecs: tuple[Satrec, ...]) -> None:
         self._omms = omms
         self._satrecs = satrecs

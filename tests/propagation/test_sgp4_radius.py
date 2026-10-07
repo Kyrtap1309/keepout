@@ -164,8 +164,8 @@ def test_the_bounds_hold_the_public_catalog_over_the_week() -> None:
     catalog = Sgp4Propagator(load(DATA / SNAPSHOT))
     bounds = catalog.radius_bounds(START, WEEK)
     assert np.all(np.isfinite(bounds.highest))
-    for ephemeris in propagate_in_chunks(
-        catalog, START, np.arange(0.0, WEEK + 1.0, 60.0)
+    for (ephemeris,) in propagate_in_chunks(
+        [catalog], START, np.arange(0.0, WEEK + 1.0, 60.0)
     ):
         radius = np.linalg.norm(ephemeris.r, axis=-1)
         assert_within(bounds, np.where(ephemeris.valid, radius, np.nan))

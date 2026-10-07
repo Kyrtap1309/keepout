@@ -21,7 +21,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import cached_property
 from types import MappingProxyType
-from typing import Final, Literal, TypeAlias
+from typing import Final, Literal, Self, TypeAlias
 
 import astropy.units as u
 import numpy as np
@@ -275,9 +275,7 @@ class ScreeningResult:
         )
         object.__setattr__(self, "volumes", MappingProxyType(dict(self.volumes)))
 
-    def __reduce__(
-        self,
-    ) -> tuple[type[ScreeningResult], tuple[object, ...]]:
+    def __reduce__(self) -> tuple[type[Self], tuple[object, ...]]:
         # A mapping proxy does not pickle: pickle the plain mapping.
         return type(self), (
             self.approaches,
