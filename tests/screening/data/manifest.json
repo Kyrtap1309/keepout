@@ -1,0 +1,114 @@
+{
+  "format": 1,
+  "retrieved": {
+    "first": "2026-10-06T15:21:25.129Z",
+    "last": "2026-10-06T15:21:41.896Z"
+  },
+  "downloads": [
+    {
+      "url": "https://celestrak.org/NORAD/elements/gp.php?GROUP=active&FORMAT=CSV",
+      "file": "gp-active.csv",
+      "sha256": "20693e19663709472384f0d68da433e0492dfce73944caa720d93bc985561ddf",
+      "size": 2514535,
+      "retrieved": "2026-10-06T15:21:25.129Z"
+    },
+    {
+      "url": "https://celestrak.org/NORAD/elements/gp.php?GROUP=last-30-days&FORMAT=CSV",
+      "file": "gp-last-30-days.csv",
+      "sha256": "20e4b85ceed785746de25ed2527163414a93a3c959a0ff6a0e92fce89e5bbf34",
+      "size": 26391,
+      "retrieved": "2026-10-06T15:21:28.668Z"
+    },
+    {
+      "url": "https://celestrak.org/NORAD/elements/gp.php?GROUP=analyst&FORMAT=CSV",
+      "file": "gp-analyst.csv",
+      "sha256": "0036fa04f4013f7ba725856c20ed46797dc429ed1d07806ae31ccf2d6a91ad95",
+      "size": 81183,
+      "retrieved": "2026-10-06T15:21:30.053Z"
+    },
+    {
+      "url": "https://celestrak.org/NORAD/elements/gp.php?GROUP=fengyun-1c-debris&FORMAT=CSV",
+      "file": "gp-fengyun-1c-debris.csv",
+      "sha256": "21cc34b0ce53d2c23123fdb6fffe9b586761cb4a64c47184541e8f7fa8b0d2bd",
+      "size": 304066,
+      "retrieved": "2026-10-06T15:21:32.507Z"
+    },
+    {
+      "url": "https://celestrak.org/NORAD/elements/gp.php?GROUP=cosmos-2251-debris&FORMAT=CSV",
+      "file": "gp-cosmos-2251-debris.csv",
+      "sha256": "b05624b7058d88eadd83e9b4d647e1fe228604e8a610c4fcd34a7ac7356e6c28",
+      "size": 91229,
+      "retrieved": "2026-10-06T15:21:34.159Z"
+    },
+    {
+      "url": "https://celestrak.org/NORAD/elements/gp.php?GROUP=iridium-33-debris&FORMAT=CSV",
+      "file": "gp-iridium-33-debris.csv",
+      "sha256": "b861bfc4f886f62077cbc82fc69adeb500608c1e37a76e78391e97389d726141",
+      "size": 16989,
+      "retrieved": "2026-10-06T15:21:35.008Z"
+    },
+    {
+      "url": "https://celestrak.org/socrates/sort-minRange.csv",
+      "file": "socrates-sort-minRange.csv",
+      "sha256": "d75143a2a94797c51d0fb9b8be4400bfc2f4ad08ffb6d8ee11c9f9beade5a43d",
+      "size": 21085678,
+      "retrieved": "2026-10-06T15:21:41.896Z"
+    }
+  ],
+  "catalog": {
+    "group_rows": {
+      "active": 16626,
+      "last-30-days": 170,
+      "analyst": 596,
+      "fengyun-1c-debris": 1983,
+      "cosmos-2251-debris": 588,
+      "iridium-33-debris": 109
+    },
+    "duplicates": 0,
+    "objects": 19914,
+    "six_digit": 1059,
+    "regimes": {
+      "LEO": 19032,
+      "MEO": 226,
+      "GEO": 590,
+      "HEO": 66
+    },
+    "oldest_epoch": "2026-09-06T16:25:14.657952",
+    "newest_epoch": "2026-10-07T10:41:14.682048"
+  },
+  "socrates": {
+    "approaches": 186229,
+    "both_in_catalog": 146018,
+    "comparable": 1275,
+    "first_tca": "2026-10-06T00:00:02.186",
+    "last_tca": "2026-10-12T23:59:59.684",
+    "newest_epoch": "2026-10-05T22:51"
+  },
+  "fixture": {
+    "objects": 222,
+    "regimes": {
+      "LEO": 115,
+      "MEO": 32,
+      "GEO": 41,
+      "HEO": 34
+    }
+  },
+  "files": {
+    "celestrak-public.csv.gz": {
+      "bytes": 1058151,
+      "sha256": "ac660c115334fb4c1f1e6e854c3f1067fcf1cce71bdaad6fef25e8ddeeb737ab"
+    },
+    "socrates-excerpt.csv.gz": {
+      "bytes": 29449,
+      "sha256": "707a9c627cc9a216b9fa117ee4277917d65145e2a6d0248d3445c84b7f521f28"
+    },
+    "celestrak-fixture.csv": {
+      "bytes": 33163,
+      "sha256": "e161e68769ecb1075dcf2e62f7736ee350a3f58cce89527d9dbf109bb1f54e11"
+    },
+    "NOTICE": {
+      "bytes": 893,
+      "sha256": "1c7ba912f96bc04006667f609e15ceb4e21585679b3fd65f78ff50e8b6ec54a2"
+    }
+  }
+}

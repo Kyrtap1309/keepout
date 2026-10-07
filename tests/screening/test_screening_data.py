@@ -1,0 +1,65 @@
+"""The committed screening data: digests, and that every file follows from
+the catalog, the SOCRATES excerpt and the manifest."""
+
+import hashlib
+import json
+from typing import Any
+
+import pytest
+import screening_snapshot as snapshot
+
+from keepout.omm import Omm, load
+
+DATA = snapshot.DATA
+
+
+@pytest.fixture(scope="module")
+def manifest() -> Any:
+    return json.loads((DATA / snapshot.MANIFEST).read_text(encoding="utf-8"))
+
+
+@pytest.fixture(scope="module")
+def inputs() -> snapshot.Inputs:
+    return snapshot.inputs_from_data(DATA)
+
+
+def test_files_match_the_manifest(manifest: Any) -> None:
+    assert set(manifest["files"]) == {
+        snapshot.SNAPSHOT,
+        snapshot.SOCRATES,
+        snapshot.FIXTURE,
+        snapshot.NOTICE,
+    }
+    for name, entry in manifest["files"].items():
+        stored = (DATA / name).read_bytes()
+        assert len(stored) == entry["bytes"], name
+        assert hashlib.sha256(stored).hexdigest() == entry["sha256"], name
+
+
+def test_every_file_follows_from_the_data(inputs: snapshot.Inputs) -> None:
+    for name, stored in snapshot.stored_files(DATA, inputs).items():
+        assert (DATA / name).read_bytes() == stored, name
+
+
+def test_the_catalog_reads_back(manifest: Any, inputs: snapshot.Inputs) -> None:
+    # inputs_from_data reads it with keepout.omm.load.
+    numbers = [omm.catalog_number for omm in inputs.omms]
+    assert len(numbers) == manifest["catalog"]["objects"]
+    assert numbers == sorted(set(numbers))
+
+
+def test_the_fixture_is_part_of_the_catalog(
+    manifest: Any, inputs: snapshot.Inputs
+) -> None:
+    fixture: tuple[Omm, ...] = load(DATA / snapshot.FIXTURE)
+    assert len(fixture) == manifest["fixture"]["objects"]
+    by_number = {omm.catalog_number: omm for omm in inputs.omms}
+    assert all(by_number[omm.catalog_number] == omm for omm in fixture)
+
+
+def test_the_excerpt_holds_the_comparable_approaches(
+    manifest: Any, inputs: snapshot.Inputs
+) -> None:
+    approaches = snapshot.read_socrates(inputs.socrates)
+    assert len(approaches) == manifest["socrates"]["comparable"]
+    assert snapshot.comparable(approaches, inputs.omms) == list(approaches)
