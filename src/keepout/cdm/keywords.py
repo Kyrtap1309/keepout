@@ -52,7 +52,9 @@ FieldValue: TypeAlias = str | int | float | Time
 
 @dataclass(frozen=True)
 class Keyword:
-    """How one CDM keyword is typed, converted and placed.
+    """How one CCSDS message keyword is typed, converted and placed.
+
+    Used for CDM keywords here and for OMM keywords in :mod:`keepout.omm.keywords`.
 
     Parameters
     ----------

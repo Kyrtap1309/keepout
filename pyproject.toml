@@ -20,6 +20,7 @@ dependencies = [
     "platformdirs>=4.11.12",
     "pyerfa>=2.0.1.5",
     "scipy>=1.17.1",
+    "sgp4>=2.27",
 ]
 
 [project.optional-dependencies]
@@ -76,7 +77,7 @@ enable_error_code = [
 ]
 
 [[tool.mypy.overrides]]
-module = ["astropy.*", "erfa.*", "xlrd.*"]
+module = ["astropy.*", "erfa.*", "sgp4.*", "xlrd.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

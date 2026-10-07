@@ -9,6 +9,7 @@ __all__ = [
     "GeometryError",
     "KeepoutError",
     "KelvinsFormatError",
+    "OmmParseError",
     "PcConvergenceError",
     "SourceFormatError",
     "SourceUnavailable",
@@ -71,6 +72,49 @@ class CdmParseError(KeepoutError):
         if keyword is not None:
             context.append(f"keyword {keyword}")
         super().__init__(f"{message} ({', '.join(context)})" if context else message)
+        self.line = line
+        self.keyword = keyword
+        self.path = path
+
+
+class OmmParseError(KeepoutError):
+    """An Orbit Mean-Elements Message could not be parsed.
+
+    Parameters
+    ----------
+    message
+        What is wrong.
+    record
+        1-based position of the object in a file of several (a CSV data row,
+        a JSON array element, a segment of an XML message).
+    line
+        1-based line number in a text format (KVN, CSV, TLE, JSON).
+    keyword
+        The OMM keyword (CSV column, JSON key) involved.
+    path
+        Element path in an XML message.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        record: int | None = None,
+        line: int | None = None,
+        keyword: str | None = None,
+        path: str | None = None,
+    ) -> None:
+        context: list[str] = []
+        if record is not None:
+            context.append(f"record {record}")
+        if line is not None:
+            context.append(f"line {line}")
+        if path is not None:
+            context.append(f"at {path}")
+        if keyword is not None:
+            context.append(f"keyword {keyword}")
+        super().__init__(f"{message} ({', '.join(context)})" if context else message)
+        self.record = record
         self.line = line
         self.keyword = keyword
         self.path = path

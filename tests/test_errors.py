@@ -3,7 +3,13 @@ import inspect
 import pytest
 
 from keepout import errors
-from keepout.errors import CdmParseError, GeometryError, KeepoutError, UnsupportedFrame
+from keepout.errors import (
+    CdmParseError,
+    GeometryError,
+    KeepoutError,
+    OmmParseError,
+    UnsupportedFrame,
+)
 
 ERRORS = [
     value
@@ -39,6 +45,22 @@ def test_cdm_parse_error_reports_xml_path() -> None:
 
 def test_cdm_parse_error_without_context() -> None:
     assert str(CdmParseError("empty message")) == "empty message"
+
+
+def test_omm_parse_error_reports_record_line_path_and_keyword() -> None:
+    error = OmmParseError(
+        "bad number", record=3, line=4, path="omm/body/segment[3]", keyword="BSTAR"
+    )
+    assert str(error) == (
+        "bad number (record 3, line 4, at omm/body/segment[3], keyword BSTAR)"
+    )
+    assert (error.record, error.line, error.path, error.keyword) == (
+        3,
+        4,
+        "omm/body/segment[3]",
+        "BSTAR",
+    )
+    assert str(OmmParseError("empty message")) == "empty message"
 
 
 def test_an_unsupported_frame_is_a_geometry_and_value_error() -> None:
