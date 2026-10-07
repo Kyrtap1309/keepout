@@ -1,4 +1,5 @@
 import json
+import resource
 import subprocess
 import sys
 
@@ -44,12 +45,29 @@ def test_main_refuses_primaries_outside_the_catalog(
     assert "primaries not in" in capsys.readouterr().err
 
 
+def test_select_refuses_missing_primaries() -> None:
+    catalog = load(CATALOG)
+    assert timing.select(catalog, [63216]) == [
+        omm for omm in catalog if omm.catalog_number == 63216
+    ]
+    with pytest.raises(ValueError, match=r"primaries not in the catalog: \[1\]"):
+        timing.select(catalog, [63216, 1])
+
+
+def children_cpu_time() -> float:
+    children = resource.getrusage(resource.RUSAGE_CHILDREN)
+    return children.ru_utime + children.ru_stime
+
+
 def test_cpu_time_counts_finished_children() -> None:
-    before = timing.cpu_time()
+    before, children_before = timing.cpu_time(), children_cpu_time()
     subprocess.run(
         [sys.executable, "-c", "sum(i * i for i in range(3_000_000))"], check=True
     )
-    assert timing.cpu_time() - before > 0.05
+    children = children_cpu_time() - children_before
+    assert children > 0.0
+    # Counted whatever the machine's speed; 1 ns for rounding of the sums.
+    assert timing.cpu_time() - before >= children - 1e-9
 
 
 def test_timed_returns_the_screening() -> None:

@@ -15,13 +15,22 @@ minimum between two samples can be missed when the pair passes the reach
 for less than a step.) An object with an SGP4 error at any sample is left
 out and listed in :attr:`Oracle.failed`, as screening skips it; a primary
 is not paired with its own catalog number.
+
+Nor does it use keepout to build its SGP4 records: each object's ``Satrec``
+is made by :func:`sgp4.omm.initialize` from the object's row of the
+committed fixture CSV (:data:`screening_data.FIXTURE`), read with
+:func:`sgp4.omm.parse_csv`. The :class:`~keepout.omm.Omm` arguments only
+name the objects (by catalog number), so they must be fixture objects; the
+row's epoch is checked against the element set's, which catches an element
+set that is not the fixture's.
 """
 
 from __future__ import annotations
 
 import dataclasses
+import functools
 import math
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final
 
@@ -30,7 +39,9 @@ import numpy as np
 import numpy.typing as npt
 from astropy.time import Time
 from scipy.optimize import minimize_scalar
-from sgp4.api import SatrecArray
+from screening_data import DATA, FIXTURE
+from sgp4 import omm as sgp4_omm
+from sgp4.api import Satrec, SatrecArray
 
 from keepout._types import FloatArray
 from keepout.omm import Omm
@@ -42,10 +53,36 @@ BLOCK_SAMPLES: Final = 4_000_000
 """Most pair-samples whose distances are held at once."""
 
 
-def positions(
+@functools.cache
+def fixture_rows() -> Mapping[int, Mapping[str, str]]:
+    """The rows of the fixture CSV, by catalog number."""
+    with (DATA / FIXTURE).open(encoding="utf-8", newline="") as stream:
+        return {int(row["NORAD_CAT_ID"]): row for row in sgp4_omm.parse_csv(stream)}
+
+
+def satrec(omm: Omm) -> Satrec:
+    """A new SGP4 record of a fixture object, from its row of the CSV.
+
+    Raises
+    ------
+    KeyError
+        If the object is not in the fixture.
+    ValueError
+        If the row's epoch is not the element set's (to 1 us).
+    """
+    row = fixture_rows()[omm.catalog_number]
+    if abs((Time(row["EPOCH"], scale="utc") - omm.epoch).sec) > 1e-6:
+        raise ValueError(f"{omm.catalog_number}: not the fixture's element set")
+    record = Satrec()
+    sgp4_omm.initialize(record, row)
+    return record
+
+
+def states(
     omms: Sequence[Omm], start: Time, offsets: npt.ArrayLike
-) -> tuple[FloatArray, npt.NDArray[np.uint8]]:
-    """TEME positions [m] and SGP4 error codes of objects on a time grid.
+) -> tuple[FloatArray, FloatArray, npt.NDArray[np.uint8]]:
+    """TEME positions [m], velocities [m/s] and SGP4 error codes of objects
+    on a time grid.
 
     Parameters
     ----------
@@ -58,17 +95,27 @@ def positions(
 
     Returns
     -------
-    tuple[FloatArray, npt.NDArray[np.uint8]]
-        Positions ``(N, T, 3)`` (NaN where SGP4 fails) and error codes
-        ``(N, T)``.
+    tuple[FloatArray, FloatArray, npt.NDArray[np.uint8]]
+        Positions and velocities ``(N, T, 3)`` (NaN where SGP4 fails) and
+        error codes ``(N, T)``.
     """
     times = (start + np.asarray(offsets, dtype=np.float64) * u.s).utc
     if not omms:
-        return np.empty((0, len(times), 3)), np.empty((0, len(times)), np.uint8)
-    errors, r, _ = SatrecArray([omm.satrec() for omm in omms]).sgp4(
+        empty = np.empty((0, len(times), 3))
+        return empty, empty.copy(), np.empty((0, len(times)), np.uint8)
+    errors, r, v = SatrecArray([satrec(omm) for omm in omms]).sgp4(
         np.atleast_1d(times.jd1), np.atleast_1d(times.jd2)
     )
-    return r * 1e3, errors
+    return r * 1e3, v * 1e3, errors
+
+
+def positions(
+    omms: Sequence[Omm], start: Time, offsets: npt.ArrayLike
+) -> tuple[FloatArray, npt.NDArray[np.uint8]]:
+    """TEME positions [m] and SGP4 error codes of objects on a time grid
+    (:func:`states` without the velocities)."""
+    r, _, errors = states(omms, start, offsets)
+    return r, errors
 
 
 def local_minima(distances: FloatArray) -> npt.NDArray[np.bool_]:
@@ -234,14 +281,14 @@ def refine(
     the earlier neighbour: its tolerance grows with the size of the variable
     (``sqrt(eps) |x|``), which would be milliseconds days into a window.
     """
-    satrecs = (primary.satrec(), secondary.satrec())
+    satrecs = (satrec(primary), satrec(secondary))
     offsets = oracle.offsets
     lowest = offsets[max(0, minimum.sample - 1)]
     highest = offsets[min(len(offsets) - 1, minimum.sample + 1)]
 
     def distance(elapsed: float) -> float:
         time = (oracle.start + (lowest + elapsed) * u.s).utc
-        a, b = (satrec.sgp4(time.jd1, time.jd2)[1] for satrec in satrecs)
+        a, b = (record.sgp4(time.jd1, time.jd2)[1] for record in satrecs)
         return float(np.linalg.norm(np.subtract(b, a))) * 1e3
 
     if highest == lowest:

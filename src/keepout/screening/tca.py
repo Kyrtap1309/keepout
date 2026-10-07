@@ -106,6 +106,7 @@ from keepout._types import (
     BoolArray,
     FloatArray,
     IndexArray,
+    as_vector,
     read_only,
     require_non_negative,
     require_positive,
@@ -258,14 +259,6 @@ class ObjectFailure:
     code: int
 
 
-def _vector(value: npt.ArrayLike, name: str) -> FloatArray:
-    array = np.array(value, dtype=np.float64)
-    if array.shape != (3,):
-        raise ValueError(f"{name} must have shape (3,), got {array.shape}")
-    read_only(array)
-    return array
-
-
 @dataclass(frozen=True, eq=False)
 class RangeMinimum:
     """A local minimum of a pair's range, inside the primary's volume.
@@ -289,7 +282,7 @@ class RangeMinimum:
     Raises
     ------
     ValueError
-        If a state vector does not have shape ``(3,)``.
+        If a state vector does not have shape ``(3,)`` or is not finite.
     """
 
     primary_index: int
@@ -303,7 +296,7 @@ class RangeMinimum:
 
     def __post_init__(self) -> None:
         for name in ("r_primary", "v_primary", "r_secondary", "v_secondary"):
-            object.__setattr__(self, name, _vector(getattr(self, name), name))
+            object.__setattr__(self, name, as_vector(getattr(self, name), name))
 
 
 def _order(minimum: RangeMinimum) -> tuple[int, int, float]:

@@ -73,16 +73,25 @@ from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final, Literal, TypeAlias, TypedDict, TypeVar, get_args
+from typing import (
+    Final,
+    Literal,
+    TypeAlias,
+    TypedDict,
+    TypeGuard,
+    TypeVar,
+    get_args,
+)
 from urllib.parse import parse_qs, urlsplit
 
 from astropy.time import Time
+from generated import write_or_check
 
 from keepout._units import DAY
+from keepout.equinoctial import semi_major_axis
 from keepout.errors import SourceUnavailable
 from keepout.omm import Omm, load
 from keepout.omm.celestrak import dumps_csv, loads_csv
-from keepout.orbits import EARTH_MU
 from keepout.screening.volume import SFS_DEEP_SPACE_PERIOD, SFS_ECCENTRICITY
 from keepout.sources.cache import http_download, store_bytes
 from keepout.sources.celestrak import (
@@ -98,6 +107,7 @@ from keepout.sources.celestrak import (
 from keepout.sources.socrates import SocratesApproach, epoch_matches, read_socrates
 
 REPO: Final = Path(__file__).resolve().parents[1]
+TOOL: Final = "tools/screening_snapshot.py"
 DATA: Final = REPO / "tests/screening/data"
 """Where ``build`` writes the committed data."""
 
@@ -161,6 +171,16 @@ epochs taken into the fixture (each)."""
 _T = TypeVar("_T")
 
 
+class BodyRecord(TypedDict):
+    """A :class:`Body` as JSON, in :data:`RAW_INDEX` and the manifest."""
+
+    url: str
+    file: str
+    sha256: str
+    size: int
+    retrieved: str
+
+
 @dataclass(frozen=True)
 class Body:
     """One response body saved in the ``RAW`` directory.
@@ -184,6 +204,23 @@ class Body:
     sha256: str
     size: int
     retrieved: str
+
+    def record(self) -> BodyRecord:
+        """The body as JSON."""
+        return {
+            "url": self.url,
+            "file": self.file,
+            "sha256": self.sha256,
+            "size": self.size,
+            "retrieved": self.retrieved,
+        }
+
+
+class RawIndex(TypedDict):
+    """The :data:`RAW_INDEX` file."""
+
+    format: int
+    bodies: list[BodyRecord]
 
 
 def raw_name(url: str) -> str:
@@ -264,15 +301,23 @@ def read_index(path: Path) -> tuple[Body, ...]:
     """
     if not path.exists():
         return ()
-    record = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(record, dict) or record.get("format") != RAW_FORMAT:
+    record: object = json.loads(path.read_text(encoding="utf-8"))
+    if not _is_raw_index(record):
         raise ValueError(f"{path} is not a raw index of format {RAW_FORMAT}")
     return tuple(Body(**body) for body in record["bodies"])
 
 
+def _is_raw_index(value: object) -> TypeGuard[RawIndex]:
+    """Whether ``value`` is a raw index as :func:`write_index` writes one."""
+    return isinstance(value, dict) and value.get("format") == RAW_FORMAT
+
+
 def write_index(path: Path, bodies: Sequence[Body]) -> None:
     """Write the :data:`RAW_INDEX` file atomically."""
-    record = {"format": RAW_FORMAT, "bodies": [vars(body) for body in bodies]}
+    record: RawIndex = {
+        "format": RAW_FORMAT,
+        "bodies": [body.record() for body in bodies],
+    }
     store_bytes(path, (json.dumps(record, indent=2) + "\n").encode())
 
 
@@ -342,14 +387,9 @@ Regime: TypeAlias = Literal["LEO", "MEO", "GEO", "HEO"]
 REGIMES: Final[tuple[Regime, ...]] = get_args(Regime)
 
 
-def semi_major_axis(omm: Omm) -> float:
-    """Semi-major axis [m] of the mean motion (two-body; for classing only)."""
-    return math.cbrt(EARTH_MU / omm.mean_motion**2)
-
-
 def perigee_altitude(omm: Omm) -> float:
     """Perigee altitude above the equatorial radius [m], from mean elements."""
-    return semi_major_axis(omm) * (1.0 - omm.eccentricity) - EARTH_RADIUS
+    return semi_major_axis(omm.mean_motion) * (1.0 - omm.eccentricity) - EARTH_RADIUS
 
 
 def regime(omm: Omm) -> Regime:
@@ -360,7 +400,7 @@ def regime(omm: Omm) -> Regime:
     """
     if omm.eccentricity >= SFS_ECCENTRICITY:
         return "HEO"
-    axis = semi_major_axis(omm)
+    axis = semi_major_axis(omm.mean_motion)
     if axis * (1.0 + omm.eccentricity) - EARTH_RADIUS <= LEO_APOGEE:
         return "LEO"
     lowest, highest = SFS_DEEP_SPACE_PERIOD
@@ -457,6 +497,72 @@ class SocratesSummary(TypedDict):
     minute): the data cut-off of its run."""
 
 
+class Retrieved(TypedDict):
+    """When the bodies were received: the first and the last, UTC ISO 8601."""
+
+    first: str
+    last: str
+
+
+class CatalogSummary(TypedDict):
+    """What the manifest records of the catalog."""
+
+    group_rows: dict[str, int]
+    duplicates: int
+    objects: int
+    six_digit: int
+    regimes: dict[Regime, int]
+    oldest_epoch: str
+    newest_epoch: str
+
+
+class FixtureSummary(TypedDict):
+    """What the manifest records of the fixture."""
+
+    objects: int
+    regimes: dict[Regime, int]
+
+
+class FileDigest(TypedDict):
+    """Length and SHA-256 hex digest of a committed file as stored."""
+
+    bytes: int
+    sha256: str
+
+
+class Manifest(TypedDict):
+    """The :data:`MANIFEST` file."""
+
+    format: int
+    retrieved: Retrieved
+    downloads: list[BodyRecord]
+    catalog: CatalogSummary
+    socrates: SocratesSummary
+    fixture: FixtureSummary
+    files: dict[str, FileDigest]
+
+
+def read_manifest(data: Path) -> Manifest:
+    """The :data:`MANIFEST` in ``data``."""
+    manifest: Manifest = json.loads((data / MANIFEST).read_text(encoding="utf-8"))
+    return manifest
+
+
+def read_catalog(data: Path) -> tuple[Omm, ...]:
+    """The catalog in ``data`` (:data:`SNAPSHOT`)."""
+    return load(data / SNAPSHOT)
+
+
+def read_excerpt(data: Path) -> str:
+    """The SOCRATES excerpt in ``data`` (:data:`SOCRATES`), as text."""
+    return gzip.decompress((data / SOCRATES).read_bytes()).decode("utf-8")
+
+
+def retrieval_day(manifest: Manifest) -> str:
+    """The day the data was retrieved (UTC, ISO 8601): of the first body."""
+    return manifest["retrieved"]["first"][:10]
+
+
 def summarise_socrates(
     approaches: Sequence[SocratesApproach], omms: Sequence[Omm]
 ) -> SocratesSummary:
@@ -533,13 +639,13 @@ def inputs_from_data(data: Path) -> Inputs:
     """The inputs, from the committed catalog and excerpt, and what only the
     manifest records (downloads, group sizes, duplicates, the whole
     report's summary)."""
-    manifest = json.loads((data / MANIFEST).read_text(encoding="utf-8"))
+    manifest = read_manifest(data)
     return Inputs(
         downloads=tuple(Body(**body) for body in manifest["downloads"]),
         group_rows=manifest["catalog"]["group_rows"],
         duplicates=manifest["catalog"]["duplicates"],
-        omms=load(data / SNAPSHOT),
-        socrates=gzip.decompress((data / SOCRATES).read_bytes()).decode("utf-8"),
+        omms=read_catalog(data),
+        socrates=read_excerpt(data),
         summary=manifest["socrates"],
     )
 
@@ -607,10 +713,10 @@ def render_manifest(inputs: Inputs, files: Mapping[str, bytes]) -> str:
     fixture = loads_csv(contents_of(FIXTURE, files[FIXTURE]).decode())
     first, last = retrieved_span(inputs)
     regimes = Counter(regime(omm) for omm in inputs.omms)
-    manifest = {
+    manifest: Manifest = {
         "format": MANIFEST_FORMAT,
         "retrieved": {"first": first, "last": last},
-        "downloads": [vars(body) for body in inputs.downloads],
+        "downloads": [body.record() for body in inputs.downloads],
         "catalog": {
             "group_rows": inputs.group_rows,
             "duplicates": inputs.duplicates,
@@ -666,29 +772,6 @@ def _gunzip(data: bytes) -> bytes | None:
         return None
 
 
-def write_or_check(data: Path, files: Mapping[str, bytes], *, check: bool) -> int:
-    """Write the files that differ, or with ``check`` report them.
-
-    Returns
-    -------
-    int
-        1 if ``check`` found a file out of date, else 0.
-    """
-    status = 0
-    for name, stored in files.items():
-        path = data / name
-        if path.exists() and path.read_bytes() == stored:
-            continue
-        if check:
-            print(f"{path} is out of date; run tools/screening_snapshot.py build")
-            status = 1
-        else:
-            data.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(stored)
-            print(f"wrote {path}")
-    return status
-
-
 def main(argv: Sequence[str] | None = None) -> int:
     """Download the bodies, build the data from them, or verify the data.
 
@@ -698,7 +781,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         0 on success; 1 if ``build --check`` or ``verify`` found a file out
         of date.
     """
-    parser = argparse.ArgumentParser(prog="tools/screening_snapshot.py")
+    parser = argparse.ArgumentParser(prog=TOOL)
     commands = parser.add_subparsers(dest="command", required=True)
     download = commands.add_parser(
         "download", help="download each URL once, saving the bodies in RAW"
@@ -722,11 +805,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 0
     if args.command == "build":
-        inputs = inputs_from_raw(args.raw)
-        files = stored_files(args.data, inputs)
-        return write_or_check(args.data, files, check=args.check)
-    inputs = inputs_from_data(args.data)
-    return write_or_check(args.data, stored_files(args.data, inputs), check=True)
+        inputs, check = inputs_from_raw(args.raw), args.check
+    else:
+        inputs, check = inputs_from_data(args.data), True
+    files = stored_files(args.data, inputs)
+    return write_or_check(
+        {args.data / name: stored for name, stored in files.items()},
+        check=check,
+        tool=f"{TOOL} build",
+    )
 
 
 if __name__ == "__main__":

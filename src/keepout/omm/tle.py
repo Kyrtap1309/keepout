@@ -27,6 +27,9 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Final, NamedTuple
 
+from sgp4.alpha5 import from_alpha5
+from sgp4.io import compute_checksum
+
 from keepout.errors import OmmParseError
 from keepout.omm._io import Text, load_file, parse_record
 from keepout.omm.keywords import DEFAULTS
@@ -56,9 +59,6 @@ _LAYOUTS: Final = {
     "2": "2 NNNNN NNN.NNNN NNN.NNNN NNNNNNN NNN.NNNN NNN.NNNN NN.NNNNNNNNNNNNNS",
 }
 """Each line's columns for error messages (``S``: the checksum)."""
-
-_ALPHA5_LETTERS: Final = "ABCDEFGHJKLMNPQRSTUVWXYZ"
-"""Alpha-5 first characters for 10 to 33 ten-thousands (no I or O)."""
 
 _PIVOT_YEAR: Final = 57
 """Two-digit years from here on are 19xx, those below 20xx."""
@@ -90,7 +90,7 @@ def checksum(line: str) -> int:
     line
         The line; only its first 68 columns count.
     """
-    return sum(int(c) if c.isdigit() else int(c == "-") for c in line[:68]) % 10
+    return int(compute_checksum(line))
 
 
 def _match(pattern: re.Pattern[str], text: str) -> re.Match[str]:
@@ -101,10 +101,9 @@ def _match(pattern: re.Pattern[str], text: str) -> re.Match[str]:
 
 
 def _catalog_number(text: str) -> str:
-    if _NUMBER.fullmatch(text):
-        return str(int(text))
-    ten_thousands = 10 + _ALPHA5_LETTERS.index(_match(_ALPHA5, text).group()[0])
-    return str(ten_thousands * 10_000 + int(text[1:]))
+    if not _NUMBER.fullmatch(text):
+        _match(_ALPHA5, text)
+    return str(from_alpha5(text))
 
 
 def _year(two_digits: str) -> int:

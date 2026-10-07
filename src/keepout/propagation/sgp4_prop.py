@@ -13,7 +13,7 @@ from astropy.time import Time
 from sgp4.api import Satrec, SatrecArray
 
 from keepout._types import FloatArray, IndexArray, require_non_negative
-from keepout._units import DAY
+from keepout._units import DAY, KM, MINUTE
 from keepout.errors import UnsupportedElements
 from keepout.omm.model import Omm
 from keepout.propagation._sgp4_radius import radius_bounds
@@ -21,9 +21,7 @@ from keepout.propagation.base import Ephemeris, RadiusBounds, time_offsets
 
 __all__ = ["Sgp4Propagator"]
 
-_KM: Final = 1e3
-
-_MINUTES_PER_DAY: Final = 1440.0
+_MINUTES_PER_DAY: Final = DAY / MINUTE
 
 
 def _utc_dates(epoch: Time, seconds: FloatArray) -> tuple[FloatArray, FloatArray]:
@@ -229,8 +227,8 @@ class Sgp4Propagator:
         """
         seconds = time_offsets(epoch, offsets)
         errors, r, v = self._array.sgp4(*_utc_dates(epoch, seconds))
-        r *= _KM
-        v *= _KM
+        r *= KM
+        v *= KM
         return Ephemeris(epoch, seconds, r, v, errors, self.frame)
 
     def radius_bounds(self, start: Time, duration: float) -> RadiusBounds:

@@ -15,6 +15,8 @@ from sgp4.alpha5 import to_alpha5
 from sgp4.api import Satrec
 from sgp4.io import compute_checksum
 
+from keepout.omm import Omm
+from keepout.omm.celestrak import loads_csv
 from keepout.omm.keywords import KEYWORDS
 from keepout.omm.model import MAX_SATREC_NUMBER
 
@@ -77,6 +79,12 @@ def csv_text(records: Sequence[Mapping[str, str]]) -> str:
     writer.writerow(records[0] if records else KEYWORDS)
     writer.writerows(record.values() for record in records)
     return stream.getvalue()
+
+
+def omm_from(values: Mapping[str, str]) -> Omm:
+    """The element set of one text record, read as CelesTrak CSV."""
+    (omm,) = loads_csv(csv_text([values]))
+    return omm
 
 
 def json_number(text: str) -> str:

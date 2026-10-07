@@ -158,15 +158,15 @@ UTC_STEP_DAYS = (
 
 
 @pytest.mark.parametrize("day", UTC_STEP_DAYS)
+@pytest.mark.parametrize("clock", ["00:00:00.432864", "12:00:00", "23:59:59.899999"])
 def test_epochs_on_a_day_that_ends_in_a_utc_step_are_read_as_written(
-    day: str,
+    day: str, clock: str
 ) -> None:
     # ERFA's Julian dates stretch such a day by its step; astropy's text
     # (ERFA's d2dtf) undoes that only for steps over 0.5 s, so it was 1 us
     # off at 00:00:00.432864 (a TLE epoch of day .00000501), 0.05 s at noon.
-    for clock in ("00:00:00.432864", "12:00:00", "23:59:59.899999"):
-        text = f"{day}T{clock}"
-        assert format_epoch(parse_epoch(text)) == text
+    text = f"{day}T{clock}"
+    assert format_epoch(parse_epoch(text)) == text
 
 
 @pytest.mark.parametrize(

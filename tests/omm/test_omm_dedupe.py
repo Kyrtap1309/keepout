@@ -3,12 +3,11 @@ import dataclasses
 import astropy.units as u
 from hypothesis import given
 from hypothesis import strategies as st
-from omm_builders import ISS
+from omm_builders import ISS, omm_from
 
 from keepout.omm import Omm, deduplicate
-from keepout.omm._io import parse_record
 
-ISS_OMM = parse_record(ISS)
+ISS_OMM = omm_from(ISS)
 
 
 def element_set(catalog_number: int, day: float, revolution: int = 0) -> Omm:

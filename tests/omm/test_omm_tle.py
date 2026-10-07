@@ -11,6 +11,7 @@ from omm_builders import (
     MINUTES,
     assert_same_satrec,
     element_sets,
+    omm_from,
     sgp4_record,
     with_checksum,
 )
@@ -19,7 +20,6 @@ from sgp4.io import compute_checksum
 
 from keepout.errors import OmmParseError
 from keepout.omm import tle
-from keepout.omm._io import parse_record
 
 GOES_LINE_1, GOES_LINE_2 = GOES_9_TLE.splitlines()[1:]
 
@@ -67,7 +67,7 @@ def assert_close_to_twoline2rv(record: Any, line_1: str, line_2: str) -> None:
 
 def test_the_ccsds_tle_is_read() -> None:
     (goes,) = tle.loads(GOES_9_TLE)
-    assert goes == parse_record(GOES_9_TLE_VALUES)
+    assert goes == omm_from(GOES_9_TLE_VALUES)
     assert goes.object_name == "GOES 9 [P]"
     assert goes.epoch.isot == "2007-03-05T10:34:41.426400"
 
@@ -226,7 +226,7 @@ def test_satrec_is_sgp4s_initialisation_of_the_tle_values(
 ) -> None:
     text, values = element_set
     (omm,) = tle.loads(text)
-    assert omm == parse_record(values)
+    assert omm == omm_from(values)
     assert_same_satrec(omm.satrec(), sgp4_record(values))
 
 
@@ -240,5 +240,5 @@ def test_an_epoch_on_a_day_that_ends_in_a_utc_step_is_read_exactly() -> None:
         "OBJECT_NAME": "UNKNOWN",
         "EPOCH": "1964-12-31T00:00:00.432864",
     }
-    assert omm == parse_record(values)
+    assert omm == omm_from(values)
     assert_same_satrec(omm.satrec(), sgp4_record(values))

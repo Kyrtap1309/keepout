@@ -13,9 +13,10 @@ from typing import Any
 import pytest
 import screening_benchmark as benchmark
 import screening_snapshot as snapshot
+from astropy.time import Time
 from screening_timing import Timing, timed
 
-from keepout.omm import load
+from keepout.omm import Omm, load
 from keepout.screening import DEFAULT_VOLUME, ScreeningResult
 
 FIXTURE = load(snapshot.DATA / snapshot.FIXTURE)
@@ -68,11 +69,42 @@ def rewrite(tmp_path: Path, summary: benchmark.Summary) -> None:
     )
 
 
-def test_main_writes_then_checks_the_data_not_the_timings(tmp_path: Path) -> None:
+@pytest.fixture(scope="module")
+def benchmarked() -> tuple[list[benchmark.Found], list[benchmark.Measured]]:
+    """One real benchmark of :data:`PRIMARIES` in the fixture, for ``main``."""
+    by_number = {omm.catalog_number: omm for omm in FIXTURE}
+    return benchmark.benchmark(
+        [by_number[int(number)] for number in PRIMARIES],
+        FIXTURE,
+        benchmark.window_start("2026-10-06"),
+        workers=1,
+        repeat=1,
+    )
+
+
+def test_main_writes_then_checks_the_data_not_the_timings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    benchmarked: tuple[list[benchmark.Found], list[benchmark.Measured]],
+) -> None:
+    # main screens as the fixture says; its runs take that benchmark's
+    # results, so only the writing and checking runs here.
+    calls: list[tuple[list[int], int, str, dict[str, Any]]] = []
+
+    def fake(
+        primaries: Sequence[Omm], catalog: Sequence[Omm], start: Time, **kwargs: Any
+    ) -> tuple[list[benchmark.Found], list[benchmark.Measured]]:
+        numbers = [omm.catalog_number for omm in primaries]
+        calls.append((numbers, len(catalog), start.isot, kwargs))
+        return copy.deepcopy(benchmarked)
+
+    monkeypatch.setattr(benchmark, "benchmark", fake)
     args = arguments(tmp_path)
     assert benchmark.main(["--check", *args]) == 1
     assert benchmark.main(args) == 0
     assert benchmark.main(["--check", *args]) == 0
+    screened = ([63216, 58509, 44476], 222, "2026-10-06T00:00:00.000")
+    assert calls == [(*screened, {"workers": 1, "repeat": 1})] * 3
     summary = written(tmp_path)
     assert summary["settings"] == {
         "primaries": [63216, 58509, 44476],
@@ -214,14 +246,6 @@ def test_counts_must_be_positive(
         benchmark.main(argv)
     assert raised.value.code == 2
     assert "must be at least 1" in capsys.readouterr().err
-
-
-def test_select_refuses_missing_primaries() -> None:
-    assert benchmark.select(FIXTURE, [63216]) == [
-        omm for omm in FIXTURE if omm.catalog_number == 63216
-    ]
-    with pytest.raises(ValueError, match=r"primaries not in the catalog: \[1\]"):
-        benchmark.select(FIXTURE, [63216, 1])
 
 
 def test_the_primaries_are_in_the_frozen_catalog() -> None:

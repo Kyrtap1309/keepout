@@ -178,22 +178,32 @@ def check_version(
         )
 
 
-def ccsds_values(omm: Omm) -> list[tuple[str, str, str | None, tuple[str, ...]]]:
-    """Keyword, text, unit and XML group of each value of an OMM, in CCSDS order.
+class CcsdsValue(NamedTuple):
+    """One value of an OMM as a CCSDS message writes it."""
+
+    keyword: str
+    text: str
+    unit: str | None
+    group: tuple[str, ...]
+    """NDM/XML element path of the value inside the section element."""
+
+
+def ccsds_values(omm: Omm) -> list[CcsdsValue]:
+    """Each value of an OMM, in CCSDS order.
 
     The metadata (the fixed metadata after ``OBJECT_ID``), then the mean
     elements and the TLE parameters, in the order of the OMM schema.
     """
     texts = omm.keywords()
-    values = [
-        (keyword, texts[keyword], spec.unit, spec.group)
-        for keyword, spec in KEYWORDS.items()
-    ]
-    metadata = values[0][3]
-    fixed = [
-        (key, accepted[0], None, metadata) for key, accepted in FIXED_METADATA.items()
-    ]
-    return values[:2] + fixed + values[2:]
+    values: list[CcsdsValue] = []
+    for keyword, spec in KEYWORDS.items():
+        values.append(CcsdsValue(keyword, texts[keyword], spec.unit, spec.group))
+        if keyword == "OBJECT_ID":
+            values += (
+                CcsdsValue(fixed, accepted[0], None, spec.group)
+                for fixed, accepted in FIXED_METADATA.items()
+            )
+    return values
 
 
 def creation_date_text(creation_date: Time | None) -> str:

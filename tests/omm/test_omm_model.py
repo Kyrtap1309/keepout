@@ -5,11 +5,10 @@ from typing import Any
 import numpy as np
 import pytest
 from astropy.time import Time
-from omm_builders import ISS, assert_same_satrec, sgp4_record
+from omm_builders import ISS, assert_same_satrec, omm_from, sgp4_record
 
 from keepout.ccsds.keywords import parse_epoch
 from keepout.errors import UnsupportedElements
-from keepout.omm._io import parse_record
 from keepout.omm.keywords import DEGREE, KEYWORDS, REVOLUTION_PER_DAY
 from keepout.omm.model import (
     MAX_CATALOG_NUMBER,
@@ -18,7 +17,7 @@ from keepout.omm.model import (
     InvalidElement,
 )
 
-ISS_OMM = parse_record(ISS)
+ISS_OMM = omm_from(ISS)
 
 
 def test_the_elements_are_held_in_si_units() -> None:
@@ -68,7 +67,7 @@ def test_satrec_is_the_record_sgp4_makes_from_the_message() -> None:
 )
 def test_epochs_outside_the_leap_second_table_are_read_and_used(epoch: str) -> None:
     values = {**ISS, "EPOCH": epoch}
-    omm = parse_record(values)
+    omm = omm_from(values)
     assert omm.keywords() == {**ISS_OMM.keywords(), "EPOCH": epoch}
     assert_same_satrec(omm.satrec(), sgp4_record(values))
 
@@ -80,7 +79,7 @@ def test_epochs_on_a_day_that_ends_in_a_utc_step_are_read_and_used(
     epoch: str,
 ) -> None:
     values = {**ISS, "EPOCH": epoch}
-    omm = parse_record(values)
+    omm = omm_from(values)
     assert omm.keywords() == {**ISS_OMM.keywords(), "EPOCH": epoch}
     assert_same_satrec(omm.satrec(), sgp4_record(values))
 
@@ -95,7 +94,7 @@ def test_epochs_on_a_day_that_ends_in_a_utc_step_are_read_and_used(
 def test_an_epoch_rounded_past_the_end_of_a_step_day_starts_the_next(
     epoch: str, sgp4_epoch: str
 ) -> None:
-    omm = parse_record({**ISS, "EPOCH": epoch})
+    omm = omm_from({**ISS, "EPOCH": epoch})
     assert omm.keywords()["EPOCH"] == epoch
     assert_same_satrec(omm.satrec(), sgp4_record({**ISS, "EPOCH": sgp4_epoch}))
 
@@ -154,7 +153,7 @@ def test_numpy_numbers_are_stored_as_python_numbers() -> None:
 
 
 def test_equal_elements_are_equal() -> None:
-    assert parse_record(ISS) == ISS_OMM
+    assert omm_from(ISS) == ISS_OMM
     assert dataclasses.replace(ISS_OMM, rev_at_epoch=1) != ISS_OMM
 
 

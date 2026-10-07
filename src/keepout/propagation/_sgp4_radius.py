@@ -62,6 +62,7 @@ import numpy as np
 from sgp4.api import Satrec
 
 from keepout._types import BoolArray, FloatArray
+from keepout._units import KM
 
 DEEP_SPACE_SAMPLING: Final = 360.0
 """Longest time [min] between the samples of a deep-space object's secular
@@ -84,6 +85,24 @@ C1L: Final = 4.7968065e-7
 
 MIN_ECCENTRICITY: Final = 1e-6
 """SGP4 raises a smaller mean eccentricity to this value."""
+
+# The atmosphere model of ``sgp4init`` (Vallado et al., AIAA 2006-6753; Hoots
+# and Roehrich, Spacetrack Report #3): its density parameter ``s`` and
+# ``(q0 - s)^4``, altitudes [km] above the Earth's radius.
+S_PERIGEE_LIMIT: Final = 156.0
+"""Perigee altitude [km] below which ``s`` follows the perigee."""
+
+S_FLOOR_PERIGEE: Final = 98.0
+"""Perigee altitude [km] below which ``s`` is :data:`S_FLOOR`."""
+
+S_FLOOR: Final = 20.0
+"""Lowest ``s`` altitude [km]."""
+
+S0: Final = 78.0
+"""Standard ``s`` altitude [km] (``s = perigee - S0`` below the limit)."""
+
+Q0: Final = 120.0
+"""Altitude [km] of the density parameter ``q0``."""
 
 
 class DragTerms(NamedTuple):
@@ -110,7 +129,7 @@ def _values(satrecs: Sequence[Satrec], name: str) -> FloatArray:
     return np.array([getattr(satrec, name) for satrec in satrecs], dtype=np.float64)
 
 
-def _brouwer_mean_motion(satrec: Satrec) -> float:
+def brouwer_mean_motion(satrec: Satrec) -> float:
     """SGP4's un-Kozai'd mean motion [rad/min] (``Satrec.no`` is Kozai's)."""
     return float(satrec.xke / satrec.a**1.5)
 
@@ -126,7 +145,7 @@ def drag_terms(satrecs: Sequence[Satrec]) -> DragTerms:
     """
     ao = _values(satrecs, "a")
     ecco = _values(satrecs, "ecco")
-    no = np.array([_brouwer_mean_motion(satrec) for satrec in satrecs])
+    no = np.array([brouwer_mean_motion(satrec) for satrec in satrecs])
     j2 = _values(satrecs, "j2")
     radius = _values(satrecs, "radiusearthkm")
     cosio2 = np.cos(_values(satrecs, "inclo")) ** 2
@@ -136,10 +155,10 @@ def drag_terms(satrecs: Sequence[Satrec]) -> DragTerms:
     perigee = ao * (1.0 - ecco)
     simple = perigee < SIMPLE_DRAG_PERIGEE / radius + 1.0
     altitude = (perigee - 1.0) * radius
-    low = altitude < 156.0
-    s = np.where(altitude < 98.0, 20.0, altitude - 78.0)
-    sfour = np.where(low, s / radius + 1.0, 78.0 / radius + 1.0)
-    qzms24 = np.where(low, (120.0 - s) / radius, 42.0 / radius) ** 4
+    low = altitude < S_PERIGEE_LIMIT
+    s = np.where(altitude < S_FLOOR_PERIGEE, S_FLOOR, altitude - S0)
+    sfour = np.where(low, s / radius + 1.0, S0 / radius + 1.0)
+    qzms24 = np.where(low, (Q0 - s) / radius, (Q0 - S0) / radius) ** 4
     tsi = 1.0 / (ao - sfour)
     eta = ao * ecco * tsi
     etasq = eta * eta
@@ -258,7 +277,7 @@ def _deep_space(
             return math.nan, math.nan, math.nan
         semi_major_axes.append(satrec.am)
         eccentricities.append(satrec.em)
-    lunisolar = 7.5 * satrec.ecco * (C1SS + C1L) / _brouwer_mean_motion(satrec)
+    lunisolar = 7.5 * satrec.ecco * (C1SS + C1L) / brouwer_mean_motion(satrec)
     return (
         min(semi_major_axes) * (1.0 - DEEP_SPACE_MARGIN),
         max(semi_major_axes) * (1.0 + DEEP_SPACE_MARGIN),
@@ -327,7 +346,7 @@ def _bounds(
     )
     # A negative factor (an orbit inside the Earth) bounds nothing below.
     lowest = np.where(f_lo > 0.0, np.maximum(lowest, 0.0), 0.0)
-    radius = _values(satrecs, "radiusearthkm") * 1e3
+    radius = _values(satrecs, "radiusearthkm") * KM
     return (
         np.where(known, lowest * radius * (1.0 - ROUNDING), 0.0),
         np.where(known, highest * radius * (1.0 + ROUNDING), math.inf),

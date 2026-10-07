@@ -59,6 +59,9 @@ SGP4_EPOCH_DIGITS: Final = 6
 """Fractional-second digits of the epoch :func:`sgp4.omm.initialize` reads:
 microseconds, the resolution of CelesTrak's epochs."""
 
+_EPOCH_SECONDS: Final = slice(17, 19)
+"""The whole seconds of epoch text ``YYYY-MM-DDTHH:MM:SS.ffffff``."""
+
 _MAX_EPOCH_DIGITS: Final = 9
 """Most fractional-second digits astropy writes (nanoseconds)."""
 
@@ -232,7 +235,7 @@ class Omm:
             )
         values = self.keywords(epoch_digits=SGP4_EPOCH_DIGITS)
         epoch = values["EPOCH"]
-        if epoch[17:19] == "60":
+        if epoch[_EPOCH_SECONDS] == "60":
             raise UnsupportedElements(f"epoch {epoch} falls in a leap second")
         satrec = Satrec()
         sgp4_omm.initialize(satrec, values)

@@ -16,7 +16,7 @@ from astropy.time import Time
 from hypothesis import given, settings, target
 from hypothesis import strategies as st
 from screening_data import FAST_SPEED, load_fixture, socrates_approaches
-from screening_oracle import brute_force, positions, refine
+from screening_oracle import brute_force, positions, refine, states
 
 from keepout.orbits import EARTH_MU
 from keepout.propagation import Ephemeris, RadiusBounds, Sgp4Propagator, time_offsets
@@ -739,6 +739,25 @@ def range_at(
     return distance
 
 
+def in_rtn_ellipsoid(
+    volume: ScreeningVolume,
+    r: npt.NDArray[np.float64],
+    v: npt.NDArray[np.float64],
+    r_other: npt.NDArray[np.float64],
+) -> bool:
+    """Whether ``r_other`` lies in ``volume`` around a primary at ``r``, ``v``:
+    the RTN axes and the ellipsoid worked out here, not by keepout."""
+    radial = r / np.linalg.norm(r)
+    normal = np.cross(r, v)
+    normal /= np.linalg.norm(normal)
+    offset = r_other - r
+    rtn = np.array(
+        [offset @ radial, offset @ np.cross(normal, radial), offset @ normal]
+    )
+    semi_axes = np.array([volume.radial, volume.transverse, volume.normal])
+    return float(np.sum((rtn / semi_axes) ** 2)) <= 1.0
+
+
 def check_against_oracle(
     primaries: list[int],
     start: Time,
@@ -781,11 +800,13 @@ def check_against_oracle(
         )
         if not 1e-3 < best.offset < duration - 1e-3:
             continue  # the range is still falling at an edge of the window
-        states = Sgp4Propagator(
-            [BY_NUMBER[sampled.primary], BY_NUMBER[sampled.secondary]]
-        ).propagate(start, best.offset)
-        r, v = states.r[:, 0], states.v[:, 0]
-        if not volume_.contains_position(r[0], v[0], r[1]):
+        r, v, _ = states(
+            [BY_NUMBER[sampled.primary], BY_NUMBER[sampled.secondary]],
+            start,
+            [best.offset],
+        )
+        r, v = r[:, 0], v[:, 0]
+        if not in_rtn_ellipsoid(volume_, r[0], v[0], r[1]):
             continue
         inside += 1
         candidates = found.get((sampled.primary, sampled.secondary), [])
@@ -844,6 +865,16 @@ def test_no_minimum_the_oracle_finds_is_missed(
     )
     # Steer towards windows holding minima, which check the main direction.
     target(float(inside), label="oracle minima inside the volumes")
+
+
+def test_a_window_with_minima_against_the_oracle() -> None:
+    # The examples above may hold no minimum inside the volume; these 6 h
+    # hold 22 (formation flyers among them), so the main direction is checked.
+    primaries = [44476, 45098, 47826, 52939, 56153]
+    inside = check_against_oracle(
+        primaries, WEEK_START, 6 * HOUR, DEFAULT_VOLUME, DEFAULT_STEP
+    )
+    assert inside >= 20
 
 
 def test_every_socrates_approach_of_the_fixture_is_found() -> None:

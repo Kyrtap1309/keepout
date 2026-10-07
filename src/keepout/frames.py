@@ -80,20 +80,35 @@ def rtn_rotation(r: npt.ArrayLike, v: npt.ArrayLike) -> FloatArray:
     GeometryError
         If ``r`` is zero or parallel to ``v``.
     """
-    position = np.asarray(r, dtype=np.float64)
-    velocity = np.asarray(v, dtype=np.float64)
+    return _rtn_basis(np.asarray(r, dtype=np.float64), np.asarray(v, dtype=np.float64))
+
+
+def _rtn_basis(position: FloatArray, velocity: FloatArray) -> FloatArray:
+    """The RTN rotations of states, shape ``(..., 3, 3)``: rows R, T, N.
+
+    A state with a non-finite component gives a non-finite rotation (NaN
+    compares false), so rows of failed states pass through.
+
+    Raises
+    ------
+    GeometryError
+        If a finite position is zero or parallel to its velocity.
+    """
     angular_momentum = np.cross(position, velocity)
-    r_norm = float(np.linalg.norm(position))
-    h_norm = float(np.linalg.norm(angular_momentum))
-    speed = float(np.linalg.norm(velocity))
-    if r_norm == 0.0 or h_norm <= PARALLEL_RTOL * r_norm * speed:
+    r_norm = np.linalg.norm(position, axis=-1, keepdims=True)
+    h_norm = np.linalg.norm(angular_momentum, axis=-1, keepdims=True)
+    speed = np.linalg.norm(velocity, axis=-1, keepdims=True)
+    if np.any((r_norm == 0.0) | (h_norm <= PARALLEL_RTOL * r_norm * speed)):
         raise GeometryError(
             "RTN frame is undefined: position is zero or parallel to velocity"
         )
     radial = position / r_norm
     normal = angular_momentum / h_norm
     transverse = np.cross(normal, radial)
-    return np.stack([radial, transverse, normal])
+    basis: FloatArray = np.stack(
+        np.broadcast_arrays(radial, transverse, normal), axis=-2
+    )
+    return basis
 
 
 def relative_position_rtn(
@@ -140,26 +155,8 @@ def relative_position_rtn(
             f"r {position.shape}, v {velocity.shape} and r_other {other.shape} "
             "do not broadcast"
         ) from None
-    angular_momentum = np.cross(position, velocity)
-    r_norm = np.linalg.norm(position, axis=-1, keepdims=True)
-    h_norm = np.linalg.norm(angular_momentum, axis=-1, keepdims=True)
-    speed = np.linalg.norm(velocity, axis=-1, keepdims=True)
-    # NaN compares false: rows of failed states pass through as NaN.
-    if np.any((r_norm == 0.0) | (h_norm <= PARALLEL_RTOL * r_norm * speed)):
-        raise GeometryError(
-            "RTN frame is undefined: position is zero or parallel to velocity"
-        )
-    radial = position / r_norm
-    normal = angular_momentum / h_norm
-    transverse = np.cross(normal, radial)
-    offset = other - position
-    result: FloatArray = np.stack(
-        [
-            np.sum(offset * radial, axis=-1),
-            np.sum(offset * transverse, axis=-1),
-            np.sum(offset * normal, axis=-1),
-        ],
-        axis=-1,
+    result: FloatArray = np.einsum(
+        "...ij,...j->...i", _rtn_basis(position, velocity), other - position
     )
     return result
 

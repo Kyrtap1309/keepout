@@ -32,7 +32,7 @@ import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from typing import Final, TypedDict
 
 from astropy.time import Time
 
@@ -58,6 +58,36 @@ class Timing:
 
     wall: float
     cpu: float
+
+
+class TimingOutput(TypedDict):
+    """What :func:`main` prints, as JSON: the measurement."""
+
+    wall: float
+    """Wall time of the screening [s]."""
+    cpu: float
+    """CPU time of the screening [s] (:class:`Timing`)."""
+    approaches: int
+    """Approaches found."""
+    screened: int
+    """Catalog objects screened."""
+    objects: int
+    """Element sets read."""
+
+
+def select(catalog: Sequence[Omm], numbers: Sequence[int]) -> list[Omm]:
+    """The element sets of ``numbers``, in that order.
+
+    Raises
+    ------
+    ValueError
+        If a number is not in the catalog.
+    """
+    by_number = {omm.catalog_number: omm for omm in catalog}
+    missing = [number for number in numbers if number not in by_number]
+    if missing:
+        raise ValueError(f"primaries not in the catalog: {missing}")
+    return [by_number[number] for number in numbers]
 
 
 def cpu_time() -> float:
@@ -119,29 +149,26 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     catalog = load(args.catalog)
-    by_number = {omm.catalog_number: omm for omm in catalog}
-    missing = [number for number in args.primaries if number not in by_number]
-    if missing:
-        parser.error(f"primaries not in {args.catalog}: {missing}")
+    try:
+        primaries = select(catalog, args.primaries)
+    except ValueError as error:
+        parser.error(f"{args.catalog}: {error}")
     result, timing = timed(
-        [by_number[number] for number in args.primaries],
+        primaries,
         catalog,
         Time(args.start, scale="utc"),
         args.days * DAY,
         ScreeningVolume.sphere(args.radius),
         workers=args.workers,
     )
-    print(
-        json.dumps(
-            {
-                "wall": timing.wall,
-                "cpu": timing.cpu,
-                "approaches": len(result.approaches),
-                "screened": result.catalog_count,
-                "objects": len(catalog),
-            }
-        )
-    )
+    output: TimingOutput = {
+        "wall": timing.wall,
+        "cpu": timing.cpu,
+        "approaches": len(result.approaches),
+        "screened": result.catalog_count,
+        "objects": len(catalog),
+    }
+    print(json.dumps(output))
     return 0
 
 

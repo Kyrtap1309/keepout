@@ -22,6 +22,8 @@ from keepout.propagation import (
     describe_error,
     propagate_in_chunks,
 )
+
+# Whitebox: the dates keepout hands SGP4, for the tests named so.
 from keepout.propagation.sgp4_prop import _utc_dates
 
 OMMS = load_fixture()
@@ -58,7 +60,7 @@ def test_states_are_sgp4s_for_each_object() -> None:
         np.testing.assert_allclose(WHOLE.v[i], v, rtol=0, atol=1e-8)
 
 
-def test_states_are_bit_identical_to_satrec_at_the_same_dates() -> None:
+def test_whitebox_states_are_bit_identical_to_satrec_at_keepouts_dates() -> None:
     # The same compiled SGP4 as Satrec.sgp4, given the same Julian dates.
     jd, fraction = _utc_dates(START, OFFSETS)
     for i, omm in enumerate(OMMS):
@@ -76,7 +78,7 @@ def test_states_are_bit_identical_to_satrec_at_the_same_dates() -> None:
         Time(61000.3, format="mjd"),
     ],
 )
-def test_the_dates_are_astropys_to_100_ps(epoch: Time) -> None:
+def test_whitebox_keepouts_dates_are_astropys_to_100_ps(epoch: Time) -> None:
     jd, fraction = _utc_dates(epoch, OFFSETS)
     utc = (epoch + OFFSETS * u.s).utc
     difference = ((jd - utc.jd1) + (fraction - utc.jd2)) * 86400.0
@@ -105,12 +107,13 @@ def test_offsets_count_the_leap_second() -> None:
     np.testing.assert_allclose(ephemeris.r[0, 3], midnight[0], rtol=0, atol=1e-5)
 
 
-def test_any_time_scale_gives_the_same_states() -> None:
-    for epoch in (START.tt, START.tai, START.tdb):
-        other = PROPAGATOR.propagate(epoch, OFFSETS)
-        assert other.epoch is epoch
-        np.testing.assert_array_equal(other.r, WHOLE.r)
-        np.testing.assert_array_equal(other.v, WHOLE.v)
+@pytest.mark.parametrize("scale", ["tt", "tai", "tdb"])
+def test_any_time_scale_gives_the_same_states(scale: str) -> None:
+    epoch = getattr(START, scale)
+    other = PROPAGATOR.propagate(epoch, OFFSETS)
+    assert other.epoch is epoch
+    np.testing.assert_array_equal(other.r, WHOLE.r)
+    np.testing.assert_array_equal(other.v, WHOLE.v)
 
 
 def test_metres_and_metres_per_second() -> None:

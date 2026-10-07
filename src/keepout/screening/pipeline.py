@@ -195,12 +195,13 @@ def screen(
     if max_states < 1:
         raise ValueError(f"max_states must be at least 1, got {max_states}")
     window = _Window(start, float(duration), float(step), max_states)
-    skipped: list[SkippedObject] = []
-    own = _current(primaries, ScreeningRole.PRIMARY, window, max_age, max_lead, skipped)
-    others = _current(
-        catalog, ScreeningRole.CATALOG, window, max_age, max_lead, skipped
+    own, dropped_primaries = _current(
+        primaries, ScreeningRole.PRIMARY, window, max_age, max_lead
     )
-    propagator, volumes = _primaries(own, volume, skipped)
+    others, dropped_catalog = _current(
+        catalog, ScreeningRole.CATALOG, window, max_age, max_lead
+    )
+    propagator, volumes, unusable_primaries = _primaries(own, volume)
     bounds = propagator.radius_bounds(start, window.duration)
     numbers = np.array([omm.catalog_number for omm in propagator.omms], dtype=np.int64)
     count = min(workers, len(others))
@@ -222,15 +223,18 @@ def screen(
         for result in results
         for index, message in result.unsupported
     ]
-    _skip_unsupported(lost, ScreeningRole.CATALOG, skipped)
     found = SearchResult.merge(result.search for result in results)
     primary_omms = propagator.omms
-    gone_primaries = _skip_failed(
-        found.primary_failures, primary_omms, ScreeningRole.PRIMARY, window, skipped
-    )
-    gone = _skip_failed(
-        found.catalog_failures, others, ScreeningRole.CATALOG, window, skipped
-    )
+    skipped = [
+        *dropped_primaries,
+        *dropped_catalog,
+        *unusable_primaries,
+        *_unsupported(lost, ScreeningRole.CATALOG),
+        *_failed(found.primary_failures, primary_omms, ScreeningRole.PRIMARY, window),
+        *_failed(found.catalog_failures, others, ScreeningRole.CATALOG, window),
+    ]
+    gone_primaries = set(found.primary_failures)
+    gone = set(found.catalog_failures)
     minima = [
         minimum
         for minimum in found.minima
@@ -293,17 +297,18 @@ def _current(
     window: _Window,
     max_age: float,
     max_lead: float,
-    skipped: list[SkippedObject],
-) -> tuple[Omm, ...]:
-    """The newest element set of each object, unless too far from the window."""
+) -> tuple[tuple[Omm, ...], list[SkippedObject]]:
+    """The newest element set of each object, unless too far from the window,
+    and the element sets left out."""
     unique = deduplicate(omms)
     newest = {omm.catalog_number: omm for omm in unique.kept}
+    skipped: list[SkippedObject] = []
     for omm in unique.dropped:
         used = newest[omm.catalog_number].epoch.isot
         detail = f"epoch {omm.epoch.isot}; the element set of epoch {used} is used"
         skipped.append(SkippedObject(omm, role, SkipReason.DUPLICATE, detail))
     if not unique.kept:
-        return ()
+        return (), skipped
     epochs = Time(
         [omm.epoch.jd1 for omm in unique.kept],
         [omm.epoch.jd2 for omm in unique.kept],
@@ -328,21 +333,19 @@ def _current(
             skipped.append(SkippedObject(omm, role, SkipReason.FUTURE_EPOCH, detail))
         else:
             current.append(omm)
-    return tuple(current)
+    return tuple(current), skipped
 
 
 def _primaries(
     omms: Sequence[Omm],
     volume: ScreeningVolume | VolumeRule,
-    skipped: list[SkippedObject],
-) -> tuple[Sgp4Propagator, list[ScreeningVolume]]:
+) -> tuple[Sgp4Propagator, list[ScreeningVolume], list[SkippedObject]]:
     """SGP4 for the primaries it can be initialised with and that have a
-    volume, and their volumes."""
+    volume, their volumes, and the primaries left out."""
     initialised, _, rejected = Sgp4Propagator.from_omms(omms)
-    _skip_unsupported(
+    skipped = _unsupported(
         [(omms[index], str(error)) for index, error in rejected],
         ScreeningRole.PRIMARY,
-        skipped,
     )
     chosen: list[int] = []
     volumes: list[ScreeningVolume] = []
@@ -356,32 +359,34 @@ def _primaries(
             )
             continue
         chosen.append(index)
-    return initialised.subset(np.array(chosen, dtype=np.intp)), volumes
+    subset = initialised.subset(np.array(chosen, dtype=np.intp))
+    return subset, volumes, skipped
 
 
-def _skip_unsupported(
-    unsupported: Iterable[tuple[Omm, str]],
-    role: ScreeningRole,
-    skipped: list[SkippedObject],
-) -> None:
-    for omm, message in unsupported:
-        skipped.append(SkippedObject(omm, role, SkipReason.UNSUPPORTED, message))
+def _unsupported(
+    unsupported: Iterable[tuple[Omm, str]], role: ScreeningRole
+) -> list[SkippedObject]:
+    """The element sets SGP4 cannot be initialised with, left out."""
+    return [
+        SkippedObject(omm, role, SkipReason.UNSUPPORTED, message)
+        for omm, message in unsupported
+    ]
 
 
-def _skip_failed(
+def _failed(
     failures: Mapping[int, ObjectFailure],
     omms: Sequence[Omm],
     role: ScreeningRole,
     window: _Window,
-    skipped: list[SkippedObject],
-) -> set[int]:
-    """List the objects SGP4 failed for; returns their positions."""
+) -> list[SkippedObject]:
+    """The objects SGP4 failed for (by position in ``omms``), left out."""
+    skipped: list[SkippedObject] = []
     for index, failure in failures.items():
         when = (window.start + failure.offset * u.s).utc.isot
         detail = f"{describe_error(failure.code)}, at {when}"
         reason = SkipReason.PROPAGATION_FAILED
         skipped.append(SkippedObject(omms[index], role, reason, detail))
-    return set(failures)
+    return skipped
 
 
 def _run(parts: Sequence[_Part], workers: int) -> list[_PartResult]:

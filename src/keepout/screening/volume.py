@@ -34,8 +34,10 @@ import numpy as np
 import numpy.typing as npt
 
 from keepout._types import BoolArray, FloatArray, read_only, require_positive
+from keepout._units import KM, MINUTE
 from keepout.frames import relative_position_rtn
 from keepout.omm import Omm
+from keepout.propagation._sgp4_radius import brouwer_mean_motion
 
 __all__ = [
     "DEFAULT_VOLUME",
@@ -302,7 +304,7 @@ SFS_LEO_PERIGEES: Final[Mapping[SfsRegime, float]] = MappingProxyType(
 )
 """Highest perigee altitude [m] of each LEO regime, lowest regime first."""
 
-SFS_DEEP_SPACE_PERIOD: Final = (1300.0 * 60.0, 1800.0 * 60.0)
+SFS_DEEP_SPACE_PERIOD: Final = (1300.0 * MINUTE, 1800.0 * MINUTE)
 """Bounds [s] of the period of the deep-space regime (both excluded)."""
 
 SFS_DEEP_SPACE_INCLINATION: Final = math.radians(35.0)
@@ -359,12 +361,11 @@ def sfs_regime(primary: Omm) -> SfsRegime:
     if primary.eccentricity >= SFS_ECCENTRICITY:
         return SfsRegime.OUTSIDE
     satrec = primary.satrec()
-    perigee = satrec.altp * satrec.radiusearthkm * 1e3
+    perigee = satrec.altp * satrec.radiusearthkm * KM
     for regime, highest in SFS_LEO_PERIGEES.items():
         if perigee <= highest:
             return regime
-    # Un-Kozai'd mean motion xke / a**1.5 [rad/min], a in Earth radii.
-    period = 2.0 * math.pi * satrec.a**1.5 / satrec.xke * 60.0
+    period = 2.0 * math.pi / brouwer_mean_motion(satrec) * MINUTE
     lowest, highest = SFS_DEEP_SPACE_PERIOD
     if lowest < period < highest and primary.inclination < SFS_DEEP_SPACE_INCLINATION:
         return SfsRegime.DEEP_SPACE

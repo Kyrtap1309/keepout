@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -23,7 +22,7 @@ from pathlib import Path
 from typing import Final, Literal, TypeAlias, TypedDict, TypeVar, assert_never, get_args
 
 import matplotlib as mpl
-from generated import replace_block, write_or_check
+from generated import relative, replace_block, table, write_or_check
 from matplotlib.figure import Figure
 
 from keepout.risk import (
@@ -264,18 +263,12 @@ def _share(count: int, total: int) -> str:
     return "<0.1%" if 0 < percent < 0.1 else f"{percent:.1f}%"
 
 
-def _table(header: Sequence[str], rows: Sequence[Sequence[object]]) -> list[str]:
-    lines = ["| " + " | ".join(header) + " |", "|" + "---|" * len(header)]
-    lines += ["| " + " | ".join(str(cell) for cell in row) + " |" for row in rows]
-    return lines
-
-
 _Key = TypeVar("_Key", bound=str)
 
 
 def _counts_table(title: str, counts: Mapping[_Key, int], total: int) -> list[str]:
     """Events per ``title`` value, with their share of ``total``."""
-    return _table(
+    return table(
         (title, "Events", "Share"),
         [(key, count, _share(count, total)) for key, count in counts.items()],
     )
@@ -345,7 +338,7 @@ def render_page(summary: Summary, images: str) -> str:
         "that early). Columns: the level of the last CDM before TCA (*none*: "
         "every CDM was issued after TCA).",
         "",
-        *_table(
+        *table(
             ("At the decision point", *LEVELS),
             [
                 (level, *summary["decision_point_vs_final"][level].values())
@@ -360,7 +353,7 @@ def render_page(summary: Summary, images: str) -> str:
         "before TCA, so an event whose only high Pc came after TCA is judged "
         "without it.",
         "",
-        *_table(
+        *table(
             ("Decision", "High-risk", "Not high-risk"),
             [
                 (action, counts["high"], counts["low"])
@@ -434,11 +427,6 @@ def plot(event: KelvinsEvent, assessment: Assessment, path: Path) -> None:
         figure.savefig(path, format="svg", metadata={"Date": None})
 
 
-def _relative(path: Path, start: Path) -> str:
-    """``path`` as a link from a file in ``start``."""
-    return Path(os.path.relpath(path, start)).as_posix()
-
-
 def main(argv: Sequence[str] | None = None) -> int:
     """Write (or with ``--check`` verify) the Kelvins risk report.
 
@@ -462,12 +450,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     summary = summarise(events)
     files = {
         args.page.with_suffix(".json"): json.dumps(summary, indent=2) + "\n",
-        args.page: render_page(summary, _relative(args.images, args.page.parent)),
+        args.page: render_page(summary, relative(args.images, args.page.parent)),
         args.readme: replace_block(
             args.readme.read_text(encoding="utf-8"),
             START,
             END,
-            render_summary(summary, _relative(args.images, args.readme.parent)),
+            render_summary(summary, relative(args.images, args.readme.parent)),
         ),
     }
     status = write_or_check(files, check=args.check, tool="tools/risk_report.py")

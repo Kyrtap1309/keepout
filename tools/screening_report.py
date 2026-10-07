@@ -20,23 +20,21 @@ whole catalog, in seconds instead of minutes.
 from __future__ import annotations
 
 import argparse
-import gzip
 import json
-import os
 import sys
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Final, Literal, TypeAlias, TypedDict, get_args
 
 import astropy.units as u
 import screening_snapshot as snapshot
 from astropy.time import Time
-from generated import replace_block, write_or_check
+from generated import relative, replace_block, table, write_or_check
 from screening_snapshot import SocratesSummary
 
 from keepout._units import DAY
-from keepout.omm import Omm, load
+from keepout.omm import Omm
 from keepout.screening import (
     DEFAULT_VOLUME,
     CloseApproach,
@@ -145,19 +143,23 @@ class Inputs:
 
 def read_inputs(data: Path) -> Inputs:
     """The excerpt, the snapshot and the manifest's facts in ``data``."""
-    text = gzip.decompress((data / snapshot.SOCRATES).read_bytes()).decode("utf-8")
-    manifest = json.loads((data / snapshot.MANIFEST).read_text(encoding="utf-8"))
+    manifest = snapshot.read_manifest(data)
     return Inputs(
-        approaches=read_socrates(text),
-        catalog=load(data / snapshot.SNAPSHOT),
+        approaches=read_socrates(snapshot.read_excerpt(data)),
+        catalog=snapshot.read_catalog(data),
         socrates=manifest["socrates"],
-        retrieved=manifest["retrieved"]["first"][:10],
+        retrieved=snapshot.retrieval_day(manifest),
     )
 
 
 def seconds_between(start: Time, end: Time) -> float:
     """Seconds from ``start`` to ``end``, from their UTC Julian days."""
     return float((end.jd1 - start.jd1) * DAY + (end.jd2 - start.jd2) * DAY)
+
+
+def objects(approaches: Sequence[SocratesApproach]) -> set[int]:
+    """The catalog numbers of the objects of ``approaches``."""
+    return {a.primary for a in approaches} | {a.secondary for a in approaches}
 
 
 def group(approach: SocratesApproach) -> Group:
@@ -195,6 +197,22 @@ class Match:
         return float((self.keepout.tca - self.socrates.tca).to_value(u.s))
 
     @property
+    def miss_distance_difference(self) -> float:
+        """Range by keepout minus range by SOCRATES [m] (NaN if keepout has
+        none)."""
+        if self.keepout is None:
+            return float("nan")
+        return self.keepout.miss_distance - self.socrates.miss_distance
+
+    @property
+    def relative_speed_difference(self) -> float:
+        """Relative speed by keepout minus by SOCRATES [m/s] (NaN if keepout
+        has none)."""
+        if self.keepout is None:
+            return float("nan")
+        return self.keepout.relative_speed - self.socrates.relative_speed
+
+    @property
     def range_change(self) -> float:
         """How much the range changes over the TCA difference [m]:
         ``v^2 dt^2 / (2 rho)`` at keepout's minimum (NaN if keepout has none
@@ -211,10 +229,8 @@ class Match:
         tolerance = TOLERANCES[group(self.socrates)]
         return (
             abs(self.tca_difference) <= tolerance.tca
-            and abs(self.keepout.miss_distance - self.socrates.miss_distance)
-            <= tolerance.miss_distance
-            and abs(self.keepout.relative_speed - self.socrates.relative_speed)
-            <= tolerance.relative_speed
+            and abs(self.miss_distance_difference) <= tolerance.miss_distance
+            and abs(self.relative_speed_difference) <= tolerance.relative_speed
         )
 
 
@@ -246,6 +262,10 @@ class Comparison:
     primaries: int
 
 
+def _pair_of(approach: CloseApproach) -> tuple[int, int]:
+    return approach.primary_number, approach.secondary_number
+
+
 def compare(
     approaches: Sequence[SocratesApproach],
     catalog: Sequence[Omm],
@@ -263,12 +283,9 @@ def compare(
     """
     by_number = {omm.catalog_number: omm for omm in catalog}
     first = sorted({a.primary for a in approaches})
-    objects = sorted(
-        {a.primary for a in approaches} | {a.secondary for a in approaches}
-    )
     result = screen(
         [by_number[number] for number in first],
-        [by_number[number] for number in objects],
+        [by_number[number] for number in sorted(objects(approaches))],
         start,
         DEFAULT_DURATION,
         DEFAULT_VOLUME,
@@ -284,21 +301,16 @@ def compare(
     pairs = {
         (approaches[index].primary, approaches[index].secondary) for index in compared
     }
-    found = [
-        a for a in result.approaches if (a.primary_number, a.secondary_number) in pairs
-    ]
+    found = [a for a in result.approaches if _pair_of(a) in pairs]
     by_pair: dict[tuple[int, int], list[int]] = {}
     for position, approach in enumerate(found):
-        by_pair.setdefault(
-            (approach.primary_number, approach.secondary_number), []
-        ).append(position)
+        by_pair.setdefault(_pair_of(approach), []).append(position)
     found_at = [seconds_between(start, approach.tca) for approach in found]
+    socrates_at = {
+        index: seconds_between(start, approaches[index].tca) for index in compared
+    }
     candidates = sorted(
-        (
-            abs(found_at[position] - seconds_between(start, approaches[index].tca)),
-            index,
-            position,
-        )
+        (abs(found_at[position] - socrates_at[index]), index, position)
         for index in compared
         for position in by_pair.get(
             (approaches[index].primary, approaches[index].secondary), []
@@ -462,42 +474,32 @@ def _group_summary(matches: Sequence[Match]) -> GroupSummary:
         worst = {
             "tca": _seconds(max(abs(m.tca_difference) for m in agree)),
             "miss_distance": _metres(
-                max(
-                    abs(m.keepout.miss_distance - m.socrates.miss_distance)
-                    for m in agree
-                    if m.keepout is not None
-                )
+                max(abs(m.miss_distance_difference) for m in agree)
             ),
             "relative_speed": _metres(
-                max(
-                    abs(m.keepout.relative_speed - m.socrates.relative_speed)
-                    for m in agree
-                    if m.keepout is not None
-                )
+                max(abs(m.relative_speed_difference) for m in agree)
             ),
             "range_change": float(f"{max(m.range_change for m in agree):.3g}"),
         }
     return {"compared": len(matches), "agree": len(agree), "worst": worst}
 
 
-def _nearest_other(approach: CloseApproach, result: ScreeningResult) -> float | None:
+def _nearest_other(
+    approach: CloseApproach, of_pair: Sequence[CloseApproach]
+) -> float | None:
+    """Seconds to the nearest other approach of ``of_pair``, the approaches of
+    ``approach``'s pair."""
     gaps = [
         abs(float((other.tca - approach.tca).to_value(u.s)))
-        for other in result.approaches
-        if (other.primary_number, other.secondary_number)
-        == (approach.primary_number, approach.secondary_number)
-        and other is not approach
+        for other in of_pair
+        if other is not approach
     ]
     return round(min(gaps), 3) if gaps else None
 
 
-def summarise(
-    comparison: Comparison,
-    inputs: Inputs,
-    start: Time,
-    known: Mapping[int, str] = KNOWN_DIFFERENCES,
-) -> Summary:
-    """The report's numbers."""
+def _list_differences(
+    comparison: Comparison, inputs: Inputs, known: Mapping[int, str]
+) -> list[Difference]:
     by_number = {omm.catalog_number: omm for omm in inputs.catalog}
     differences: list[Difference] = []
     for match in comparison.matches:
@@ -520,6 +522,27 @@ def summarise(
                 "cause": _cause(a, known),
             }
         )
+    return differences
+
+
+def _list_keepout_only(comparison: Comparison) -> list[KeepoutOnly]:
+    by_pair: dict[tuple[int, int], list[CloseApproach]] = {}
+    for approach in comparison.result.approaches:
+        by_pair.setdefault(_pair_of(approach), []).append(approach)
+    return [
+        {
+            "primary": a.primary_number,
+            "secondary": a.secondary_number,
+            "tca": a.tca.iso,
+            "miss_distance": _metres(a.miss_distance),
+            "relative_speed": _metres(a.relative_speed),
+            "nearest_other": _nearest_other(a, by_pair[_pair_of(a)]),
+        }
+        for a in comparison.keepout_only
+    ]
+
+
+def _list_skipped(comparison: Comparison) -> list[Skipped]:
     left_out = {item.catalog_number: item for item in comparison.result.skipped}
     skipped: list[Skipped] = []
     for a in comparison.skipped:
@@ -534,31 +557,37 @@ def summarise(
                 "detail": left_out[number].detail,
             }
         )
-    whole = inputs.socrates
-    objects = {a.primary for a in inputs.approaches} | {
-        a.secondary for a in inputs.approaches
+    return skipped
+
+
+def _settings(comparison: Comparison, inputs: Inputs, start: Time) -> Settings:
+    return {
+        "start": start.isot,
+        "days": DEFAULT_DURATION / DAY,
+        "volume": DEFAULT_VOLUME.label,
+        "max_age_days": MAX_AGE / DAY,
+        "max_lead_days": MAX_LEAD / DAY,
+        "match_window": MATCH_WINDOW,
+        "fast_from": FAST,
+        "primaries": comparison.primaries,
+        "objects": len(objects(inputs.approaches)),
     }
+
+
+def summarise(
+    comparison: Comparison,
+    inputs: Inputs,
+    start: Time,
+    known: Mapping[int, str] = KNOWN_DIFFERENCES,
+) -> Summary:
+    """The report's numbers."""
+    whole = inputs.socrates
     return {
         "retrieved": inputs.retrieved,
         "socrates": whole,
-        "settings": {
-            "start": start.isot,
-            "days": DEFAULT_DURATION / DAY,
-            "volume": DEFAULT_VOLUME.label,
-            "max_age_days": MAX_AGE / DAY,
-            "max_lead_days": MAX_LEAD / DAY,
-            "match_window": MATCH_WINDOW,
-            "fast_from": FAST,
-            "primaries": comparison.primaries,
-            "objects": len(objects),
-        },
+        "settings": _settings(comparison, inputs, start),
         "tolerances": {
-            name: {
-                "tca": tolerance.tca,
-                "miss_distance": tolerance.miss_distance,
-                "relative_speed": tolerance.relative_speed,
-            }
-            for name, tolerance in TOLERANCES.items()
+            name: asdict(tolerance) for name, tolerance in TOLERANCES.items()
         },
         "groups": {
             name: _group_summary(
@@ -566,30 +595,20 @@ def summarise(
             )
             for name in GROUPS
         },
-        "differences": differences,
-        "keepout_only": [
-            {
-                "primary": a.primary_number,
-                "secondary": a.secondary_number,
-                "tca": a.tca.iso,
-                "miss_distance": _metres(a.miss_distance),
-                "relative_speed": _metres(a.relative_speed),
-                "nearest_other": _nearest_other(a, comparison.result),
-            }
-            for a in comparison.keepout_only
-        ],
+        "differences": _list_differences(comparison, inputs, known),
+        "keepout_only": _list_keepout_only(comparison),
         "not_compared": {
             "outside_catalog": whole["approaches"] - whole["both_in_catalog"],
             "other_element_sets": whole["both_in_catalog"] - whole["comparable"],
-            "skipped": skipped,
+            "skipped": _list_skipped(comparison),
         },
     }
 
 
 def known_differences(approaches: Sequence[SocratesApproach]) -> dict[int, str]:
     """The :data:`KNOWN_DIFFERENCES` of the objects of ``approaches``."""
-    objects = {a.primary for a in approaches} | {a.secondary for a in approaches}
-    return {n: text for n, text in KNOWN_DIFFERENCES.items() if n in objects}
+    numbers = objects(approaches)
+    return {n: text for n, text in KNOWN_DIFFERENCES.items() if n in numbers}
 
 
 def problems(
@@ -618,12 +637,6 @@ GROUP_TITLES: Final[Mapping[Group, str]] = {
 }
 
 
-def _table(header: Sequence[str], rows: Sequence[Sequence[object]]) -> list[str]:
-    lines = ["| " + " | ".join(header) + " |", "|" + "---|" * len(header)]
-    lines += ["| " + " | ".join(str(cell) for cell in row) + " |" for row in rows]
-    return lines
-
-
 def _ms(seconds: float) -> str:
     return f"{seconds * 1e3:.3f} ms"
 
@@ -644,8 +657,21 @@ def _pair(primary: int, secondary: int) -> str:
     return f"{primary} - {secondary}"
 
 
-def _agreement(summary: Summary) -> list[str]:
-    rows = []
+AGREEMENT_HEADER: Final = (
+    "Approaches",
+    "Compared",
+    "Within tolerance",
+    "Worst TCA",
+    "Worst range",
+    "Worst relative speed",
+    "Range change over the TCA difference",
+)
+"""The columns of the agreement table; the README shows the first five."""
+
+
+def _agreement(summary: Summary, columns: int = len(AGREEMENT_HEADER)) -> list[str]:
+    """The agreement table, its first ``columns`` columns."""
+    rows: list[tuple[object, ...]] = []
     for name, numbers in summary["groups"].items():
         worst = numbers["worst"]
         cells: list[object] = ["-"] * 4
@@ -657,35 +683,12 @@ def _agreement(summary: Summary) -> list[str]:
                 f"{worst['range_change']:.2g} m",
             ]
         rows.append((GROUP_TITLES[name], numbers["compared"], numbers["agree"], *cells))
-    return _table(
-        (
-            "Approaches",
-            "Compared",
-            "Within tolerance",
-            "Worst TCA",
-            "Worst range",
-            "Worst relative speed",
-            "Range change over the TCA difference",
-        ),
-        rows,
-    )
+    return table(AGREEMENT_HEADER[:columns], [row[:columns] for row in rows])
 
 
 def render_summary(summary: Summary, page: str) -> str:
     """The README block."""
     socrates = summary["socrates"]
-    rows = [
-        (
-            GROUP_TITLES[name],
-            numbers["compared"],
-            numbers["agree"],
-            "-" if numbers["worst"] is None else _ms(numbers["worst"]["tca"]),
-            "-"
-            if numbers["worst"] is None
-            else f"{numbers['worst']['miss_distance']:.5f} m",
-        )
-        for name, numbers in summary["groups"].items()
-    ]
     differences = summary["differences"]
     causes = {d["cause"] for d in differences if d["cause"] is not None}
     unexplained = sum(d["cause"] is None for d in differences)
@@ -713,16 +716,7 @@ def render_summary(summary: Summary, page: str) -> str:
             f"{socrates['comparable']} SOCRATES approaches computed from the same "
             f"element sets ([report]({page})):",
             "",
-            *_table(
-                (
-                    "Approaches",
-                    "Compared",
-                    "Within tolerance",
-                    "Worst TCA",
-                    "Worst range",
-                ),
-                rows,
-            ),
+            *_agreement(summary, columns=5),
             *(["", " ".join(notes)] if notes else []),
         ]
     )
@@ -759,7 +753,7 @@ def _differences(summary: Summary, known: Mapping[int, str]) -> list[str]:
         {d["cause"] for d in summary["differences"] if d["cause"] is not None}
     )
     return [
-        *_table(
+        *table(
             (
                 "Pair",
                 "SOCRATES TCA (UTC)",
@@ -783,12 +777,11 @@ def _keepout_only(summary: Summary) -> list[str]:
     return [
         "Formation flyers can have two range minima per orbit, minutes apart, "
         "with a maximum at most a few metres higher between them. keepout reports "
-        "every "
-        "local minimum inside the volume; SOCRATES lists only one of the two "
+        "every local minimum inside the volume; SOCRATES lists only one of the two "
         "once they come close. The last column gives the time to the nearest "
         "other approach keepout reports for the pair.",
         "",
-        *_table(
+        *table(
             ("Pair", "TCA (UTC)", "Range", "Relative speed", "Nearest other approach"),
             [
                 (
@@ -815,7 +808,7 @@ def _skipped(summary: Summary) -> list[str]:
         f"{_count(len(skipped), 'approach has', 'approaches have')} an object "
         "`screen` left out, with its defaults:",
         "",
-        *_table(
+        *table(
             ("Pair", "SOCRATES TCA (UTC)", "Object", "Reason", "Detail"),
             [
                 (
@@ -831,18 +824,10 @@ def _skipped(summary: Summary) -> list[str]:
     ]
 
 
-def render_page(summary: Summary, known: Mapping[int, str] = KNOWN_DIFFERENCES) -> str:
-    """The report page."""
+def _introduction(summary: Summary) -> list[str]:
     settings = summary["settings"]
     socrates = summary["socrates"]
-    tolerances = summary["tolerances"]
-    not_compared = summary["not_compared"]
-    slow = summary["groups"]["slow"]["worst"]
-    lines = [
-        "# Screening against CelesTrak's SOCRATES",
-        "",
-        "<!-- Generated by tools/screening_report.py; do not edit. -->",
-        "",
+    return [
         "CelesTrak's [SOCRATES](https://celestrak.org/SOCRATES/) lists, for a "
         "week, the approaches within 5 km of the objects it screens, from SGP4 "
         "on the GP element sets of its time. keepout screened the same element "
@@ -872,33 +857,12 @@ def render_page(summary: Summary, known: Mapping[int, str] = KNOWN_DIFFERENCES) 
         f"(celestrak.org) on {summary['retrieved']}; the public catalog and the "
         "SOCRATES report sorted by minimum range (see "
         "`tests/screening/data/NOTICE`).",
-        "",
-        "## Agreement",
-        "",
-        *_agreement(summary),
-        "",
-        "Worst: the largest difference between keepout and SOCRATES among the "
-        "approaches within tolerance; the last column is how much the range "
-        "changes when TCA moves by the TCA difference (v² Δt² / 2r, with r "
-        "the range at keepout's minimum). The approaches outside tolerance are "
-        "under "
-        "[Differences](#differences).",
-        "",
-        "## Tolerances",
-        "",
-        *_table(
-            ("Approaches", "TCA", "Range", "Relative speed"),
-            [
-                (
-                    GROUP_TITLES[name],
-                    f"{tolerance['tca'] * 1e3:g} ms",
-                    f"{tolerance['miss_distance']:g} m",
-                    f"{tolerance['relative_speed']:g} m/s",
-                )
-                for name, tolerance in tolerances.items()
-            ],
-        ),
-        "",
+    ]
+
+
+def _tolerances(summary: Summary) -> list[str]:
+    slow = summary["groups"]["slow"]["worst"]
+    reason = (
         "SOCRATES prints TCA (UTC) to the millisecond, `TCA_RANGE` in km and "
         "`TCA_RELATIVE_SPEED` in km/s with three decimals, so rounding alone "
         "leaves up to 0.5 ms, 0.5 m and 0.5 m/s; read in these units, every "
@@ -907,26 +871,34 @@ def render_page(summary: Summary, known: Mapping[int, str] = KNOWN_DIFFERENCES) 
         "A fast approach's TCA is allowed 1 ms: the rounding, and as much again "
         "for the two TCA searches. A slow pair's range hardly changes for "
         "seconds around its minimum, which leaves its TCA ill-conditioned: it "
-        "is allowed 0.5 s",
-    ]
+        "is allowed 0.5 s"
+    )
     if slow is not None:
-        lines[-1] += (
+        reason += (
             f", and moving TCA by the differences found changes the range by "
             f"{slow['range_change']:.2g} m at most"
         )
-    lines[-1] += "."
-    lines += [
+    return [
+        *table(
+            ("Approaches", "TCA", "Range", "Relative speed"),
+            [
+                (
+                    GROUP_TITLES[name],
+                    f"{tolerance['tca'] * 1e3:g} ms",
+                    f"{tolerance['miss_distance']:g} m",
+                    f"{tolerance['relative_speed']:g} m/s",
+                )
+                for name, tolerance in summary["tolerances"].items()
+            ],
+        ),
         "",
-        "## Differences",
-        "",
-        *_differences(summary, known),
-        "",
-        "## Found by keepout only",
-        "",
-        *_keepout_only(summary),
-        "",
-        "## Not compared",
-        "",
+        reason + ".",
+    ]
+
+
+def _not_compared(summary: Summary) -> list[str]:
+    not_compared = summary["not_compared"]
+    return [
         f"- **{not_compared['outside_catalog']} approaches with an object outside "
         "the public catalog**: SOCRATES screens the whole catalog of "
         "Space-Track.org; CelesTrak publishes only part of it.",
@@ -941,12 +913,44 @@ def render_page(summary: Summary, known: Mapping[int, str] = KNOWN_DIFFERENCES) 
         "lists.",
         *_skipped(summary),
     ]
+
+
+def render_page(summary: Summary, known: Mapping[int, str] = KNOWN_DIFFERENCES) -> str:
+    """The report page."""
+    lines = [
+        "# Screening against CelesTrak's SOCRATES",
+        "",
+        "<!-- Generated by tools/screening_report.py; do not edit. -->",
+        "",
+        *_introduction(summary),
+        "",
+        "## Agreement",
+        "",
+        *_agreement(summary),
+        "",
+        "Worst: the largest difference between keepout and SOCRATES among the "
+        "approaches within tolerance; the last column is how much the range "
+        "changes when TCA moves by the TCA difference (v² Δt² / 2r, with r "
+        "the range at keepout's minimum). The approaches outside tolerance are "
+        "under [Differences](#differences).",
+        "",
+        "## Tolerances",
+        "",
+        *_tolerances(summary),
+        "",
+        "## Differences",
+        "",
+        *_differences(summary, known),
+        "",
+        "## Found by keepout only",
+        "",
+        *_keepout_only(summary),
+        "",
+        "## Not compared",
+        "",
+        *_not_compared(summary),
+    ]
     return "\n".join(lines) + "\n"
-
-
-def _relative(path: Path, start: Path) -> str:
-    """``path`` as a link from a file in ``start``."""
-    return Path(os.path.relpath(path, start)).as_posix()
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -980,7 +984,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.readme.read_text(encoding="utf-8"),
             START,
             END,
-            render_summary(summary, _relative(args.page, args.readme.parent)),
+            render_summary(summary, relative(args.page, args.readme.parent)),
         ),
     }
     status = write_or_check(files, check=args.check, tool=TOOL)

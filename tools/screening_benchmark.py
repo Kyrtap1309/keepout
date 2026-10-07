@@ -58,10 +58,10 @@ from typing import Final, TypedDict
 import screening_snapshot as snapshot
 from astropy.time import Time
 from generated import replace_block, write_or_check
-from screening_timing import timed
+from screening_timing import TimingOutput, select, timed
 
 from keepout._units import DAY
-from keepout.omm import Omm, load
+from keepout.omm import Omm
 from keepout.omm.celestrak import dumps_csv
 from keepout.screening import (
     DEFAULT_VOLUME,
@@ -209,28 +209,13 @@ def _processes(workers: int) -> str:
 
 def read_catalog(data: Path) -> tuple[tuple[Omm, ...], str]:
     """The snapshot's element sets and the day it was retrieved (UTC, ISO)."""
-    manifest = json.loads((data / snapshot.MANIFEST).read_text(encoding="utf-8"))
-    return load(data / snapshot.SNAPSHOT), manifest["retrieved"]["first"][:10]
+    manifest = snapshot.read_manifest(data)
+    return snapshot.read_catalog(data), snapshot.retrieval_day(manifest)
 
 
 def window_start(retrieved: str) -> Time:
     """0 h UTC of the retrieval day: the benchmark's window starts there."""
     return Time(retrieved, scale="utc")
-
-
-def select(catalog: Sequence[Omm], numbers: Sequence[int]) -> list[Omm]:
-    """The element sets of ``numbers``, in that order.
-
-    Raises
-    ------
-    ValueError
-        If a number is not in the catalog.
-    """
-    by_number = {omm.catalog_number: omm for omm in catalog}
-    missing = [number for number in numbers if number not in by_number]
-    if missing:
-        raise ValueError(f"primaries not in the catalog: {missing}")
-    return [by_number[number] for number in numbers]
 
 
 def found(volume: str, result: ScreeningResult) -> Found:
@@ -344,36 +329,14 @@ def render_summary(summary: Summary) -> str:
     )
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    """Run the benchmark (or ``compare``, if that is the first argument).
+def benchmark_main(args: argparse.Namespace) -> int:
+    """Run the benchmark (or with ``--check`` verify its data).
 
     Returns
     -------
     int
-        0 on success; 1 if, with ``--check``, a file is out of date, or if
-        ``compare`` finds a regression.
+        1 if, with ``--check``, a file is out of date, else 0.
     """
-    arguments = sys.argv[1:] if argv is None else list(argv)
-    if arguments[:1] == ["compare"]:
-        return compare_main(arguments[1:])
-    parser = argparse.ArgumentParser(prog=TOOL)
-    parser.add_argument("--check", action="store_true", help="fail if out of date")
-    parser.add_argument("--data", type=Path, default=snapshot.DATA)
-    parser.add_argument("--results", type=Path, default=RESULTS)
-    parser.add_argument("--readme", type=Path, default=REPO / "README.md")
-    parser.add_argument(
-        "--primaries",
-        type=int,
-        nargs="+",
-        default=list(PRIMARIES),
-        help=argparse.SUPPRESS,
-    )
-    parser.add_argument("--workers", type=positive, default=WORKERS)
-    parser.add_argument(
-        "--repeat", type=positive, default=REPEAT, help="runs per volume (not --check)"
-    )
-    args = parser.parse_args(arguments)
-
     catalog, retrieved = read_catalog(args.data)
     start = window_start(retrieved)
     primaries = select(catalog, args.primaries)
@@ -478,12 +441,8 @@ def run_timing(command: Sequence[str]) -> Run:
     if done.returncode != 0:
         lines = done.stderr.strip().splitlines()[-5:]
         raise TimingFailed("\n".join(lines) or f"exit status {done.returncode}")
-    numbers = json.loads(done.stdout)
-    return Run(
-        wall=float(numbers["wall"]),
-        cpu=float(numbers["cpu"]),
-        approaches=int(numbers["approaches"]),
-    )
+    output: TimingOutput = json.loads(done.stdout)
+    return Run(wall=output["wall"], cpu=output["cpu"], approaches=output["approaches"])
 
 
 @dataclass(frozen=True)
@@ -578,7 +537,7 @@ def render_comparison(
     return "\n".join(lines), regression
 
 
-def compare_main(argv: Sequence[str]) -> int:
+def compare_main(args: argparse.Namespace) -> int:
     """Compare this tree's screening speed with another tree's.
 
     Returns
@@ -586,26 +545,6 @@ def compare_main(argv: Sequence[str]) -> int:
     int
         1 if this tree is slower than the threshold allows, else 0.
     """
-    parser = argparse.ArgumentParser(prog=f"{TOOL} compare")
-    parser.add_argument(
-        "--base-python",
-        required=True,
-        help="Python of the base tree's environment (with its keepout)",
-    )
-    parser.add_argument("--data", type=Path, default=snapshot.DATA)
-    parser.add_argument(
-        "--primaries",
-        type=int,
-        nargs="+",
-        default=list(PRIMARIES),
-        help=argparse.SUPPRESS,
-    )
-    parser.add_argument("--every", type=positive, default=EVERY, help="catalog sample")
-    parser.add_argument("--days", type=float, default=DEFAULT_DURATION / DAY)
-    parser.add_argument("--repeat", type=positive, default=COMPARE_REPEAT)
-    parser.add_argument("--threshold", type=float, default=THRESHOLD)
-    args = parser.parse_args(argv)
-
     catalog, retrieved = read_catalog(args.data)
     select(catalog, args.primaries)  # all there, or ValueError
     reduced = reduced_catalog(catalog, args.primaries, args.every)
@@ -643,6 +582,55 @@ def compare_main(argv: Sequence[str]) -> int:
         with Path(summary).open("a", encoding="utf-8") as stream:
             stream.write(text + "\n")
     return 1 if regression else 0
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Run the benchmark, or ``compare`` if that is the command.
+
+    Returns
+    -------
+    int
+        0 on success; 1 if, with ``--check``, a file is out of date, or if
+        ``compare`` finds a regression.
+    """
+    data = argparse.ArgumentParser(add_help=False)
+    data.add_argument("--data", type=Path, default=snapshot.DATA)
+    data.add_argument(
+        "--primaries",
+        type=int,
+        nargs="+",
+        default=list(PRIMARIES),
+        help=argparse.SUPPRESS,
+    )
+    parser = argparse.ArgumentParser(prog=TOOL, parents=[data])
+    parser.add_argument("--check", action="store_true", help="fail if out of date")
+    parser.add_argument("--results", type=Path, default=RESULTS)
+    parser.add_argument("--readme", type=Path, default=REPO / "README.md")
+    parser.add_argument("--workers", type=positive, default=WORKERS)
+    parser.add_argument(
+        "--repeat", type=positive, default=REPEAT, help="runs per volume (not --check)"
+    )
+    commands = parser.add_subparsers(dest="command")
+    comparing = commands.add_parser(
+        "compare",
+        parents=[data],
+        help="compare this tree's screening speed with another tree's",
+    )
+    comparing.add_argument(
+        "--base-python",
+        required=True,
+        help="Python of the base tree's environment (with its keepout)",
+    )
+    comparing.add_argument(
+        "--every", type=positive, default=EVERY, help="catalog sample"
+    )
+    comparing.add_argument("--days", type=float, default=DEFAULT_DURATION / DAY)
+    comparing.add_argument("--repeat", type=positive, default=COMPARE_REPEAT)
+    comparing.add_argument("--threshold", type=float, default=THRESHOLD)
+    args = parser.parse_args(argv)
+    if args.command == "compare":
+        return compare_main(args)
+    return benchmark_main(args)
 
 
 if __name__ == "__main__":
