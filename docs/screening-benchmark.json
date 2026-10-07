@@ -1,0 +1,81 @@
+{
+  "settings": {
+    "primaries": [
+      25544,
+      48274,
+      20580,
+      45212,
+      43613,
+      43476,
+      39634,
+      39084,
+      25994,
+      27424,
+      36508,
+      40697,
+      41335,
+      43013,
+      38771,
+      54754,
+      43070,
+      47284,
+      41240,
+      46984
+    ],
+    "objects": 19914,
+    "retrieved": "2026-10-06",
+    "start": "2026-10-06 00:00",
+    "days": 7.0,
+    "workers": 4
+  },
+  "found": [
+    {
+      "volume": "5 km sphere (default)",
+      "screened": 19886,
+      "skipped": {
+        "stale": 28
+      },
+      "approaches": 715
+    },
+    {
+      "volume": "10 km sphere (NASA, GP data)",
+      "screened": 19886,
+      "skipped": {
+        "stale": 28
+      },
+      "approaches": 2551
+    },
+    {
+      "volume": "SFS Handbook Table 3",
+      "screened": 19886,
+      "skipped": {
+        "stale": 28
+      },
+      "approaches": 345
+    }
+  ],
+  "timings": {
+    "cpu_model": "Intel(R) Core(TM) i5-14600K",
+    "logical_cpus": 20,
+    "python": "3.13.7",
+    "runs": 3,
+    "date": "2026-10-07",
+    "volumes": [
+      {
+        "volume": "5 km sphere (default)",
+        "wall": 8.479,
+        "cpu": 40.348
+      },
+      {
+        "volume": "10 km sphere (NASA, GP data)",
+        "wall": 9.485,
+        "cpu": 44.293
+      },
+      {
+        "volume": "SFS Handbook Table 3",
+        "wall": 14.819,
+        "cpu": 65.198
+      }
+    ]
+  }
+}

@@ -17,6 +17,7 @@ from keepout.cdm.keywords import covariance_names
 from keepout.cdm.model import Cdm, CdmObject, DuplicateKeyword, Field, Section
 from keepout.conjunction import Conjunction
 from keepout.errors import CovarianceError, UnsupportedFrame
+from keepout.frames import teme_to_gcrf
 
 
 def test_typed_accessors() -> None:
@@ -149,6 +150,17 @@ def test_unsupported_ref_frame() -> None:
         cdm.object1.state()
     with pytest.raises(UnsupportedFrame):
         cdm.object_states()
+
+
+def test_a_teme_state_is_converted_to_gcrf() -> None:
+    cdm = minimal_cdm(segment1=replace(segment_fields(1), "REF_FRAME", "TEME"))
+    teme = cdm.object1.state()
+    assert teme.frame == "TEME"
+    primary, _ = cdm.object_states()
+    assert primary.state.frame == "GCRF"
+    expected_r, expected_v = teme_to_gcrf(teme.epoch, teme.r, teme.v)
+    np.testing.assert_array_equal(primary.state.r, expected_r)
+    np.testing.assert_array_equal(primary.state.v, expected_v)
 
 
 def test_covariance_policies() -> None:

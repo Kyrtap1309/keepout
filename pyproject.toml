@@ -1,7 +1,7 @@
 [project]
 name = "keepout"
 version = "0.1.0.dev0"
-description = "Spacecraft conjunction assessment: CDM ingest, probability of collision, risk trends and avoidance manoeuvre planning."
+description = "Spacecraft conjunction assessment: screening, CDM ingest, probability of collision, risk trends and avoidance manoeuvre planning."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -20,6 +20,7 @@ dependencies = [
     "platformdirs>=4.11.12",
     "pyerfa>=2.0.1.5",
     "scipy>=1.17.1",
+    "sgp4>=2.27",
 ]
 
 [project.optional-dependencies]
@@ -76,7 +77,7 @@ enable_error_code = [
 ]
 
 [[tool.mypy.overrides]]
-module = ["astropy.*", "erfa.*", "xlrd.*"]
+module = ["astropy.*", "erfa.*", "sgp4.*", "xlrd.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
@@ -85,7 +86,7 @@ pythonpath = ["tools"]
 addopts = ["-ra", "--strict-markers", "-m", "not validation"]
 filterwarnings = ["error"]
 markers = [
-    "validation: needs NASA CARA or ESA Kelvins data (downloads on first run)",
+    "validation: slow checks against reference data (NASA CARA and ESA Kelvins data download on first run; screening uses the committed CelesTrak data)",
 ]
 
 [tool.coverage.run]

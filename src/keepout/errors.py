@@ -7,8 +7,10 @@ __all__ = [
     "ChecksumMismatch",
     "CovarianceError",
     "GeometryError",
+    "HttpStatusError",
     "KeepoutError",
     "KelvinsFormatError",
+    "OmmParseError",
     "PcConvergenceError",
     "SourceFormatError",
     "SourceUnavailable",
@@ -22,6 +24,25 @@ class KeepoutError(Exception):
 
 class SourceUnavailable(KeepoutError):
     """A remote data source could not be reached or returned an error."""
+
+
+class HttpStatusError(SourceUnavailable):
+    """A server answered a download with an HTTP status other than 200 OK.
+
+    Parameters
+    ----------
+    message
+        What happened.
+    url
+        The URL asked for.
+    status
+        The HTTP status code, e.g. 403 or 503.
+    """
+
+    def __init__(self, message: str, *, url: str, status: int) -> None:
+        super().__init__(message)
+        self.url = url
+        self.status = status
 
 
 class ChecksumMismatch(KeepoutError):
@@ -71,6 +92,49 @@ class CdmParseError(KeepoutError):
         if keyword is not None:
             context.append(f"keyword {keyword}")
         super().__init__(f"{message} ({', '.join(context)})" if context else message)
+        self.line = line
+        self.keyword = keyword
+        self.path = path
+
+
+class OmmParseError(KeepoutError):
+    """An Orbit Mean-Elements Message could not be parsed.
+
+    Parameters
+    ----------
+    message
+        What is wrong.
+    record
+        1-based position of the object in a file of several (a CSV data row,
+        a JSON array element, a segment of an XML message).
+    line
+        1-based line number in a text format (KVN, CSV, TLE, JSON).
+    keyword
+        The OMM keyword (CSV column, JSON key) involved.
+    path
+        Element path in an XML message.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        record: int | None = None,
+        line: int | None = None,
+        keyword: str | None = None,
+        path: str | None = None,
+    ) -> None:
+        context: list[str] = []
+        if record is not None:
+            context.append(f"record {record}")
+        if line is not None:
+            context.append(f"line {line}")
+        if path is not None:
+            context.append(f"at {path}")
+        if keyword is not None:
+            context.append(f"keyword {keyword}")
+        super().__init__(f"{message} ({', '.join(context)})" if context else message)
+        self.record = record
         self.line = line
         self.keyword = keyword
         self.path = path

@@ -1,0 +1,19 @@
+Data: USSPACECOM/18 SDS via Space-Track.org, retrieved from CelesTrak
+(celestrak.org) on 2026-10-06.
+
+Retrieved 2026-10-06 15:21:25 to 15:21:41 UTC by tools/screening_snapshot.py:
+
+- celestrak-public.csv.gz: the GP element sets of CelesTrak's groups active,
+  last-30-days, analyst, fengyun-1c-debris, cosmos-2251-debris,
+  iridium-33-debris, one (the newest) per object;
+- celestrak-fixture.csv: about 200 of those objects (see the tool);
+- socrates-excerpt.csv.gz: the approaches of the SOCRATES Plus report
+  (sorted by minimum range) whose two objects are in the catalog with
+  the element sets SOCRATES used, lines as downloaded.
+
+manifest.json lists the URLs, retrieval times, counts and SHA-256
+digests.
+
+This is basic space situational awareness data, which the
+Space-Track.org user agreement allows to redistribute with the
+citation above. It is not covered by keepout's MIT licence.

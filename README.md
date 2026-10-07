@@ -1,10 +1,10 @@
 # keepout
 
-Spacecraft conjunction assessment in Python: CCSDS CDM ingest, probability of
-collision (Pc), risk trends and collision-avoidance manoeuvre planning.
+Spacecraft conjunction assessment in Python: screening against the public
+catalog, CCSDS CDM ingest, probability of collision (Pc), risk trends and
+collision-avoidance manoeuvre planning.
 
-> **Status:** pre-alpha (milestone M4 — risk levels, trends and decisions
-> over a conjunction event).
+> **Status:** pre-alpha (milestone M5 — screening).
 
 Pc algorithms are implemented from the published literature and validated
 against the public test cases of the
@@ -42,6 +42,17 @@ Monte Carlo against CARA's two-body Monte Carlo
 | Alfano (2009), Monte Carlo | montecarlo | 12 / 12 | 7.3e-02 |
 | CARA Pc method test set, Monte Carlo | montecarlo | 21 / 21 | 1.6e-01 |
 <!-- validation-monte-carlo-summary:end -->
+
+<!-- screening-socrates-summary:start -->
+Close approaches from `screen` against CelesTrak's SOCRATES, on the 1275 SOCRATES approaches computed from the same element sets ([report](docs/screening-socrates.md)):
+
+| Approaches | Compared | Within tolerance | Worst TCA | Worst range |
+|---|---|---|---|---|
+| fast (>= 1 km/s) | 266 | 261 | 0.493 ms | 0.49565 m |
+| slow (< 1 km/s) | 1008 | 1008 | 324.653 ms | 0.49998 m |
+
+5 approaches outside tolerance involve 2 objects whose element sets evidently differ from SOCRATES's. keepout also reports 5 minima of these pairs that SOCRATES does not list.
+<!-- screening-socrates-summary:end -->
 
 ## Reading a CDM
 
@@ -100,20 +111,73 @@ Kelvins data: ESA, *Collision Avoidance Challenge dataset*, Zenodo, 2021,
 [doi:10.5281/zenodo.4463683](https://doi.org/10.5281/zenodo.4463683); © ESA,
 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 
+## Screening
+
+```python
+from collections import Counter
+
+from astropy.time import Time
+
+from keepout import screen
+from keepout.sources.celestrak import fetch_catalog
+
+catalog = fetch_catalog()  # CelesTrak's public catalog, cached for two hours
+iss = [omm for omm in catalog.omms if omm.catalog_number == 25544]
+result = screen(iss, catalog.omms, Time.now())  # the next 7 days, a 5 km sphere
+for approach in result.approaches:
+    print(approach.tca.isot, approach.secondary_id, f"{approach.miss_distance:.0f} m")
+print(Counter(skipped.reason.value for skipped in result.skipped))  # sets left out
+```
+
+Each approach holds both objects' GCRF states at TCA, the miss distance, the
+miss vector in the primary's RTN frame and the relative velocity. Screening
+GP element sets finds geometry, not risk: they have no covariance and are
+kilometres off within days. [Screening](docs/screening.md) explains the
+method, the screening volumes (5 km as SOCRATES by default, NASA's 10 km for
+GP data, the USSPACECOM Spaceflight Safety Handbook's by orbit regime), the
+limits of GP data and the gap between the public and the full catalog; the
+comparison with SOCRATES is under [Validation](#validation).
+
+GP data: USSPACECOM/18 SDS via Space-Track.org, retrieved from CelesTrak
+(celestrak.org); the frozen copy in `tests/screening/data/` was retrieved
+on 2026-10-06 and is not covered by keepout's MIT licence (see its `NOTICE`).
+
+### Performance
+
+The target: 20 primaries against the public catalog for a week in under 60 s
+with 4 worker processes. CI also times each change against its merge base and
+fails on a slowdown of more than 20 %.
+
+<!-- screening-benchmark-summary:start -->
+Screening 20 LEO primaries against the 19914 element sets of the frozen public catalog (CelesTrak, retrieved 2026-10-06) for 7 days from 2026-10-06 00:00 UTC, with 4 worker processes (`tools/screening_benchmark.py`):
+
+| Volume | Screened | Left out | Approaches | Wall time | CPU time |
+|---|---|---|---|---|---|
+| 5 km sphere (default) | 19886 | 28 stale | 715 | 8.5 s | 40.3 s |
+| 10 km sphere (NASA, GP data) | 19886 | 28 stale | 2551 | 9.5 s | 44.3 s |
+| SFS Handbook Table 3 | 19886 | 28 stale | 345 | 14.8 s | 65.2 s |
+
+Times: median of 3 runs on 2026-10-07, Intel(R) Core(TM) i5-14600K (20 logical CPUs), Python 3.13.7; `--check` checks the counts, not the times.
+<!-- screening-benchmark-summary:end -->
+
 ## Development
 
 ```bash
 uv sync
 uv run pre-commit install     # ruff, mypy and the lock checked on commit
 uv run pytest                 # offline test suite
-uv run pytest -m validation   # downloads CARA and Kelvins data
+uv run pytest -m validation   # slow checks; downloads CARA and Kelvins data
 uv run python tools/validation_report.py   # regenerate the validation report
 uv run python tools/validation_report.py --monte-carlo   # Monte Carlo (slow)
 uv run python tools/risk_report.py   # Kelvins risk report (downloads 221 MB once)
+uv run python tools/screening_report.py   # SOCRATES screening report (offline)
+uv run python tools/screening_benchmark.py   # screening benchmark (offline, minutes)
 uv run ruff check && uv run ruff format --check
 uv run mypy
 ```
 
 ## Licence
 
-MIT
+MIT. The third-party data committed for tests is not covered: the CelesTrak
+data in `tests/screening/data/` (see its `NOTICE`) and the Kelvins excerpt in
+`tests/sources/data/` (see its `README.md`).

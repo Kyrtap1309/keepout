@@ -99,7 +99,7 @@ class PcObservation:
             raise ValueError(f"kind must be one of {PC_KINDS}, got {self.kind!r}")
         if self.pc is not None:
             _probability("pc", self.pc)
-            object.__setattr__(self, "pc", float(self.pc))
+            object.__setattr__(self, "pc", float(self.pc) + 0.0)
         if self.ci_high is not None:
             if self.pc is None:
                 raise ValueError("ci_high needs pc")
@@ -108,10 +108,12 @@ class PcObservation:
                 raise ValueError(
                     f"ci_high ({self.ci_high}) must not be below pc ({self.pc})"
                 )
-            object.__setattr__(self, "ci_high", float(self.ci_high))
+            object.__setattr__(self, "ci_high", float(self.ci_high) + 0.0)
         if self.reported_pc is not None:
             _probability("reported_pc", self.reported_pc)
-        object.__setattr__(self, "time_to_tca", float(self.time_to_tca))
+        # Adding 0.0 turns -0.0 into 0.0: observations at TCA sort and print
+        # alike whatever the sign of their zero.
+        object.__setattr__(self, "time_to_tca", float(self.time_to_tca) + 0.0)
         object.__setattr__(self, "diagnostics", tuple(self.diagnostics))
 
     @property

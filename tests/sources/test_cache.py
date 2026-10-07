@@ -5,12 +5,13 @@ import sys
 import urllib.error
 import urllib.request
 from email.message import Message
+from importlib.metadata import version
 from pathlib import Path
 
 import platformdirs
 import pytest
 
-from keepout.errors import ChecksumMismatch, SourceUnavailable
+from keepout.errors import ChecksumMismatch, HttpStatusError, SourceUnavailable
 from keepout.sources import cache
 
 PAYLOAD = b"reference bytes"
@@ -59,12 +60,47 @@ def test_cache_dir_defaults_to_home(
     assert cache.cache_dir() == tmp_path / ".cache" / "keepout"
 
 
+def test_the_user_agent_names_keepout_its_version_and_home_page() -> None:
+    assert (
+        f"keepout/{version('keepout')} (+https://github.com/Kyrtap1309/keepout)"
+    ) == cache.USER_AGENT
+
+
+class _Response(io.BytesIO):
+    """What ``urlopen`` returns: the body, with an HTTP status."""
+
+    def __init__(self, body: bytes = b"", status: int = 200) -> None:
+        super().__init__(body)
+        self.status = status
+        self.reason = "OK" if status == 200 else "No Content"
+
+
 def test_http_download_returns_body(monkeypatch: pytest.MonkeyPatch) -> None:
     def fake_urlopen(url: str, timeout: float) -> io.BytesIO:
-        return io.BytesIO(b"body")
+        return _Response(b"body")
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
     assert cache.http_download("https://example.invalid/x") == b"body"
+
+
+def test_http_download_sends_the_headers_given(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requests: list[urllib.request.Request] = []
+
+    def fake_urlopen(request: urllib.request.Request, timeout: float) -> io.BytesIO:
+        requests.append(request)
+        return _Response(b"body")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    cache.http_download("https://example.invalid/x", headers={"User-Agent": "me/1"})
+    cache.http_download("https://example.invalid/y")
+    assert [request.full_url for request in requests] == [
+        "https://example.invalid/x",
+        "https://example.invalid/y",
+    ]
+    assert requests[0].get_header("User-agent") == "me/1"
+    assert requests[1].header_items() == []
 
 
 def test_http_download_wraps_network_errors(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -81,11 +117,24 @@ def test_http_download_wraps_http_404(monkeypatch: pytest.MonkeyPatch) -> None:
         raise urllib.error.HTTPError(url, 404, "Not Found", Message(), None)
 
     monkeypatch.setattr(urllib.request, "urlopen", not_found)
-    with pytest.raises(SourceUnavailable, match="404"):
+    with pytest.raises(HttpStatusError, match="404") as caught:
         cache.http_download("https://example.invalid/x")
+    assert caught.value.status == 404
+    assert caught.value.url == "https://example.invalid/x"
 
 
-class _BrokenBody(io.BytesIO):
+def test_http_download_refuses_a_success_other_than_200(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        urllib.request, "urlopen", lambda url, timeout: _Response(b"", status=204)
+    )
+    with pytest.raises(HttpStatusError, match="HTTP 204 No Content") as caught:
+        cache.http_download("https://example.invalid/x")
+    assert caught.value.status == 204
+
+
+class _BrokenBody(_Response):
     def read(self, size: int | None = -1) -> bytes:
         raise http.client.IncompleteRead(b"partial")
 
@@ -117,9 +166,7 @@ def test_http_stream_writes_the_body_in_chunks(
 ) -> None:
     body = bytes(range(256)) * 10
     monkeypatch.setattr(cache, "CHUNK_SIZE", 1000)
-    monkeypatch.setattr(
-        urllib.request, "urlopen", lambda url, timeout: io.BytesIO(body)
-    )
+    monkeypatch.setattr(urllib.request, "urlopen", lambda url, timeout: _Response(body))
     chunks: list[bytes] = []
 
     class Collect:

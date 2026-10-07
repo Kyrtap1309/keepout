@@ -1,0 +1,383 @@
+# Screening
+
+Screening finds the close approaches of your satellites (the *primaries*)
+with a catalog of other objects over a window of days: every time a catalog
+object comes inside a *screening volume* around a primary, with its time of
+closest approach (TCA), miss distance and relative velocity. keepout screens
+the general perturbations (GP) element sets that USSPACECOM publishes, with
+SGP4, as CelesTrak's [SOCRATES](https://celestrak.org/SOCRATES/) does.
+
+```python
+from collections import Counter
+
+from astropy.time import Time
+
+from keepout import screen
+from keepout.sources.celestrak import fetch_catalog
+
+
+def main() -> None:
+    catalog = fetch_catalog()  # CelesTrak's public catalog, one set per object
+    iss = [omm for omm in catalog.omms if omm.catalog_number == 25544]
+    start = Time("2026-10-06T00:00:00", scale="utc")  # live data: Time.now()
+    result = screen(iss, catalog.omms, start, workers=4)  # 7 days, 5 km sphere
+    for approach in result.approaches:
+        radial, transverse, normal = approach.miss_rtn
+        print(
+            approach.tca.isot,
+            approach.secondary_id,
+            f"{approach.miss_distance:.0f} m",
+            f"(R {radial:.0f}, T {transverse:.0f}, N {normal:.0f})",
+            f"{approach.relative_speed:.0f} m/s",
+        )
+    print(Counter(skipped.reason.value for skipped in result.skipped))
+
+
+if __name__ == "__main__":  # needed for workers > 1
+    main()
+```
+
+The window starts on 2026-10-06 to match the catalog CelesTrak served that
+day (the frozen copy in `tests/screening/data/`), on which this prints the
+output below. On the live catalog, start the window from the data, as with
+`Time.now()`: a window that ends more than 30 days after an element set's
+epoch leaves that set out as stale (see [Element age](#element-age)), so this
+fixed start finds nothing from November 2026 on.
+
+```text
+2026-10-06T05:12:33.772 58180 4633 m (R 3186, T -2873, N 1748) 7914 m/s
+2026-10-06T12:10:37.724 58180 4902 m (R -4629, T -1376, N -842) 7937 m/s
+2026-10-07T16:10:03.846 46275 4104 m (R -1521, T 1998, N 3246) 13035 m/s
+2026-10-10T14:08:54.848 49773 2751 m (R -2365, T -957, N 1030) 11225 m/s
+Counter({'stale': 28})
+```
+
+!!! warning "Screening finds geometry, not risk"
+    GP element sets carry no covariance, and their errors reach kilometres
+    within days. A close approach found on GP data is a candidate for a
+    closer look, not a collision risk; see [Limits of GP data](#limits-of-gp-data).
+
+## Element sets
+
+`keepout.omm` reads element sets into `Omm` objects (one object's SGP4 mean
+elements each, in SI units) from every format they come in, recognised by
+content: CCSDS OMM in KVN or XML (CCSDS 502.0-B-3), CelesTrak's CSV and JSON,
+and legacy two- and three-line element sets (TLE).
+
+```python
+import keepout.omm
+
+catalog = keepout.omm.load("catalog.csv")  # also gzip, KVN, XML, JSON, TLE
+```
+
+Catalog numbers above 99 999 have been assigned since July 2026; they have no
+TLE form, so use OMM data for them. SGP4 accepts catalog numbers up to
+339 999.
+
+## CelesTrak's public catalog
+
+`keepout.sources.celestrak.fetch_catalog()` downloads the GP groups that
+together form CelesTrak's public catalog (`PUBLIC_GROUPS`: active
+satellites, the last 30 days' launches, analyst objects and the debris of the
+three largest fragmentations), as CSV, and keeps one element set per object:
+the newest, when an object is in several groups (`Catalog.duplicates` lists
+the others). `fetch_group` fetches one group, `fetch_socrates` the latest
+SOCRATES report.
+
+The client follows CelesTrak's
+[usage policy](https://celestrak.org/usage-policy.php), which blocks clients
+that ignore it:
+
+- A download is cached (under `keepout.sources.cache.cache_dir()`, or
+  `$KEEPOUT_CACHE_DIR`) and reused for at least two hours (`TTL`, CelesTrak's
+  update interval) without asking CelesTrak again.
+- CelesTrak answers a repeated download of unchanged data with HTTP 403. The
+  cached copy is then current and is returned; without one,
+  `SourceUnavailable` says why.
+- Any other status (`HttpStatusError`) or network error raises at once.
+  Nothing is retried.
+- Requests name keepout, its version and its home page in the `User-Agent`.
+
+Only what is in the public catalog can be screened this way; see
+[The public catalog](#the-public-catalog).
+
+## How `screen` works
+
+`screen(primaries, catalog, start, duration=7 days, volume=DEFAULT_VOLUME)`
+returns a `ScreeningResult`: the `CloseApproach`es in chronological order,
+the element sets it left out (`skipped`), the window and the volume of each
+primary. The window has no default start: `start` is always given.
+
+1. **Element sets.** Of several element sets of one object, the newest is
+   screened; the others are skipped. An element set is also skipped when it
+   is too old or too new for the window (below), when SGP4 cannot be
+   initialised with it, or, for a primary, when the volume rule refuses it.
+2. **Pairs.** Each primary is paired with every catalog object except
+   itself (a primary may be in the catalog). The apogee/perigee filter
+   drops the pairs whose distances from the Earth's centre never come
+   within the primary's volume of each other, before anything is
+   propagated.
+3. **Search.** The remaining pairs are propagated with SGP4 (in TEME, in
+   time chunks of bounded memory) on a time grid; sieves rule out the grid
+   intervals in which a pair cannot come inside the volume, and in the
+   others every local minimum of the range is found, with its TCA.
+4. **Approaches.** Each minimum inside the primary's volume becomes a
+   `CloseApproach`: both objects' states at TCA, rotated from TEME to GCRF.
+
+### Skipped element sets
+
+Nothing is dropped silently: `result.skipped` lists every element set that
+was not screened, as a `SkippedObject` with the element set, its role
+(`"primary"` or `"catalog"`), a `SkipReason` and a detail for people.
+
+| `SkipReason` | When |
+|---|---|
+| `DUPLICATE` | another element set of the same catalog number has a newer epoch |
+| `STALE` | the window ends more than `max_age` (30 days) after the element epoch |
+| `FUTURE_EPOCH` | the window starts more than `max_lead` (3 days) before the element epoch |
+| `UNSUPPORTED` | SGP4 cannot be initialised with the elements (e.g. a catalog number above 339 999) |
+| `NO_VOLUME` | the volume rule gives no volume for this primary |
+| `PROPAGATION_FAILED` | SGP4 reports an error inside the window (e.g. the orbit has decayed) |
+
+An object with an SGP4 error inside the window is left out with every
+approach it has: its states before the error are not trusted either. An
+object the filter rules out of every pair is never propagated, so an error
+it would have is not seen.
+
+### Element age
+
+The search's guarantee (next section) assumes that every acceleration
+beyond the point mass and J2 stays below 1 m/s² (`PERTURBATION`). On the
+public catalog of October 2026, SGP4 stays below 0.2 m/s² from 3 days before
+to 38 days after each element epoch; further away some objects leave the
+bound (from 39 days after the epoch, by orders of magnitude). Hence the
+defaults: `max_age` of 30 days from the epoch to the end of the window and
+`max_lead` of 3 days from the start of the window to a later epoch (CelesTrak
+serves epochs up to about a day and a half after the day of the download).
+
+One kind of object breaks the assumption inside these limits: an object
+re-entering the atmosphere. With its perigee 113 km up, SGP4's drag on
+object 270365 exceeds 1 m/s² from 8 days after its epoch, days before SGP4
+fails for it. The guarantee does not cover such objects. GP data loses
+accuracy much sooner than 30 days, so a smaller `max_age` may suit your
+application better.
+
+### The search and its guarantee
+
+Both objects are sampled every `step` (120 s by default) and two sieves
+rule out the grid intervals in which the pair cannot come inside the
+volume. Both hold for any step, so the step changes the time screening
+takes, not what it finds:
+
+- **Speed sieve.** Each object's speed is bounded from its radius bounds
+  over the window (the perigee speed of the most eccentric orbit that fits,
+  plus 5 %), so the relative speed is below a bound *V*. A pair whose
+  ranges at the two ends of an interval of length *h* add up to more than
+  2*R* + *V h* (*R* the volume's bounding radius) cannot come within *R*
+  in between.
+- **Chord sieve.** With *A* a bound on the relative acceleration (the
+  gravity gradient over the largest range, 5 % added for the zonal terms,
+  plus twice `PERTURBATION`), the relative position stays within *A h*²/8
+  of the straight line between its two end points; if that line does not
+  come within *R* + *A h*²/8 of the primary, neither does the pair.
+
+In an interval that passes, a minimum of the range is a root of
+ρ·dρ/dt (ρ the relative position), found with Brent's method to 1 µs.
+dρ/dt comes from positions (a central difference), not from SGP4's
+velocities: SGP4's velocity is not exactly the derivative of its position
+(by up to 12 m/s), which would move the TCA of a slow pair by seconds. The
+states reported at TCA are SGP4's own, velocities included. When the range
+of a pair changes too slowly over an interval for the grid to decide (a
+co-orbital or formation-flying pair), the interval is resampled every
+10 s (`SLOW_STEP`): a minimum and a maximum of the range less than 10 s
+apart are not told apart there.
+
+keepout's tests compare the search with a brute-force one (every pair
+sampled densely) on a small catalog, and check with property tests that no
+filter or sieve drops an approach the brute-force search finds.
+
+### What counts as an approach
+
+- **Every local minimum** of the range inside the volume is its own
+  `CloseApproach`; a pair in formation can have two within minutes.
+- **The window is `(start, start + duration]`**: an approach is reported
+  when its TCA lies in it. A range still falling at the end of the window,
+  or already rising at its start, has its minimum outside. Consecutive
+  windows therefore find the minima of their union, each once.
+- **Inside the volume at TCA.** For an ellipsoid, a pass that crosses the
+  volume away from its closest point does not count: with a flat volume
+  (400 m radial, tens of kilometres in-track), a pair can enter it without
+  its point of closest approach being inside.
+- **Docked spacecraft.** CelesTrak gives docked spacecraft the element set
+  of their station. A pair at exactly the same position is taken as one
+  object, with no approach.
+
+### Workers
+
+`workers=4` deals the catalog into 4 parts, screened in separate processes,
+and merges the results. Each approach depends on its own pair's states only,
+so the result is the same, bit for bit, for any number of workers.
+The processes are started with `spawn` on every platform, which imports the
+main module again: a script must call `screen` with `workers` above 1 under
+`if __name__ == "__main__":`, as in the example above, and a script read from
+standard input (`python -`) cannot use workers.
+
+### From an approach to a Pc
+
+A `CloseApproach` holds the catalog numbers and both GCRF states at TCA; the
+miss distance, the miss vector in the primary's RTN frame (`miss_rtn`), the
+relative velocity and speed follow from them. `to_conjunction` turns an
+approach into a `Conjunction` for `compute_pc`, with a hard-body radius and
+covariances at TCA from elsewhere (your own orbit determination, a CDM).
+Without covariances only the maximum-Pc methods apply: an upper bound, not
+an estimate.
+
+```python
+from astropy.time import Time
+
+import keepout.omm
+from keepout import ScreeningVolume, compute_pc, screen
+
+catalog = keepout.omm.load("catalog.csv")  # OMM KVN/XML, CelesTrak CSV/JSON, TLE
+primaries = [omm for omm in catalog if omm.catalog_number in {63216, 58509}]
+start = Time("2026-10-06T00:00:00", scale="utc")
+result = screen(primaries, catalog, start, volume=ScreeningVolume.sfs_handbook)
+for number, volume in result.volumes.items():
+    print(number, volume.label)
+closest = min(result.approaches, key=lambda approach: approach.miss_distance)
+print(closest.tca.isot, closest.secondary_id, f"{closest.miss_distance:.0f} m")
+conjunction = closest.to_conjunction(hard_body_radius=10.0)  # no covariance
+pc = compute_pc(conjunction)
+print(pc.method, f"{pc.value:.1e}")
+```
+
+With the 222 element sets of `tests/screening/data/celestrak-fixture.csv`
+as `catalog.csv`:
+
+```text
+58509 SFS Handbook v1.7 Table 3, LEO 1
+63216 SFS Handbook v1.7 Table 3, LEO 1
+2026-10-06T08:34:04.437 57062 671 m
+alfano 7.2e-03
+```
+
+## Screening volumes
+
+A `ScreeningVolume` is an ellipsoid centred on the primary with radial,
+transverse (in-track) and normal (cross-track) semi-axes along the primary's
+RTN axes; a sphere is three equal semi-axes. `screen` takes one volume for
+every primary, or a rule (`VolumeRule`, a function of the primary's `Omm`)
+choosing each primary's own.
+
+| Volume | Size | Source |
+|---|---|---|
+| `DEFAULT_VOLUME` | 5 km sphere | the threshold of CelesTrak's SOCRATES reports |
+| `ScreeningVolume.nasa_gp_data()` | 10 km sphere | NASA CA Best Practices Handbook, Rev. 2, Appendix E |
+| `ScreeningVolume.sfs_handbook` (a rule) | by orbit regime, below | USSPACECOM Spaceflight Safety Handbook for Satellite Operators, v1.7, Table 3 |
+| `ScreeningVolume.sphere(radius)`, `ScreeningVolume(radial, transverse, normal)` | your own | |
+
+**5 km**, the default, makes the results comparable with SOCRATES. It is
+not a safety margin for GP data.
+
+**10 km.** NASA's analysis of screenings on GP data against screenings on
+precision orbits finds that a miss-distance threshold of about 10 km is
+needed to catch 95 % of the high-Pc events, because of the errors of GP
+data (NASA Spacecraft Conjunction Assessment and Collision Avoidance Best
+Practices Handbook, NASA/SP-20205011318 Rev. 2, 2026, Appendix E).
+
+**Spaceflight Safety Handbook, Table 3** ("HAC screening volumes"), radial ×
+in-track × cross-track:
+
+| Regime (`SfsRegime`) | Orbit | Volume |
+|---|---|---|
+| LEO 1 | perigee altitude up to 500 km | 0.4 × 44 × 51 km |
+| LEO 2 | perigee above 500 km, up to 750 km | 0.4 × 25 × 25 km |
+| LEO 3 | perigee above 750 km, up to 1200 km | 0.4 × 12 × 12 km |
+| LEO 4 | perigee above 1200 km, up to 2000 km | 0.4 × 2 × 2 km |
+| Deep Space | period between 1300 and 1800 min, inclination below 35° | 10 × 10 × 10 km |
+| outside Table 3 | anything else (MEO, HEO, inclined geosynchronous) | 10 × 10 × 10 km |
+
+Every row of the table also needs an eccentricity below 0.25. keepout makes
+three choices the table leaves open:
+
+- **Semi-axes.** The table does not say whether its sizes are semi-axes or
+  full extents; keepout reads them as semi-axes, the larger of the two
+  readings, so no approach the handbook would report is missed.
+- **Fixed ellipsoids.** The LEO rows are covariance screenings, for which
+  the 18th Space Defense Squadron builds a volume from both objects'
+  covariances; GP data has none, so keepout uses the rows' sizes as fixed
+  ellipsoids.
+- **Outside the table.** An orbit in no row gets the deep-space volume,
+  which the table labels "Deep Space (GEO/HEO/MEO)"; its regime is
+  `SfsRegime.OUTSIDE`, so the classification stays honest.
+
+The regime comes from SGP4's own mean elements (its perigee and un-Kozai'd
+period, with the WGS 72 constants). A two-body reading of the element set's
+mean motion would put LEO perigees 3 km lower to 6 km higher, enough to move
+some orbits across a regime boundary.
+
+## Limits of GP data
+
+GP element sets are mean elements that the 18th Space Defense Squadron fits
+to its tracking and publishes for every catalogued object; they are what
+anyone can screen with. They are not precise orbits:
+
+- **No covariance.** GP data says nothing about its own uncertainty, so a
+  probability of collision cannot be computed from it; an approach found on
+  GP data gives a miss distance, not a risk.
+- **Kilometre errors.** SGP4's analytic theory and the fit leave errors of
+  kilometres in low orbits within days of the element epoch, growing with
+  the time since it. This is why NASA finds a 10 km threshold necessary on
+  GP data to catch 95 % of the high-Pc events (Appendix E of its handbook),
+  where the 5 km default only matches SOCRATES.
+- **Each object its own epoch.** Element sets are hours to days old, each
+  from its own fit; SOCRATES and keepout give the same approach only from
+  the same element sets, and two element sets of the same epoch can still
+  differ (see the [SOCRATES report](screening-socrates.md)).
+
+Use GP screening to find what to look at. Decisions need precise orbits
+with covariance, such as the conjunction data messages (CDMs) of an
+operational conjunction assessment service, which keepout reads with
+`keepout.cdm` and assesses as in [Risk assessment](risk.md).
+
+## The public catalog
+
+CelesTrak publishes only part of the catalog: about 20 000 objects in its
+groups (19 914 on 2026-10-06), while SOCRATES screens the whole catalog of
+Space-Track.org (24 194 objects appear in its report of that day). Most
+rocket bodies and debris are in no public group: 40 211 of the 186 229
+approaches of SOCRATES's report of 2026-10-06 involve an object outside the
+public catalog, and screening against `fetch_catalog()` misses such
+approaches. The full catalog comes with the Space-Track.org client
+(milestone M6); `screen` takes any element sets, so a catalog downloaded
+from Space-Track.org and read with `keepout.omm.load` can be screened
+already.
+
+## Validation and performance
+
+- **[Screening against SOCRATES](screening-socrates.md).** The 1 275
+  approaches of SOCRATES's report of 2026-10-06 whose objects are in the
+  public catalog with the element sets SOCRATES used, screened with
+  keepout's defaults: all agree within SOCRATES's print precision (1 ms,
+  0.5 m, 0.5 m/s; 0.5 s for the TCA of slow pairs) except 5 approaches of
+  two objects whose element sets evidently differ from SOCRATES's, and one
+  left out as stale. `tools/screening_report.py` generates the report; CI
+  runs it with `--check`.
+- **Benchmark.** 20 LEO primaries against the 19 914 objects of the frozen
+  public catalog for 7 days take about 9 s with 4 workers on a desktop CPU
+  (the target is under 60 s); `tools/screening_benchmark.py` writes the
+  numbers to the [README](https://github.com/Kyrtap1309/keepout#performance).
+  CI also times every change against its merge base on the same runner (a
+  reduced catalog, one process, five runs each, alternately) and fails when
+  the median CPU time rises by more than 20 %.
+
+## Data
+
+The frozen catalog, test fixture and SOCRATES excerpt in
+`tests/screening/data/` (see the `NOTICE` there): Data: USSPACECOM/18 SDS
+via Space-Track.org, retrieved from CelesTrak (celestrak.org) on
+2026-10-06. This is basic space situational awareness data, which the
+Space-Track.org user agreement allows to be redistributed with this
+citation; it is not covered by keepout's MIT licence. Cite data you
+download from CelesTrak in the same way when you publish results computed
+from it.

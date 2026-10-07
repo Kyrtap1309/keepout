@@ -3,7 +3,15 @@ import inspect
 import pytest
 
 from keepout import errors
-from keepout.errors import CdmParseError, GeometryError, KeepoutError, UnsupportedFrame
+from keepout.errors import (
+    CdmParseError,
+    GeometryError,
+    HttpStatusError,
+    KeepoutError,
+    OmmParseError,
+    SourceUnavailable,
+    UnsupportedFrame,
+)
 
 ERRORS = [
     value
@@ -41,8 +49,31 @@ def test_cdm_parse_error_without_context() -> None:
     assert str(CdmParseError("empty message")) == "empty message"
 
 
+def test_omm_parse_error_reports_record_line_path_and_keyword() -> None:
+    error = OmmParseError(
+        "bad number", record=3, line=4, path="omm/body/segment[3]", keyword="BSTAR"
+    )
+    assert str(error) == (
+        "bad number (record 3, line 4, at omm/body/segment[3], keyword BSTAR)"
+    )
+    assert (error.record, error.line, error.path, error.keyword) == (
+        3,
+        4,
+        "omm/body/segment[3]",
+        "BSTAR",
+    )
+    assert str(OmmParseError("empty message")) == "empty message"
+
+
 def test_an_unsupported_frame_is_a_geometry_and_value_error() -> None:
     # A ValueError like StateVector's other argument errors, and the keepout
     # error of a message (e.g. a CDM) in a frame keepout cannot handle.
     assert issubclass(UnsupportedFrame, GeometryError)
     assert issubclass(UnsupportedFrame, ValueError)
+
+
+def test_an_http_status_error_is_a_source_error_with_url_and_status() -> None:
+    error = HttpStatusError("cannot download u: HTTP 503", url="u", status=503)
+    assert isinstance(error, SourceUnavailable)
+    assert str(error) == "cannot download u: HTTP 503"
+    assert (error.url, error.status) == ("u", 503)

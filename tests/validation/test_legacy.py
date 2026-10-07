@@ -120,7 +120,7 @@ def test_an_unused_covariance_is_unknown(tmp_path: Path) -> None:
     [
         (legacy_cdm().replace("TCA =", "XCA ="), "no TCA"),
         (legacy_cdm().replace("OBJECT = OBJECT2\n", ""), "expected 2 object sections"),
-        (legacy_cdm("TEME"), "bad REF_FRAME .unsupported reference frame 'TEME'"),
+        (legacy_cdm("TOD"), "bad REF_FRAME .unsupported reference frame 'TOD'"),
         (legacy_cdm().replace("REF_FRAME", "XREF_FRAME"), "bad REF_FRAME"),
         (legacy_cdm().replace("CN_N = 25.0", "CN_N = abc", 1), "no numeric CN_N"),
     ],
