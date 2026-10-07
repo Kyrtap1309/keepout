@@ -125,7 +125,9 @@ catalog = fetch_catalog()  # CelesTrak's public catalog, cached for two hours
 iss = [omm for omm in catalog.omms if omm.catalog_number == 25544]
 result = screen(iss, catalog.omms, Time.now())  # the next 7 days, a 5 km sphere
 for approach in result.approaches:
-    print(approach.tca.isot, approach.secondary_id, f"{approach.miss_distance:.0f} m")
+    print(
+        approach.tca.isot, approach.secondary_number, f"{approach.miss_distance:.0f} m"
+    )
 print(Counter(skipped.reason.value for skipped in result.skipped))  # sets left out
 ```
 

@@ -23,6 +23,7 @@ from keepout.screening import (
     DEFAULT_VOLUME,
     CloseApproach,
     ScreeningResult,
+    ScreeningRole,
     ScreeningVolume,
     SkippedObject,
     SkipReason,
@@ -159,7 +160,7 @@ def approach_at(seconds: float, primary: int, secondary: int) -> CloseApproach:
 
 
 def skip(index: int, role: str, reason: SkipReason) -> SkippedObject:
-    return SkippedObject(FIXTURE[index], role, reason, "why")  # type: ignore[arg-type]
+    return SkippedObject(FIXTURE[index], ScreeningRole(role), reason, "why")
 
 
 def test_a_result_keeps_approaches_in_time_order_and_skipped_by_object() -> None:
@@ -184,7 +185,7 @@ def test_a_result_keeps_approaches_in_time_order_and_skipped_by_object() -> None
         {25544: DEFAULT_VOLUME, 20580: ScreeningVolume.nasa_gp_data()},
         120,
     )
-    assert [(a.primary_id, a.secondary_id) for a in result.approaches] == [
+    assert [(a.primary_number, a.secondary_number) for a in result.approaches] == [
         (7, 7),
         (3, 2),
         (3, 4),

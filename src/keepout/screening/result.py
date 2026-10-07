@@ -21,7 +21,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import cached_property
 from types import MappingProxyType
-from typing import Final, Literal, Self, TypeAlias
+from typing import Final, Self
 
 import astropy.units as u
 import numpy as np
@@ -45,10 +45,18 @@ __all__ = [
     "SkippedObject",
 ]
 
-ScreeningRole: TypeAlias = Literal["primary", "catalog"]
-"""Which input of a screening an element set came from."""
 
-_ROLES: Final[tuple[ScreeningRole, ...]] = ("primary", "catalog")
+class ScreeningRole(enum.StrEnum):
+    """Which input of a screening an element set came from; primaries sort
+    first."""
+
+    PRIMARY = "primary"
+    """Given as a primary."""
+    CATALOG = "catalog"
+    """Given in the catalog."""
+
+
+_ROLES: Final = tuple(ScreeningRole)
 
 
 @dataclass(frozen=True, eq=False)
@@ -60,9 +68,9 @@ class CloseApproach:
 
     Parameters
     ----------
-    primary_id
+    primary_number
         Catalog number of the primary.
-    secondary_id
+    secondary_number
         Catalog number of the catalog object.
     primary_state
         The primary's GCRF state at TCA.
@@ -76,8 +84,8 @@ class CloseApproach:
         :data:`keepout.objects.EPOCH_TOLERANCE_S`.
     """
 
-    primary_id: int
-    secondary_id: int
+    primary_number: int
+    secondary_number: int
     primary_state: StateVector
     secondary_state: StateVector
 
@@ -164,15 +172,15 @@ class CloseApproach:
         """
         objects = []
         for number, state, covariance in (
-            (self.primary_id, self.primary_state, primary_covariance),
-            (self.secondary_id, self.secondary_state, secondary_covariance),
+            (self.primary_number, self.primary_state, primary_covariance),
+            (self.secondary_number, self.secondary_state, secondary_covariance),
         ):
             gcrf = None if covariance is None else covariance.in_gcrf(state)
             objects.append(ObjectState(str(number), state, gcrf))
         return Conjunction(objects[0], objects[1], hard_body_radius)
 
 
-class SkipReason(enum.Enum):
+class SkipReason(enum.StrEnum):
     """Why screening left an element set out."""
 
     DUPLICATE = "duplicate"
@@ -222,7 +230,12 @@ class SkippedObject:
 
 def _chronological(approach: CloseApproach) -> tuple[float, float, int, int]:
     tca = approach.tca
-    return float(tca.jd1), float(tca.jd2), approach.primary_id, approach.secondary_id
+    return (
+        float(tca.jd1),
+        float(tca.jd2),
+        approach.primary_number,
+        approach.secondary_number,
+    )
 
 
 def _skip_order(skipped: SkippedObject) -> tuple[int, int, float, float, int]:

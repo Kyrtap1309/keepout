@@ -60,8 +60,8 @@ def summary(result: ScreeningResult) -> list[object]:
     """Everything in a result, exact, for comparisons."""
     approaches: list[object] = [
         (
-            a.primary_id,
-            a.secondary_id,
+            a.primary_number,
+            a.secondary_number,
             a.tca.jd1,
             a.tca.jd2,
             a.primary_state.r.tolist(),
@@ -107,12 +107,12 @@ def test_approaches_are_the_minima_of_the_search_in_gcrf() -> None:
     ).run()
 
     def ids(m: RangeMinimum) -> tuple[int, int]:
-        return primaries[m.primary].catalog_number, numbers[m.secondary]
+        return primaries[m.primary_index].catalog_number, numbers[m.secondary_index]
 
     minima = sorted(found.minima, key=lambda m: (m.offset, *ids(m)))
     assert len(result.approaches) == len(minima) == 122
     for approach, minimum in zip(result.approaches, minima, strict=True):
-        assert (approach.primary_id, approach.secondary_id) == ids(minimum)
+        assert (approach.primary_number, approach.secondary_number) == ids(minimum)
         tca = START + minimum.offset * u.s
         assert abs((approach.tca - tca).to_value(u.s)) < 1e-9
         assert 0.0 < minimum.offset <= DAY
@@ -143,8 +143,8 @@ def test_a_primary_is_not_screened_against_itself() -> None:
     )
     for primary in (BY_NUMBER[68377], moved):
         result = screen([primary], FIXTURE, START, DAY)
-        assert {a.secondary_id for a in result.approaches} == {68378}
-        assert all(a.primary_id == 68377 for a in result.approaches)
+        assert {a.secondary_number for a in result.approaches} == {68378}
+        assert all(a.primary_number == 68377 for a in result.approaches)
 
 
 def test_the_newest_of_several_element_sets_is_screened() -> None:
@@ -219,7 +219,7 @@ def test_element_sets_too_far_from_the_window_are_left_out() -> None:
     )
     assert STALE not in result.volumes
     left_out = stale | ahead
-    assert not {a.secondary_id for a in result.approaches} & left_out
+    assert not {a.secondary_number for a in result.approaches} & left_out
     assert result.approaches
 
 
@@ -376,7 +376,9 @@ def test_every_socrates_approach_of_the_fixture_is_found_in_gcrf() -> None:
     found: dict[tuple[int, int], list[npt.NDArray[np.float64]]] = {}
     for a in result.approaches:
         row = [(a.tca - start).to_value(u.s), a.miss_distance, a.relative_speed]
-        found.setdefault((a.primary_id, a.secondary_id), []).append(np.array(row))
+        found.setdefault((a.primary_number, a.secondary_number), []).append(
+            np.array(row)
+        )
     assert len(socrates) == 1033
     for approach in socrates:
         offset = (approach.tca - start).sec

@@ -278,12 +278,14 @@ def compare(
     pairs = {
         (approaches[index].primary, approaches[index].secondary) for index in compared
     }
-    found = [a for a in result.approaches if (a.primary_id, a.secondary_id) in pairs]
+    found = [
+        a for a in result.approaches if (a.primary_number, a.secondary_number) in pairs
+    ]
     by_pair: dict[tuple[int, int], list[int]] = {}
     for position, approach in enumerate(found):
-        by_pair.setdefault((approach.primary_id, approach.secondary_id), []).append(
-            position
-        )
+        by_pair.setdefault(
+            (approach.primary_number, approach.secondary_number), []
+        ).append(position)
     found_at = [seconds_between(start, approach.tca) for approach in found]
     candidates = sorted(
         (
@@ -476,8 +478,8 @@ def _nearest_other(approach: CloseApproach, result: ScreeningResult) -> float | 
     gaps = [
         abs(float((other.tca - approach.tca).to_value(u.s)))
         for other in result.approaches
-        if (other.primary_id, other.secondary_id)
-        == (approach.primary_id, approach.secondary_id)
+        if (other.primary_number, other.secondary_number)
+        == (approach.primary_number, approach.secondary_number)
         and other is not approach
     ]
     return round(min(gaps), 3) if gaps else None
@@ -522,7 +524,7 @@ def summarise(
                 "secondary": a.secondary,
                 "tca": a.tca.iso,
                 "object": number,
-                "reason": left_out[number].reason.value,
+                "reason": left_out[number].reason,
                 "detail": left_out[number].detail,
             }
         )
@@ -561,8 +563,8 @@ def summarise(
         "differences": differences,
         "keepout_only": [
             {
-                "primary": a.primary_id,
-                "secondary": a.secondary_id,
+                "primary": a.primary_number,
+                "secondary": a.secondary_number,
                 "tca": a.tca.iso,
                 "miss_distance": _metres(a.miss_distance),
                 "relative_speed": _metres(a.relative_speed),

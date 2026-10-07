@@ -196,8 +196,10 @@ def screen(
         raise ValueError(f"max_states must be at least 1, got {max_states}")
     window = _Window(start, float(duration), float(step), max_states)
     skipped: list[SkippedObject] = []
-    own = _current(primaries, "primary", window, max_age, max_lead, skipped)
-    others = _current(catalog, "catalog", window, max_age, max_lead, skipped)
+    own = _current(primaries, ScreeningRole.PRIMARY, window, max_age, max_lead, skipped)
+    others = _current(
+        catalog, ScreeningRole.CATALOG, window, max_age, max_lead, skipped
+    )
     propagator, volumes = _primaries(own, volume, skipped)
     bounds = propagator.radius_bounds(start, window.duration)
     numbers = np.array([omm.catalog_number for omm in propagator.omms], dtype=np.int64)
@@ -220,17 +222,20 @@ def screen(
         for result in results
         for index, message in result.unsupported
     ]
-    _skip_unsupported(lost, "catalog", skipped)
+    _skip_unsupported(lost, ScreeningRole.CATALOG, skipped)
     found = SearchResult.merge(result.search for result in results)
     primary_omms = propagator.omms
     gone_primaries = _skip_failed(
-        found.primary_failures, primary_omms, "primary", window, skipped
+        found.primary_failures, primary_omms, ScreeningRole.PRIMARY, window, skipped
     )
-    gone = _skip_failed(found.catalog_failures, others, "catalog", window, skipped)
+    gone = _skip_failed(
+        found.catalog_failures, others, ScreeningRole.CATALOG, window, skipped
+    )
     minima = [
         minimum
         for minimum in found.minima
-        if minimum.primary not in gone_primaries and minimum.secondary not in gone
+        if minimum.primary_index not in gone_primaries
+        and minimum.secondary_index not in gone
     ]
     screened_volumes = {
         omm.catalog_number: volumes[index]
@@ -335,7 +340,9 @@ def _primaries(
     volume, and their volumes."""
     initialised, _, rejected = Sgp4Propagator.from_omms(omms)
     _skip_unsupported(
-        [(omms[index], str(error)) for index, error in rejected], "primary", skipped
+        [(omms[index], str(error)) for index, error in rejected],
+        ScreeningRole.PRIMARY,
+        skipped,
     )
     chosen: list[int] = []
     volumes: list[ScreeningVolume] = []
@@ -344,7 +351,9 @@ def _primaries(
             volumes.append(volume_for(volume, omm))
         except KeepoutError as error:
             reason = SkipReason.NO_VOLUME
-            skipped.append(SkippedObject(omm, "primary", reason, str(error)))
+            skipped.append(
+                SkippedObject(omm, ScreeningRole.PRIMARY, reason, str(error))
+            )
             continue
         chosen.append(index)
     return initialised.subset(np.array(chosen, dtype=np.intp)), volumes
@@ -409,7 +418,7 @@ def _screen_part(part: _Part) -> _PartResult:
     )
     found = search.run(max_states=window.max_states)
     minima = [
-        replace(minimum, secondary=int(columns[minimum.secondary]))
+        replace(minimum, secondary_index=int(columns[minimum.secondary_index]))
         for minimum in found.minima
     ]
     failures = {
@@ -441,8 +450,8 @@ def _approaches(
         tca = times[i]
         approaches.append(
             CloseApproach(
-                primaries[minimum.primary].catalog_number,
-                catalog[minimum.secondary].catalog_number,
+                primaries[minimum.primary_index].catalog_number,
+                catalog[minimum.secondary_index].catalog_number,
                 StateVector(tca, r_gcrf[i, 0], v_gcrf[i, 0], "GCRF"),
                 StateVector(tca, r_gcrf[i, 1], v_gcrf[i, 1], "GCRF"),
             )

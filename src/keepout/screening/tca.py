@@ -272,9 +272,9 @@ class RangeMinimum:
 
     Parameters
     ----------
-    primary
+    primary_index
         Position of the primary among the search's primaries.
-    secondary
+    secondary_index
         Position of the other object in the search's catalog.
     offset
         Time of closest approach [s since the start of the window].
@@ -292,8 +292,8 @@ class RangeMinimum:
         If a state vector does not have shape ``(3,)``.
     """
 
-    primary: int
-    secondary: int
+    primary_index: int
+    secondary_index: int
     offset: float
     distance: float
     r_primary: FloatArray
@@ -307,7 +307,7 @@ class RangeMinimum:
 
 
 def _order(minimum: RangeMinimum) -> tuple[int, int, float]:
-    return minimum.primary, minimum.secondary, minimum.offset
+    return minimum.primary_index, minimum.secondary_index, minimum.offset
 
 
 def _earliest(

@@ -199,8 +199,8 @@ def summary(result: SearchResult) -> list[object]:
     """Everything in a result, exact, for comparisons."""
     minima: list[object] = [
         (
-            m.primary,
-            m.secondary,
+            m.primary_index,
+            m.secondary_index,
             m.offset,
             m.distance,
             m.r_primary.tolist(),
@@ -326,7 +326,7 @@ def test_a_pass_inside_the_volume_is_found_at_its_tca(
     catalog = lines(passing(miss, relative, tca))
     result = search(catalog).run()
     (minimum,) = result.minima
-    assert (minimum.primary, minimum.secondary) == (0, 0)
+    assert (minimum.primary_index, minimum.secondary_index) == (0, 0)
     assert minimum.offset == pytest.approx(tca, abs=precision)
     assert minimum.distance == pytest.approx(3 * KM, abs=1e-6)
     expected = (
@@ -359,7 +359,7 @@ def test_only_passes_inside_the_volume_count(relative: npt.NDArray[np.float64]) 
         passing(across * 100.0, relative, 3000.0),
     )
     found = search(catalog).run().minima
-    assert [m.secondary for m in found] == [0, 2]
+    assert [m.secondary_index for m in found] == [0, 2]
 
 
 def rtn_axes(tca: float) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
@@ -381,7 +381,7 @@ def test_an_ellipsoid_counts_the_position_at_tca() -> None:
         passing(rtn_axes(3000.0)[0] * 600.0, across, 3000.0),
     )
     found = search(catalog, volume=volume).run().minima
-    assert [m.secondary for m in found] == [1, 2]
+    assert [m.secondary_index for m in found] == [1, 2]
 
 
 def test_minima_outside_the_window_are_not_found() -> None:
@@ -395,7 +395,7 @@ def test_minima_outside_the_window_are_not_found() -> None:
         passing(miss, FAST, 2 * HOUR + 0.5),
     )
     found = search(catalog).run().minima
-    assert [m.secondary for m in found] == [1, 2]
+    assert [m.secondary_index for m in found] == [1, 2]
 
 
 @pytest.mark.parametrize(
@@ -413,9 +413,9 @@ def test_consecutive_windows_find_the_minima_of_the_whole(
     first = search(catalog, 3000.0).run().minima
     later = REFERENCE + 3000.0 * u.s
     second = search(catalog, 2 * HOUR - 3000.0, start=later).run().minima
-    assert [m.secondary for m in whole] == [0, 1, 2, 3]
-    assert [m.secondary for m in first] == [0, 1]
-    assert [m.secondary for m in second] == [2, 3]
+    assert [m.secondary_index for m in whole] == [0, 1, 2, 3]
+    assert [m.secondary_index for m in first] == [0, 1]
+    assert [m.secondary_index for m in second] == [2, 3]
     joined = [m.offset for m in first] + [3000.0 + m.offset for m in second]
     np.testing.assert_allclose(
         [m.offset for m in whole], joined, rtol=0, atol=precision
@@ -458,7 +458,7 @@ def test_every_pair_of_several_primaries_is_searched() -> None:
     catalog = lines(passing(miss, FAST, 900.0), near_other, passing(miss, FAST, 300.0))
     pairs = np.array([[True, True, False], [True, True, True]])
     found = search(catalog, primaries=primaries, pairs=pairs).run().minima
-    assert [(m.primary, m.secondary) for m in found] == [(0, 0), (1, 1)]
+    assert [(m.primary_index, m.secondary_index) for m in found] == [(0, 0), (1, 1)]
     assert [m.offset for m in found] == pytest.approx([900.0, 1500.0], abs=1e-6)
 
 
@@ -509,7 +509,7 @@ def test_failed_objects_are_listed_with_their_first_failure() -> None:
     fail[2] = (-np.inf, 600.0)  # fails at the start
     catalog = StraightLines(catalog.r0, catalog.v0, fail)
     result = search(catalog).run()
-    assert [(m.secondary, round(m.offset, 6)) for m in result.minima] == [
+    assert [(m.secondary_index, round(m.offset, 6)) for m in result.minima] == [
         (0, 1000.0),
         (2, 5000.0),
         (3, 3000.0),
@@ -565,7 +565,7 @@ def test_chunks_do_not_change_the_result(max_states: int) -> None:
     searched = search(FAILING)
     whole = searched.run()
     # The failure loses the minimum of its own interval only.
-    companion = [m.offset for m in whole.minima if m.secondary == 5]
+    companion = [m.offset for m in whole.minima if m.secondary_index == 5]
     expected = (math.pi - 0.3) / CIRCLING + 200.0 * np.arange(36)
     np.testing.assert_allclose(companion, np.delete(expected, 14), rtol=0, atol=1e-5)
     assert len(whole.minima) == 4 + 35
@@ -660,7 +660,7 @@ def test_results_are_sorted_and_merge_the_earliest_failures() -> None:
         {2: ObjectFailure(50.0, 6), 0: ObjectFailure(10.0, 1)},
         {7: ObjectFailure(30.0, 6)},
     )
-    assert [(m.primary, m.secondary, m.offset) for m in first.minima] == [
+    assert [(m.primary_index, m.secondary_index, m.offset) for m in first.minima] == [
         (0, 3, 2.0),
         (0, 3, 9.0),
         (1, 0, 5.0),
@@ -670,7 +670,7 @@ def test_results_are_sorted_and_merge_the_earliest_failures() -> None:
         (minimum(0, 0, 1.0),), {2: ObjectFailure(40.0, 3)}, {7: ObjectFailure(31.0, 1)}
     )
     merged = SearchResult.merge([first, second])
-    assert [(m.primary, m.secondary) for m in merged.minima] == [
+    assert [(m.primary_index, m.secondary_index) for m in merged.minima] == [
         (0, 0),
         (0, 3),
         (0, 3),
@@ -765,7 +765,10 @@ def check_against_oracle(
     assert failed <= oracle.failed
     found: dict[tuple[int, int], list[RangeMinimum]] = {}
     for minimum in result.minima:
-        pair = (primaries[minimum.primary], FIXTURE[minimum.secondary].catalog_number)
+        pair = (
+            primaries[minimum.primary_index],
+            FIXTURE[minimum.secondary_index].catalog_number,
+        )
         found.setdefault(pair, []).append(minimum)
     row = {number: i for i, number in enumerate(primaries)}
     inside = 0
@@ -857,7 +860,10 @@ def test_every_socrates_approach_of_the_fixture_is_found() -> None:
     result = fixture_search(primaries, start, duration, DEFAULT_VOLUME)[0].run()
     found: dict[tuple[int, int], list[RangeMinimum]] = {}
     for minimum in result.minima:
-        pair = (primaries[minimum.primary], FIXTURE[minimum.secondary].catalog_number)
+        pair = (
+            primaries[minimum.primary_index],
+            FIXTURE[minimum.secondary_index].catalog_number,
+        )
         found.setdefault(pair, []).append(minimum)
     assert len(SOCRATES) == 1033
     for approach in SOCRATES:

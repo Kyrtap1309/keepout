@@ -25,7 +25,7 @@ def main() -> None:
         radial, transverse, normal = approach.miss_rtn
         print(
             approach.tca.isot,
-            approach.secondary_id,
+            approach.secondary_number,
             f"{approach.miss_distance:.0f} m",
             f"(R {radial:.0f}, T {transverse:.0f}, N {normal:.0f})",
             f"{approach.relative_speed:.0f} m/s",
@@ -127,8 +127,9 @@ primary. The window has no default start: `start` is always given.
 ### Skipped element sets
 
 Nothing is dropped silently: `result.skipped` lists every element set that
-was not screened, as a `SkippedObject` with the element set, its role
-(`"primary"` or `"catalog"`), a `SkipReason` and a detail for people.
+was not screened, as a `SkippedObject` with the element set, its
+`ScreeningRole` (`PRIMARY` or `CATALOG`), a `SkipReason` and a detail for
+people.
 
 | `SkipReason` | When |
 |---|---|
@@ -245,7 +246,7 @@ result = screen(primaries, catalog, start, volume=ScreeningVolume.sfs_handbook)
 for number, volume in result.volumes.items():
     print(number, volume.label)
 closest = min(result.approaches, key=lambda approach: approach.miss_distance)
-print(closest.tca.isot, closest.secondary_id, f"{closest.miss_distance:.0f} m")
+print(closest.tca.isot, closest.secondary_number, f"{closest.miss_distance:.0f} m")
 conjunction = closest.to_conjunction(hard_body_radius=10.0)  # no covariance
 pc = compute_pc(conjunction)
 print(pc.method, f"{pc.value:.1e}")

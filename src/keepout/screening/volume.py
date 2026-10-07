@@ -266,7 +266,7 @@ def volume_for(volume: ScreeningVolume | VolumeRule, primary: Omm) -> ScreeningV
     return chosen
 
 
-class SfsRegime(enum.Enum):
+class SfsRegime(enum.StrEnum):
     """Orbit regimes of the Spaceflight Safety Handbook's Table 3.
 
     The LEO regimes need an eccentricity below :data:`SFS_ECCENTRICITY`

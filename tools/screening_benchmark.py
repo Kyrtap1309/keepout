@@ -240,9 +240,7 @@ def found(volume: str, result: ScreeningResult) -> Found:
         "volume": volume,
         "screened": result.catalog_count,
         "skipped": {
-            reason.value: reasons.count(reason)
-            for reason in SkipReason
-            if reason in reasons
+            reason: reasons.count(reason) for reason in SkipReason if reason in reasons
         },
         "approaches": len(result.approaches),
     }
