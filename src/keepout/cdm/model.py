@@ -369,7 +369,7 @@ class CdmObject:
         Raises
         ------
         UnsupportedFrame
-            If ``REF_FRAME`` is not GCRF, EME2000 or ITRF (a
+            If ``REF_FRAME`` is not GCRF, EME2000, ITRF or TEME (a
             :class:`~keepout.errors.GeometryError`).
         """
         return StateVector(

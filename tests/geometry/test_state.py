@@ -36,9 +36,9 @@ def test_state_vector_rejects_bad_vectors(
 
 
 def test_state_vector_rejects_unknown_frame() -> None:
-    with pytest.raises(UnsupportedFrame, match="unsupported reference frame 'TEME'"):
+    with pytest.raises(UnsupportedFrame, match="unsupported reference frame 'TOD'"):
         # The wrong literal is the point of the test.
-        StateVector(EPOCH, [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], "TEME")  # type: ignore[arg-type]
+        StateVector(EPOCH, [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], "TOD")  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize("frame", REF_FRAMES)
@@ -46,7 +46,9 @@ def test_as_ref_frame_accepts_supported_frames(frame: str) -> None:
     assert as_ref_frame(frame) == frame
 
 
-@pytest.mark.parametrize("name", ["TEME", "gcrf", "", None])
+@pytest.mark.parametrize("name", ["TOD", "teme", "gcrf", "", None])
 def test_as_ref_frame_rejects_other_names(name: str | None) -> None:
-    with pytest.raises(UnsupportedFrame, match="expected one of GCRF, EME2000, ITRF"):
+    with pytest.raises(
+        UnsupportedFrame, match=r"expected one of GCRF, EME2000, ITRF, TEME$"
+    ):
         as_ref_frame(name)

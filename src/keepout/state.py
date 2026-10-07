@@ -13,7 +13,7 @@ from keepout.errors import UnsupportedFrame
 
 __all__ = ["REF_FRAMES", "RefFrame", "StateVector", "as_ref_frame"]
 
-RefFrame: TypeAlias = Literal["GCRF", "EME2000", "ITRF"]
+RefFrame: TypeAlias = Literal["GCRF", "EME2000", "ITRF", "TEME"]
 """Reference frames a state vector can be expressed in."""
 
 REF_FRAMES: Final[tuple[RefFrame, ...]] = get_args(RefFrame)

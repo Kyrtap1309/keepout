@@ -6,6 +6,8 @@
   Earth-rotation term of the velocity.
 * EME2000 is rotated to GCRF by the IAU 2006 frame bias (about 23 mas, ~0.8 m
   at 7000 km), so objects given in different frames stay consistent.
+* TEME, the frame of SGP4 output, is rotated to GCRF with ERFA (see
+  :func:`teme_to_gcrf`); no Earth-orientation data is needed.
 """
 
 from __future__ import annotations
@@ -26,14 +28,17 @@ from keepout.state import StateVector
 __all__ = [
     "FRAME_BIAS",
     "PARALLEL_RTOL",
+    "TEME_RATE_STEP",
     "inertial_to_rtn_covariance",
     "rtn_rotation",
     "rtn_to_inertial_covariance",
+    "teme_to_gcrf",
     "to_gcrf",
     "to_gcrf_all",
 ]
 
 _J2000_JD: Final = 2451545.0
+_DAY: Final = 86400.0
 # GCRS -> mean J2000 (EME2000) frame bias; constant, so any date gives it.
 FRAME_BIAS: Final[FloatArray] = np.array(erfa.bp06(_J2000_JD, 0.0)[0], dtype=np.float64)
 read_only(FRAME_BIAS)
@@ -42,6 +47,11 @@ read_only(FRAME_BIAS)
 PARALLEL_RTOL: Final = 1e-12
 """Relative size below which a vector's component perpendicular to another
 is taken as zero: position and velocity are then parallel."""
+
+TEME_RATE_STEP: Final = 600.0
+"""Half-width [s] of the central difference that gives the rate of the TEME
+to GCRF rotation: long enough for rounding in GMST and ERA to stay small,
+short against nutation (error below 1e-8 m/s at GEO)."""
 
 
 def rtn_rotation(r: npt.ArrayLike, v: npt.ArrayLike) -> FloatArray:
@@ -158,13 +168,126 @@ def _itrf_to_gcrf(states: Sequence[StateVector]) -> list[StateVector]:
     ]
 
 
+def _teme_rotation(
+    tt1: FloatArray, tt2: FloatArray, ut1: FloatArray, ut2: FloatArray
+) -> FloatArray:
+    """GCRF <- TEME rotation matrices, shape ``(..., 3, 3)``.
+
+    ``r_gcrf = C^T R3(GMST82 - ERA) r_teme``, with ``C`` the IAU 2006/2000A
+    GCRS -> CIRS matrix (TT) and ``R3`` ERFA's rotation of the axes about z.
+    """
+    theta = erfa.gmst82(ut1, ut2) - erfa.era00(ut1, ut2)
+    cosine, sine = np.cos(theta), np.sin(theta)
+    about_z = np.zeros((*np.shape(theta), 3, 3))
+    about_z[..., 0, 0] = about_z[..., 1, 1] = cosine
+    about_z[..., 0, 1] = sine
+    about_z[..., 1, 0] = -sine
+    about_z[..., 2, 2] = 1.0
+    gcrs_to_cirs = erfa.c2i06a(tt1, tt2)
+    rotation: FloatArray = np.swapaxes(gcrs_to_cirs, -1, -2) @ about_z
+    return rotation
+
+
+def _components(value: npt.ArrayLike, name: str) -> FloatArray:
+    """``value`` as a float64 array whose last axis has length 3."""
+    array = np.asarray(value, dtype=np.float64)
+    if array.ndim == 0 or array.shape[-1] != 3:
+        raise ValueError(f"{name} must have 3 components on its last axis")
+    return array
+
+
+def teme_to_gcrf(
+    epochs: Time, r: npt.ArrayLike, v: npt.ArrayLike
+) -> tuple[FloatArray, FloatArray]:
+    """Convert TEME positions and velocities to GCRF, many at once.
+
+    TEME (true equator, mean equinox of date) is the frame of SGP4 output.
+    Following Vallado et al. (2006), TEME is turned to the pseudo-Earth-fixed
+    frame by GMST (IAU 1982) and then, through ITRF, to GCRF by the IAU
+    2006/2000A model. Written as one rotation,
+    ``r_gcrf = C^T R3(GMST82 - ERA) r_teme`` (``C``: GCRS -> CIRS matrix,
+    ``ERA``: Earth rotation angle), polar motion cancels and UT1 enters only
+    through ``GMST82 - ERA``, which changes by 7e-12 rad per second of
+    UT1 - UTC: so UTC is used for UT1 (< 0.3 mm at GEO for |UT1 - UTC| <
+    0.9 s) and no Earth-orientation data is read, for any epoch. The result
+    agrees with astropy's TEME -> GCRS (which uses IERS data) to 1e-10 of
+    the radius. The velocity is ``M v + (dM/dt) r``: the frame turns slowly
+    (precession and nutation, up to 1.1e-11 rad/s, 5e-4 m/s at GEO), and its
+    rate comes from a central difference over :data:`TEME_RATE_STEP`.
+
+    Parameters
+    ----------
+    epochs
+        Epoch of each state (UTC, TT, TAI, ...); a scalar for states at one
+        epoch.
+    r
+        TEME positions [m], shape ``(..., 3)``.
+    v
+        TEME velocities [m/s], shape ``(..., 3)``.
+
+    Returns
+    -------
+    tuple of FloatArray
+        GCRF positions [m] and velocities [m/s], shape ``(..., 3)``, where
+        ``...`` is the broadcast of ``epochs.shape``, ``r.shape[:-1]`` and
+        ``v.shape[:-1]`` (e.g. ``(n,)`` epochs with ``(n, 3)`` states, or
+        ``(t, 1)`` epochs with ``(n, 3)`` states for a ``(t, n, 3)`` grid).
+        Non-finite inputs give non-finite outputs.
+
+    Raises
+    ------
+    ValueError
+        If ``r`` or ``v`` does not have 3 components on its last axis, or
+        the shapes do not broadcast.
+
+    References
+    ----------
+    D. A. Vallado, P. Crawford, R. Hujsak and T. S. Kelso, "Revisiting
+    Spacetrack Report #3", AIAA 2006-6753, 2006.
+    """
+    position = _components(r, "r")
+    velocity = _components(v, "v")
+    try:
+        np.broadcast_shapes(epochs.shape, position.shape[:-1], velocity.shape[:-1])
+    except ValueError:
+        raise ValueError(
+            f"epochs {epochs.shape}, r {position.shape} and v {velocity.shape} "
+            "do not broadcast"
+        ) from None
+    tt, utc = epochs.tt, epochs.utc
+    tt1, tt2 = np.asarray(tt.jd1), np.asarray(tt.jd2)
+    ut1, ut2 = np.asarray(utc.jd1), np.asarray(utc.jd2)
+    step = TEME_RATE_STEP / _DAY
+    rotation = _teme_rotation(tt1, tt2, ut1, ut2)
+    later = _teme_rotation(tt1, tt2 + step, ut1, ut2 + step)
+    earlier = _teme_rotation(tt1, tt2 - step, ut1, ut2 - step)
+    rate = (later - earlier) / (2.0 * TEME_RATE_STEP)
+    column_r, column_v = position[..., None], velocity[..., None]
+    gcrf_r: FloatArray = (rotation @ column_r)[..., 0]
+    gcrf_v: FloatArray = (rotation @ column_v + rate @ column_r)[..., 0]
+    return gcrf_r, gcrf_v
+
+
+def _teme_states_to_gcrf(states: Sequence[StateVector]) -> list[StateVector]:
+    """Convert TEME states with one :func:`teme_to_gcrf` call for all of them."""
+    positions, velocities = teme_to_gcrf(
+        Time([state.epoch for state in states]),
+        np.stack([state.r for state in states]),
+        np.stack([state.v for state in states]),
+    )
+    return [
+        StateVector(state.epoch, positions[i], velocities[i], "GCRF")
+        for i, state in enumerate(states)
+    ]
+
+
 def to_gcrf_all(states: Sequence[StateVector]) -> list[StateVector]:
-    """Express several state vectors in GCRF, converting ITRF ones together.
+    """Express several state vectors in GCRF, converting ITRF and TEME together.
 
     Parameters
     ----------
     states
-        States in GCRF, EME2000 or ITRF.
+        States in GCRF, EME2000, ITRF or TEME.
 
     Returns
     -------
@@ -178,12 +301,14 @@ def to_gcrf_all(states: Sequence[StateVector]) -> list[StateVector]:
                 state.epoch, FRAME_BIAS.T @ state.r, FRAME_BIAS.T @ state.v, "GCRF"
             )
         converted.append(state)
-    itrf = [i for i, state in enumerate(converted) if state.frame == "ITRF"]
-    if itrf:
-        for i, state in zip(
-            itrf, _itrf_to_gcrf([converted[i] for i in itrf]), strict=True
-        ):
-            converted[i] = state
+    # All states of a frame in one call: the conversions are vectorised.
+    for frame, convert in (("ITRF", _itrf_to_gcrf), ("TEME", _teme_states_to_gcrf)):
+        indices = [i for i, state in enumerate(converted) if state.frame == frame]
+        if indices:
+            for i, state in zip(
+                indices, convert([converted[i] for i in indices]), strict=True
+            ):
+                converted[i] = state
     return converted
 
 
@@ -193,7 +318,7 @@ def to_gcrf(state: StateVector) -> StateVector:
     Parameters
     ----------
     state
-        State in GCRF, EME2000 or ITRF.
+        State in GCRF, EME2000, ITRF or TEME.
 
     Returns
     -------
