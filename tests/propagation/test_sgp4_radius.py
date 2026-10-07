@@ -7,6 +7,7 @@ from typing import Any
 
 import astropy.units as u
 import numpy as np
+import numpy.typing as npt
 import pytest
 from astropy.time import Time
 from hypothesis import given
@@ -16,6 +17,7 @@ from sgp4 import propagation as python_sgp4
 from sgp4.api import WGS72, Satrec
 from sgp4.model import Satrec as PythonSatrec
 
+from keepout._types import FloatArray
 from keepout.omm import Omm, load, loads
 from keepout.propagation import RadiusBounds, Sgp4Propagator, propagate_in_chunks
 from keepout.propagation._sgp4_radius import C1L, C1SS, drag_terms
@@ -60,14 +62,16 @@ def python_satrec(satrec: Satrec) -> PythonSatrec:
     return python
 
 
-def radii(propagator: Sgp4Propagator, start: Time, offsets: Any) -> Any:
+def radii(
+    propagator: Sgp4Propagator, start: Time, offsets: npt.ArrayLike
+) -> FloatArray:
     """Radii [m] of the states without error (NaN elsewhere), ``(N, T)``."""
     ephemeris = propagator.propagate(start, offsets)
     radius = np.linalg.norm(ephemeris.r, axis=-1)
     return np.where(ephemeris.valid, radius, np.nan)
 
 
-def assert_within(bounds: RadiusBounds, radius: Any) -> None:
+def assert_within(bounds: RadiusBounds, radius: FloatArray) -> None:
     valid = ~np.isnan(radius)
     lowest = np.broadcast_to(bounds.lowest[:, None], radius.shape)
     highest = np.broadcast_to(bounds.highest[:, None], radius.shape)

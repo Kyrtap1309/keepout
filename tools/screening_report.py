@@ -33,8 +33,9 @@ import astropy.units as u
 import screening_snapshot as snapshot
 from astropy.time import Time
 from generated import replace_block, write_or_check
-from screening_snapshot import Approach, SocratesSummary
+from screening_snapshot import Approach, SocratesSummary, seconds_between
 
+from keepout._units import DAY
 from keepout.omm import Omm, load
 from keepout.screening import (
     DEFAULT_VOLUME,
@@ -50,8 +51,6 @@ PAGE: Final = REPO / "docs/screening-socrates.md"
 START: Final = "<!-- screening-socrates-summary:start -->"
 END: Final = "<!-- screening-socrates-summary:end -->"
 TOOL: Final = "tools/screening_report.py"
-
-DAY: Final = 86400.0
 
 FAST: Final = snapshot.FAST
 """Approaches at this relative speed or more [m/s] (SOCRATES's value) are
@@ -241,11 +240,6 @@ class Comparison:
     primaries: int
 
 
-def _since(start: Time, time: Time) -> float:
-    """Seconds from ``start`` to ``time``, from their UTC Julian days."""
-    return float((time.jd1 - start.jd1) * DAY + (time.jd2 - start.jd2) * DAY)
-
-
 def compare(
     approaches: Sequence[Approach],
     catalog: Sequence[Omm],
@@ -290,10 +284,10 @@ def compare(
         by_pair.setdefault((approach.primary_id, approach.secondary_id), []).append(
             position
         )
-    found_at = [_since(start, approach.tca) for approach in found]
+    found_at = [seconds_between(start, approach.tca) for approach in found]
     candidates = sorted(
         (
-            abs(found_at[position] - _since(start, approaches[index].tca)),
+            abs(found_at[position] - seconds_between(start, approaches[index].tca)),
             index,
             position,
         )

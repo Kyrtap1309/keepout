@@ -84,34 +84,52 @@ radii = st.floats(min_value=6000.0, max_value=50000.0)
 fractions = st.floats(min_value=0.0, max_value=1.0)
 
 
+widths = st.floats(min_value=0.0, max_value=5000.0)
+reaches = st.floats(min_value=0.1, max_value=100.0)
+
+
 @given(
     radii,
-    st.floats(min_value=0.0, max_value=5000.0),
-    radii,
-    st.floats(min_value=0.0, max_value=5000.0),
+    widths,
+    widths,
     fractions,
     fractions,
-    st.floats(min_value=0.1, max_value=100.0),
+    st.floats(min_value=-1.0, max_value=1.0),
+    reaches,
 )
 def test_radii_within_reach_keep_the_pair(
     low_p: float,
     width_p: float,
-    low_s: float,
     width_s: float,
     at_p: float,
     at_s: float,
+    separation: float,
     reach: float,
 ) -> None:
-    # Any radius of each band, within the reach of each other: kept.
+    # Bands holding radii within the reach of each other: kept.
     radius_p = low_p + at_p * width_p
-    radius_s = low_s + at_s * width_s
+    radius_s = radius_p + separation * reach * (1 - 1e-12)
+    low_s = radius_s - at_s * width_s
     keep = apogee_perigee_filter(
         bands((low_p, low_p + width_p)),
         bands((low_s, low_s + width_s)),
         ScreeningVolume.sphere(reach * KM),
     )
-    if abs(radius_p - radius_s) <= reach * (1 - 1e-12):
-        assert keep[0, 0]
+    assert keep[0, 0]
+
+
+@given(radii, widths, widths, st.floats(min_value=1.0, max_value=2.0), reaches)
+def test_bands_beyond_reach_drop_the_pair(
+    low_p: float, width_p: float, width_s: float, gap: float, reach: float
+) -> None:
+    # The secondary's band starts more than the reach above the primary's.
+    low_s = low_p + width_p + gap * reach * (1 + 1e-9)
+    keep = apogee_perigee_filter(
+        bands((low_p, low_p + width_p)),
+        bands((low_s, low_s + width_s)),
+        ScreeningVolume.sphere(reach * KM),
+    )
+    assert not keep[0, 0]
 
 
 @pytest.fixture(scope="module")

@@ -22,6 +22,7 @@ import numpy.typing as npt
 from astropy.time import Time
 
 from keepout._types import FloatArray, read_only
+from keepout._units import DAY
 from keepout.errors import GeometryError
 from keepout.state import StateVector
 
@@ -39,7 +40,6 @@ __all__ = [
 ]
 
 _J2000_JD: Final = 2451545.0
-_DAY: Final = 86400.0
 # GCRS -> mean J2000 (EME2000) frame bias; constant, so any date gives it.
 FRAME_BIAS: Final[FloatArray] = np.array(erfa.bp06(_J2000_JD, 0.0)[0], dtype=np.float64)
 read_only(FRAME_BIAS)
@@ -326,7 +326,7 @@ def teme_to_gcrf(
     tt, utc = epochs.tt, epochs.utc
     tt1, tt2 = np.asarray(tt.jd1), np.asarray(tt.jd2)
     ut1, ut2 = np.asarray(utc.jd1), np.asarray(utc.jd2)
-    step = TEME_RATE_STEP / _DAY
+    step = TEME_RATE_STEP / DAY
     rotation = _teme_rotation(tt1, tt2, ut1, ut2)
     later = _teme_rotation(tt1, tt2 + step, ut1, ut2 + step)
     earlier = _teme_rotation(tt1, tt2 - step, ut1, ut2 - step)

@@ -60,6 +60,7 @@ from astropy.time import Time
 from generated import replace_block, write_or_check
 from screening_timing import timed
 
+from keepout._units import DAY
 from keepout.omm import Omm, load
 from keepout.omm.celestrak import dumps_csv
 from keepout.screening import (
@@ -80,7 +81,6 @@ END: Final = "<!-- screening-benchmark-summary:end -->"
 TOOL: Final = "tools/screening_benchmark.py"
 CPUINFO: Final = Path("/proc/cpuinfo")
 
-DAY: Final = 86400.0
 
 PRIMARIES: Final = (
     25544,  # ISS (ZARYA)

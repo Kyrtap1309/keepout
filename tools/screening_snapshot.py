@@ -79,10 +79,12 @@ from urllib.parse import parse_qs, urlsplit
 
 from astropy.time import Time
 
+from keepout._units import DAY
 from keepout.errors import SourceUnavailable
 from keepout.omm import Omm, load
 from keepout.omm.celestrak import dumps_csv, loads_csv
 from keepout.orbits import EARTH_MU
+from keepout.screening.volume import SFS_DEEP_SPACE_PERIOD, SFS_ECCENTRICITY
 from keepout.sources.cache import store
 from keepout.sources.celestrak import (
     GP_URL,
@@ -143,21 +145,11 @@ SOCRATES_COLUMNS: Final = (
 )
 """The columns of a SOCRATES CSV report, in order."""
 
-DAY: Final = 86400.0
-"""Seconds per day."""
-
 EARTH_RADIUS: Final = 6_378_137.0
 """Equatorial radius of the Earth [m] (WGS 84), for altitudes."""
 
 LEO_APOGEE: Final = 2_000e3
 """Highest apogee altitude of a LEO orbit [m]."""
-
-GEO_PERIOD: Final = (1300.0 * 60.0, 1800.0 * 60.0)
-"""Periods of the geosynchronous band [s] (the Spaceflight Safety
-Handbook's deep-space band)."""
-
-HIGHLY_ECCENTRIC: Final = 0.25
-"""Least eccentricity of a HEO orbit."""
 
 SIX_DIGITS: Final = 100_000
 """The first six-digit catalog number."""
@@ -426,7 +418,7 @@ def epoch_matches(approach: Approach, primary: Omm, secondary: Omm) -> bool:
     would count one second, far inside the tolerance.
     """
     return all(
-        abs(_seconds_between(omm.epoch, approach.tca) - since)
+        abs(seconds_between(omm.epoch, approach.tca) - since)
         <= approach.since_epoch_tolerance
         for omm, since in (
             (primary, approach.since_epoch_primary),
@@ -435,7 +427,8 @@ def epoch_matches(approach: Approach, primary: Omm, secondary: Omm) -> bool:
     )
 
 
-def _seconds_between(start: Time, end: Time) -> float:
+def seconds_between(start: Time, end: Time) -> float:
+    """Seconds from ``start`` to ``end``, from their UTC Julian days."""
     return float((end.jd1 - start.jd1) * DAY + (end.jd2 - start.jd2) * DAY)
 
 
@@ -476,12 +469,13 @@ def regime(omm: Omm) -> Regime:
     HEO: eccentricity 0.25 or more; LEO: apogee altitude up to 2000 km;
     GEO: period 1300 to 1800 min; MEO: the rest.
     """
-    if omm.eccentricity >= HIGHLY_ECCENTRIC:
+    if omm.eccentricity >= SFS_ECCENTRICITY:
         return "HEO"
     axis = semi_major_axis(omm)
     if axis * (1.0 + omm.eccentricity) - EARTH_RADIUS <= LEO_APOGEE:
         return "LEO"
-    if GEO_PERIOD[0] <= 2.0 * math.pi / omm.mean_motion <= GEO_PERIOD[1]:
+    lowest, highest = SFS_DEEP_SPACE_PERIOD
+    if lowest <= 2.0 * math.pi / omm.mean_motion <= highest:
         return "GEO"
     return "MEO"
 

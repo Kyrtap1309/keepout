@@ -111,7 +111,13 @@ from keepout._types import (
     require_positive,
 )
 from keepout.orbits import EARTH_MU
-from keepout.propagation.base import CHUNK_STATES, NO_ERROR, Propagator, RadiusBounds
+from keepout.propagation.base import (
+    CHUNK_STATES,
+    NO_ERROR,
+    ErrorArray,
+    Propagator,
+    RadiusBounds,
+)
 from keepout.screening.volume import ScreeningVolume
 
 __all__ = [
@@ -334,9 +340,10 @@ class SearchResult:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "minima", tuple(sorted(self.minima, key=_order)))
-        for name in ("primary_failures", "catalog_failures"):
-            failures = dict(sorted(getattr(self, name).items()))
-            object.__setattr__(self, name, MappingProxyType(failures))
+        primary = MappingProxyType(dict(sorted(self.primary_failures.items())))
+        catalog = MappingProxyType(dict(sorted(self.catalog_failures.items())))
+        object.__setattr__(self, "primary_failures", primary)
+        object.__setattr__(self, "catalog_failures", catalog)
 
     def __reduce__(
         self,
@@ -415,9 +422,7 @@ class _Failed(Exception):
         self.secondary = secondary
 
 
-def _first_failure(
-    errors: npt.NDArray[np.uint8], stamps: FloatArray
-) -> ObjectFailure | None:
+def _first_failure(errors: ErrorArray, stamps: FloatArray) -> ObjectFailure | None:
     bad = np.flatnonzero(errors != NO_ERROR)
     if bad.size == 0:
         return None
@@ -425,9 +430,7 @@ def _first_failure(
     return ObjectFailure(float(stamps[first]), int(errors[first]))
 
 
-def _check(
-    own: npt.NDArray[np.uint8], other: npt.NDArray[np.uint8], stamps: FloatArray
-) -> None:
+def _check(own: ErrorArray, other: ErrorArray, stamps: FloatArray) -> None:
     """Raise :class:`_Failed` if either object failed at some of ``stamps``."""
     failed = _first_failure(own, stamps), _first_failure(other, stamps)
     if failed != (None, None):
@@ -544,7 +547,7 @@ def _samples(first: float, last: float, *, quick: bool) -> FloatArray:
 def _record(
     failures: dict[int, ObjectFailure],
     positions: IndexArray,
-    errors: npt.NDArray[np.uint8],
+    errors: ErrorArray,
     times: FloatArray,
 ) -> None:
     """Record the first failed state of each object of a chunk (in time

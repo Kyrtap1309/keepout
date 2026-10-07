@@ -13,6 +13,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 from hypothesis.extra.numpy import arrays
 
+from keepout._types import FloatArray
 from keepout.covariance import make_covariance
 from keepout.errors import GeometryError
 from keepout.frames import rtn_rotation
@@ -39,7 +40,7 @@ FIXTURE = load(snapshot.DATA / snapshot.FIXTURE)
 
 
 def states(
-    epoch: Time = TCA, miss: np.ndarray = MISS, relative: np.ndarray = RELATIVE
+    epoch: Time = TCA, miss: FloatArray = MISS, relative: FloatArray = RELATIVE
 ) -> tuple[StateVector, StateVector]:
     primary = StateVector(epoch, R_PRIMARY, V_PRIMARY, "GCRF")
     secondary = StateVector(epoch, R_PRIMARY + miss, V_PRIMARY + relative, "GCRF")
@@ -79,7 +80,7 @@ offsets = arrays(np.float64, 3, elements=st.floats(min_value=-2e5, max_value=2e5
 
 @given(r=positions, v=velocities, miss=offsets)
 def test_the_miss_vector_is_the_relative_position_in_rtn(
-    r: np.ndarray, v: np.ndarray, miss: np.ndarray
+    r: FloatArray, v: FloatArray, miss: FloatArray
 ) -> None:
     angular = np.linalg.norm(np.cross(r, v))
     if angular <= 1e-6 * np.linalg.norm(r) * np.linalg.norm(v):

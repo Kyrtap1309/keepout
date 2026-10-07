@@ -17,7 +17,7 @@ import numpy.typing as npt
 import pytest
 import screening_snapshot as snapshot
 from astropy.time import Time
-from hypothesis import given, settings
+from hypothesis import given, settings, target
 from hypothesis import strategies as st
 from screening_oracle import brute_force, positions, refine
 
@@ -853,7 +853,11 @@ def test_no_minimum_the_oracle_finds_is_missed(
     step: float,
     volume: ScreeningVolume | VolumeRule,
 ) -> None:
-    check_against_oracle(chosen, WEEK_START + start * u.s, duration, volume, step)
+    inside = check_against_oracle(
+        chosen, WEEK_START + start * u.s, duration, volume, step
+    )
+    # Steer towards windows holding minima, which check the main direction.
+    target(float(inside), label="oracle minima inside the volumes")
 
 
 def test_every_socrates_approach_of_the_fixture_is_found() -> None:

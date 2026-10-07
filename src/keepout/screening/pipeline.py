@@ -220,17 +220,18 @@ def screen(
         for minimum in found.minima
         if minimum.primary not in gone_primaries and minimum.secondary not in gone
     ]
+    screened_volumes = {
+        omm.catalog_number: volumes[index]
+        for index, omm in enumerate(primary_omms)
+        if index not in gone_primaries
+    }
     return ScreeningResult(
-        tuple(_approaches(minima, primary_omms, others, start)),
-        tuple(skipped),
-        start,
-        window.duration,
-        {
-            omm.catalog_number: volumes[index]
-            for index, omm in enumerate(primary_omms)
-            if index not in gone_primaries
-        },
-        len(others) - len(lost) - len(gone),
+        approaches=tuple(_approaches(minima, primary_omms, others, start)),
+        skipped=tuple(skipped),
+        start=start,
+        duration=window.duration,
+        volumes=screened_volumes,
+        catalog_count=len(others) - len(lost) - len(gone),
     )
 
 
