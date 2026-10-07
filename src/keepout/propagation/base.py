@@ -3,9 +3,11 @@
 A :class:`Propagator` holds N objects and returns, for a reference epoch and
 an array of time offsets, an :class:`Ephemeris`: positions [m], velocities
 [m/s] and an error code for every object at every time, in one inertial
-frame. Screening depends on this interface only, so that SGP4
-(:class:`~keepout.propagation.sgp4_prop.Sgp4Propagator`) and a numerical
-propagator can be used alike.
+frame. It also bounds each object's distance from the Earth's centre over a
+time span (:class:`RadiusBounds`), which screening's apogee/perigee filter
+needs before anything is propagated. Screening depends on this interface
+only, so that SGP4 (:class:`~keepout.propagation.sgp4_prop.Sgp4Propagator`)
+and a numerical propagator can be used alike.
 """
 
 from __future__ import annotations
@@ -30,6 +32,7 @@ __all__ = [
     "Ephemeris",
     "ErrorArray",
     "Propagator",
+    "RadiusBounds",
     "describe_error",
     "propagate_in_chunks",
     "time_offsets",
@@ -196,6 +199,52 @@ class Ephemeris:
         return valid
 
 
+@dataclass(frozen=True, eq=False)
+class RadiusBounds:
+    """Bounds on the distance of N objects from the Earth's centre.
+
+    Over a time span, every state a propagator gives for object ``i`` (at a
+    time in the span, without an error) has ``lowest[i] <= |r| <=
+    highest[i]``. The arrays are read-only copies of those given.
+
+    Parameters
+    ----------
+    lowest
+        Lower bounds [m], shape ``(N,)``, finite and >= 0.
+    highest
+        Upper bounds [m], shape ``(N,)``, >= ``lowest``; ``inf`` for an
+        object the propagator cannot bound.
+
+    Raises
+    ------
+    ValueError
+        If the arrays are not one-dimensional of the same length, or a bound
+        is out of range.
+    """
+
+    lowest: FloatArray
+    highest: FloatArray
+
+    def __post_init__(self) -> None:
+        lowest = np.array(self.lowest, dtype=np.float64)
+        highest = np.array(self.highest, dtype=np.float64)
+        if lowest.ndim != 1 or highest.shape != lowest.shape:
+            raise ValueError(
+                "lowest and highest must be one-dimensional of the same length, "
+                f"got shapes {lowest.shape} and {highest.shape}"
+            )
+        if not np.all(np.isfinite(lowest) & (lowest >= 0.0)):
+            raise ValueError("lowest must be finite and >= 0")
+        if not np.all(highest >= lowest):
+            raise ValueError("highest must be >= lowest")
+        read_only(lowest, highest)
+        object.__setattr__(self, "lowest", lowest)
+        object.__setattr__(self, "highest", highest)
+
+    def __len__(self) -> int:
+        return len(self.lowest)
+
+
 @runtime_checkable
 class Propagator(Protocol):
     """States of a fixed set of objects at any times.
@@ -210,6 +259,8 @@ class Propagator(Protocol):
       of the objects, or a part of the offsets, gives exactly the numbers of
       the matching part of a whole call, so chunking a time grid or splitting
       the work between processes cannot change a result;
+    * :meth:`radius_bounds` holds every such state's distance from the
+      Earth's centre, without propagating (screening filters on it);
     * a propagator can be pickled, to be sent to worker processes.
     """
 
@@ -242,6 +293,22 @@ class Propagator(Protocol):
             Reference epoch; one time, in any time scale.
         offsets
             Seconds elapsed since ``epoch``; see :func:`time_offsets`.
+        """
+        ...
+
+    def radius_bounds(self, start: Time, duration: float) -> RadiusBounds:
+        """Bounds on each object's distance from the Earth's centre over a span.
+
+        Every state :meth:`propagate` gives at a time from ``start`` to
+        ``start + duration`` (both included) is within its object's bounds,
+        unless it has an error.
+
+        Parameters
+        ----------
+        start
+            Start of the span; one time, in any time scale.
+        duration
+            Length of the span [s], finite and >= 0.
         """
         ...
 

@@ -19,6 +19,7 @@ from keepout.propagation import (
     NO_ERROR,
     Ephemeris,
     Propagator,
+    RadiusBounds,
     describe_error,
     propagate_in_chunks,
     time_offsets,
@@ -52,6 +53,19 @@ class LinearPropagator:
         r[errors != 0] = np.nan
         v[errors != 0] = np.nan
         return Ephemeris(epoch, seconds, r, v, errors.astype(np.uint8), self.frame)
+
+    def radius_bounds(self, start: Time, duration: float) -> RadiusBounds:
+        # The closest and farthest points of each segment from t = 0 to duration.
+        speed2 = np.sum(self.v0 * self.v0, axis=1)
+        closest = np.clip(-np.sum(self.r0 * self.v0, axis=1) / speed2, 0.0, duration)
+
+        def radius(times: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+            return np.linalg.norm(self.r0 + self.v0 * times[:, None], axis=1)
+
+        ends = np.maximum(
+            radius(np.zeros(len(self))), radius(np.full(len(self), duration))
+        )
+        return RadiusBounds(radius(closest), ends)
 
 
 def linear(count: int) -> LinearPropagator:
@@ -156,6 +170,51 @@ def test_ephemeris_rejects_a_bad_grid_or_frame() -> None:
         Ephemeris(EPOCH, np.array([math.nan]), r, r, errors, "TEME")
     with pytest.raises(UnsupportedFrame, match="'TOD'"):
         Ephemeris(EPOCH, np.zeros(1), r, r, errors, "TOD")  # type: ignore[arg-type]
+
+
+def test_radius_bounds_hold_read_only_copies() -> None:
+    lowest = np.array([7e6, 0.0])
+    bounds = RadiusBounds(lowest, np.array([7.1e6, math.inf]))
+    lowest[0] = 1.0
+    np.testing.assert_array_equal(bounds.lowest, [7e6, 0.0])
+    np.testing.assert_array_equal(bounds.highest, [7.1e6, math.inf])
+    assert bounds.lowest.dtype == bounds.highest.dtype == np.float64
+    assert not bounds.lowest.flags.writeable
+    assert not bounds.highest.flags.writeable
+    assert len(bounds) == 2
+    assert len(RadiusBounds(np.empty(0), np.empty(0))) == 0
+
+
+@pytest.mark.parametrize(
+    ("lowest", "highest", "message"),
+    [
+        ([1.0, 2.0], [3.0], r"same length, got shapes \(2,\) and \(1,\)"),
+        ([[1.0]], [[2.0]], "one-dimensional"),
+        ([-1.0], [2.0], "lowest must be finite and >= 0"),
+        ([math.nan], [2.0], "lowest must be finite and >= 0"),
+        ([math.inf], [math.inf], "lowest must be finite and >= 0"),
+        ([2.0], [1.0], "highest must be >= lowest"),
+        ([1.0], [math.nan], "highest must be >= lowest"),
+    ],
+)
+def test_radius_bounds_reject_bad_bounds(
+    lowest: list[float], highest: list[float], message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        RadiusBounds(lowest, highest)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("duration", [0.0, 50.0, 1e4])
+def test_the_bounds_hold_the_propagated_radius(duration: float) -> None:
+    propagator = linear(5)
+    bounds = propagator.radius_bounds(EPOCH, duration)
+    ephemeris = propagator.propagate(EPOCH, np.linspace(0.0, duration, 101))
+    radius = np.linalg.norm(ephemeris.r, axis=-1)
+    lowest = np.broadcast_to(bounds.lowest[:, None], radius.shape)
+    highest = np.broadcast_to(bounds.highest[:, None], radius.shape)
+    valid = ephemeris.valid
+    assert np.all(lowest[valid] <= radius[valid] * (1 + 1e-15))
+    assert np.all(radius[valid] <= highest[valid] * (1 + 1e-15))
 
 
 def test_a_propagator_is_anything_with_the_protocol() -> None:
