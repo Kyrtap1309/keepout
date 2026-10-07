@@ -124,6 +124,10 @@ def test_ordinal_epoch_and_trailing_z() -> None:
         # Outside ERFA's leap-second table a second 60 is still refused.
         "2035-06-30T23:59:60",
         "1955-181T23:59:60",
+        # Past the 0.1 s UTC step at the end of 1964-12-31, and in the 0.1 s
+        # that 1968-01-31 lacked.
+        "1964-12-31T23:59:60.1",
+        "1968-01-31T23:59:59.95",
     ],
 )
 def test_invalid_epochs(text: str) -> None:
@@ -157,6 +161,66 @@ def test_epochs_outside_the_leap_second_table_are_accepted(
     # ERFA calls UTC before 1960 or a few years past its last leap second
     # "dubious": the leap seconds there are unknown, not the time invalid.
     assert format_epoch(parse_epoch(text)) == isot
+
+
+UTC_STEP_DAYS = (
+    "1960-12-31",
+    "1961-07-31",
+    "1963-10-31",
+    "1964-03-31",
+    "1964-08-31",
+    "1964-12-31",
+    "1965-02-28",
+    "1965-06-30",
+    "1965-08-31",
+    "1968-01-31",
+    "1971-12-31",
+)
+"""The days before 1972 at whose end UTC stepped by a fraction of a second
+(-0.1 s to +0.108 s; leap seconds came in 1972)."""
+
+
+@pytest.mark.parametrize("day", UTC_STEP_DAYS)
+def test_epochs_on_a_day_that_ends_in_a_utc_step_are_read_as_written(
+    day: str,
+) -> None:
+    # ERFA's Julian dates stretch such a day by its step; astropy's text
+    # (ERFA's d2dtf) undoes that only for steps over 0.5 s, so it was 1 us
+    # off at 00:00:00.432864 (a TLE epoch of day .00000501), 0.05 s at noon.
+    for clock in ("00:00:00.432864", "12:00:00", "23:59:59.899999"):
+        text = f"{day}T{clock}"
+        assert format_epoch(parse_epoch(text)) == text
+
+
+@pytest.mark.parametrize(
+    ("text", "isot"),
+    [
+        ("1964-12-31T23:59:60.05", "1964-12-31T23:59:60.05"),
+        ("1964-366T12:00:00.000001", "1964-12-31T12:00:00.000001"),
+    ],
+)
+def test_the_utc_step_ends_its_day(text: str, isot: str) -> None:
+    # Like a leap second, the 0.1 s step is written as 23:59:60.0 to 60.1.
+    assert format_epoch(parse_epoch(text)) == isot
+
+
+def test_an_epoch_on_a_day_that_ends_in_a_utc_step_keeps_its_time() -> None:
+    # TAI-UTC on 1964-12-31: 3.44013 s less 0.001296 s a day before 1965.
+    tai = parse_epoch("1964-12-31T12:00:00.000000").tai
+    assert tai.isot == "1964-12-31T12:00:03.439482"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "1964-12-30T12:00:00",
+        "1965-01-01T00:00:00.000001",
+        # ERFA's drift arithmetic gives this day a step of -4e-16 s.
+        "1961-12-31T23:59:59.999999",
+    ],
+)
+def test_the_other_days_before_1972_are_read_as_written(text: str) -> None:
+    assert format_epoch(parse_epoch(text)) == text
 
 
 @pytest.mark.parametrize(

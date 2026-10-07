@@ -18,6 +18,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final, Literal, TypeAlias, assert_never
 
+import erfa
 import numpy as np
 from astropy.time import Time
 from erfa import ErfaWarning
@@ -321,6 +322,9 @@ def parse_epoch(text: str) -> Time:
     hour 24, or second 60 outside a UTC leap second is rejected rather than
     rolled over to another time. Years outside ERFA's leap-second table
     (before 1960, or a few years past its last leap second) are accepted.
+    The eleven days before 1972 that end in a UTC step of a fraction of a
+    second are as long as ERFA counts them: 1964-12-31 runs to 23:59:60.1,
+    1968-01-31 ends at 23:59:59.9 (see :func:`format_epoch`).
 
     Parameters
     ----------
@@ -355,8 +359,9 @@ def parse_epoch(text: str) -> Time:
         # astropy rolls some out-of-range fields over (day 366 of a common
         # year becomes 1 January): the parsed fields must survive unchanged.
         date = f"{year}:{doy}" if doy else f"{year}-{month}-{day}"
-        parsed = epoch.yday[:8] if doy else epoch.isot[:10]
-        if parsed != date or epoch.isot[11:19] != f"{hour}:{minute}:{second}":
+        isot = _utc_isot(epoch)
+        parsed = epoch.yday[:8] if doy else isot[:10]
+        if parsed != date or isot[11:19] != f"{hour}:{minute}:{second}":
             raise ValueError(f"invalid CCSDS epoch {text!r}: a field is out of range")
     return epoch
 
@@ -365,7 +370,10 @@ def format_epoch(epoch: Time) -> str:
     """Write an epoch in CCSDS calendar format, UTC.
 
     Years outside ERFA's leap-second table are written without a warning
-    (see :func:`parse_epoch`).
+    (see :func:`parse_epoch`). On the eleven days before 1972 that end in a
+    UTC step of a fraction of a second (1960-12-31 to 1971-12-31) the time
+    is written right, where astropy's ``isot`` is off by up to 0.1 s (see
+    ``_utc_isot``).
 
     Parameters
     ----------
@@ -373,7 +381,57 @@ def format_epoch(epoch: Time) -> str:
         Epoch to write; its precision sets the number of fractional digits.
     """
     with _dubious_years_allowed():
-        return str(epoch.utc.isot)
+        return _utc_isot(epoch)
+
+
+_UTC_STEP_FLOOR: Final = 1e-6
+"""Smallest step [s] taken for one: ERFA's drift arithmetic leaves about
+1e-16 s on the other days before 1972; the smallest step is 5 ms."""
+
+
+def _utc_isot(epoch: Time) -> str:
+    """``epoch.utc.isot``, also right on the days that end in a small UTC step.
+
+    ERFA, and astropy with it, counts a UTC day as one unit of its Julian
+    date also when the day is longer or shorter: clock time ``t`` on a day
+    of ``86400 + s`` seconds is the fraction ``t / (86400 + s)``. Reading
+    text (``dtf2d``) and converting to TAI (``utctai``) use that scale for
+    any step ``s``, but writing text (``d2dtf``) undoes it only for steps
+    over 0.5 s, the leap seconds. On the eleven days before 1972 that end
+    in a step of 5 to 108 ms, astropy therefore writes ``t`` as
+    ``t 86400 / (86400 + s)``: 1 us off at 00:00:00.43, up to 0.1 s at the
+    end of the day. Here the clock is the fraction times the day's length,
+    as ``d2dtf`` computes it on a leap-second day.
+    """
+    utc = epoch.utc
+    text = str(utc.isot)
+    if not "1960" <= text[:4] < "1972":
+        return text
+    year, month, day, fraction = erfa.jd2cal(utc.jd1, utc.jd2)
+    step = _utc_step(year, month, day)
+    if abs(step) < _UTC_STEP_FLOOR:
+        return text
+    digits = utc.precision
+    ticks = round(float(fraction) * (DAY + step) * 10**digits)
+    seconds, part = divmod(ticks, 10**digits)
+    # From 23:59 on, the seconds run on past 59 into a positive step.
+    minutes = min(seconds, 86_340) // 60
+    clock = f"{minutes // 60:02d}:{minutes % 60:02d}:{seconds - 60 * minutes:02d}"
+    return f"{text[:10]}T{clock}" + (f".{part:0{digits}d}" if digits else "")
+
+
+def _utc_step(year: int, month: int, day: int) -> float:
+    """Step of TAI-UTC at the end of a UTC day [s], as ERFA reckons it.
+
+    The change from 0h to the next day's 0h beyond the day's drift; ERFA's
+    ``dtf2d``, ``d2dtf`` and ``utctai`` compute it alike.
+    """
+    start = erfa.dat(year, month, day, 0.0)
+    noon = erfa.dat(year, month, day, 0.5)
+    zero, mjd = erfa.cal2jd(year, month, day)
+    next_year, next_month, next_day, _ = erfa.jd2cal(zero, mjd + 1.0)
+    end = erfa.dat(next_year, next_month, next_day, 0.0)
+    return float(end - (2.0 * noon - start))
 
 
 def parse_value(keyword: Keyword, text: str, unit: str | None) -> FieldValue:
