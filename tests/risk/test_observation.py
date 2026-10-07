@@ -43,6 +43,15 @@ def test_edge_probabilities_are_accepted(changes: dict[str, Any]) -> None:
     assert observation(**changes).ok
 
 
+def test_a_negative_zero_is_stored_as_zero() -> None:
+    # Else an observation at TCA sorts and prints by the sign of its zero.
+    seen = observation(time_to_tca=-0.0, pc=-0.0, ci_high=-0.0)
+    assert seen.pc is not None
+    assert seen.ci_high is not None
+    values = (seen.time_to_tca, seen.pc, seen.ci_high)
+    assert [math.copysign(1.0, value) for value in values] == [1.0, 1.0, 1.0]
+
+
 def test_a_failed_observation_has_an_error_and_no_pc() -> None:
     failed = observation(pc=None, error="PcConvergenceError: no convergence")
     assert not failed.ok
