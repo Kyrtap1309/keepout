@@ -111,6 +111,24 @@ Kelvins data: ESA, *Collision Avoidance Challenge dataset*, Zenodo, 2021,
 [doi:10.5281/zenodo.4463683](https://doi.org/10.5281/zenodo.4463683); © ESA,
 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 
+## Screening performance
+
+The target: 20 primaries against the public catalog for a week in under 60 s
+with 4 worker processes. CI also times each change against its merge base and
+fails on a slowdown of more than 20 %.
+
+<!-- screening-benchmark-summary:start -->
+Screening 20 LEO primaries against the 19914 element sets of the frozen public catalog (CelesTrak, retrieved 2026-10-06) for 7 days from 2026-10-06 00:00 UTC, with 4 worker processes (`tools/screening_benchmark.py`):
+
+| Volume | Screened | Left out | Approaches | Wall time | CPU time |
+|---|---|---|---|---|---|
+| 5 km sphere (default) | 19886 | 28 stale | 715 | 8.5 s | 40.3 s |
+| 10 km sphere (NASA, GP data) | 19886 | 28 stale | 2551 | 9.5 s | 44.3 s |
+| SFS Handbook Table 3 | 19886 | 28 stale | 345 | 14.8 s | 65.2 s |
+
+Times: median of 3 runs on 2026-10-07, Intel(R) Core(TM) i5-14600K (20 logical CPUs), Python 3.13.7; `--check` checks the counts, not the times.
+<!-- screening-benchmark-summary:end -->
+
 ## Development
 
 ```bash
@@ -122,6 +140,7 @@ uv run python tools/validation_report.py   # regenerate the validation report
 uv run python tools/validation_report.py --monte-carlo   # Monte Carlo (slow)
 uv run python tools/risk_report.py   # Kelvins risk report (downloads 221 MB once)
 uv run python tools/screening_report.py   # SOCRATES screening report (offline)
+uv run python tools/screening_benchmark.py   # screening benchmark (offline, minutes)
 uv run ruff check && uv run ruff format --check
 uv run mypy
 ```
