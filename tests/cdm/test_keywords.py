@@ -121,6 +121,9 @@ def test_ordinal_epoch_and_trailing_z() -> None:
         "2020-01-01T23:59:61",
         "2020-01-01T24:00:00",
         "2020-01-01T12:60:00",
+        # Outside ERFA's leap-second table a second 60 is still refused.
+        "2035-06-30T23:59:60",
+        "1955-181T23:59:60",
     ],
 )
 def test_invalid_epochs(text: str) -> None:
@@ -137,6 +140,22 @@ def test_invalid_epochs(text: str) -> None:
     ],
 )
 def test_leap_seconds_and_leap_days_are_accepted(text: str, isot: str) -> None:
+    assert format_epoch(parse_epoch(text)) == isot
+
+
+@pytest.mark.parametrize(
+    ("text", "isot"),
+    [
+        ("1957-10-04T19:28:34", "1957-10-04T19:28:34"),
+        ("2035-06-30T12:00:00.25", "2035-06-30T12:00:00.25"),
+        ("2150-001T00:00:00.000001", "2150-01-01T00:00:00.000001"),
+    ],
+)
+def test_epochs_outside_the_leap_second_table_are_accepted(
+    text: str, isot: str
+) -> None:
+    # ERFA calls UTC before 1960 or a few years past its last leap second
+    # "dubious": the leap seconds there are unknown, not the time invalid.
     assert format_epoch(parse_epoch(text)) == isot
 
 

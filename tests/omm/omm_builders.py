@@ -102,10 +102,13 @@ _NAME = st.text(st.sampled_from('ABCXYZ0189 -()/,"'), min_size=1, max_size=24).f
     lambda name: name.strip() == name
 )
 
-# UTC epochs astropy takes without a "dubious year" warning (1960 to 2028),
-# on CelesTrak's microsecond grid.
-_EPOCH_START = datetime.datetime(1960, 1, 1, tzinfo=datetime.UTC)
-_EPOCH = st.integers(0, 69 * 365 * 86_400_000_000).map(
+# UTC epochs from 1957 to 2149 on CelesTrak's microsecond grid, on both sides
+# of ERFA's leap-second table (1960 to a few years past its last leap second).
+_EPOCH_START = datetime.datetime(1957, 1, 1, tzinfo=datetime.UTC)
+_EPOCH_END = datetime.datetime(2150, 1, 1, tzinfo=datetime.UTC)
+_EPOCH = st.integers(
+    0, (_EPOCH_END - _EPOCH_START) // datetime.timedelta(microseconds=1) - 1
+).map(
     lambda microseconds: (
         _EPOCH_START + datetime.timedelta(microseconds=microseconds)
     ).strftime("%Y-%m-%dT%H:%M:%S.%f")

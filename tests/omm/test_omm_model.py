@@ -56,6 +56,16 @@ def test_satrec_is_the_record_sgp4_makes_from_the_message() -> None:
     assert_same_satrec(ISS_OMM.satrec(), sgp4_record(ISS))
 
 
+@pytest.mark.parametrize(
+    "epoch", ["1958-03-17T12:00:00.000000", "2100-02-28T23:59:59.999999"]
+)
+def test_epochs_outside_the_leap_second_table_are_read_and_used(epoch: str) -> None:
+    values = {**ISS, "EPOCH": epoch}
+    omm = parse_record(values)
+    assert omm.keywords() == {**ISS_OMM.keywords(), "EPOCH": epoch}
+    assert_same_satrec(omm.satrec(), sgp4_record(values))
+
+
 def test_satrec_holds_a_six_digit_catalog_number() -> None:
     record = dataclasses.replace(ISS_OMM, catalog_number=MAX_SATREC_NUMBER).satrec()
     assert record.satnum == MAX_SATREC_NUMBER

@@ -18,7 +18,7 @@ from astropy.time import Time
 from sgp4 import omm as sgp4_omm
 from sgp4.api import Satrec
 
-from keepout.cdm.keywords import format_value
+from keepout.cdm.keywords import format_epoch, format_value
 from keepout.omm.keywords import ATTRIBUTES, KEYWORDS, SGP4_EPHEMERIS_TYPE
 
 __all__ = ["MAX_CATALOG_NUMBER", "MAX_SATREC_NUMBER", "InvalidElement", "Omm"]
@@ -196,7 +196,7 @@ class Omm:
                 f"{MAX_SATREC_NUMBER}, the largest an SGP4 record holds"
             )
         values = self.keywords()
-        epoch = str(Time(self.epoch, precision=_SGP4_EPOCH_DIGITS).isot)
+        epoch = format_epoch(Time(self.epoch, precision=_SGP4_EPOCH_DIGITS))
         if epoch[17:19] == "60":
             raise ValueError(f"epoch {epoch} falls in a leap second")
         values["EPOCH"] = epoch

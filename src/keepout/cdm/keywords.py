@@ -10,10 +10,11 @@ text by the model.
 
 from __future__ import annotations
 
+import contextlib
 import math
 import re
 import warnings
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final, Literal, TypeAlias, assert_never
 
@@ -294,6 +295,22 @@ def normalize_unit(unit: str) -> str:
     return unit.strip().lower().replace(" ", "").replace("**", "").replace("^", "")
 
 
+@contextlib.contextmanager
+def _dubious_years_allowed() -> Iterator[None]:
+    """ERFA's "dubious year" warning is ignored, every other ERFA warning raised.
+
+    ERFA calls a UTC year "dubious" outside its leap-second table: before
+    1960, when UTC began, or more than about five years past the table's
+    release (from 2029 with the tables of 2026). There the UTC-TAI offset is
+    extrapolated; the calendar time itself is exact, and an element set or
+    CDM epoch there is valid.
+    """
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", ErfaWarning)
+        warnings.filterwarnings("ignore", r".*dubious year", ErfaWarning)
+        yield
+
+
 def parse_epoch(text: str) -> Time:
     """Parse a CCSDS UTC epoch.
 
@@ -302,7 +319,8 @@ def parse_epoch(text: str) -> Time:
     digits as its precision, so :func:`format_epoch` writes it back unchanged.
     Every field must be in range: a day past the end of its month or year,
     hour 24, or second 60 outside a UTC leap second is rejected rather than
-    rolled over to another time.
+    rolled over to another time. Years outside ERFA's leap-second table
+    (before 1960, or a few years past its last leap second) are accepted.
 
     Parameters
     ----------
@@ -323,36 +341,39 @@ def parse_epoch(text: str) -> Time:
         body, time_format = f"{year}-{month}-{day}T{clock}", "isot"
     else:
         body, time_format = f"{year}:{doy}:{clock}", "yday"
-    try:
-        with warnings.catch_warnings():
-            # ERFA only warns about a second 60 outside a leap second.
-            warnings.simplefilter("error", ErfaWarning)
+    with _dubious_years_allowed():
+        try:
+            # ERFA warns about a second 60 outside a leap second.
             epoch = Time(
                 body,
                 format=time_format,
                 scale="utc",
                 precision=min(len(fraction or ""), 9),
             )
-    except (ValueError, ErfaWarning) as exc:
-        raise ValueError(f"invalid CCSDS epoch {text!r}: {exc}") from exc
-    # astropy rolls some out-of-range fields over (day 366 of a common year
-    # becomes 1 January): the parsed fields must survive unchanged.
-    date = f"{year}:{doy}" if doy else f"{year}-{month}-{day}"
-    parsed = epoch.yday[:8] if doy else epoch.isot[:10]
-    if parsed != date or epoch.isot[11:19] != f"{hour}:{minute}:{second}":
-        raise ValueError(f"invalid CCSDS epoch {text!r}: a field is out of range")
+        except (ValueError, ErfaWarning) as exc:
+            raise ValueError(f"invalid CCSDS epoch {text!r}: {exc}") from exc
+        # astropy rolls some out-of-range fields over (day 366 of a common
+        # year becomes 1 January): the parsed fields must survive unchanged.
+        date = f"{year}:{doy}" if doy else f"{year}-{month}-{day}"
+        parsed = epoch.yday[:8] if doy else epoch.isot[:10]
+        if parsed != date or epoch.isot[11:19] != f"{hour}:{minute}:{second}":
+            raise ValueError(f"invalid CCSDS epoch {text!r}: a field is out of range")
     return epoch
 
 
 def format_epoch(epoch: Time) -> str:
     """Write an epoch in CCSDS calendar format, UTC.
 
+    Years outside ERFA's leap-second table are written without a warning
+    (see :func:`parse_epoch`).
+
     Parameters
     ----------
     epoch
         Epoch to write; its precision sets the number of fractional digits.
     """
-    return str(epoch.utc.isot)
+    with _dubious_years_allowed():
+        return str(epoch.utc.isot)
 
 
 def parse_value(keyword: Keyword, text: str, unit: str | None) -> FieldValue:

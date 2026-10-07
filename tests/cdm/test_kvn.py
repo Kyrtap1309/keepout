@@ -16,8 +16,8 @@ from keepout.errors import CdmParseError, CdmWriteError, CovarianceError
 from keepout.frames import to_gcrf
 
 
-def mutate_b1(old: str, new: str) -> str:
-    return cdm_builders.mutate(B1.read_text(encoding="utf-8"), old, new)
+def mutate_b1(old: str, new: str, count: int = 1) -> str:
+    return cdm_builders.mutate(B1.read_text(encoding="utf-8"), old, new, count)
 
 
 def line_of(text: str, fragment: str) -> int:
@@ -100,6 +100,14 @@ def test_tracss_itrf_states_are_converted_to_gcrf() -> None:
 def test_fixture_round_trip(path: Path) -> None:
     cdm = kvn.load(path)
     assert_equivalent(kvn.loads(kvn.dumps(cdm)), cdm)
+
+
+def test_a_cdm_after_the_leap_second_table_is_read_and_written() -> None:
+    # ERFA calls UTC from 2029 "dubious": past its leap-second table.
+    cdm = kvn.loads(mutate_b1("2010-03-", "2035-03-", count=8))
+    assert format_epoch(cdm.tca) == "2035-03-13T22:37:52.618"
+    # Compared as text: subtracting such times (assert_equivalent) warns.
+    assert kvn.dumps(kvn.loads(kvn.dumps(cdm))) == kvn.dumps(cdm)
 
 
 @settings(max_examples=50, deadline=None)
