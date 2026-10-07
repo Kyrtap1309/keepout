@@ -1,11 +1,11 @@
 # keepout
 
-Spacecraft conjunction assessment in Python: CCSDS CDM ingest, probability of
-collision (Pc), risk trends and collision-avoidance manoeuvre planning.
+Spacecraft conjunction assessment in Python: screening against the public
+catalog, CCSDS CDM ingest, probability of collision (Pc), risk trends and
+collision-avoidance manoeuvre planning.
 
 !!! warning "Pre-alpha"
-    Milestone M4 — risk levels, trends and decisions over a conjunction
-    event. APIs will change.
+    Milestone M5 — screening. APIs will change.
 
 ## Reading a CDM
 
@@ -53,6 +53,27 @@ See [Risk assessment](risk.md) for the rules and the
 [Kelvins report](risk-kelvins.md) for keepout's decisions on 15 321 real
 events of ESA missions.
 
+## Screening
+
+```python
+from astropy.time import Time
+
+from keepout import screen
+from keepout.sources.celestrak import fetch_catalog
+
+catalog = fetch_catalog()  # CelesTrak's public catalog, cached for two hours
+iss = [omm for omm in catalog.omms if omm.catalog_number == 25544]
+result = screen(iss, catalog.omms, Time("2026-10-06T00:00:00", scale="utc"))
+for approach in result.approaches:  # 7 days, within a 5 km sphere
+    print(approach.tca.isot, approach.secondary_id, f"{approach.miss_distance:.0f} m")
+for skipped in result.skipped:  # element sets left out, with the reason
+    print(skipped.catalog_number, skipped.reason.value, skipped.detail)
+```
+
+See [Screening](screening.md) for the method, the screening volumes and the
+limits of GP data, and [Screening against SOCRATES](screening-socrates.md)
+for keepout's results next to CelesTrak's.
+
 ## Validation philosophy
 
 Every Pc algorithm in keepout is implemented from the published literature
@@ -68,9 +89,11 @@ SHA-256; they are never redistributed with keepout. See the
 uv sync
 uv run pre-commit install     # ruff, mypy and the lock checked on commit
 uv run pytest                 # offline test suite
-uv run pytest -m validation   # downloads CARA and Kelvins data
+uv run pytest -m validation   # slow checks; downloads CARA and Kelvins data
 uv run python tools/validation_report.py   # regenerate the validation report
 uv run python tools/validation_report.py --monte-carlo   # Monte Carlo (slow)
 uv run python tools/risk_report.py   # Kelvins risk report (downloads 221 MB once)
+uv run python tools/screening_report.py   # SOCRATES screening report (offline)
+uv run python tools/screening_benchmark.py   # screening benchmark (offline, minutes)
 uv run mkdocs serve           # this documentation
 ```
