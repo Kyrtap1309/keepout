@@ -114,6 +114,8 @@ Kelvins data: ESA, *Collision Avoidance Challenge dataset*, Zenodo, 2021,
 ## Screening
 
 ```python
+from collections import Counter
+
 from astropy.time import Time
 
 from keepout import screen
@@ -121,11 +123,10 @@ from keepout.sources.celestrak import fetch_catalog
 
 catalog = fetch_catalog()  # CelesTrak's public catalog, cached for two hours
 iss = [omm for omm in catalog.omms if omm.catalog_number == 25544]
-result = screen(iss, catalog.omms, Time("2026-10-06T00:00:00", scale="utc"))
-for approach in result.approaches:  # 7 days, within a 5 km sphere
+result = screen(iss, catalog.omms, Time.now())  # the next 7 days, a 5 km sphere
+for approach in result.approaches:
     print(approach.tca.isot, approach.secondary_id, f"{approach.miss_distance:.0f} m")
-for skipped in result.skipped:  # element sets left out, with the reason
-    print(skipped.catalog_number, skipped.reason.value, skipped.detail)
+print(Counter(skipped.reason.value for skipped in result.skipped))  # sets left out
 ```
 
 Each approach holds both objects' GCRF states at TCA, the miss distance, the

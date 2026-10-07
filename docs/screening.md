@@ -19,7 +19,7 @@ from keepout.sources.celestrak import fetch_catalog
 def main() -> None:
     catalog = fetch_catalog()  # CelesTrak's public catalog, one set per object
     iss = [omm for omm in catalog.omms if omm.catalog_number == 25544]
-    start = Time("2026-10-06T00:00:00", scale="utc")
+    start = Time("2026-10-06T00:00:00", scale="utc")  # live data: Time.now()
     result = screen(iss, catalog.omms, start, workers=4)  # 7 days, 5 km sphere
     for approach in result.approaches:
         radial, transverse, normal = approach.miss_rtn
@@ -37,8 +37,12 @@ if __name__ == "__main__":  # needed for workers > 1
     main()
 ```
 
-On the catalog CelesTrak served on 2026-10-06 (the frozen copy in
-`tests/screening/data/`) this prints:
+The window starts on 2026-10-06 to match the catalog CelesTrak served that
+day (the frozen copy in `tests/screening/data/`), on which this prints the
+output below. On the live catalog, start the window from the data, as with
+`Time.now()`: a window that ends more than 30 days after an element set's
+epoch leaves that set out as stale (see [Element age](#element-age)), so this
+fixed start finds nothing from November 2026 on.
 
 ```text
 2026-10-06T05:12:33.772 58180 4633 m (R 3186, T -2873, N 1748) 7914 m/s
