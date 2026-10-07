@@ -255,6 +255,35 @@ def test_objects_sgp4_fails_for_are_left_out_with_their_approaches() -> None:
     assert result.catalog_count == rest.catalog_count
 
 
+def test_an_object_failing_just_after_the_window_is_screened() -> None:
+    # SGP4 first fails for 45711 between 83478.5 and 83478.75 s after START;
+    # the search's derivative at the window's end reaches 2 s past it. With
+    # a sphere wide enough to hold the pair, its minimum 0.23 s before the
+    # end is found, a minimum of the range, and nothing is left out.
+    duration = 83477.5
+    result = screen(
+        elements(FAILING[:1]),
+        elements(FAILING[1:]),
+        START,
+        duration,
+        ScreeningVolume.sphere(5000e3),
+    )
+    assert result.skipped == ()
+    assert len(result.approaches) == 33
+    last = result.approaches[-1]
+    offset = (last.tca - START).to_value(u.s)
+    assert duration - 1.0 < offset <= duration
+    ephemeris = Sgp4Propagator(elements(FAILING)).propagate(
+        START, offset + np.array([-1e-3, 0.0, 1e-3])
+    )
+    assert ephemeris.valid.all()
+    distance = np.linalg.norm(ephemeris.r[1] - ephemeris.r[0], axis=-1)
+    assert distance[0] > distance[1] < distance[2]
+    assert np.linalg.norm(
+        last.secondary_state.r - last.primary_state.r
+    ) == pytest.approx(distance[1], abs=1e-6)
+
+
 def test_element_sets_sgp4_cannot_take_are_left_out() -> None:
     big = dataclasses.replace(BY_NUMBER[68378], catalog_number=400_000)
     result = screen([big, *elements(FORMATION)], [*FIXTURE, big], START, DAY)

@@ -56,6 +56,12 @@ samples is a minimum: there, a minimum and a maximum of the range less than
 :data:`SLOW_STEP` apart are not told apart (on the frozen fixture the
 closest are 75 s apart).
 
+Within ``2 DERIVATIVE_STEP`` of the window's ends the central difference
+takes positions outside the window. An error SGP4 reports there (an object
+decaying a second after the window) is not the object's: ``f`` at such a
+time comes from a one-sided fourth-order difference over five positions
+inside the window instead.
+
 **Inside the volume.** A minimum counts when the catalog object's position
 relative to the primary at TCA, in the primary's RTN frame, is inside the
 volume (:meth:`~keepout.screening.volume.ScreeningVolume.contains_position`).
@@ -71,10 +77,16 @@ together find the minima of their union, each once.
 interval is taken as one object over it, with no minimum: CelesTrak gives
 docked spacecraft the element set of their station.
 
+**Failures.** An object fails when SGP4 reports an error for it at a
+time in the window: on the grid, or while an interval is refined. A failure
+while refining an interval loses that interval's minima only; the pair's
+other intervals are refined as if it had none.
+
 **Determinism.** Each interval is decided from the states of its own pair
-only, so the result does not depend on how the grid is cut into chunks or
-into runs (:meth:`ApproachSearch.run` over parts of the grid, e.g. one per
-worker, merged with :meth:`SearchResult.merge`).
+only, and so is each failure found while refining it, so the result does
+not depend on how the grid is cut into chunks or into runs
+(:meth:`ApproachSearch.run` over parts of the grid, e.g. one per worker,
+merged with :meth:`SearchResult.merge`).
 """
 
 from __future__ import annotations
@@ -158,6 +170,11 @@ error [m]: the Earth's polar radius (WGS 84). SGP4 reports error 6 below
 _STENCIL: Final = np.array([-2.0, -1.0, 1.0, 2.0]) * DERIVATIVE_STEP
 _WEIGHTS: Final = np.array([1.0, -8.0, 8.0, -1.0]) / (24.0 * DERIVATIVE_STEP)
 """Fourth-order central difference of ``|rho|^2``, halved: ``f``."""
+
+_ONE_SIDED: Final = np.array([-25.0, 48.0, -36.0, 16.0, -3.0]) / 24.0
+"""Fourth-order one-sided difference of ``|rho|^2`` over positions 0 to 4
+steps away, halved, per unit step: ``f`` at a window's ends when the
+central difference reaches a failed state outside the window."""
 
 
 def time_grid(duration: float, step: float = DEFAULT_STEP) -> FloatArray:
@@ -388,7 +405,7 @@ def _acceleration(
 
 
 class _Failed(Exception):
-    """Propagation failed while refining a pair."""
+    """Propagation failed, in the window, while refining a pair."""
 
     def __init__(
         self, primary: ObjectFailure | None, secondary: ObjectFailure | None
@@ -408,11 +425,34 @@ def _first_failure(
     return ObjectFailure(float(stamps[first]), int(errors[first]))
 
 
+def _check(
+    own: npt.NDArray[np.uint8], other: npt.NDArray[np.uint8], stamps: FloatArray
+) -> None:
+    """Raise :class:`_Failed` if either object failed at some of ``stamps``."""
+    failed = _first_failure(own, stamps), _first_failure(other, stamps)
+    if failed != (None, None):
+        raise _Failed(*failed)
+
+
+def _note(
+    failures: tuple[dict[int, ObjectFailure], dict[int, ObjectFailure]],
+    primary: int,
+    secondary: int,
+    failed: _Failed,
+) -> None:
+    """Record a pair's failure found while refining it."""
+    if failed.primary is not None:
+        _earliest(failures[0], primary, failed.primary)
+    if failed.secondary is not None:
+        _earliest(failures[1], secondary, failed.secondary)
+
+
 class _Pair:
     """One primary and one catalog object, evaluated at any times."""
 
     def __init__(self, search: ApproachSearch, primary: int, secondary: int) -> None:
         self.start = search.start
+        self.duration = search.duration
         self.primary = search.primaries.subset(np.array([primary]))
         self.secondary = search.catalog.subset(np.array([secondary]))
         self.known: dict[float, float] = {}
@@ -423,19 +463,23 @@ class _Pair:
         """Positions and velocities of both at ``stamps``, ``(n, 3)`` each."""
         own = self.primary.propagate(self.start, stamps)
         other = self.secondary.propagate(self.start, stamps)
-        failed = (
-            _first_failure(own.errors[0], stamps),
-            _first_failure(other.errors[0], stamps),
-        )
-        if failed != (None, None):
-            raise _Failed(*failed)
+        _check(own.errors[0], other.errors[0], stamps)
         return own.r[0], own.v[0], other.r[0], other.v[0]
 
     def derivative(self, times: FloatArray) -> FloatArray:
-        """``rho . drho/dt`` at ``times`` from positions only."""
+        """``rho . drho/dt`` at ``times`` (in the window) from positions only.
+
+        Raises :class:`_Failed` for a failure in the window only: a time
+        whose central difference reaches a failed state outside the window
+        takes the one-sided difference inside it.
+        """
         stamps = (times[:, None] + _STENCIL).reshape(-1)
-        r_own, _, r_other, _ = self.states(stamps)
-        rho = r_other - r_own
+        own = self.primary.propagate(self.start, stamps)
+        other = self.secondary.propagate(self.start, stamps)
+        outside = (stamps < 0.0) | (stamps > self.duration)
+        inside = ~outside
+        _check(own.errors[0][inside], other.errors[0][inside], stamps[inside])
+        rho = other.r[0] - own.r[0]
         squared = _dot(rho, rho).reshape(-1, len(_STENCIL))
         derivative: FloatArray = (
             squared[:, 0] * _WEIGHTS[0]
@@ -443,7 +487,40 @@ class _Pair:
             + squared[:, 2] * _WEIGHTS[2]
             + squared[:, 3] * _WEIGHTS[3]
         )
+        failed = (own.errors[0] != NO_ERROR) | (other.errors[0] != NO_ERROR)
+        edge = np.flatnonzero(np.any((failed & outside).reshape(squared.shape), axis=1))
+        if edge.size > 0:
+            derivative[edge] = self._one_sided(times[edge])
         return derivative
+
+    def _one_sided(self, times: FloatArray) -> FloatArray:
+        """``rho . drho/dt`` at ``times`` from five positions inside the
+        window, towards its far end (closer together than DERIVATIVE_STEP in
+        a window shorter than four of them)."""
+        after = self.duration - times
+        forward = after >= times
+        room = np.where(forward, after, times)
+        spacing = np.minimum(DERIVATIVE_STEP, room / 4.0) * np.where(forward, 1.0, -1.0)
+        nodes = times[:, None] + spacing[:, None] * np.arange(len(_ONE_SIDED))
+        stamps = np.clip(nodes, 0.0, self.duration).reshape(-1)
+        r_own, _, r_other, _ = self.states(stamps)
+        rho = r_other - r_own
+        squared = _dot(rho, rho).reshape(-1, len(_ONE_SIDED))
+        total = squared[:, 0] * _ONE_SIDED[0]
+        for k in range(1, len(_ONE_SIDED)):
+            total = total + squared[:, k] * _ONE_SIDED[k]
+        derivative: FloatArray = total / spacing
+        return derivative
+
+    def values(self, times: FloatArray) -> FloatArray:
+        """``rho . drho/dt`` at ``times``, from those already known if all
+        are."""
+        listed = times.tolist()
+        if all(time in self.known for time in listed):
+            return np.array([self.known[time] for time in listed])
+        values = self.derivative(times)
+        self.known.update(zip(listed, values.tolist(), strict=True))
+        return values
 
     def at(self, time: float) -> float:
         """``rho . drho/dt`` at one time, for Brent's method (which starts
@@ -659,13 +736,7 @@ class ApproachSearch:
         candidates = self._candidates(rows, first, stop, max_states, failures)
         minima: list[RangeMinimum] = []
         for (primary, secondary), found in sorted(candidates.items()):
-            try:
-                minima.extend(self._refine(primary, secondary, found))
-            except _Failed as failed:
-                if failed.primary is not None:
-                    _earliest(failures[0], primary, failed.primary)
-                if failed.secondary is not None:
-                    _earliest(failures[1], secondary, failed.secondary)
+            minima.extend(self._refine(primary, secondary, found, failures))
         return SearchResult(tuple(minima), *failures)
 
     def _candidates(
@@ -765,23 +836,45 @@ class ApproachSearch:
         return others[pair[keep]], interval[keep], quick[keep]
 
     def _refine(
-        self, primary: int, secondary: int, found: list[tuple[int, bool]]
+        self,
+        primary: int,
+        secondary: int,
+        found: list[tuple[int, bool]],
+        failures: tuple[dict[int, ObjectFailure], dict[int, ObjectFailure]],
     ) -> list[RangeMinimum]:
-        """The minima of one pair in its intervals that passed the sieves."""
+        """The minima of one pair in its intervals that passed the sieves.
+
+        A failure while refining an interval is recorded in ``failures`` and
+        loses that interval's minima only.
+        """
         pair = _Pair(self, primary, secondary)
         grid = self._offsets
         brackets = [_samples(grid[k], grid[k + 1], quick=quick) for k, quick in found]
         points = np.unique(np.concatenate(brackets))
-        derivative = pair.derivative(points)
-        pair.known = dict(zip(points.tolist(), derivative.tolist(), strict=True))
+        try:
+            derivative = pair.derivative(points)
+            pair.known = dict(zip(points.tolist(), derivative.tolist(), strict=True))
+        except _Failed:
+            pass  # each interval is evaluated, and its failure found, on its own
         minima: list[RangeMinimum] = []
         for samples in brackets:
-            values = derivative[np.searchsorted(points, samples)]
-            for j in np.flatnonzero((values[:-1] < 0.0) & (values[1:] >= 0.0)):
-                tca = brentq(pair.at, samples[j], samples[j + 1], xtol=TCA_TOLERANCE)
-                minimum = self._inside(pair, primary, secondary, float(tca))
-                if minimum is not None:
-                    minima.append(minimum)
+            try:
+                minima.extend(self._bracket(pair, primary, secondary, samples))
+            except _Failed as failed:
+                _note(failures, primary, secondary, failed)
+        return minima
+
+    def _bracket(
+        self, pair: _Pair, primary: int, secondary: int, samples: FloatArray
+    ) -> list[RangeMinimum]:
+        """The minima of a pair in one interval, sampled at ``samples``."""
+        values = pair.values(samples)
+        minima: list[RangeMinimum] = []
+        for j in np.flatnonzero((values[:-1] < 0.0) & (values[1:] >= 0.0)):
+            tca = brentq(pair.at, samples[j], samples[j + 1], xtol=TCA_TOLERANCE)
+            minimum = self._inside(pair, primary, secondary, float(tca))
+            if minimum is not None:
+                minima.append(minimum)
         return minima
 
     def _inside(

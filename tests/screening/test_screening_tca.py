@@ -454,6 +454,38 @@ def test_every_pair_of_several_primaries_is_searched() -> None:
     assert [m.offset for m in found] == pytest.approx([900.0, 1500.0], abs=1e-6)
 
 
+@pytest.mark.parametrize(
+    ("relative", "precision"), [(FAST, 1e-6), (SLOW, 1e-4)], ids=["fast", "slow"]
+)
+@pytest.mark.parametrize(
+    ("tca", "fail"),
+    [(0.5, (-np.inf, -1.0)), (2 * HOUR - 0.5, (2 * HOUR + 1.0, np.inf))],
+    ids=["start", "end"],
+)
+def test_a_failure_just_outside_the_window_is_not_the_objects(
+    relative: npt.NDArray[np.float64],
+    precision: float,
+    tca: float,
+    fail: tuple[float, float],
+) -> None:
+    # The central difference at the window's ends reaches 2 s outside it:
+    # an object failing a second outside is fine in the window, and its
+    # minimum half a second from the end is found as accurately.
+    miss = np.cross(relative, [1.0, 0.0, 0.0])
+    miss *= 1 * KM / np.linalg.norm(miss)
+    fine = lines(passing(miss, relative, tca))
+    failing = StraightLines(fine.r0, fine.v0, np.array([fail]))
+    result = search(failing).run()
+    assert result.primary_failures == result.catalog_failures == {}
+    (minimum,) = result.minima
+    assert minimum.offset == pytest.approx(tca, abs=precision)
+    assert minimum.distance == pytest.approx(1 * KM, abs=1e-6)
+    # Every evaluation in the window, failing or not, is the same object's.
+    assert search(fine).run().minima[0].offset == pytest.approx(
+        minimum.offset, abs=precision
+    )
+
+
 def test_failed_objects_are_listed_with_their_first_failure() -> None:
     miss = np.cross(FAST, [1.0, 0.0, 0.0])
     miss *= 1 * KM / np.linalg.norm(miss)
@@ -506,6 +538,16 @@ MISSES = lines(
         ]
     )
 )
+CIRCLING = 2 * math.pi / 200.0
+FAILING = StraightLines(
+    np.concatenate([MISSES.r0, (PRIMARY[0] + [2 * KM, 0.0, 0.0])[None]]),
+    np.concatenate([MISSES.v0, PRIMARY[1][None]]),
+    np.concatenate([MISSES.fail, [[2900.5, 2901.5]]]),
+    np.concatenate([MISSES.circle, [[1 * KM, CIRCLING, 0.3]]]),
+)
+"""MISSES and a companion circling 1 km around a point 2 km from PRIMARY
+(a minimum every 200 s, at 90.45 s + 200 k), failing for a second in the
+interval of the minimum at 2890.45 s."""
 
 
 @settings(deadline=None, max_examples=30)
@@ -516,9 +558,14 @@ MISSES = lines(
 def test_chunks_and_runs_do_not_change_the_result(
     max_states: int, cuts: list[int]
 ) -> None:
-    searched = search(MISSES)
+    searched = search(FAILING)
     whole = searched.run()
-    assert len(whole.minima) == 4
+    # The failure loses the minimum of its own interval only.
+    companion = [m.offset for m in whole.minima if m.secondary == 5]
+    expected = (math.pi - 0.3) / CIRCLING + 200.0 * np.arange(36)
+    np.testing.assert_allclose(companion, np.delete(expected, 14), rtol=0, atol=1e-5)
+    assert len(whole.minima) == 4 + 35
+    assert dict(whole.catalog_failures) == {5: ObjectFailure(2901.0, 6)}
     assert searched.intervals == 60
     bounds = [0, *sorted(cuts), searched.intervals]
     parts = [
