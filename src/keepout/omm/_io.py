@@ -10,7 +10,7 @@ from typing import Any, Final, NamedTuple, TypeVar
 
 from astropy.time import Time
 
-from keepout.cdm.keywords import format_epoch, parse_value
+from keepout.ccsds.keywords import format_epoch, parse_value
 from keepout.errors import OmmParseError
 from keepout.omm.keywords import (
     ATTRIBUTES,

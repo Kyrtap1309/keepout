@@ -13,7 +13,7 @@ import pytest
 import screening_snapshot as snapshot
 from astropy.time import Time
 
-from keepout.errors import GeometryError
+from keepout.errors import GeometryError, UnsupportedElements
 from keepout.frames import teme_to_gcrf
 from keepout.omm import Omm, load
 from keepout.propagation import Sgp4Propagator, describe_error
@@ -310,7 +310,8 @@ def picky(error: Exception) -> Callable[[Omm], ScreeningVolume]:
 
 
 @pytest.mark.parametrize(
-    "error", [ValueError("no volume for 56156"), GeometryError("no volume for 56156")]
+    "error",
+    [GeometryError("no volume for 56156"), UnsupportedElements("no volume for 56156")],
 )
 def test_a_primary_without_a_volume_is_left_out(error: Exception) -> None:
     result = screen(elements(FORMATION), FIXTURE, START, DAY, picky(error))
@@ -328,6 +329,18 @@ def test_a_primary_without_a_volume_is_left_out(error: Exception) -> None:
         elements([68377, 58199]), FIXTURE, START, DAY, ScreeningVolume.nasa_gp_data()
     )
     assert summary(result)[:-4] == summary(others)[:-4]
+
+
+@pytest.mark.parametrize(
+    "error", [ZeroDivisionError("division by zero"), ValueError("a bug in the rule")]
+)
+def test_a_volume_rule_that_fails_otherwise_stops_the_screening(
+    error: Exception,
+) -> None:
+    # Only a KeepoutError says the rule has no volume for a primary; any
+    # other exception is a bug in the rule, not a reason to skip.
+    with pytest.raises(type(error), match=str(error)):
+        screen(elements(FORMATION), FIXTURE, START, DAY, picky(error))
 
 
 def test_a_volume_rule_must_give_volumes() -> None:

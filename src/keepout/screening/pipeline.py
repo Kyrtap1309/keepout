@@ -8,7 +8,8 @@ theory) and a window, and returns a
    screened (:func:`keepout.omm.deduplicate`). An element set is left out
    when the window ends more than ``max_age`` after its epoch (stale) or
    starts more than ``max_lead`` before it, when SGP4 cannot be initialised
-   with it, or (a primary) when the volume rule refuses it.
+   with it, or (a primary) when the volume rule refuses it (raises a
+   :class:`~keepout.errors.KeepoutError`).
 2. **Pairs.** Every primary is paired with every catalog object, except
    itself (the same catalog number); the apogee/perigee filter
    (:func:`~keepout.screening.filters.apogee_perigee_filter`) drops the pairs
@@ -67,7 +68,7 @@ from keepout._types import (
     require_positive,
 )
 from keepout._units import DAY
-from keepout.errors import KeepoutError
+from keepout.errors import KeepoutError, UnsupportedElements
 from keepout.frames import teme_to_gcrf
 from keepout.omm import Omm, deduplicate
 from keepout.propagation.base import CHUNK_STATES, RadiusBounds, describe_error
@@ -142,7 +143,9 @@ def screen(
     volume
         The screening volume of every primary, or a rule giving each
         primary's own (e.g. ``ScreeningVolume.sfs_handbook``); called once
-        per primary, in this process.
+        per primary, in this process. A primary the rule raises a
+        :class:`~keepout.errors.KeepoutError` for is left out; any other
+        exception the rule raises propagates.
     workers
         Number of processes to screen in; 1 screens in this process.
     max_age
@@ -325,7 +328,7 @@ def _primaries(
     for index, omm in enumerate(initialised.omms):
         try:
             volumes.append(volume_for(volume, omm))
-        except (ValueError, KeepoutError) as error:
+        except KeepoutError as error:
             reason = SkipReason.NO_VOLUME
             skipped.append(SkippedObject(omm, "primary", reason, str(error)))
             continue
@@ -343,14 +346,14 @@ def _propagator(
     """
     try:
         return Sgp4Propagator(omms), np.arange(len(omms)), []
-    except ValueError:
+    except UnsupportedElements:
         pass  # find which, one by one
     usable: list[int] = []
     unsupported: list[tuple[int, str]] = []
     for index, omm in enumerate(omms):
         try:
             omm.satrec()
-        except ValueError as error:
+        except UnsupportedElements as error:
             unsupported.append((index, str(error)))
             continue
         usable.append(index)

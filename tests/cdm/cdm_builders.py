@@ -7,12 +7,12 @@ from astropy.time import Time
 from builders import CDM_DATA, DIAGONAL_COVARIANCE, EPOCH
 from hypothesis import strategies as st
 
+from keepout.ccsds.keywords import parse_epoch
 from keepout.cdm.keywords import (
     REQUIRED,
     SEGMENT,
     covariance_entries,
     covariance_names,
-    parse_epoch,
 )
 from keepout.cdm.model import Cdm, Field, Section
 

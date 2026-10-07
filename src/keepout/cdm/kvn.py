@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import dataclasses
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+from keepout.ccsds.kvn import assignment, comment, format_line, split_unit
 from keepout.cdm._io import (
     Location,
     build_cdm,
@@ -28,23 +28,13 @@ from keepout.errors import CdmParseError, CdmWriteError
 
 __all__ = ["dump", "dumps", "load", "loads"]
 
-_ASSIGNMENT: Final = re.compile(r"^(?P<keyword>[A-Z][A-Z0-9_]*)\s*=\s*(?P<value>.*)$")
-_UNIT: Final = re.compile(r"^(?P<value>.*?)\s*\[(?P<unit>[^\[\]]*)\]$")
-_COMMENT: Final = re.compile(r"^COMMENT(?:\s+(?P<text>.*))?$")
 _KEYWORD_WIDTH: Final = 30
 _LAYOUT: Final[tuple[SectionKind, ...]] = ("header", "relative", "segment", "segment")
 
 
-def _split_unit(text: str) -> tuple[str, str | None]:
-    match = _UNIT.match(text)
-    if match is None:
-        return text, None
-    return match.group("value").strip(), match.group("unit").strip()
-
-
 def _field(kind: SectionKind, keyword: str, text: str, line: int) -> Field:
     spec = KEYWORDS[kind].get(keyword)
-    value, unit = (text, None) if spec and spec.kind == "str" else _split_unit(text)
+    value, unit = (text, None) if spec and spec.kind == "str" else split_unit(text)
     try:
         return parse_field(kind, keyword, value, unit)
     except ValueError as exc:
@@ -123,21 +113,20 @@ def loads(text: str) -> Cdm:
         line = raw.strip()
         if not line:
             continue
-        comment = _COMMENT.match(line)
-        if comment is not None:
+        remark = comment(line)
+        if remark is not None:
             if not building:
                 raise CdmParseError(
                     "CCSDS_CDM_VERS must be the first keyword", line=number
                 )
-            remark = (comment.group("text") or "").strip()
             pending.append((Field(COMMENT, remark), number))
             continue
-        assignment = _ASSIGNMENT.match(line)
-        if assignment is None:
+        assigned = assignment(line)
+        if assigned is None:
             raise CdmParseError(
                 f"expected 'KEYWORD = value', got {line!r}", line=number
             )
-        keyword = assignment.group("keyword")
+        keyword, value = assigned
         opened = _opened([b.kind for b in building], keyword, number)
         if opened is not None:
             building.append(_Building(opened))
@@ -145,7 +134,6 @@ def loads(text: str) -> Cdm:
         for item, at in pending:
             current.add(item, at)
         pending.clear()
-        value = assignment.group("value").strip()
         current.add(_field(current.kind, keyword, value, number), number)
     for item, at in pending:
         building[-1].add(item, at)
@@ -184,12 +172,15 @@ def dumps(cdm: Cdm) -> str:
                 )
                 continue
             text, unit = format_field(section.kind, field)
-            if len(text.splitlines()) > 1:
-                raise CdmWriteError(
-                    f"{field.keyword}: KVN cannot hold a multi-line value {text!r}"
+            lines.append(
+                format_line(
+                    field.keyword,
+                    text,
+                    unit,
+                    width=_KEYWORD_WIDTH,
+                    error=CdmWriteError,
                 )
-            line = f"{field.keyword:<{_KEYWORD_WIDTH}} = {text}"
-            lines.append(f"{line} [{unit}]" if unit is not None else line.rstrip())
+            )
     return "\n".join(lines) + "\n"
 
 

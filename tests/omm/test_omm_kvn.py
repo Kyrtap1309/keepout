@@ -16,7 +16,7 @@ from omm_builders import (
     sgp4_record,
 )
 
-from keepout.errors import OmmParseError
+from keepout.errors import OmmParseError, OmmWriteError
 from keepout.omm import kvn
 from keepout.omm.celestrak import load_csv, loads_csv
 
@@ -195,9 +195,11 @@ def test_invalid_kvn_is_refused_with_its_place(text: str, message: str) -> None:
 @pytest.mark.parametrize("name", ["A\nB", "A\rB", "A\u2028B"])
 def test_a_line_break_cannot_be_written(name: str) -> None:
     (iss,) = kvn.loads(ISS_KVN)
-    with pytest.raises(ValueError, match="OBJECT_NAME: KVN cannot hold a line break"):
+    with pytest.raises(
+        OmmWriteError, match="OBJECT_NAME: KVN cannot hold a line break"
+    ):
         kvn.dumps([dataclasses.replace(iss, object_name=name)])
-    with pytest.raises(ValueError, match="ORIGINATOR: KVN cannot hold a line break"):
+    with pytest.raises(OmmWriteError, match="ORIGINATOR: KVN cannot hold a line break"):
         kvn.dumps([iss], originator=name)
 
 

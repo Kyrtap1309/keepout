@@ -11,11 +11,12 @@ performed.
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Sequence
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Final
 from xml.etree import ElementTree
 
+from keepout.ccsds.xml import XSI, add_leaf, leaves, local, parse, single, tostring
 from keepout.cdm._io import (
     Location,
     build_cdm,
@@ -33,12 +34,11 @@ from keepout.cdm.model import (
     format_field,
     parse_field,
 )
-from keepout.errors import CdmParseError
+from keepout.errors import CdmParseError, CdmWriteError
 
 __all__ = ["NDM_NAMESPACE", "dump", "dumps", "load", "loads"]
 
 NDM_NAMESPACE: Final = "urn:ccsds:schema:ndmxml"
-_XSI: Final = "http://www.w3.org/2001/XMLSchema-instance"
 # Schema of CDM 1.0 messages ("1.0" is the CDM version): the master schema of
 # the NDM/XML 2.0.0 suite, which includes CDM 1.0.
 _CDM_1_0_SCHEMA_LOCATION: Final = (
@@ -58,33 +58,8 @@ _GROUPS: Final = frozenset(
 """Grouping elements; they are structure even when empty."""
 
 
-def _local(tag: str) -> str:
-    return tag.rsplit("}", 1)[-1]
-
-
-def _single(parent: ElementTree.Element, name: str, path: str) -> ElementTree.Element:
-    found = [child for child in parent if _local(child.tag) == name]
-    if len(found) != 1:
-        raise CdmParseError(
-            f"expected exactly one <{name}>, found {len(found)}", path=path
-        )
-    return found[0]
-
-
-def _leaves(
-    element: ElementTree.Element, path: str
-) -> Iterator[tuple[ElementTree.Element, str]]:
-    for child in element:
-        name = _local(child.tag)
-        child_path = f"{path}/{name}"
-        if len(child) or name in _GROUPS:
-            yield from _leaves(child, child_path)
-        else:
-            yield child, child_path
-
-
 def _keyword(leaf: ElementTree.Element, path: str) -> str:
-    keyword = _local(leaf.tag)
+    keyword = local(leaf.tag)
     if keyword != _USER_DEFINED:
         return keyword
     parameter = leaf.get("parameter")
@@ -101,7 +76,7 @@ def _section(
 ) -> Section:
     fields = list(leading)
     locations = [Location(path=path)] * len(fields)
-    for leaf, leaf_path in _leaves(element, path):
+    for leaf, leaf_path in leaves(element, path, _GROUPS):
         keyword = _keyword(leaf, leaf_path)
         text = (leaf.text or "").strip()
         try:
@@ -129,30 +104,27 @@ def loads(text: str) -> Cdm:
     CdmParseError
         If the message is malformed; the error names the element path.
     """
-    if "<!DOCTYPE" in text.upper():
-        raise CdmParseError("DOCTYPE declarations are not allowed in CDM XML")
-    try:
-        root = ElementTree.fromstring(text)
-    except ElementTree.ParseError as exc:
-        raise CdmParseError(f"malformed XML: {exc}") from exc
-    if _local(root.tag) != "cdm":
-        raise CdmParseError(f"root element must be <cdm>, got <{_local(root.tag)}>")
+    root = parse(text, "CDM", CdmParseError)
+    if local(root.tag) != "cdm":
+        raise CdmParseError(f"root element must be <cdm>, got <{local(root.tag)}>")
     version = root.get("version")
     if not version:
         raise CdmParseError("<cdm> has no version attribute")
-    header = _single(root, "header", "cdm")
-    body = _single(root, "body", "cdm")
-    relative = _single(body, "relativeMetadataData", "cdm/body")
-    segments = [child for child in body if _local(child.tag) == "segment"]
+    header, header_path = single(root, "header", "cdm", CdmParseError)
+    body, body_path = single(root, "body", "cdm", CdmParseError)
+    relative, relative_path = single(
+        body, "relativeMetadataData", body_path, CdmParseError
+    )
+    segments = [child for child in body if local(child.tag) == "segment"]
     if len(segments) != 2:
         raise CdmParseError(
-            f"expected 2 <segment> elements, found {len(segments)}", path="cdm/body"
+            f"expected 2 <segment> elements, found {len(segments)}", path=body_path
         )
     return build_cdm(
-        _section("header", header, "cdm/header", [Field("CCSDS_CDM_VERS", version)]),
-        _section("relative", relative, "cdm/body/relativeMetadataData"),
+        _section("header", header, header_path, [Field("CCSDS_CDM_VERS", version)]),
+        _section("relative", relative, relative_path),
         [
-            _section("segment", segment, f"cdm/body/segment[{index}]")
+            _section("segment", segment, f"{body_path}/segment[{index}]")
             for index, segment in enumerate(segments, start=1)
         ],
     )
@@ -199,8 +171,8 @@ def _insert_comment(element: ElementTree.Element, text: str) -> None:
     position = next(
         (i for i, child in enumerate(element) if child.tag != COMMENT), len(element)
     )
-    comment = ElementTree.Element(COMMENT)
-    comment.text = text
+    comment = add_leaf(element, COMMENT, text, None, error=CdmWriteError)
+    element.remove(comment)
     element.insert(position, comment)
 
 
@@ -226,14 +198,18 @@ def _write(
         text, unit = format_field(kind, field)
         if field.keyword.startswith(USER_DEFINED_PREFIX) and group == _USER_GROUP:
             parameter = field.keyword.removeprefix(USER_DEFINED_PREFIX)
-            element = ElementTree.SubElement(
-                elements[-1], _USER_DEFINED, {"parameter": parameter}
-            )
+            tag, attributes = _USER_DEFINED, {"parameter": parameter}
         else:
-            element = ElementTree.SubElement(elements[-1], field.keyword)
-        element.text = text
-        if unit is not None:
-            element.set("units", unit)
+            tag, attributes = field.keyword, None
+        add_leaf(
+            elements[-1],
+            tag,
+            text,
+            unit,
+            error=CdmWriteError,
+            keyword=field.keyword,
+            attributes=attributes,
+        )
 
 
 def dumps(cdm: Cdm) -> str:
@@ -248,10 +224,15 @@ def dumps(cdm: Cdm) -> str:
     ----------
     cdm
         The message.
+
+    Raises
+    ------
+    CdmWriteError
+        If a value or comment contains a character XML 1.0 cannot hold.
     """
     root = ElementTree.Element("cdm", {"id": "CCSDS_CDM_VERS", "version": cdm.version})
     if cdm.version == "1.0":
-        root.set("xmlns:xsi", _XSI)
+        root.set("xmlns:xsi", XSI)
         root.set("xsi:noNamespaceSchemaLocation", _CDM_1_0_SCHEMA_LOCATION)
     header_fields = [f for f in cdm.header.fields if f.keyword != "CCSDS_CDM_VERS"]
     _write(ElementTree.SubElement(root, "header"), header_fields, "header", cdm.version)
@@ -263,9 +244,7 @@ def dumps(cdm: Cdm) -> str:
         _write(
             ElementTree.SubElement(body, tag), section.fields, section.kind, cdm.version
         )
-    ElementTree.indent(root)
-    declaration = '<?xml version="1.0" encoding="UTF-8"?>\n'
-    return declaration + ElementTree.tostring(root, encoding="unicode") + "\n"
+    return tostring(root)
 
 
 def load(path: str | Path) -> Cdm:

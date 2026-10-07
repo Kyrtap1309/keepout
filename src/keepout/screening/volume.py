@@ -144,7 +144,7 @@ class ScreeningVolume:
 
         Raises
         ------
-        ValueError
+        UnsupportedElements
             If SGP4 cannot be initialised from ``primary``
             (:meth:`keepout.omm.Omm.satrec`).
 
@@ -235,7 +235,10 @@ DEFAULT_VOLUME: Final = ScreeningVolume.sphere(
 
 VolumeRule: TypeAlias = Callable[[Omm], ScreeningVolume]
 """A screening volume chosen from the primary's element set, e.g.
-:meth:`ScreeningVolume.sfs_handbook`."""
+:meth:`ScreeningVolume.sfs_handbook`. A rule that has no volume for a
+primary raises a :class:`~keepout.errors.KeepoutError` (e.g.
+:class:`~keepout.errors.UnsupportedElements`); screening then leaves the
+primary out. Any other exception is a bug in the rule and propagates."""
 
 
 def volume_for(volume: ScreeningVolume | VolumeRule, primary: Omm) -> ScreeningVolume:
@@ -349,7 +352,7 @@ def sfs_regime(primary: Omm) -> SfsRegime:
 
     Raises
     ------
-    ValueError
+    UnsupportedElements
         If SGP4 cannot be initialised from ``primary``
         (:meth:`keepout.omm.Omm.satrec`).
     """

@@ -14,6 +14,7 @@ from sgp4.api import Satrec, SatrecArray
 
 from keepout._types import FloatArray, IndexArray, require_non_negative
 from keepout._units import DAY
+from keepout.errors import UnsupportedElements
 from keepout.omm.model import Omm
 from keepout.propagation._sgp4_radius import radius_bounds
 from keepout.propagation.base import Ephemeris, RadiusBounds, time_offsets
@@ -83,7 +84,7 @@ class Sgp4Propagator:
 
     Raises
     ------
-    ValueError
+    UnsupportedElements
         If an element set cannot initialise SGP4 (a catalog number above
         ``keepout.omm.model.MAX_SATREC_NUMBER``, or an epoch in a leap
         second); the message names its position and catalog number.
@@ -101,8 +102,8 @@ class Sgp4Propagator:
         for index, omm in enumerate(elements):
             try:
                 satrecs.append(omm.satrec())
-            except ValueError as error:
-                raise ValueError(
+            except UnsupportedElements as error:
+                raise UnsupportedElements(
                     f"element set {index} (catalog number {omm.catalog_number}) "
                     f"cannot initialise SGP4: {error}"
                 ) from error

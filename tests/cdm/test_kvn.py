@@ -9,8 +9,8 @@ from builders import known
 from cdm_builders import TRACSS, assert_equivalent, cdms, minimal_cdm
 from hypothesis import given, settings
 
+from keepout.ccsds.keywords import format_epoch
 from keepout.cdm import Cdm, Field, Section, kvn
-from keepout.cdm.keywords import format_epoch
 from keepout.conjunction import Conjunction
 from keepout.errors import CdmParseError, CdmWriteError, CovarianceError
 from keepout.frames import to_gcrf
@@ -270,7 +270,7 @@ def test_multi_line_comment_becomes_one_comment_line_each() -> None:
 def test_multi_line_value_cannot_be_written() -> None:
     base = minimal_cdm()
     header = Section("header", (*base.header.fields, Field("X_NOTE", "a\nb")))
-    with pytest.raises(CdmWriteError, match="X_NOTE: KVN cannot hold a multi-line"):
+    with pytest.raises(CdmWriteError, match="X_NOTE: KVN cannot hold a line break"):
         kvn.dumps(dataclasses.replace(base, header=header))
 
 

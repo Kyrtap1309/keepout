@@ -9,7 +9,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from omm_builders import CCSDS_XML, GOES_9, ISS, SAMPLE_CSV, csv_text, records
 
-from keepout.errors import OmmParseError
+from keepout.errors import OmmParseError, OmmWriteError
 from keepout.omm import Omm, xml
 from keepout.omm.celestrak import load_csv, loads_csv
 
@@ -175,7 +175,7 @@ def test_invalid_xml_is_refused_with_its_place(text: str, message: str) -> None:
 
 def test_a_character_xml_cannot_hold_is_refused() -> None:
     broken = dataclasses.replace(ISS_OMM, object_name="A\x00B")
-    with pytest.raises(ValueError, match=r"OBJECT_NAME: XML 1\.0 cannot hold"):
+    with pytest.raises(OmmWriteError, match=r"OBJECT_NAME: XML 1\.0 cannot hold"):
         xml.dumps([broken])
 
 

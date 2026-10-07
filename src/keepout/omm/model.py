@@ -19,7 +19,8 @@ from astropy.time import Time
 from sgp4 import omm as sgp4_omm
 from sgp4.api import Satrec
 
-from keepout.cdm.keywords import format_epoch, format_value, parse_epoch
+from keepout.ccsds.keywords import format_epoch, format_value, parse_epoch
+from keepout.errors import UnsupportedElements
 from keepout.omm.keywords import ATTRIBUTES, KEYWORDS, SGP4_EPHEMERIS_TYPE
 
 __all__ = [
@@ -220,19 +221,19 @@ class Omm:
 
         Raises
         ------
-        ValueError
+        UnsupportedElements
             If the catalog number is above :data:`MAX_SATREC_NUMBER`, or
             the epoch falls in a leap second (SGP4 counts days of 86400 s).
         """
         if self.catalog_number > MAX_SATREC_NUMBER:
-            raise ValueError(
+            raise UnsupportedElements(
                 f"catalog number {self.catalog_number} is above "
                 f"{MAX_SATREC_NUMBER}, the largest an SGP4 record holds"
             )
         values = self.keywords(epoch_digits=SGP4_EPOCH_DIGITS)
         epoch = values["EPOCH"]
         if epoch[17:19] == "60":
-            raise ValueError(f"epoch {epoch} falls in a leap second")
+            raise UnsupportedElements(f"epoch {epoch} falls in a leap second")
         satrec = Satrec()
         sgp4_omm.initialize(satrec, values)
         return satrec

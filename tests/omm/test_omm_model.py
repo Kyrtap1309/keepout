@@ -7,7 +7,8 @@ import pytest
 from astropy.time import Time
 from omm_builders import ISS, assert_same_satrec, sgp4_record
 
-from keepout.cdm.keywords import parse_epoch
+from keepout.ccsds.keywords import parse_epoch
+from keepout.errors import UnsupportedElements
 from keepout.omm._io import parse_record
 from keepout.omm.keywords import DEGREE, KEYWORDS, REVOLUTION_PER_DAY
 from keepout.omm.model import (
@@ -107,7 +108,7 @@ def test_satrec_holds_a_six_digit_catalog_number() -> None:
 
 def test_satrec_refuses_a_catalog_number_sgp4_cannot_hold() -> None:
     above = dataclasses.replace(ISS_OMM, catalog_number=MAX_SATREC_NUMBER + 1)
-    with pytest.raises(ValueError, match="340000 is above 339999"):
+    with pytest.raises(UnsupportedElements, match="340000 is above 339999"):
         above.satrec()
 
 
@@ -130,7 +131,7 @@ def test_satrec_refuses_an_epoch_in_a_leap_second() -> None:
     leap = dataclasses.replace(
         ISS_OMM, epoch=Time("2016-12-31T23:59:60.5", scale="utc")
     )
-    with pytest.raises(ValueError, match="leap second"):
+    with pytest.raises(UnsupportedElements, match="leap second"):
         leap.satrec()
 
 

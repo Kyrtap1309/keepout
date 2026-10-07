@@ -4,12 +4,14 @@ import pytest
 
 from keepout import errors
 from keepout.errors import (
+    CcsdsParseError,
     CdmParseError,
     GeometryError,
     HttpStatusError,
     KeepoutError,
     OmmParseError,
     SourceUnavailable,
+    UnsupportedElements,
     UnsupportedFrame,
 )
 
@@ -63,6 +65,24 @@ def test_omm_parse_error_reports_record_line_path_and_keyword() -> None:
         "BSTAR",
     )
     assert str(OmmParseError("empty message")) == "empty message"
+
+
+@pytest.mark.parametrize("error", [CdmParseError, OmmParseError])
+def test_message_parse_errors_share_the_ccsds_base(
+    error: type[CcsdsParseError],
+) -> None:
+    assert issubclass(error, CcsdsParseError)
+    assert not issubclass(error, ValueError)
+    raised = error("bad unit", record=2, keyword="X")
+    assert str(raised) == "bad unit (record 2, keyword X)"
+    assert (raised.record, raised.line, raised.path) == (2, None, None)
+
+
+def test_unsupported_elements_are_a_keepout_and_value_error() -> None:
+    # A ValueError like any other invalid argument, and a keepout error that
+    # screening catches to leave the element set out.
+    assert issubclass(UnsupportedElements, KeepoutError)
+    assert issubclass(UnsupportedElements, ValueError)
 
 
 def test_an_unsupported_frame_is_a_geometry_and_value_error() -> None:

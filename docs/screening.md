@@ -267,7 +267,9 @@ A `ScreeningVolume` is an ellipsoid centred on the primary with radial,
 transverse (in-track) and normal (cross-track) semi-axes along the primary's
 RTN axes; a sphere is three equal semi-axes. `screen` takes one volume for
 every primary, or a rule (`VolumeRule`, a function of the primary's `Omm`)
-choosing each primary's own.
+choosing each primary's own. A rule refuses a primary by raising a
+`KeepoutError` (the primary is then skipped as `NO_VOLUME`); any other
+exception is taken for a bug in the rule and propagates.
 
 | Volume | Size | Source |
 |---|---|---|

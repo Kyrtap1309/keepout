@@ -2,6 +2,7 @@
 
 __all__ = [
     "CaraFormatError",
+    "CcsdsParseError",
     "CdmParseError",
     "CdmWriteError",
     "ChecksumMismatch",
@@ -11,9 +12,11 @@ __all__ = [
     "KeepoutError",
     "KelvinsFormatError",
     "OmmParseError",
+    "OmmWriteError",
     "PcConvergenceError",
     "SourceFormatError",
     "SourceUnavailable",
+    "UnsupportedElements",
     "UnsupportedFrame",
 ]
 
@@ -61,44 +64,12 @@ class KelvinsFormatError(SourceFormatError):
     """ESA's Kelvins collision avoidance data could not be parsed."""
 
 
-class CdmParseError(KeepoutError):
-    """A Conjunction Data Message could not be parsed.
+class CcsdsParseError(KeepoutError):
+    """A CCSDS message (CDM, OMM) or a related element-set format could not
+    be parsed.
 
-    Parameters
-    ----------
-    message
-        What is wrong.
-    line
-        1-based line number in a KVN message.
-    keyword
-        The CDM keyword involved.
-    path
-        Element path in an XML message, e.g. ``cdm/body/segment[1]/data/stateVector/X``.
-    """
-
-    def __init__(
-        self,
-        message: str,
-        *,
-        line: int | None = None,
-        keyword: str | None = None,
-        path: str | None = None,
-    ) -> None:
-        context: list[str] = []
-        if line is not None:
-            context.append(f"line {line}")
-        if path is not None:
-            context.append(f"at {path}")
-        if keyword is not None:
-            context.append(f"keyword {keyword}")
-        super().__init__(f"{message} ({', '.join(context)})" if context else message)
-        self.line = line
-        self.keyword = keyword
-        self.path = path
-
-
-class OmmParseError(KeepoutError):
-    """An Orbit Mean-Elements Message could not be parsed.
+    The message names where the problem is, e.g.
+    ``bad number (record 3, line 4, keyword BSTAR)``.
 
     Parameters
     ----------
@@ -106,13 +77,13 @@ class OmmParseError(KeepoutError):
         What is wrong.
     record
         1-based position of the object in a file of several (a CSV data row,
-        a JSON array element, a segment of an XML message).
+        a JSON array element, a message of several).
     line
         1-based line number in a text format (KVN, CSV, TLE, JSON).
     keyword
-        The OMM keyword (CSV column, JSON key) involved.
+        The keyword (CSV column, JSON key) involved.
     path
-        Element path in an XML message.
+        Element path in an XML message, e.g. ``cdm/body/segment[1]/data/stateVector/X``.
     """
 
     def __init__(
@@ -140,8 +111,30 @@ class OmmParseError(KeepoutError):
         self.path = path
 
 
+class CdmParseError(CcsdsParseError):
+    """A Conjunction Data Message could not be parsed (see :class:`CcsdsParseError`)."""
+
+
+class OmmParseError(CcsdsParseError):
+    """Orbit Mean-Elements Message data (CCSDS OMM, CelesTrak CSV or JSON, TLE)
+    could not be parsed (see :class:`CcsdsParseError`)."""
+
+
 class CdmWriteError(KeepoutError):
     """A Conjunction Data Message cannot be written in the requested format."""
+
+
+class OmmWriteError(KeepoutError):
+    """An Orbit Mean-Elements Message cannot be written in the requested format."""
+
+
+class UnsupportedElements(KeepoutError, ValueError):
+    """An element set SGP4 cannot be initialised with.
+
+    E.g. a catalog number above :data:`~keepout.omm.model.MAX_SATREC_NUMBER`
+    or an epoch in a leap second. It is also a :class:`ValueError`, as
+    raised for any other invalid argument.
+    """
 
 
 class CovarianceError(KeepoutError):

@@ -16,7 +16,7 @@ from cdm_builders import (
 from hypothesis import given, settings
 
 from keepout.cdm import Cdm, Field, Section, kvn, xml
-from keepout.errors import CdmParseError
+from keepout.errors import CdmParseError, CdmWriteError
 
 # NDM/XML 2.0.0 CDM module (CCSDS 508.0-B-1). CCSDS publishes no schema for
 # CDM 2.0, so only version 1.0 output is validated.
@@ -168,6 +168,20 @@ def test_kvn_to_xml_property(cdm: Cdm) -> None:
 def test_structural_errors(text: str, message: str) -> None:
     with pytest.raises(CdmParseError, match=message):
         xml.loads(text)
+
+
+def test_malformed_xml_names_its_line() -> None:
+    with pytest.raises(CdmParseError, match="malformed XML") as info:
+        xml.loads('<cdm version="1.0">\n<header>\n</cdm>')
+    assert info.value.line == 3
+
+
+@pytest.mark.parametrize("keyword", ["X_NOTE", "COMMENT"])
+def test_a_character_xml_cannot_hold_cannot_be_written(keyword: str) -> None:
+    base = minimal_cdm()
+    header = Section("header", (*base.header.fields, Field(keyword, "a\x00b")))
+    with pytest.raises(CdmWriteError, match=rf"{keyword}: XML 1\.0 cannot hold"):
+        xml.dumps(dataclasses.replace(base, header=header))
 
 
 def test_one_segment_is_rejected() -> None:

@@ -15,6 +15,7 @@ from keepout.conjunction import Conjunction
 from keepout.covariance import Covariance, make_covariance
 from keepout.errors import (
     CaraFormatError,
+    CcsdsParseError,
     CdmParseError,
     CdmWriteError,
     ChecksumMismatch,
@@ -24,9 +25,11 @@ from keepout.errors import (
     KeepoutError,
     KelvinsFormatError,
     OmmParseError,
+    OmmWriteError,
     PcConvergenceError,
     SourceFormatError,
     SourceUnavailable,
+    UnsupportedElements,
     UnsupportedFrame,
 )
 from keepout.objects import ObjectState
@@ -44,6 +47,7 @@ __version__ = version("keepout")
 
 __all__ = [
     "CaraFormatError",
+    "CcsdsParseError",
     "CdmParseError",
     "CdmWriteError",
     "ChecksumMismatch",
@@ -60,6 +64,7 @@ __all__ = [
     "MethodChoice",
     "ObjectState",
     "OmmParseError",
+    "OmmWriteError",
     "PcConvergenceError",
     "PcObservation",
     "PcResult",
@@ -69,6 +74,7 @@ __all__ = [
     "SourceFormatError",
     "SourceUnavailable",
     "StateVector",
+    "UnsupportedElements",
     "UnsupportedFrame",
     "__version__",
     "assess",

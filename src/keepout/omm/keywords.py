@@ -5,8 +5,8 @@ SGP4/SDP4 mean elements and TLE-related parameters, the ones CelesTrak and
 Space-Track publish as CSV columns and JSON keys. Each entry gives the value
 type, the CCSDS unit, the factor converting the message value to keepout's
 unit (SI where one exists) and the OMM XML element group. Values are converted
-by :func:`keepout.cdm.keywords.parse_value` and
-:func:`~keepout.cdm.keywords.format_value`, so the message value is recovered
+by :func:`keepout.ccsds.keywords.parse_value` and
+:func:`~keepout.ccsds.keywords.format_value`, so the message value is recovered
 exactly when it is written back.
 """
 
@@ -17,7 +17,7 @@ from collections.abc import Mapping
 from typing import Final
 
 from keepout._units import DAY
-from keepout.cdm.keywords import Keyword
+from keepout.ccsds.keywords import Keyword
 
 __all__ = [
     "ATTRIBUTES",

@@ -17,15 +17,15 @@ refused, which rules out entity-expansion attacks.
 
 from __future__ import annotations
 
-import re
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Final
 from xml.etree import ElementTree
 
 from astropy.time import Time
 
-from keepout.errors import OmmParseError
+from keepout.ccsds.xml import XSI, add_leaf, leaves, local, parse, single, tostring
+from keepout.errors import OmmParseError, OmmWriteError
 from keepout.omm._io import (
     Text,
     ccsds_values,
@@ -44,52 +44,21 @@ SCHEMA_LOCATION: Final = (
 )
 """Schema of the NDM/XML 4.0.0 suite, which includes OMM 3.0."""
 
-_XSI: Final = "http://www.w3.org/2001/XMLSchema-instance"
 _USER_DEFINED: Final = "USER_DEFINED"
 _NDM_PARTS: Final = frozenset({"COMMENT", "MESSAGE_ID"})
 """Children of ``<ndm>`` that are not messages."""
-_NOT_XML: Final = re.compile("[^\t\n\r\x20-퟿-�\U00010000-\U0010ffff]")
-"""A character XML 1.0 cannot hold."""
-
-
-def _local(tag: str) -> str:
-    return tag.rsplit("}", 1)[-1]
-
-
-def _single(
-    parent: ElementTree.Element, name: str, path: str, record: int
-) -> tuple[ElementTree.Element, str]:
-    found = [child for child in parent if _local(child.tag) == name]
-    if len(found) != 1:
-        raise OmmParseError(
-            f"expected exactly one <{name}>, found {len(found)}",
-            record=record,
-            path=path,
-        )
-    return found[0], f"{path}/{name}"
-
-
-def _leaves(
-    element: ElementTree.Element, path: str
-) -> Iterator[tuple[ElementTree.Element, str]]:
-    for child in element:
-        child_path = f"{path}/{_local(child.tag)}"
-        if len(child):
-            yield from _leaves(child, child_path)
-        else:
-            yield child, child_path
 
 
 def _messages(root: ElementTree.Element) -> list[tuple[ElementTree.Element, str]]:
     """The ``<omm>`` elements of a document and their paths."""
-    name = _local(root.tag)
+    name = local(root.tag)
     if name == "omm":
         return [(root, "omm")]
     if name != "ndm":
         raise OmmParseError(f"root element must be <omm> or <ndm>, got <{name}>")
     messages: list[tuple[ElementTree.Element, str]] = []
     for child in root:
-        child_name = _local(child.tag)
+        child_name = local(child.tag)
         if child_name == "omm":
             messages.append((child, f"ndm/omm[{len(messages) + 1}]"))
         elif child_name not in _NDM_PARTS:
@@ -104,13 +73,17 @@ def _record(element: ElementTree.Element, path: str, record: int) -> Omm:
     if version is None:
         raise OmmParseError("<omm> has no version attribute", record=record, path=path)
     check_version(version, record=record, path=path)
-    body, body_path = _single(element, "body", path, record)
-    segment, segment_path = _single(body, "segment", body_path, record)
+    body, body_path = single(element, "body", path, OmmParseError, record=record)
+    segment, segment_path = single(
+        body, "segment", body_path, OmmParseError, record=record
+    )
     values: dict[str, Text] = {}
     for part in ("metadata", "data"):
-        container, container_path = _single(segment, part, segment_path, record)
-        for leaf, leaf_path in _leaves(container, container_path):
-            keyword = _local(leaf.tag)
+        container, container_path = single(
+            segment, part, segment_path, OmmParseError, record=record
+        )
+        for leaf, leaf_path in leaves(container, container_path):
+            keyword = local(leaf.tag)
             if keyword == "COMMENT":
                 continue
             if keyword == _USER_DEFINED:
@@ -146,14 +119,7 @@ def loads(text: str) -> tuple[Omm, ...]:
         a keyword, or its elements are missing or invalid. The error names the
         message (``record``) and the element path.
     """
-    if "<!DOCTYPE" in text.upper():
-        raise OmmParseError("DOCTYPE declarations are not allowed in OMM XML")
-    try:
-        root = ElementTree.fromstring(text)
-    except ElementTree.ParseError as exc:
-        raise OmmParseError(
-            f"malformed XML: {exc}", line=exc.position[0] or None
-        ) from exc
+    root = parse(text, "OMM", OmmParseError)
     return tuple(
         _record(element, path, record)
         for record, (element, path) in enumerate(_messages(root), start=1)
@@ -195,12 +161,12 @@ def dumps(
 
     Raises
     ------
-    ValueError
+    OmmWriteError
         If a value contains a character XML 1.0 cannot hold.
     """
     created = creation_date_text(creation_date)
     root = ElementTree.Element(
-        "ndm", {"xmlns:xsi": _XSI, "xsi:noNamespaceSchemaLocation": SCHEMA_LOCATION}
+        "ndm", {"xmlns:xsi": XSI, "xsi:noNamespaceSchemaLocation": SCHEMA_LOCATION}
     )
     for omm in omms:
         message = ElementTree.SubElement(
@@ -220,17 +186,10 @@ def dumps(
                     found if found is not None else ElementTree.SubElement(parent, name)
                 )
             _leaf(parent, keyword, value, unit)
-    ElementTree.indent(root)
-    declaration = '<?xml version="1.0" encoding="UTF-8"?>\n'
-    return declaration + ElementTree.tostring(root, encoding="unicode") + "\n"
+    return tostring(root)
 
 
 def _leaf(
     parent: ElementTree.Element, keyword: str, value: str, unit: str | None
 ) -> None:
-    if _NOT_XML.search(value):
-        raise ValueError(f"{keyword}: XML 1.0 cannot hold {value!r}")
-    element = ElementTree.SubElement(parent, keyword)
-    element.text = value
-    if unit is not None:
-        element.set("units", unit)
+    add_leaf(parent, keyword, value, unit, error=OmmWriteError)

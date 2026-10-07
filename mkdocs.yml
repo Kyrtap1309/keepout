@@ -60,6 +60,7 @@ nav:
       - Conjunction: reference/conjunction.md
       - CDM: reference/cdm.md
       - Element sets (OMM): reference/omm.md
+      - CCSDS formats: reference/ccsds.md
       - Covariance: reference/covariance.md
       - Encounter plane: reference/encounter.md
       - Frames: reference/frames.md

@@ -16,14 +16,14 @@ parameters are read past; the metadata of
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Final
 
 from astropy.time import Time
 
-from keepout.errors import OmmParseError
+from keepout.ccsds.kvn import assignment, comment, format_line, split_unit
+from keepout.errors import OmmParseError, OmmWriteError
 from keepout.omm._io import (
     Text,
     ccsds_values,
@@ -38,9 +38,6 @@ from keepout.omm.model import Omm
 __all__ = ["dumps", "load", "loads"]
 
 VERSION_KEYWORD: Final = "CCSDS_OMM_VERS"
-_ASSIGNMENT: Final = re.compile(r"^(?P<keyword>[A-Z][A-Z0-9_]*)\s*=\s*(?P<value>.*)$")
-_UNIT: Final = re.compile(r"^(?P<value>.*?)\s*\[(?P<unit>[^\[\]]*)\]$")
-_COMMENT: Final = re.compile(r"^COMMENT(?:\s|$)")
 _KEYWORD_WIDTH: Final = len("MEAN_ELEMENT_THEORY")
 
 
@@ -49,10 +46,8 @@ def _value(keyword: str, text: str, line: int) -> Text:
     if spec is None or spec.kind == "str":
         # Text values keep brackets: "GOES 9 [P]" is a name, not a unit.
         return Text(text, line=line)
-    match = _UNIT.match(text)
-    if match is None:
-        return Text(text, line=line)
-    return Text(match.group("value"), match.group("unit").strip(), line)
+    value, unit = split_unit(text)
+    return Text(value, unit, line)
 
 
 def loads(text: str) -> tuple[Omm, ...]:
@@ -83,12 +78,10 @@ def loads(text: str) -> tuple[Omm, ...]:
         if not line:
             continue
         current = len(messages) or None  # the message being read, 1-based
-        assignment = _ASSIGNMENT.match(line)
-        keyword = assignment["keyword"] if assignment else None
-        if keyword == VERSION_KEYWORD and assignment:
-            check_version(
-                assignment["value"].strip(), record=len(messages) + 1, line=number
-            )
+        assigned = assignment(line)
+        keyword = assigned[0] if assigned else None
+        if assigned and keyword == VERSION_KEYWORD:
+            check_version(assigned[1], record=len(messages) + 1, line=number)
             messages.append((number, {}))
             continue
         if current is None:
@@ -97,18 +90,19 @@ def loads(text: str) -> tuple[Omm, ...]:
                 line=number,
                 keyword=keyword,
             )
-        if _COMMENT.match(line):
+        if comment(line) is not None:
             continue
-        if assignment is None or keyword is None:
+        if assigned is None:
             raise OmmParseError(
                 f"expected 'KEYWORD = value', got {line!r}", record=current, line=number
             )
+        keyword, value = assigned
         values = messages[-1][1]
         if keyword in values:
             raise OmmParseError(
                 "duplicate keyword", record=current, line=number, keyword=keyword
             )
-        values[keyword] = _value(keyword, assignment["value"].strip(), number)
+        values[keyword] = _value(keyword, value, number)
     return tuple(
         parse_record({**DEFAULTS, **values}, record=record, line=start)
         for record, (start, values) in enumerate(messages, start=1)
@@ -149,7 +143,7 @@ def dumps(
 
     Raises
     ------
-    ValueError
+    OmmWriteError
         If a value contains a line break, which KVN cannot hold.
     """
     created = creation_date_text(creation_date)
@@ -171,7 +165,4 @@ def dumps(
 
 
 def _line(keyword: str, value: str, unit: str | None) -> str:
-    if len(f"<{value}>".splitlines()) > 1:
-        raise ValueError(f"{keyword}: KVN cannot hold a line break in {value!r}")
-    line = f"{keyword:<{_KEYWORD_WIDTH}} = {value}"
-    return f"{line} [{unit}]" if unit is not None else line.rstrip()
+    return format_line(keyword, value, unit, width=_KEYWORD_WIDTH, error=OmmWriteError)

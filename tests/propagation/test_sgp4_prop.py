@@ -13,6 +13,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 from screening_snapshot import DATA, FIXTURE
 
+from keepout.errors import UnsupportedElements
 from keepout.omm import Omm, load
 from keepout.propagation import (
     Ephemeris,
@@ -242,7 +243,7 @@ def test_empty_propagators_and_grids() -> None:
 def test_elements_sgp4_cannot_hold_are_named() -> None:
     too_large = dataclasses.replace(OMMS[1], catalog_number=400_000)
     with pytest.raises(
-        ValueError,
+        UnsupportedElements,
         match=r"element set 1 \(catalog number 400000\) cannot initialise SGP4: "
         r"catalog number 400000 is above 339999",
     ):

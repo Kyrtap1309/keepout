@@ -16,6 +16,7 @@ from sgp4.api import WGS72
 from sgp4.model import Satrec as PythonSatrec
 
 from keepout._types import FloatArray
+from keepout.errors import UnsupportedElements
 from keepout.frames import relative_position_rtn
 from keepout.omm import Omm, load
 from keepout.screening import (
@@ -315,7 +316,7 @@ def test_deep_space_is_bounded_by_period_and_inclination() -> None:
 
 def test_regimes_need_an_sgp4_element_set() -> None:
     beyond = dataclasses.replace(BY_NUMBER[900], catalog_number=340_000)
-    with pytest.raises(ValueError, match="339999"):
+    with pytest.raises(UnsupportedElements, match="339999"):
         sfs_regime(beyond)
 
 

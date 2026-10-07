@@ -18,16 +18,13 @@ import numpy as np
 from astropy.time import Time
 
 from keepout._types import FloatArray, read_only
+from keepout.ccsds.keywords import FieldValue, ValueKind, format_value, parse_value
 from keepout.cdm.keywords import (
     KEYWORDS,
     REQUIRED,
-    FieldValue,
     SectionKind,
-    ValueKind,
     covariance_matrix,
     covariance_names,
-    format_value,
-    parse_value,
 )
 from keepout.covariance import Covariance, Policy, make_covariance
 from keepout.objects import ObjectState, ReportedObject, gcrf_object_states
