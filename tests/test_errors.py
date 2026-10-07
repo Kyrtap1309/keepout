@@ -6,8 +6,10 @@ from keepout import errors
 from keepout.errors import (
     CdmParseError,
     GeometryError,
+    HttpStatusError,
     KeepoutError,
     OmmParseError,
+    SourceUnavailable,
     UnsupportedFrame,
 )
 
@@ -68,3 +70,10 @@ def test_an_unsupported_frame_is_a_geometry_and_value_error() -> None:
     # error of a message (e.g. a CDM) in a frame keepout cannot handle.
     assert issubclass(UnsupportedFrame, GeometryError)
     assert issubclass(UnsupportedFrame, ValueError)
+
+
+def test_an_http_status_error_is_a_source_error_with_url_and_status() -> None:
+    error = HttpStatusError("cannot download u: HTTP 503", url="u", status=503)
+    assert isinstance(error, SourceUnavailable)
+    assert str(error) == "cannot download u: HTTP 503"
+    assert (error.url, error.status) == ("u", 503)

@@ -11,8 +11,9 @@ from __future__ import annotations
 
 import math
 import numbers
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, NamedTuple
 
 from astropy.time import Time
 from sgp4 import omm as sgp4_omm
@@ -26,8 +27,10 @@ __all__ = [
     "MAX_ELEMENT_SET_NO",
     "MAX_SATREC_NUMBER",
     "SGP4_EPOCH_DIGITS",
+    "Deduplicated",
     "InvalidElement",
     "Omm",
+    "deduplicate",
 ]
 
 MAX_CATALOG_NUMBER: Final = 999_999_999
@@ -233,6 +236,53 @@ class Omm:
         satrec = Satrec()
         sgp4_omm.initialize(satrec, values)
         return satrec
+
+
+class Deduplicated(NamedTuple):
+    """Element sets split by :func:`deduplicate`."""
+
+    kept: tuple[Omm, ...]
+    """The newest element set of each object, in the order the objects first
+    appear."""
+    dropped: tuple[Omm, ...]
+    """The other element sets, in input order; an exact copy of a set
+    already kept or dropped is not listed again."""
+
+
+def deduplicate(omms: Iterable[Omm]) -> Deduplicated:
+    """Keep one element set per catalog number: the one with the newest epoch.
+
+    Catalogs put together from several sources (e.g. CelesTrak groups) hold
+    some objects more than once. Of two different sets with the same epoch,
+    the first given is kept. Exact copies (equal in every element) are the
+    same set and not reported.
+
+    Parameters
+    ----------
+    omms
+        Element sets, of any objects, in any order.
+
+    Returns
+    -------
+    Deduplicated
+        ``kept``, one set per object, and ``dropped``, the older (or tied
+        later) sets.
+    """
+    newest: dict[int, Omm] = {}
+    distinct: dict[int, list[Omm]] = {}
+    order: list[Omm] = []
+    for omm in omms:
+        seen = distinct.setdefault(omm.catalog_number, [])
+        if any(omm == other for other in seen):
+            continue
+        seen.append(omm)
+        order.append(omm)
+        best = newest.get(omm.catalog_number)
+        if best is None or omm.epoch > best.epoch:
+            newest[omm.catalog_number] = omm
+    kept = tuple(newest.values())
+    kept_ids = {id(omm) for omm in kept}
+    return Deduplicated(kept, tuple(omm for omm in order if id(omm) not in kept_ids))
 
 
 def _epoch_text(epoch: Time, digits: int | None) -> str:

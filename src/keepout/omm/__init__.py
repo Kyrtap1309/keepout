@@ -1,7 +1,8 @@
 """Orbit Mean-Elements Messages: SGP4 mean elements of catalogued objects.
 
 :class:`Omm` holds one object's elements in SI units; :meth:`Omm.satrec`
-initialises SGP4 with them. :func:`load` and :func:`loads` read every format
+initialises SGP4 with them; :func:`deduplicate` keeps the newest of several
+sets of one object. :func:`load` and :func:`loads` read every format
 keepout knows, recognised by content: CCSDS OMM in KVN (:mod:`keepout.omm.kvn`)
 or XML (:mod:`keepout.omm.xml`), CelesTrak's CSV or JSON
 (:mod:`keepout.omm.celestrak`) and legacy TLEs (:mod:`keepout.omm.tle`). Each
@@ -13,9 +14,19 @@ from pathlib import Path
 from keepout.errors import OmmParseError
 from keepout.omm import celestrak, kvn, tle, xml
 from keepout.omm._io import load_file
-from keepout.omm.model import Omm
+from keepout.omm.model import Deduplicated, Omm, deduplicate
 
-__all__ = ["Omm", "celestrak", "kvn", "load", "loads", "tle", "xml"]
+__all__ = [
+    "Deduplicated",
+    "Omm",
+    "celestrak",
+    "deduplicate",
+    "kvn",
+    "load",
+    "loads",
+    "tle",
+    "xml",
+]
 
 
 def loads(text: str) -> tuple[Omm, ...]:

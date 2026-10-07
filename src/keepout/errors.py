@@ -7,6 +7,7 @@ __all__ = [
     "ChecksumMismatch",
     "CovarianceError",
     "GeometryError",
+    "HttpStatusError",
     "KeepoutError",
     "KelvinsFormatError",
     "OmmParseError",
@@ -23,6 +24,25 @@ class KeepoutError(Exception):
 
 class SourceUnavailable(KeepoutError):
     """A remote data source could not be reached or returned an error."""
+
+
+class HttpStatusError(SourceUnavailable):
+    """A server answered a download with an HTTP status other than 200 OK.
+
+    Parameters
+    ----------
+    message
+        What happened.
+    url
+        The URL asked for.
+    status
+        The HTTP status code, e.g. 403 or 503.
+    """
+
+    def __init__(self, message: str, *, url: str, status: int) -> None:
+        super().__init__(message)
+        self.url = url
+        self.status = status
 
 
 class ChecksumMismatch(KeepoutError):

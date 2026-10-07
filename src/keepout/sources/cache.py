@@ -1,6 +1,7 @@
 """Downloaded reference data: cache location, verified atomic writes, HTTP.
 
-Shared by :mod:`keepout.sources.cara` and :mod:`keepout.sources.kelvins`.
+Shared by :mod:`keepout.sources.cara`, :mod:`keepout.sources.kelvins` and
+:mod:`keepout.sources.celestrak`.
 Every cached file has a pinned SHA-256 digest; a file is written under a
 unique temporary name and renamed into place only once its digest matches,
 so the cache never uses a partial or unverified file. A hard kill (SIGKILL,
@@ -17,18 +18,23 @@ import os
 import stat
 import tempfile
 import threading
+import urllib.error
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from http import HTTPStatus
+from importlib.metadata import version
 from pathlib import Path
 from typing import Final, Protocol, TypeAlias
 
 import platformdirs
 
-from keepout.errors import ChecksumMismatch, SourceUnavailable
+from keepout.errors import ChecksumMismatch, HttpStatusError, SourceUnavailable
 
 __all__ = [
     "CHUNK_SIZE",
     "DOWNLOAD_TIMEOUT",
+    "HOME_PAGE",
+    "USER_AGENT",
     "Sink",
     "cache_dir",
     "has_digest",
@@ -42,6 +48,13 @@ DOWNLOAD_TIMEOUT: Final = 60.0
 
 CHUNK_SIZE: Final = 1 << 20
 """Bytes :func:`http_stream` reads at a time."""
+
+HOME_PAGE: Final = "https://github.com/Kyrtap1309/keepout"
+"""keepout's home page, named in :data:`USER_AGENT`."""
+
+USER_AGENT: Final = f"keepout/{version('keepout')} (+{HOME_PAGE})"
+"""A ``User-Agent`` naming keepout, its version and where to find it, for
+servers that ask clients to identify themselves (CelesTrak)."""
 
 
 class Sink(Protocol):
@@ -65,33 +78,68 @@ def cache_dir() -> Path:
     return platformdirs.user_cache_path("keepout")
 
 
-def http_download(url: str) -> bytes:
+def http_download(url: str, *, headers: Mapping[str, str] | None = None) -> bytes:
     """Download ``url`` and return the body.
+
+    Parameters
+    ----------
+    url
+        What to download.
+    headers
+        Extra request headers, e.g. a ``User-Agent``.
 
     Raises
     ------
+    HttpStatusError
+        If the server answers with a status other than 200 OK.
     SourceUnavailable
-        On any network or HTTP error.
+        On any other network or HTTP error.
     """
     buffer = io.BytesIO()
-    http_stream(url, buffer)
+    http_stream(url, buffer, headers=headers)
     return buffer.getvalue()
 
 
-def http_stream(url: str, sink: Sink) -> None:
+def http_stream(
+    url: str, sink: Sink, *, headers: Mapping[str, str] | None = None
+) -> None:
     """Download ``url`` into ``sink`` in chunks of :data:`CHUNK_SIZE` bytes.
 
-    For files too large to hold in memory at once.
+    For files too large to hold in memory at once. Redirects are followed;
+    any final status but 200 OK is an error, the success codes included,
+    and nothing is retried.
+
+    Parameters
+    ----------
+    url
+        What to download.
+    sink
+        Where the body goes.
+    headers
+        Extra request headers, e.g. a ``User-Agent``.
 
     Raises
     ------
+    HttpStatusError
+        If the server answers with a status other than 200 OK.
     SourceUnavailable
-        On any network or HTTP error, also one in the middle of the body.
+        On any other network or HTTP error, also one in the middle of the body.
     """
+    request = urllib.request.Request(url, headers=dict(headers or {}))
     try:
-        with urllib.request.urlopen(url, timeout=DOWNLOAD_TIMEOUT) as response:
+        with urllib.request.urlopen(request, timeout=DOWNLOAD_TIMEOUT) as response:
+            if response.status != HTTPStatus.OK:
+                raise HttpStatusError(
+                    f"cannot download {url}: HTTP {response.status} {response.reason}",
+                    url=url,
+                    status=response.status,
+                )
             while chunk := response.read(CHUNK_SIZE):
                 sink.write(chunk)
+    except urllib.error.HTTPError as exc:
+        raise HttpStatusError(
+            f"cannot download {url}: {exc}", url=url, status=exc.code
+        ) from exc
     except (OSError, http.client.HTTPException) as exc:
         raise SourceUnavailable(f"cannot download {url}: {exc}") from exc
 
