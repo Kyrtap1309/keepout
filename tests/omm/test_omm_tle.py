@@ -122,6 +122,15 @@ def test_names_two_and_three_line_forms_are_read_together() -> None:
     assert names == ["UNKNOWN", "GOES 9", "GOES 9 [P]"]
 
 
+@pytest.mark.parametrize("name", ["0 0", "1 0", "2 X"])
+def test_a_name_that_starts_like_a_line_is_read_after_the_3le_prefix(
+    name: str,
+) -> None:
+    # Bare, such a name line would read as a 3LE prefix or a TLE line.
+    (omm,) = tle.loads(f"0 {name}\n{GOES_LINE_1}\n{GOES_LINE_2}\n")
+    assert omm.object_name == name
+
+
 def test_trailing_blanks_and_crlf_are_ignored() -> None:
     text = GOES_9_TLE.replace("\n", "   \r\n")
     assert tle.loads(text) == tle.loads(GOES_9_TLE)

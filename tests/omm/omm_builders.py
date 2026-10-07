@@ -313,5 +313,9 @@ def element_sets(draw: st.DrawFn) -> tuple[str, dict[str, str]]:
             exponents[0][0].strip(), *exponents[0][1:]
         ),
     }
-    title = "" if name is None else draw(st.sampled_from(["", "0 "])) + name + "\n"
+    # A bare name line starting "0 ", "1 " or "2 " reads as a 3LE prefix or
+    # a TLE line: such a name is only ever written with the "0 " prefix.
+    bare = name is not None and name[:2] not in ("0 ", "1 ", "2 ")
+    prefix = draw(st.sampled_from(["", "0 "])) if bare else "0 "
+    title = "" if name is None else prefix + name + "\n"
     return f"{title}{line_1}\n{line_2}\n", values
