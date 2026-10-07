@@ -12,7 +12,7 @@ import pytest
 from astropy.time import Time
 from hypothesis import given
 from hypothesis import strategies as st
-from screening_snapshot import DATA, FIXTURE, SNAPSHOT
+from screening_data import DATA, SNAPSHOT, load_fixture
 from sgp4 import propagation as python_sgp4
 from sgp4.api import WGS72, Satrec
 from sgp4.model import Satrec as PythonSatrec
@@ -22,7 +22,7 @@ from keepout.omm import Omm, load, loads
 from keepout.propagation import RadiusBounds, Sgp4Propagator, propagate_in_chunks
 from keepout.propagation._sgp4_radius import C1L, C1SS, drag_terms
 
-OMMS = load(DATA / FIXTURE)
+OMMS = load_fixture()
 """222 objects of the frozen public catalog, LEO to HEO; three fail SGP4
 within the week below."""
 PROPAGATOR = Sgp4Propagator(OMMS)

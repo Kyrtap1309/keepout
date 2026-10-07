@@ -9,6 +9,7 @@ import pytest
 import screening_snapshot as snapshot
 
 from keepout.omm import Omm, load
+from keepout.sources.socrates import read_socrates
 
 DATA = snapshot.DATA
 
@@ -60,6 +61,6 @@ def test_the_fixture_is_part_of_the_catalog(
 def test_the_excerpt_holds_the_comparable_approaches(
     manifest: Any, inputs: snapshot.Inputs
 ) -> None:
-    approaches = snapshot.read_socrates(inputs.socrates)
+    approaches = read_socrates(inputs.socrates)
     assert len(approaches) == manifest["socrates"]["comparable"]
     assert snapshot.comparable(approaches, inputs.omms) == list(approaches)

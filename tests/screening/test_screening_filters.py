@@ -6,10 +6,9 @@ import pytest
 from astropy.time import Time
 from hypothesis import given
 from hypothesis import strategies as st
+from screening_data import load_fixture
 from screening_oracle import Oracle, brute_force
-from screening_snapshot import DATA, FIXTURE
 
-from keepout.omm import load
 from keepout.propagation import RadiusBounds, Sgp4Propagator
 from keepout.screening import (
     DEFAULT_VOLUME,
@@ -20,7 +19,7 @@ from keepout.screening import (
 )
 
 KM = 1e3
-CATALOG = load(DATA / FIXTURE)
+CATALOG = load_fixture()
 """222 objects of the frozen public catalog, LEO to HEO."""
 COLUMN = {omm.catalog_number: index for index, omm in enumerate(CATALOG)}
 PRIMARIES = CATALOG[::9]
@@ -108,7 +107,8 @@ def test_radii_within_reach_keep_the_pair(
 ) -> None:
     # Bands holding radii within the reach of each other: kept.
     radius_p = low_p + at_p * width_p
-    radius_s = radius_p + separation * reach * (1 - 1e-12)
+    # 1 mm inside the reach: well above rounding at these radii [m].
+    radius_s = radius_p + separation * (reach - 1e-6)
     low_s = radius_s - at_s * width_s
     keep = apogee_perigee_filter(
         bands((low_p, low_p + width_p)),
@@ -123,7 +123,7 @@ def test_bands_beyond_reach_drop_the_pair(
     low_p: float, width_p: float, width_s: float, gap: float, reach: float
 ) -> None:
     # The secondary's band starts more than the reach above the primary's.
-    low_s = low_p + width_p + gap * reach * (1 + 1e-9)
+    low_s = low_p + width_p + gap * reach + 1e-6
     keep = apogee_perigee_filter(
         bands((low_p, low_p + width_p)),
         bands((low_s, low_s + width_s)),

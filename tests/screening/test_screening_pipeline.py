@@ -3,19 +3,18 @@ element sets left out and why, and the same result in any number of
 processes."""
 
 import dataclasses
-import gzip
 from collections.abc import Callable, Sequence
 
 import astropy.units as u
 import numpy as np
 import numpy.typing as npt
 import pytest
-import screening_snapshot as snapshot
 from astropy.time import Time
+from screening_data import FAST_SPEED, load_fixture, socrates_approaches
 
 from keepout.errors import GeometryError, UnsupportedElements
 from keepout.frames import teme_to_gcrf
-from keepout.omm import Omm, load
+from keepout.omm import Omm
 from keepout.propagation import Sgp4Propagator, describe_error
 from keepout.screening import (
     DEFAULT_VOLUME,
@@ -32,7 +31,7 @@ from keepout.screening.tca import PERTURBATION
 
 DAY = 86400.0
 START = Time("2026-10-06T00:00:00", scale="utc")
-FIXTURE = load(snapshot.DATA / snapshot.FIXTURE)
+FIXTURE = load_fixture()
 BY_NUMBER = {omm.catalog_number: omm for omm in FIXTURE}
 FORMATION = [68377, 56156, 58199]
 """Formation flyers: many slow approaches."""
@@ -364,9 +363,7 @@ def test_every_socrates_approach_of_the_fixture_is_found_in_gcrf() -> None:
     # ill-conditioned.
     socrates = [
         approach
-        for approach in snapshot.read_socrates(
-            gzip.decompress((snapshot.DATA / snapshot.SOCRATES).read_bytes()).decode()
-        )
+        for approach in socrates_approaches()
         if approach.primary in BY_NUMBER and approach.secondary in BY_NUMBER
     ]
     start = min(approach.tca for approach in socrates) - 1 * u.hour
@@ -386,7 +383,7 @@ def test_every_socrates_approach_of_the_fixture_is_found_in_gcrf() -> None:
             found[approach.primary, approach.secondary],
             key=lambda m: abs(m[0] - offset),
         )
-        fast = approach.relative_speed >= snapshot.FAST
+        fast = approach.relative_speed >= FAST_SPEED
         assert match[0] == pytest.approx(offset, abs=1e-3 if fast else 0.5)
         assert match[1] == pytest.approx(approach.miss_distance, abs=0.5)
         assert match[2] == pytest.approx(approach.relative_speed, abs=0.5)

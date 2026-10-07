@@ -33,7 +33,7 @@ import astropy.units as u
 import screening_snapshot as snapshot
 from astropy.time import Time
 from generated import replace_block, write_or_check
-from screening_snapshot import Approach, SocratesSummary, seconds_between
+from screening_snapshot import SocratesSummary
 
 from keepout._units import DAY
 from keepout.omm import Omm, load
@@ -45,6 +45,7 @@ from keepout.screening import (
     screen,
 )
 from keepout.screening.pipeline import DEFAULT_DURATION, MAX_AGE, MAX_LEAD
+from keepout.sources.socrates import SocratesApproach, read_socrates
 
 REPO: Final = Path(__file__).resolve().parents[1]
 PAGE: Final = REPO / "docs/screening-socrates.md"
@@ -136,7 +137,7 @@ class Inputs:
         The day the data was retrieved (UTC, ISO 8601).
     """
 
-    approaches: tuple[Approach, ...]
+    approaches: tuple[SocratesApproach, ...]
     catalog: tuple[Omm, ...]
     socrates: SocratesSummary
     retrieved: str
@@ -147,19 +148,24 @@ def read_inputs(data: Path) -> Inputs:
     text = gzip.decompress((data / snapshot.SOCRATES).read_bytes()).decode("utf-8")
     manifest = json.loads((data / snapshot.MANIFEST).read_text(encoding="utf-8"))
     return Inputs(
-        approaches=snapshot.read_socrates(text),
+        approaches=read_socrates(text),
         catalog=load(data / snapshot.SNAPSHOT),
         socrates=manifest["socrates"],
         retrieved=manifest["retrieved"]["first"][:10],
     )
 
 
-def group(approach: Approach) -> Group:
+def seconds_between(start: Time, end: Time) -> float:
+    """Seconds from ``start`` to ``end``, from their UTC Julian days."""
+    return float((end.jd1 - start.jd1) * DAY + (end.jd2 - start.jd2) * DAY)
+
+
+def group(approach: SocratesApproach) -> Group:
     """Whether SOCRATES's approach is fast or slow (:data:`FAST`)."""
     return "fast" if approach.relative_speed >= FAST else "slow"
 
 
-def window_start(approaches: Sequence[Approach]) -> Time:
+def window_start(approaches: Sequence[SocratesApproach]) -> Time:
     """0 h UTC of the day of the first TCA: where SOCRATES's week starts."""
     first = min(approaches, key=lambda a: (a.tca.jd1, a.tca.jd2))
     return Time(first.tca.isot[:10], scale="utc")
@@ -178,7 +184,7 @@ class Match:
         :data:`MATCH_WINDOW`, if any.
     """
 
-    socrates: Approach
+    socrates: SocratesApproach
     keepout: CloseApproach | None
 
     @property
@@ -234,14 +240,14 @@ class Comparison:
     """
 
     matches: tuple[Match, ...]
-    skipped: tuple[Approach, ...]
+    skipped: tuple[SocratesApproach, ...]
     keepout_only: tuple[CloseApproach, ...]
     result: ScreeningResult
     primaries: int
 
 
 def compare(
-    approaches: Sequence[Approach],
+    approaches: Sequence[SocratesApproach],
     catalog: Sequence[Omm],
     start: Time,
     *,
@@ -445,7 +451,7 @@ def _values(approach: CloseApproach, tca: Time) -> Values:
     }
 
 
-def _cause(approach: Approach, known: Mapping[int, str]) -> int | None:
+def _cause(approach: SocratesApproach, known: Mapping[int, str]) -> int | None:
     return next((n for n in (approach.primary, approach.secondary) if n in known), None)
 
 
@@ -580,7 +586,7 @@ def summarise(
     }
 
 
-def known_differences(approaches: Sequence[Approach]) -> dict[int, str]:
+def known_differences(approaches: Sequence[SocratesApproach]) -> dict[int, str]:
     """The :data:`KNOWN_DIFFERENCES` of the objects of ``approaches``."""
     objects = {a.primary for a in approaches} | {a.secondary for a in approaches}
     return {n: text for n, text in KNOWN_DIFFERENCES.items() if n in objects}

@@ -8,47 +8,24 @@ from pathlib import Path
 import astropy.units as u
 import pytest
 import screening_snapshot as snapshot
-from astropy.time import Time
+from celestrak_builders import SAMPLE, SOCRATES_HEADER, FakeCelesTrak, socrates_row
 from hypothesis import given
 from hypothesis import strategies as st
 
-from keepout.errors import HttpStatusError, SourceFormatError, SourceUnavailable
+from keepout.errors import SourceFormatError, SourceUnavailable
 from keepout.omm import Omm, load
-from keepout.omm.celestrak import dumps_csv, load_csv
+from keepout.omm.celestrak import dumps_csv
 from keepout.sources.celestrak import PUBLIC_GROUPS, SOCRATES_URL, group_url
-
-SAMPLE = load_csv(Path(__file__).parents[1] / "omm" / "data" / "celestrak_sample.csv")
-"""Eight element sets: 900 (LEO), 25544 ISS, 51850 (GEO), 30798 (HEO), 38745
-(MEO), 100000, 100001 and 100882 (docked to the ISS, same epoch)."""
+from keepout.sources.socrates import read_socrates
 
 CALSPHERE, ISS, GOES, THEMIS, EXPRESS, SARAMAGO, STARLINK, DRAGON = SAMPLE
 OLD_ISS = dataclasses.replace(ISS, epoch=ISS.epoch - 1.0 * u.day)
 """An older element set of the ISS: a duplicate the catalog leaves out."""
 
-HEADER = (
-    "NORAD_CAT_ID_1,OBJECT_NAME_1,DSE_1,NORAD_CAT_ID_2,OBJECT_NAME_2,DSE_2,"
-    "TCA,TCA_RANGE,TCA_RELATIVE_SPEED,MAX_PROB,DILUTION\r\n"
-)
-"""SOCRATES's header; the report has CRLF line endings."""
-
-TCA = "2026-10-07 00:20:47.861"
-"""One day (to the millisecond) after the epoch of the ISS and Crew Dragon."""
-
-
-def socrates_row(
-    first: Omm, second: Omm, dse: tuple[str, str], distance: str, speed: str
-) -> str:
-    return (
-        f"{first.catalog_number},{first.object_name} [+],{dse[0]},"
-        f"{second.catalog_number},{second.object_name} [-],{dse[1]},"
-        f"{TCA},{distance},{speed},1.000E-05,0.010\r\n"
-    )
-
-
 DOCKED = socrates_row(ISS, DRAGON, ("1.000", "1.000"), "0.004", "0.000")
 FAST = socrates_row(CALSPHERE, STARLINK, ("0.838", "0.764"), "2.500", "7.500")
 SOCRATES_CSV = (
-    HEADER
+    SOCRATES_HEADER
     + DOCKED
     + socrates_row(CALSPHERE, GOES, ("2.000", "2.000"), "0.100", "3.000")
     + socrates_row(
@@ -76,26 +53,10 @@ BODIES: Mapping[str, bytes] = {
 URLS = [*(group_url(name) for name in PUBLIC_GROUPS), SOCRATES_URL]
 
 
-class FakeCelesTrak:
-    """Answers each URL from ``bodies`` (an int is an HTTP error status) and
-    records the URLs asked for."""
-
-    def __init__(self, bodies: Mapping[str, bytes | int]) -> None:
-        self.bodies = dict(bodies)
-        self.urls: list[str] = []
-
-    def __call__(self, url: str) -> bytes:
-        self.urls.append(url)
-        body = self.bodies[url]
-        if isinstance(body, int):
-            raise HttpStatusError(f"HTTP {body}", url=url, status=body)
-        return body
-
-
 @pytest.fixture
 def celestrak(monkeypatch: pytest.MonkeyPatch) -> FakeCelesTrak:
     fake = FakeCelesTrak(BODIES)
-    monkeypatch.setattr(snapshot, "http_get", fake)
+    monkeypatch.setattr(snapshot, "http_download", fake)
     return fake
 
 
@@ -136,14 +97,14 @@ def test_download_does_not_ask_again_for_a_saved_url(
 def test_download_stops_at_the_first_error_and_resumes_after_it(
     tmp_path: Path, celestrak: FakeCelesTrak
 ) -> None:
-    celestrak.bodies[group_url("analyst")] = 403
+    celestrak.answers[group_url("analyst")] = 403
     raw = tmp_path / "raw"
     with pytest.raises(SourceUnavailable, match="403"):
         snapshot.main(["download", str(raw)])
     assert celestrak.urls == URLS[:3]
     saved = [body.url for body in snapshot.read_index(raw / snapshot.RAW_INDEX)]
     assert saved == URLS[:2]
-    celestrak.bodies[group_url("analyst")] = BODIES[group_url("analyst")]
+    celestrak.answers[group_url("analyst")] = BODIES[group_url("analyst")]
     celestrak.urls.clear()
     assert snapshot.main(["download", str(raw)]) == 0
     assert celestrak.urls == URLS[2:]
@@ -152,7 +113,7 @@ def test_download_stops_at_the_first_error_and_resumes_after_it(
 def test_download_keeps_a_body_keepout_cannot_read(
     tmp_path: Path, celestrak: FakeCelesTrak
 ) -> None:
-    celestrak.bodies[group_url("active")] = b"No GP data found"
+    celestrak.answers[group_url("active")] = b"No GP data found"
     raw = tmp_path / "raw"
     with pytest.raises(SourceFormatError):
         snapshot.main(["download", str(raw)])
@@ -211,7 +172,7 @@ def test_build_writes_the_data_then_checks_it(raw: Path, tmp_path: Path) -> None
         sorted(SAMPLE, key=lambda omm: omm.catalog_number)
     )
     excerpt = gzip.decompress((data / snapshot.SOCRATES).read_bytes()).decode()
-    assert excerpt == HEADER + DOCKED + FAST
+    assert excerpt == SOCRATES_HEADER + DOCKED + FAST
     manifest = json.loads((data / snapshot.MANIFEST).read_text(encoding="utf-8"))
     assert manifest["retrieved"] == {
         "first": manifest["downloads"][0]["retrieved"],
@@ -297,7 +258,7 @@ def test_verify_finds_an_approach_that_is_not_comparable(
 ) -> None:
     data = tmp_path / "data"
     assert build(raw, data) == 0
-    changed = HEADER + DOCKED.replace("1.000", "1.100") + FAST
+    changed = SOCRATES_HEADER + DOCKED.replace("1.000", "1.100") + FAST
     (data / snapshot.SOCRATES).write_bytes(gzip.compress(changed.encode()))
     assert snapshot.main(["verify", "--data", str(data)]) == 1
 
@@ -335,7 +296,7 @@ def test_notice_gives_both_dates_of_a_download_over_midnight() -> None:
         group_rows={"active": 0},
         duplicates=0,
         omms=(),
-        socrates=HEADER,
+        socrates=SOCRATES_HEADER,
         summary=snapshot.SocratesSummary(
             approaches=0,
             both_in_catalog=0,
@@ -350,56 +311,13 @@ def test_notice_gives_both_dates_of_a_download_over_midnight() -> None:
     )
 
 
-def test_read_socrates_converts_to_si() -> None:
-    first = snapshot.read_socrates(SOCRATES_CSV)[0]
-    assert (first.primary, first.secondary) == (25544, 100882)
-    assert first.since_epoch_primary == first.since_epoch_secondary == 86400.0
-    assert first.since_epoch_tolerance == pytest.approx(43.2005)
-    assert first.tca == Time("2026-10-07T00:20:47.861", scale="utc")
-    assert first.miss_distance == pytest.approx(4.0)
-    assert first.relative_speed == 0.0
-    assert first.line == DOCKED
-    assert snapshot.read_socrates(SOCRATES_CSV)[-1].relative_speed == 7500.0
-
-
-def test_read_socrates_reads_a_report_without_approaches() -> None:
-    assert snapshot.read_socrates(HEADER) == ()
-
-
-def test_read_socrates_skips_a_byte_order_mark() -> None:
-    assert len(snapshot.read_socrates("\ufeff" + SOCRATES_CSV)) == 4
-    assert snapshot.socrates_header("\ufeff" + SOCRATES_CSV) == "\ufeff" + HEADER
-
-
-@pytest.mark.parametrize(
-    "text",
-    [
-        "",
-        SOCRATES_CSV.replace(",DILUTION", ",OTHER"),
-        SOCRATES_CSV.replace("NORAD_CAT_ID_1,OBJECT_NAME_1,", "OBJECT_NAME_1,"),
-    ],
-)
-def test_read_socrates_needs_the_header(text: str) -> None:
-    with pytest.raises(ValueError, match="not a SOCRATES report header"):
-        snapshot.read_socrates(text)
-
-
-def test_read_socrates_needs_eleven_values() -> None:
-    with pytest.raises(ValueError, match="line 3: 10 values"):
-        snapshot.read_socrates(HEADER + DOCKED + DOCKED.replace(",0.010", ""))
-
-
-def test_epoch_matches_within_the_dse_digits() -> None:
-    docked, _, _, fast = snapshot.read_socrates(SOCRATES_CSV)
-    assert snapshot.epoch_matches(docked, ISS, DRAGON)
-    assert snapshot.epoch_matches(fast, CALSPHERE, STARLINK)
-    later = dataclasses.replace(DRAGON, epoch=DRAGON.epoch + 50.0 * u.s)
-    assert not snapshot.epoch_matches(docked, ISS, later)
-    assert not snapshot.epoch_matches(docked, later, DRAGON)
+def test_socrates_header_keeps_a_byte_order_mark() -> None:
+    text = "\ufeff" + SOCRATES_CSV
+    assert snapshot.socrates_header(text) == "\ufeff" + SOCRATES_HEADER
 
 
 def test_comparable_approaches() -> None:
-    approaches = snapshot.read_socrates(SOCRATES_CSV)
+    approaches = read_socrates(SOCRATES_CSV)
     assert snapshot.comparable(approaches, SAMPLE) == [approaches[0], approaches[3]]
 
 
@@ -434,7 +352,7 @@ def test_spread_takes_distinct_items_in_order(size: int, count: int) -> None:
 
 @given(st.permutations(SAMPLE), st.permutations(range(4)))
 def test_select_fixture_ignores_the_order(omms: list[Omm], order: list[int]) -> None:
-    approaches = snapshot.read_socrates(SOCRATES_CSV)
+    approaches = read_socrates(SOCRATES_CSV)
     chosen = snapshot.select_fixture(omms, [approaches[i] for i in order])
     assert chosen == sorted(SAMPLE, key=lambda omm: omm.catalog_number)
 
@@ -464,5 +382,5 @@ def test_select_fixture_parts(
 ) -> None:
     no_fixture_parts(monkeypatch)
     monkeypatch.setattr(snapshot, part, value)
-    chosen = snapshot.select_fixture(SAMPLE, snapshot.read_socrates(SOCRATES_CSV))
+    chosen = snapshot.select_fixture(SAMPLE, read_socrates(SOCRATES_CSV))
     assert [omm.catalog_number for omm in chosen] == expected

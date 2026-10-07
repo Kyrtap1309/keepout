@@ -3,7 +3,6 @@ however the grid is cut into chunks, and on SGP4 every minimum the
 brute-force oracle and SOCRATES find."""
 
 import dataclasses
-import gzip
 import math
 import pickle
 from dataclasses import dataclass, field
@@ -13,13 +12,12 @@ import astropy.units as u
 import numpy as np
 import numpy.typing as npt
 import pytest
-import screening_snapshot as snapshot
 from astropy.time import Time
 from hypothesis import given, settings, target
 from hypothesis import strategies as st
+from screening_data import FAST_SPEED, load_fixture, socrates_approaches
 from screening_oracle import brute_force, positions, refine
 
-from keepout.omm import load
 from keepout.orbits import EARTH_MU
 from keepout.propagation import Ephemeris, RadiusBounds, Sgp4Propagator, time_offsets
 from keepout.screening import (
@@ -49,16 +47,14 @@ HOUR = 3600.0
 REFERENCE = Time("2026-10-06T00:00:00", scale="utc")
 """Time zero of the straight-line objects."""
 
-FIXTURE = load(snapshot.DATA / snapshot.FIXTURE)
+FIXTURE = load_fixture()
 BY_NUMBER = {omm.catalog_number: omm for omm in FIXTURE}
 COLUMN = {omm.catalog_number: index for index, omm in enumerate(FIXTURE)}
 PRIMARIES = FIXTURE[::9]
 """25 primaries spread over the fixture (LEO, MEO, GEO, HEO)."""
 SOCRATES = [
     approach
-    for approach in snapshot.read_socrates(
-        gzip.decompress((snapshot.DATA / snapshot.SOCRATES).read_bytes()).decode()
-    )
+    for approach in socrates_approaches()
     if approach.primary in BY_NUMBER and approach.secondary in BY_NUMBER
 ]
 """The SOCRATES approaches of two fixture objects (31 fast, 1002 slow)."""
@@ -870,7 +866,7 @@ def test_every_socrates_approach_of_the_fixture_is_found() -> None:
         offset = (approach.tca - start).sec
         candidates = found[(approach.primary, approach.secondary)]
         match = min(candidates, key=lambda m: abs(m.offset - offset))
-        fast = approach.relative_speed >= snapshot.FAST
+        fast = approach.relative_speed >= FAST_SPEED
         assert match.offset == pytest.approx(offset, abs=1e-3 if fast else 0.5)
         assert match.distance == pytest.approx(approach.miss_distance, abs=0.5)
 

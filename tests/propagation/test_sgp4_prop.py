@@ -11,10 +11,10 @@ import pytest
 from astropy.time import Time
 from hypothesis import given
 from hypothesis import strategies as st
-from screening_snapshot import DATA, FIXTURE
+from screening_data import load_fixture
 
 from keepout.errors import UnsupportedElements
-from keepout.omm import Omm, load
+from keepout.omm import Omm
 from keepout.propagation import (
     Ephemeris,
     Propagator,
@@ -24,7 +24,7 @@ from keepout.propagation import (
 )
 from keepout.propagation.sgp4_prop import _utc_dates
 
-OMMS = load(DATA / FIXTURE)
+OMMS = load_fixture()
 """222 objects of the frozen public catalog (LEO to HEO, 6-digit numbers, and
 three that fail SGP4 on the grid below)."""
 PROPAGATOR = Sgp4Propagator(OMMS)

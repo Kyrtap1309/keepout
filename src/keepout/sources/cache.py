@@ -4,7 +4,9 @@ Shared by :mod:`keepout.sources.cara`, :mod:`keepout.sources.kelvins` and
 :mod:`keepout.sources.celestrak`.
 Every cached file has a pinned SHA-256 digest; a file is written under a
 unique temporary name and renamed into place only once its digest matches,
-so the cache never uses a partial or unverified file. A hard kill (SIGKILL,
+so the cache never uses a partial or unverified file (:func:`store`). Bytes
+already in memory are written the same way, without a digest to match
+(:func:`store_bytes`). A hard kill (SIGKILL,
 power loss) mid-write can leave the temporary ``.part`` file behind; it is
 never read.
 """
@@ -20,7 +22,7 @@ import tempfile
 import threading
 import urllib.error
 import urllib.request
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from http import HTTPStatus
 from importlib.metadata import version
 from pathlib import Path
@@ -41,6 +43,7 @@ __all__ = [
     "http_download",
     "http_stream",
     "store",
+    "store_bytes",
 ]
 
 DOWNLOAD_TIMEOUT: Final = 60.0
@@ -53,8 +56,8 @@ HOME_PAGE: Final = "https://github.com/Kyrtap1309/keepout"
 """keepout's home page, named in :data:`USER_AGENT`."""
 
 USER_AGENT: Final = f"keepout/{version('keepout')} (+{HOME_PAGE})"
-"""A ``User-Agent`` naming keepout, its version and where to find it, for
-servers that ask clients to identify themselves (CelesTrak)."""
+"""The ``User-Agent`` of every request: keepout, its version and where to
+find it, for servers that ask clients to identify themselves (CelesTrak)."""
 
 
 class Sink(Protocol):
@@ -78,15 +81,13 @@ def cache_dir() -> Path:
     return platformdirs.user_cache_path("keepout")
 
 
-def http_download(url: str, *, headers: Mapping[str, str] | None = None) -> bytes:
-    """Download ``url`` and return the body.
+def http_download(url: str) -> bytes:
+    """Download ``url`` and return the body, as :func:`http_stream` does.
 
     Parameters
     ----------
     url
         What to download.
-    headers
-        Extra request headers, e.g. a ``User-Agent``.
 
     Raises
     ------
@@ -96,18 +97,17 @@ def http_download(url: str, *, headers: Mapping[str, str] | None = None) -> byte
         On any other network or HTTP error.
     """
     buffer = io.BytesIO()
-    http_stream(url, buffer, headers=headers)
+    http_stream(url, buffer)
     return buffer.getvalue()
 
 
-def http_stream(
-    url: str, sink: Sink, *, headers: Mapping[str, str] | None = None
-) -> None:
+def http_stream(url: str, sink: Sink) -> None:
     """Download ``url`` into ``sink`` in chunks of :data:`CHUNK_SIZE` bytes.
 
-    For files too large to hold in memory at once. Redirects are followed;
-    any final status but 200 OK is an error, the success codes included,
-    and nothing is retried.
+    For files too large to hold in memory at once. The request names keepout
+    in the ``User-Agent`` (:data:`USER_AGENT`). Redirects are followed; any
+    final status but 200 OK is an error, the success codes included, and
+    nothing is retried.
 
     Parameters
     ----------
@@ -115,8 +115,6 @@ def http_stream(
         What to download.
     sink
         Where the body goes.
-    headers
-        Extra request headers, e.g. a ``User-Agent``.
 
     Raises
     ------
@@ -125,7 +123,7 @@ def http_stream(
     SourceUnavailable
         On any other network or HTTP error, also one in the middle of the body.
     """
-    request = urllib.request.Request(url, headers=dict(headers or {}))
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     try:
         with urllib.request.urlopen(request, timeout=DOWNLOAD_TIMEOUT) as response:
             if response.status != HTTPStatus.OK:
@@ -174,9 +172,9 @@ def _remember(path: Path, sha256: str, signature: _Signature | None) -> None:
 def has_digest(path: Path, sha256: str) -> bool:
     """Whether the file at ``path`` exists and has SHA-256 digest ``sha256``.
 
-    A file already checked by this process (or written by :func:`store`) is
-    not hashed again while its inode, size and modification time are
-    unchanged.
+    A file already checked by this process (or written by :func:`store` or
+    :func:`store_bytes`) is not hashed again while its inode, size and
+    modification time are unchanged.
     """
     signature = _signature(path)
     if signature is None:
@@ -225,6 +223,45 @@ def store(
         If the contents do not have digest ``sha256``; ``target`` is then
         left as it was.
     """
+
+    def check(actual: str) -> None:
+        if actual != sha256:
+            raise ChecksumMismatch(f"{source}: expected sha256 {sha256}, got {actual}")
+
+    _write(target, write, check)
+
+
+def store_bytes(target: Path, data: bytes) -> str:
+    """Write ``data`` to ``target`` atomically, as :func:`store` does.
+
+    For contents already in memory, so there is no digest to check them
+    against; the one computed while writing is returned.
+
+    Parameters
+    ----------
+    target
+        The file to create or replace; parent directories are created.
+    data
+        Its contents.
+
+    Returns
+    -------
+    str
+        The SHA-256 hex digest of ``data``.
+    """
+    return _write(target, lambda sink: sink.write(data))
+
+
+def _write(
+    target: Path,
+    write: Callable[[Sink], object],
+    check: Callable[[str], None] | None = None,
+) -> str:
+    """Write ``target`` atomically; ``check`` may refuse the contents' digest.
+
+    Returns the SHA-256 hex digest of what was written. If ``write`` or
+    ``check`` raises, ``target`` is left as it was.
+    """
     target.parent.mkdir(parents=True, exist_ok=True)
     # A unique temporary name, so concurrent writers never share a partial file.
     descriptor, name = tempfile.mkstemp(
@@ -236,10 +273,11 @@ def store(
             hashing = _Hashing(stream)
             write(hashing)
         actual = hashing.digest.hexdigest()
-        if actual != sha256:
-            raise ChecksumMismatch(f"{source}: expected sha256 {sha256}, got {actual}")
+        if check is not None:
+            check(actual)
         partial.replace(target)
     except BaseException:
         partial.unlink(missing_ok=True)
         raise
-    _remember(target, sha256, _signature(target))
+    _remember(target, actual, _signature(target))
+    return actual

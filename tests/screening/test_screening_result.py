@@ -7,17 +7,16 @@ import pickle
 import astropy.units as u
 import numpy as np
 import pytest
-import screening_snapshot as snapshot
 from astropy.time import Time
 from hypothesis import given
 from hypothesis import strategies as st
 from hypothesis.extra.numpy import arrays
+from screening_data import load_fixture
 
 from keepout._types import FloatArray
 from keepout.covariance import make_covariance
 from keepout.errors import GeometryError
 from keepout.frames import rtn_rotation
-from keepout.omm import load
 from keepout.pc import compute_pc
 from keepout.screening import (
     DEFAULT_VOLUME,
@@ -37,7 +36,7 @@ V_PRIMARY = np.array([0.0, 7546.0, 0.0])
 MISS = np.array([100.0, 0.0, 300.0])
 RELATIVE = np.array([3.0, -15092.0, -1.0])
 """Head on, perpendicular to MISS: closest at TCA."""
-FIXTURE = load(snapshot.DATA / snapshot.FIXTURE)
+FIXTURE = load_fixture()
 
 
 def states(

@@ -1,13 +1,11 @@
 """The brute-force oracle: SGP4's positions, every sampled minimum, and
 SOCRATES's fast approaches to the precision the report prints."""
 
-import gzip
-
 import astropy.units as u
 import numpy as np
 import pytest
-import screening_snapshot as snapshot
 from astropy.time import Time
+from screening_data import FAST_SPEED, load_fixture, socrates_approaches
 from screening_oracle import (
     ORACLE_STEP,
     brute_force,
@@ -16,23 +14,21 @@ from screening_oracle import (
     refine,
 )
 
-from keepout.omm import load
 from keepout.propagation import Sgp4Propagator
+from keepout.sources.socrates import SocratesApproach
 
-FIXTURE = load(snapshot.DATA / snapshot.FIXTURE)
+FIXTURE = load_fixture()
 BY_NUMBER = {omm.catalog_number: omm for omm in FIXTURE}
 START = Time("2026-10-06T00:00:00", scale="utc")
 FAILING = {45665, 45711, 270365}
 """Fixture objects SGP4 fails on within a week of START."""
 
-FAST = [
+FAST_APPROACHES = [
     approach
-    for approach in snapshot.read_socrates(
-        gzip.decompress((snapshot.DATA / snapshot.SOCRATES).read_bytes()).decode()
-    )
+    for approach in socrates_approaches()
     if approach.primary in BY_NUMBER
     and approach.secondary in BY_NUMBER
-    and approach.relative_speed >= snapshot.FAST
+    and approach.relative_speed >= FAST_SPEED
 ]
 """The fast (1 km/s or more) SOCRATES approaches of two fixture objects."""
 
@@ -67,14 +63,14 @@ def test_local_minima(distances: list[float], minima: list[bool]) -> None:
 
 
 def test_the_fixture_holds_fast_socrates_approaches() -> None:
-    assert len(FAST) == 31
+    assert len(FAST_APPROACHES) == 31
 
 
 @pytest.mark.parametrize(
-    "approach", FAST, ids=lambda a: f"{a.primary}-{a.secondary}-{a.tca.isot}"
+    "approach", FAST_APPROACHES, ids=lambda a: f"{a.primary}-{a.secondary}-{a.tca.isot}"
 )
 def test_refined_minima_are_socrates_approaches(
-    approach: snapshot.Approach,
+    approach: SocratesApproach,
 ) -> None:
     # SOCRATES prints TCA to the millisecond and the range to the metre.
     primary = BY_NUMBER[approach.primary]
@@ -139,7 +135,7 @@ def test_each_primary_has_its_own_reach() -> None:
 
 
 def test_minima_at_the_edges_of_the_window() -> None:
-    approach = FAST[0]
+    approach = FAST_APPROACHES[0]
     primary = BY_NUMBER[approach.primary]
     secondary = BY_NUMBER[approach.secondary]
     # The window opens at TCA: the distance only grows after it.

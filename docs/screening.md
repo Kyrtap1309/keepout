@@ -82,7 +82,8 @@ satellites, the last 30 days' launches, analyst objects and the debris of the
 three largest fragmentations), as CSV, and keeps one element set per object:
 the newest, when an object is in several groups (`Catalog.duplicates` lists
 the others). `fetch_group` fetches one group, `fetch_socrates` the latest
-SOCRATES report.
+SOCRATES report, whose `approaches()` are its rows in SI units
+(`keepout.sources.socrates.SocratesApproach`).
 
 The client follows CelesTrak's
 [usage policy](https://celestrak.org/usage-policy.php), which blocks clients

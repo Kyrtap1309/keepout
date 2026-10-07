@@ -11,14 +11,14 @@ from hypothesis import given
 from hypothesis import strategies as st
 from hypothesis.extra.numpy import arrays
 from scipy.optimize import brentq
-from screening_snapshot import DATA, FIXTURE
+from screening_data import load_fixture
 from sgp4.api import WGS72
 from sgp4.model import Satrec as PythonSatrec
 
 from keepout._types import FloatArray
 from keepout.errors import UnsupportedElements
 from keepout.frames import relative_position_rtn
-from keepout.omm import Omm, load
+from keepout.omm import Omm
 from keepout.screening import (
     DEFAULT_VOLUME,
     SFS_HANDBOOK_VOLUMES,
@@ -36,7 +36,7 @@ from keepout.screening.volume import (
     SOCRATES_RADIUS,
 )
 
-BY_NUMBER = {omm.catalog_number: omm for omm in load(DATA / FIXTURE)}
+BY_NUMBER = {omm.catalog_number: omm for omm in load_fixture()}
 """The 222 objects of the frozen public catalog's fixture."""
 
 semi_axis = st.floats(min_value=1.0, max_value=1e5)

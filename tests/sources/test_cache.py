@@ -83,7 +83,7 @@ def test_http_download_returns_body(monkeypatch: pytest.MonkeyPatch) -> None:
     assert cache.http_download("https://example.invalid/x") == b"body"
 
 
-def test_http_download_sends_the_headers_given(
+def test_every_request_names_keepout_in_the_user_agent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     requests: list[urllib.request.Request] = []
@@ -93,14 +93,14 @@ def test_http_download_sends_the_headers_given(
         return _Response(b"body")
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
-    cache.http_download("https://example.invalid/x", headers={"User-Agent": "me/1"})
-    cache.http_download("https://example.invalid/y")
+    cache.http_download("https://example.invalid/x")
+    cache.http_stream("https://example.invalid/y", io.BytesIO())
     assert [request.full_url for request in requests] == [
         "https://example.invalid/x",
         "https://example.invalid/y",
     ]
-    assert requests[0].get_header("User-agent") == "me/1"
-    assert requests[1].header_items() == []
+    for request in requests:
+        assert request.header_items() == [("User-agent", cache.USER_AGENT)]
 
 
 def test_http_download_wraps_network_errors(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -237,3 +237,26 @@ def test_has_digest_rejects_a_missing_or_different_file(tmp_path: Path) -> None:
     target.write_bytes(b"other")
     assert not cache.has_digest(target, DIGEST)
     assert not cache.has_digest(tmp_path, DIGEST)
+
+
+def test_store_bytes_writes_the_file_and_gives_its_digest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "a" / "file.bin"
+    target.parent.mkdir()
+    target.write_bytes(b"previous")
+    assert cache.store_bytes(target, PAYLOAD) == DIGEST
+    assert target.read_bytes() == PAYLOAD
+    assert [p.name for p in target.parent.iterdir()] == ["file.bin"]
+
+    def refuse(*args: object) -> object:
+        raise AssertionError("hashed from disk")
+
+    monkeypatch.setattr(hashlib, "file_digest", refuse)
+    assert cache.has_digest(target, DIGEST)
+
+
+def test_store_bytes_creates_the_parents(tmp_path: Path) -> None:
+    target = tmp_path / "a" / "b" / "file.bin"
+    cache.store_bytes(target, b"")
+    assert target.read_bytes() == b""

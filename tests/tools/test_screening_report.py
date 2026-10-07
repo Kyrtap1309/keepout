@@ -12,12 +12,14 @@ import pytest
 import screening_report as report
 import screening_snapshot as snapshot
 from astropy.time import Time
+from screening_data import socrates_text
 
 from keepout.omm import Omm, load
 from keepout.omm.celestrak import dumps_csv
+from keepout.sources.socrates import COLUMNS, read_socrates
 
 FIXTURE = {omm.catalog_number: omm for omm in load(snapshot.DATA / snapshot.FIXTURE)}
-EXCERPT = gzip.decompress((snapshot.DATA / snapshot.SOCRATES).read_bytes()).decode()
+EXCERPT = socrates_text()
 HEADER = snapshot.socrates_header(EXCERPT)
 
 PAIRS = {
@@ -29,7 +31,7 @@ PAIRS = {
 }
 """Pairs of the excerpt whose objects are in the test fixture."""
 
-ROWS = [a for a in snapshot.read_socrates(EXCERPT) if (a.primary, a.secondary) in PAIRS]
+ROWS = [a for a in read_socrates(EXCERPT) if (a.primary, a.secondary) in PAIRS]
 START = Time("2026-10-06T00:00:00", scale="utc")
 
 
@@ -41,7 +43,7 @@ def objects() -> list[Omm]:
 def with_value(line: str, column: str, value: str) -> str:
     """A SOCRATES line with one value replaced."""
     values = line.rstrip("\r\n").split(",")
-    values[snapshot.SOCRATES_COLUMNS.index(column)] = value
+    values[COLUMNS.index(column)] = value
     return ",".join(values) + "\r\n"
 
 

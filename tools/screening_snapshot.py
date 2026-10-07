@@ -34,11 +34,11 @@ commit. SOCRATES ran on the element sets of its own time (TCA minus ``DSE``
 gives each object's epoch, to the 43 s of DSE's three decimals), and
 CelesTrak serves only the latest element sets, so an approach can be
 compared exactly only if the snapshot holds the same element sets of both
-objects (:func:`epoch_matches`). Those approaches are the excerpt; the
-manifest counts the others. The report window starts at 0 h UTC and uses
-element sets of the evening before, while most objects get new element sets
-several times a day: download soon after SOCRATES's data cut-off to keep
-more approaches comparable.
+objects (:func:`~keepout.sources.socrates.epoch_matches`). Those approaches
+are the excerpt; the manifest counts the others. The report window starts at
+0 h UTC and uses element sets of the evening before, while most objects get
+new element sets several times a day: download soon after SOCRATES's data
+cut-off to keep more approaches comparable.
 
 CelesTrak's usage policy (https://celestrak.org/usage-policy.php) applies to
 ``download``: GP data changes about every two hours and each URL may be
@@ -60,7 +60,6 @@ gives. It is not covered by keepout's MIT licence.
 from __future__ import annotations
 
 import argparse
-import csv
 import gzip
 import hashlib
 import json
@@ -85,7 +84,7 @@ from keepout.omm import Omm, load
 from keepout.omm.celestrak import dumps_csv, loads_csv
 from keepout.orbits import EARTH_MU
 from keepout.screening.volume import SFS_DEEP_SPACE_PERIOD, SFS_ECCENTRICITY
-from keepout.sources.cache import store
+from keepout.sources.cache import http_download, store_bytes
 from keepout.sources.celestrak import (
     GP_URL,
     PUBLIC_GROUPS,
@@ -95,8 +94,8 @@ from keepout.sources.celestrak import (
     SocratesReport,
     fetch_catalog,
     fetch_socrates,
-    http_get,
 )
+from keepout.sources.socrates import SocratesApproach, epoch_matches, read_socrates
 
 REPO: Final = Path(__file__).resolve().parents[1]
 DATA: Final = REPO / "tests/screening/data"
@@ -114,7 +113,8 @@ element set per object (the newest), by catalog number, gzipped."""
 
 SOCRATES: Final = "socrates-excerpt.csv.gz"
 """The header and the approaches of the SOCRATES report whose element sets
-are in the catalog (:func:`epoch_matches`), lines unchanged, gzipped."""
+are in the catalog (:func:`~keepout.sources.socrates.epoch_matches`), lines
+unchanged, gzipped."""
 
 FIXTURE: Final = "celestrak-fixture.csv"
 """About 200 objects of the catalog (:func:`select_fixture`), CelesTrak CSV."""
@@ -129,21 +129,6 @@ MANIFEST_FORMAT: Final = 1
 """Version of the :data:`MANIFEST` layout."""
 
 GZIPPED: Final = frozenset({SNAPSHOT, SOCRATES})
-
-SOCRATES_COLUMNS: Final = (
-    "NORAD_CAT_ID_1",
-    "OBJECT_NAME_1",
-    "DSE_1",
-    "NORAD_CAT_ID_2",
-    "OBJECT_NAME_2",
-    "DSE_2",
-    "TCA",
-    "TCA_RANGE",
-    "TCA_RELATIVE_SPEED",
-    "MAX_PROB",
-    "DILUTION",
-)
-"""The columns of a SOCRATES CSV report, in order."""
 
 EARTH_RADIUS: Final = 6_378_137.0
 """Equatorial radius of the Earth [m] (WGS 84), for altitudes."""
@@ -263,8 +248,7 @@ class RawBodies:
         name = raw_name(url)
         data = self.download(url)
         retrieved = utc_text(self.clock())
-        digest = hashlib.sha256(data).hexdigest()
-        store(self.raw / name, lambda sink: sink.write(data), digest, url)
+        digest = store_bytes(self.raw / name, data)
         self.bodies[url] = Body(url, name, digest, len(data), retrieved)
         write_index(self.raw / RAW_INDEX, tuple(self.bodies.values()))
         return data
@@ -289,9 +273,7 @@ def read_index(path: Path) -> tuple[Body, ...]:
 def write_index(path: Path, bodies: Sequence[Body]) -> None:
     """Write the :data:`RAW_INDEX` file atomically."""
     record = {"format": RAW_FORMAT, "bodies": [vars(body) for body in bodies]}
-    blob = (json.dumps(record, indent=2) + "\n").encode()
-    digest = hashlib.sha256(blob).hexdigest()
-    store(path, lambda sink: sink.write(blob), digest, str(path))
+    store_bytes(path, (json.dumps(record, indent=2) + "\n").encode())
 
 
 def read_body(raw: Path, body: Body) -> bytes:
@@ -330,111 +312,18 @@ def fetch(raw: Path, download: Downloader | None) -> tuple[Catalog, SocratesRepo
     return catalog, report
 
 
-@dataclass(frozen=True)
-class Approach:
-    """One row of a SOCRATES report: a close approach of two objects.
-
-    Parameters
-    ----------
-    primary, secondary
-        Catalog numbers of the two objects (``NORAD_CAT_ID_1``, ``_2``).
-    since_epoch_primary, since_epoch_secondary
-        Time from each object's element set epoch to TCA [s] (``DSE_1``,
-        ``DSE_2``, in days in the report).
-    since_epoch_tolerance
-        Half the last digit of the DSE values plus half a millisecond of
-        TCA [s]: how well the report gives the epochs.
-    tca
-        Time of closest approach (UTC).
-    miss_distance
-        Range at TCA [m] (``TCA_RANGE``, km in the report).
-    relative_speed
-        Relative speed at TCA [m/s] (``TCA_RELATIVE_SPEED``, km/s).
-    line
-        The row as the report gives it, line ending included.
-    """
-
-    primary: int
-    secondary: int
-    since_epoch_primary: float
-    since_epoch_secondary: float
-    since_epoch_tolerance: float
-    tca: Time
-    miss_distance: float
-    relative_speed: float
-    line: str
-
-
 def socrates_header(text: str) -> str:
     """The header line of a SOCRATES report, line ending and any byte-order
     mark included."""
     return text.splitlines(keepends=True)[0] if text else ""
 
 
-def read_socrates(text: str) -> tuple[Approach, ...]:
-    """The approaches of a SOCRATES CSV report, in file order.
-
-    Raises
-    ------
-    ValueError
-        If the header is not the report's, a row has another number of
-        values, or a value cannot be read.
-    """
-    header, *lines = text.splitlines(keepends=True) or [""]
-    columns = next(csv.reader([header.removeprefix("\ufeff")]), [])
-    if tuple(columns) != SOCRATES_COLUMNS:
-        raise ValueError(f"not a SOCRATES report header: {header.strip()!r}")
-    rows = [next(csv.reader([line])) for line in lines]
-    for number, row in enumerate(rows, start=2):
-        if len(row) != len(SOCRATES_COLUMNS):
-            raise ValueError(f"line {number}: {len(row)} values, not 11")
-    tcas = Time([row[6] for row in rows], format="iso", scale="utc")
-    return tuple(
-        Approach(
-            primary=int(row[0]),
-            secondary=int(row[3]),
-            since_epoch_primary=float(row[2]) * DAY,
-            since_epoch_secondary=float(row[5]) * DAY,
-            since_epoch_tolerance=(
-                0.5 * 10.0 ** -max(_decimals(row[2]), _decimals(row[5])) * DAY + 0.5e-3
-            ),
-            tca=tcas[index],
-            miss_distance=float(row[7]) * 1e3,
-            relative_speed=float(row[8]) * 1e3,
-            line=line,
-        )
-        for index, (row, line) in enumerate(zip(rows, lines, strict=True))
-    )
-
-
-def _decimals(number: str) -> int:
-    return len(number.partition(".")[2])
-
-
-def epoch_matches(approach: Approach, primary: Omm, secondary: Omm) -> bool:
-    """Whether SOCRATES used these element sets: TCA minus DSE is their epoch.
-
-    Computed from UTC Julian days: a leap second between epoch and TCA
-    would count one second, far inside the tolerance.
-    """
-    return all(
-        abs(seconds_between(omm.epoch, approach.tca) - since)
-        <= approach.since_epoch_tolerance
-        for omm, since in (
-            (primary, approach.since_epoch_primary),
-            (secondary, approach.since_epoch_secondary),
-        )
-    )
-
-
-def seconds_between(start: Time, end: Time) -> float:
-    """Seconds from ``start`` to ``end``, from their UTC Julian days."""
-    return float((end.jd1 - start.jd1) * DAY + (end.jd2 - start.jd2) * DAY)
-
-
-def comparable(approaches: Sequence[Approach], omms: Sequence[Omm]) -> list[Approach]:
+def comparable(
+    approaches: Sequence[SocratesApproach], omms: Sequence[Omm]
+) -> list[SocratesApproach]:
     """The approaches whose two objects are in ``omms`` with the element sets
-    SOCRATES used (:func:`epoch_matches`), in report order."""
+    SOCRATES used (:func:`~keepout.sources.socrates.epoch_matches`), in
+    report order."""
     by_number = {omm.catalog_number: omm for omm in omms}
     return [
         approach
@@ -487,7 +376,9 @@ def spread(items: Sequence[_T], count: int) -> list[_T]:
     return [items[(index * len(items)) // count] for index in range(count)]
 
 
-def select_fixture(omms: Sequence[Omm], approaches: Sequence[Approach]) -> list[Omm]:
+def select_fixture(
+    omms: Sequence[Omm], approaches: Sequence[SocratesApproach]
+) -> list[Omm]:
     """The test fixture: about 200 objects of the catalog, by a fixed rule.
 
     - The objects of the :data:`CLOSEST` closest pairs of comparable SOCRATES
@@ -543,7 +434,7 @@ def select_fixture(omms: Sequence[Omm], approaches: Sequence[Approach]) -> list[
     return [by_number[number] for number in sorted(chosen)]
 
 
-def _pairs(approaches: Sequence[Approach], count: int) -> list[tuple[int, int]]:
+def _pairs(approaches: Sequence[SocratesApproach], count: int) -> list[tuple[int, int]]:
     """The first ``count`` distinct pairs of objects of ``approaches``."""
     pairs = dict.fromkeys((a.primary, a.secondary) for a in approaches)
     return list(pairs)[:count]
@@ -567,7 +458,7 @@ class SocratesSummary(TypedDict):
 
 
 def summarise_socrates(
-    approaches: Sequence[Approach], omms: Sequence[Omm]
+    approaches: Sequence[SocratesApproach], omms: Sequence[Omm]
 ) -> SocratesSummary:
     """Counts and times of a whole SOCRATES report against the catalog."""
     numbers = {omm.catalog_number for omm in omms}
@@ -634,7 +525,7 @@ def inputs_from_raw(raw: Path) -> Inputs:
         duplicates=len(catalog.duplicates),
         omms=catalog.omms,
         socrates=report.text,
-        summary=summarise_socrates(read_socrates(report.text), catalog.omms),
+        summary=summarise_socrates(report.approaches(), catalog.omms),
     )
 
 
@@ -823,11 +714,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     verify.add_argument("--data", type=Path, default=DATA)
     args = parser.parse_args(argv)
     if args.command == "download":
-        catalog, report = fetch(args.raw, http_get)
+        catalog, report = fetch(args.raw, http_download)
         print(
             f"saved {len(catalog.groups) + 1} bodies in {args.raw}: "
             f"{len(catalog.omms)} objects, "
-            f"{len(read_socrates(report.text))} SOCRATES approaches"
+            f"{len(report.approaches())} SOCRATES approaches"
         )
         return 0
     if args.command == "build":

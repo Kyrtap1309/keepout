@@ -8,6 +8,8 @@ objects: not the whole catalog of about 30 000, as most rocket bodies and
 debris are in no group (the full catalog is Space-Track's ``gp`` query).
 Element sets are fetched as CSV (one OMM keyword per column), a third of the
 size of the JSON form, and read by :func:`keepout.omm.celestrak.loads_csv`.
+A SOCRATES report is kept as text and read by
+:meth:`SocratesReport.approaches` (see :mod:`keepout.sources.socrates`).
 
 The client follows CelesTrak's usage policy
 (https://celestrak.org/usage-policy.php):
@@ -58,7 +60,8 @@ from keepout.errors import (
 )
 from keepout.omm.celestrak import loads_csv
 from keepout.omm.model import Omm, deduplicate
-from keepout.sources.cache import USER_AGENT, cache_dir, http_download, store
+from keepout.sources.cache import cache_dir, http_download, store_bytes
+from keepout.sources.socrates import COLUMNS, SocratesApproach, read_socrates
 
 __all__ = [
     "GP_URL",
@@ -74,7 +77,6 @@ __all__ = [
     "fetch_group",
     "fetch_socrates",
     "group_url",
-    "http_get",
 ]
 
 GP_URL: Final = "https://celestrak.org/NORAD/elements/gp.php"
@@ -109,29 +111,16 @@ _GROUP_NAME: Final = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 _META_FORMAT: Final = 1
 """Version of the ``.meta.json`` layout; another version is not read."""
 
-_SOCRATES_COLUMN: Final = "NORAD_CAT_ID_1"
+_SOCRATES_COLUMN: Final = COLUMNS[0]
 """A column of the SOCRATES CSV header, to recognise the report."""
 
 Downloader: TypeAlias = Callable[[str], bytes]
 """Downloads a URL and returns the body, raising
 :class:`~keepout.errors.HttpStatusError` for an HTTP status other than 200
 and :class:`~keepout.errors.SourceUnavailable` for other failures, like
-:func:`http_get`."""
+:func:`~keepout.sources.cache.http_download`."""
 
 _T = TypeVar("_T")
-
-
-def http_get(url: str) -> bytes:
-    """Download ``url`` with keepout's ``User-Agent``: the default downloader.
-
-    Raises
-    ------
-    HttpStatusError
-        If CelesTrak answers with a status other than 200 OK.
-    SourceUnavailable
-        On any other network or HTTP error.
-    """
-    return http_download(url, headers={"User-Agent": USER_AGENT})
 
 
 @dataclass(frozen=True)
@@ -212,6 +201,17 @@ class SocratesReport:
     text: str
     retrieval: Retrieval
 
+    def approaches(self) -> tuple[SocratesApproach, ...]:
+        """The approaches of the report, in its order (read anew each call).
+
+        Raises
+        ------
+        SourceFormatError
+            If the text is not a SOCRATES report keepout can read (see
+            :func:`~keepout.sources.socrates.read_socrates`).
+        """
+        return read_socrates(self.text)
+
 
 def group_url(name: str) -> str:
     """The CSV URL of the GP group ``name`` (case-insensitive).
@@ -229,7 +229,8 @@ def fetch_group(
     *,
     cache: Path | None = None,
     max_age: float = TTL,
-    download: Downloader = http_get,
+    download: Downloader = http_download,
+    now: Callable[[], float] = time.time,
 ) -> GpGroup:
     """The element sets of one GP group, from the cache or CelesTrak.
 
@@ -248,6 +249,8 @@ def fetch_group(
         :data:`TTL`.
     download
         Downloads a URL.
+    now
+        Gives the current Unix time [s], by which cached copies age.
 
     Raises
     ------
@@ -263,7 +266,7 @@ def fetch_group(
     group = _group_name(name)
     url = group_url(group)
     target = _root(cache) / "gp" / f"{group}.csv"
-    omms, retrieval = _fetch(url, target, _gp_reader(url), max_age, download)
+    omms, retrieval = _fetch(url, target, _gp_reader(url), max_age, download, now)
     return GpGroup(group, omms, retrieval)
 
 
@@ -272,7 +275,8 @@ def fetch_catalog(
     *,
     cache: Path | None = None,
     max_age: float = TTL,
-    download: Downloader = http_get,
+    download: Downloader = http_download,
+    now: Callable[[], float] = time.time,
 ) -> Catalog:
     """The element sets of several GP groups, one per object.
 
@@ -291,6 +295,8 @@ def fetch_catalog(
         :data:`TTL`.
     download
         Downloads a URL.
+    now
+        Gives the current Unix time [s], by which cached copies age.
 
     Raises
     ------
@@ -309,7 +315,7 @@ def fetch_catalog(
         raise ValueError("no groups to fetch")
     _check_max_age(max_age)
     fetched = tuple(
-        fetch_group(name, cache=cache, max_age=max_age, download=download)
+        fetch_group(name, cache=cache, max_age=max_age, download=download, now=now)
         for name in names
     )
     kept, dropped = deduplicate(omm for group in fetched for omm in group.omms)
@@ -321,7 +327,8 @@ def fetch_socrates(
     *,
     cache: Path | None = None,
     max_age: float = TTL,
-    download: Downloader = http_get,
+    download: Downloader = http_download,
+    now: Callable[[], float] = time.time,
 ) -> SocratesReport:
     """The latest SOCRATES Plus report (:data:`SOCRATES_URL`).
 
@@ -338,6 +345,8 @@ def fetch_socrates(
         :data:`TTL`.
     download
         Downloads a URL.
+    now
+        Gives the current Unix time [s], by which cached copies age.
 
     Raises
     ------
@@ -347,7 +356,9 @@ def fetch_socrates(
         As :func:`fetch_group`.
     """
     target = _root(cache) / "socrates" / "sort-minRange.csv"
-    text, retrieval = _fetch(SOCRATES_URL, target, _read_socrates, max_age, download)
+    text, retrieval = _fetch(
+        SOCRATES_URL, target, _read_socrates, max_age, download, now
+    )
     return SocratesReport(text, retrieval)
 
 
@@ -415,11 +426,6 @@ class _Cached:
     data: bytes
 
 
-def _now() -> float:
-    """The current Unix time (replaced in tests)."""
-    return time.time()
-
-
 def _meta_path(target: Path) -> Path:
     return target.with_name(f"{target.name}.meta.json")
 
@@ -454,13 +460,7 @@ def _is_time(value: object) -> TypeGuard[float]:
 
 def _write_meta(target: Path, meta: _Meta) -> None:
     record = {"format": _META_FORMAT, **dataclasses.asdict(meta)}
-    blob = (json.dumps(record, indent=2) + "\n").encode()
-    store(
-        _meta_path(target),
-        lambda sink: sink.write(blob),
-        hashlib.sha256(blob).hexdigest(),
-        str(_meta_path(target)),
-    )
+    store_bytes(_meta_path(target), (json.dumps(record, indent=2) + "\n").encode())
 
 
 def _retrieval(target: Path, meta: _Meta) -> Retrieval:
@@ -488,11 +488,12 @@ def _fetch(
     read: Callable[[bytes], _T],
     max_age: float,
     download: Downloader,
+    clock: Callable[[], float],
 ) -> tuple[_T, Retrieval]:
     """``url`` read from the cache at ``target`` or downloaded, by the policy."""
     _check_max_age(max_age)
     cached = _read_cache(target, url)
-    now = _now()
+    now = clock()
     if cached is not None and 0.0 <= now - cached.meta.checked < max_age:
         value = _parsed(read, cached)
         if value is not None:
@@ -514,8 +515,7 @@ def _fetch(
         _write_meta(target, meta)
         return value, _retrieval(target, meta)
     value = read(data)
-    digest = hashlib.sha256(data).hexdigest()
-    store(target, lambda sink: sink.write(data), digest, url)
+    digest = store_bytes(target, data)
     meta = _Meta(url=url, sha256=digest, retrieved=now, checked=now)
     _write_meta(target, meta)
     return value, _retrieval(target, meta)
