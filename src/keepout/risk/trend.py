@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import enum
 import math
 import statistics
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import Literal, TypeAlias
 
 from keepout._types import require_positive
 from keepout._units import DAY
@@ -21,13 +21,19 @@ __all__ = [
     "analyse_trend",
 ]
 
-Direction: TypeAlias = Literal["rising", "falling", "steady", "undetermined"]
-"""Where the Pc is heading: the sign of the fitted slope of log10 Pc, or
-``"undetermined"`` with fewer than two observations to fit or with all fitted
-observations at one time."""
+
+class Direction(enum.StrEnum):
+    """Where the Pc is heading: the sign of the fitted slope of log10 Pc."""
+
+    RISING = "rising"
+    FALLING = "falling"
+    STEADY = "steady"
+    UNDETERMINED = "undetermined"
+    """Fewer than two observations to fit, or all fitted observations at one
+    time."""
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class TrendConfig:
     """How the direction of a trend is decided.
 
@@ -40,7 +46,7 @@ class TrendConfig:
     window
         Number of latest observations fitted (at least 2).
     steady_within
-        Largest slope [decades of Pc per day] still called ``"steady"``.
+        Largest slope [decades of Pc per day] still called :attr:`Direction.STEADY`.
 
     Raises
     ------
@@ -58,7 +64,7 @@ class TrendConfig:
         require_positive(self.steady_within, "steady_within")
 
 
-@dataclass(frozen=True, eq=False)
+@dataclass(frozen=True, eq=False, slots=True)
 class TrendPoint:
     """One observation with a Pc, before TCA, as the trend sees it.
 
@@ -133,7 +139,7 @@ def _slope(points: Sequence[TrendPoint]) -> float | None:
         return None
 
 
-@dataclass(frozen=True, eq=False)
+@dataclass(frozen=True, eq=False, slots=True)
 class Trend:
     """The Pc of an event over time.
 
@@ -228,7 +234,7 @@ def analyse_trend(
     fitted = points[-settings.window :]
     if any(point.value < PC_FLOOR for point in fitted):
         notes.append(f"Pc below {PC_FLOOR:g} fitted at {PC_FLOOR:g}")
-    direction: Direction = "undetermined"
+    direction = Direction.UNDETERMINED
     slope = None
     if len(fitted) < 2:
         notes.append(
@@ -239,9 +245,9 @@ def analyse_trend(
         if slope is None:
             notes.append("observations at one time: direction undetermined")
         elif slope > settings.steady_within:
-            direction = "rising"
+            direction = Direction.RISING
         elif slope < -settings.steady_within:
-            direction = "falling"
+            direction = Direction.FALLING
         else:
-            direction = "steady"
+            direction = Direction.STEADY
     return Trend(ordered, tuple(points), direction, slope, tuple(notes), limits)

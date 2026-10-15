@@ -255,3 +255,9 @@ def test_store_bytes_creates_the_parents(tmp_path: Path) -> None:
     target = tmp_path / "a" / "b" / "file.bin"
     cache.store_bytes(target, b"")
     assert target.read_bytes() == b""
+
+
+@pytest.mark.parametrize("url", ["file:///etc/passwd", "ftp://example.invalid/x"])
+def test_only_http_urls_are_opened(url: str) -> None:
+    with pytest.raises(ValueError, match="not an HTTP URL"):
+        cache.http_stream(url, io.BytesIO())

@@ -5,7 +5,7 @@ from builders import case_with_reference
 
 from keepout.pc.result import PcResult
 from keepout.validation.criteria import HALL, MONTE_CARLO, TWO_D, Criterion
-from keepout.validation.evaluation import Verdict, evaluate, judge
+from keepout.validation.evaluation import Outcome, Verdict, evaluate, judge
 
 SMALL = TWO_D.small
 RELATIVE = TWO_D.relative or 0.0
@@ -65,6 +65,28 @@ def test_evaluate_runs_the_case_methods_and_keeps_the_full_result() -> None:
     assert [o.result.method for o in outcomes] == ["foster", "elrod"]
     assert all(o.case is case and o.passed for o in outcomes)
     assert all("encounter_duration_s" in o.result.details for o in outcomes)
+
+
+def test_evaluate_in_processes_gives_the_same_outcomes_in_order() -> None:
+    cases = [
+        case_with_reference(0.0, absolute_tolerance=1e-10),
+        case_with_reference(0.5),
+    ]
+    serial = evaluate(cases)
+    parallel = evaluate(cases, workers=2)
+
+    def summary(outcomes: list[Outcome]) -> list[tuple[object, ...]]:
+        return [
+            (o.case.reference, o.result.method, o.result.value, dict(o.result.details))
+            for o in outcomes
+        ]
+
+    assert summary(parallel) == summary(serial)
+
+
+def test_evaluate_needs_a_worker() -> None:
+    with pytest.raises(ValueError, match="workers must be at least 1"):
+        evaluate([], workers=0)
 
 
 def test_outcome_verdict_follows_its_value() -> None:

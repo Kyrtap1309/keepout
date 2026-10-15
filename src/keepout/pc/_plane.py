@@ -29,7 +29,7 @@ the hard-body radius. Smaller ones are raised to it, with a diagnostic, so a
 degenerate (line-like) covariance still gives a finite, well-defined Pc."""
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class PlaneGaussian:
     """Miss vector and covariance of the encounter plane in principal axes.
 

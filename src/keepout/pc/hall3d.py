@@ -158,7 +158,7 @@ def hall3d(
     return integrate(conjunction, encounters, rtol=rtol)
 
 
-@dataclass(frozen=True, eq=False)
+@dataclass(frozen=True, eq=False, slots=True)
 class Encounters:
     """A conjunction's 3D-Nc collision rate and the scan locating its encounters.
 

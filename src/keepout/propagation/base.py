@@ -123,7 +123,7 @@ def _view(array: npt.NDArray[np.generic]) -> npt.NDArray[np.generic]:
     return view
 
 
-@dataclass(frozen=True, eq=False)
+@dataclass(frozen=True, eq=False, slots=True)
 class Ephemeris:
     """States of N objects at T times, as a propagator returns them.
 
@@ -190,7 +190,8 @@ class Ephemeris:
     @property
     def times(self) -> Time:
         """The times of the grid, shape ``(T,)``."""
-        return self.epoch + self.offsets * u.s
+        times: Time = self.epoch + self.offsets * u.s  # astropy.units is untyped
+        return times
 
     @property
     def valid(self) -> BoolArray:
@@ -199,7 +200,7 @@ class Ephemeris:
         return valid
 
 
-@dataclass(frozen=True, eq=False)
+@dataclass(frozen=True, eq=False, slots=True)
 class RadiusBounds:
     """Bounds on the distance of N objects from the Earth's centre.
 

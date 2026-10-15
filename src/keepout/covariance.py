@@ -311,7 +311,7 @@ def _frozen(array: FloatArray) -> FloatArray:
     return symmetric
 
 
-@dataclass(frozen=True, eq=False)
+@dataclass(frozen=True, eq=False, slots=True)
 class Covariance:
     """A validated 6x6 position-velocity covariance in SI units (m, m/s).
 
@@ -475,4 +475,4 @@ def make_covariance(
     if policy == "raise":
         return Covariance(array, frame, epoch)
     fixed, repairs = repair(array)
-    return Covariance._trusted(fixed, frame, epoch, repairs)
+    return Covariance._trusted(fixed, frame, epoch, repairs)  # noqa: SLF001

@@ -7,7 +7,7 @@ import zlib
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Final, TypedDict
+from typing import Final, SupportsFloat, TypedDict
 
 import numpy as np
 import numpy.typing as npt
@@ -21,6 +21,7 @@ from keepout.errors import CaraFormatError
 from keepout.objects import ObjectState
 from keepout.pc.result import Method
 from keepout.sources import cara
+from keepout.sources.cara import Cell
 from keepout.state import StateVector
 from keepout.validation.criteria import (
     HALL,
@@ -132,7 +133,7 @@ _ACCEPTED: Final[Mapping[Method, frozenset[str]]] = {
 """The :class:`CaseOptions` each method takes; the others take none."""
 
 
-@dataclass(frozen=True, eq=False)
+@dataclass(frozen=True, eq=False, slots=True)
 class ValidationCase:
     """One conjunction with a CARA reference Pc for some methods.
 
@@ -193,11 +194,11 @@ def monte_carlo_options(suite: str, case_id: str, reference: float) -> MonteCarl
     return {"samples": samples, "seed": zlib.crc32(f"{suite}/{case_id}".encode())}
 
 
-def _vector(rows: Sequence[Sequence[Any]], row: int) -> FloatArray:
+def _vector(rows: Sequence[Sequence[Cell]], row: int) -> FloatArray:
     return np.array(rows[row - 1][:3], dtype=np.float64)
 
 
-def _matrix(rows: Sequence[Sequence[Any]], first_row: int) -> FloatArray:
+def _matrix(rows: Sequence[Sequence[Cell]], first_row: int) -> FloatArray:
     return np.array(
         [rows[index - 1][:6] for index in range(first_row, first_row + 6)],
         dtype=np.float64,
@@ -211,7 +212,7 @@ def _gcrf_object(
     return ObjectState(name, StateVector(NOMINAL_EPOCH, r, v, "GCRF"), covariance)
 
 
-def alfano_objects(rows: Sequence[Sequence[Any]]) -> tuple[ObjectState, ObjectState]:
+def alfano_objects(rows: Sequence[Sequence[Cell]]) -> tuple[ObjectState, ObjectState]:
     """Primary and secondary from the rows of a ``CaseN data at TCA.xls`` sheet.
 
     Layout (1-based rows): primary position 5, velocity 9, covariance 13-18;
@@ -238,24 +239,25 @@ def alfano_objects(rows: Sequence[Sequence[Any]]) -> tuple[ObjectState, ObjectSt
     return primary, secondary
 
 
-def _field(row: Mapping[str, Any], name: str) -> Any:
+def _field(row: Mapping[str, Cell], name: str) -> Cell:
     try:
         return row[name]
     except KeyError as exc:
         raise CaraFormatError(f"CARA table has no column {name!r}") from exc
 
 
-def _number(row: Mapping[str, Any], name: str) -> float:
+def _number(row: Mapping[str, Cell], name: str) -> float:
     value = _field(row, name)
+    error = f"column {name!r}: expected a number, got {value!r}"
+    if not isinstance(value, str | SupportsFloat):
+        raise CaraFormatError(error)
     try:
         return float(value)
-    except (TypeError, ValueError) as exc:
-        raise CaraFormatError(
-            f"column {name!r}: expected a number, got {value!r}"
-        ) from exc
+    except ValueError as exc:
+        raise CaraFormatError(error) from exc
 
 
-@dataclass(frozen=True, eq=False)
+@dataclass(frozen=True, eq=False, slots=True)
 class AlfanoInput:
     """One Alfano (2009) case as CARA gives it.
 
@@ -271,10 +273,10 @@ class AlfanoInput:
 
     number: int
     conjunction: Conjunction
-    results: Mapping[str, Any]
+    results: Mapping[str, Cell]
 
 
-@dataclass(frozen=True, eq=False)
+@dataclass(frozen=True, eq=False, slots=True)
 class PcMethodInput:
     """One conjunction of the CARA Pc method test set.
 
@@ -290,7 +292,7 @@ class PcMethodInput:
 
     conjunction_id: str
     conjunction: Conjunction
-    row: Mapping[str, Any]
+    row: Mapping[str, Cell]
 
 
 def load_alfano_inputs(cache: Path | None = None) -> list[AlfanoInput]:
@@ -329,9 +331,7 @@ def load_pc_method_inputs(cache: Path | None = None) -> list[PcMethodInput]:
         if conjunction_id not in cara.PC_METHOD_CDMS:
             raise CaraFormatError(f"no pinned CDM for conjunction {conjunction_id}")
         path = cara.fetch(cara.PC_METHOD_CDMS[conjunction_id], cache=cache)
-        conjunction = Conjunction.from_cdm(
-            cdm.load(path), hard_body_radius=_number(row, "HBR_m")
-        )
+        conjunction = cdm.load(path).conjunction(hard_body_radius=_number(row, "HBR_m"))
         inputs.append(PcMethodInput(conjunction_id, conjunction, row))
     return inputs
 
@@ -497,7 +497,7 @@ def load_non_pd_case(cache: Path | None = None) -> ValidationCase:
     (``testNonPositiveDefinite``, HBR 20 m).
     """
     path = cara.fetch(cara.NON_PD_CDM, cache=cache)
-    conjunction = Conjunction.from_cdm(cdm.load(path), hard_body_radius=20.0)
+    conjunction = cdm.load(path).conjunction(hard_body_radius=20.0)
     return ValidationCase(
         UNIT_TESTS,
         "non-PD covariance CDM",
@@ -638,7 +638,7 @@ def load_hall_2d3d_cases(cache: Path | None = None) -> list[ValidationCase]:
     pinned commit.
     """
     path = cara.fetch(cara.HALL_3D_CDM, cache=cache)
-    conjunction = Conjunction.from_cdm(cdm.load(path), hard_body_radius=20.0)
+    conjunction = cdm.load(path).conjunction(hard_body_radius=20.0)
     return [
         ValidationCase(
             UNIT_TESTS,

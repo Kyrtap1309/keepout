@@ -5,18 +5,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import cached_property
-from typing import TYPE_CHECKING
 
 import numpy as np
 from astropy.time import Time
 
 from keepout._types import FloatArray, require_positive
-from keepout.covariance import Policy
 from keepout.encounter import EncounterPlane, Role, encounter_plane
 from keepout.objects import ObjectState, require_same_epoch
-
-if TYPE_CHECKING:
-    from keepout.cdm.model import Cdm
 
 __all__ = ["Conjunction", "combined_hard_body_radius"]
 
@@ -105,35 +100,6 @@ class Conjunction:
             undefined (3-D and Monte Carlo Pc are not).
         """
         return encounter_plane(self)
-
-    @classmethod
-    def from_cdm(
-        cls,
-        message: Cdm,
-        *,
-        hard_body_radius: float | None = None,
-        policy: Policy = "repair",
-    ) -> Conjunction:
-        """Build a conjunction from a CDM (``OBJECT1`` is the primary).
-
-        Parameters
-        ----------
-        message
-            The CDM.
-        hard_body_radius
-            Combined radius [m]; if ``None``, the sum of both objects' ``HBR``
-            (CDM 2.0).
-        policy
-            Covariance policy; see :func:`keepout.covariance.make_covariance`.
-
-        Raises
-        ------
-        ValueError
-            If no radius is given and an object has no ``HBR``.
-        """
-        primary, secondary = message.object_states(policy=policy)
-        radius = combined_hard_body_radius(primary, secondary, hard_body_radius)
-        return cls(primary, secondary, radius)
 
     @property
     def tca(self) -> Time:

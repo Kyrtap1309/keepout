@@ -82,7 +82,7 @@ class InvalidElement(ValueError):
         self.attribute = attribute
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Omm:
     """The SGP4 mean elements of one catalogued object (CCSDS OMM).
 
@@ -162,7 +162,8 @@ class Omm:
         _check_integer(self, "catalog_number", MAX_CATALOG_NUMBER)
         _check_integer(self, "element_set_no", MAX_ELEMENT_SET_NO)
         _check_integer(self, "rev_at_epoch")
-        if not (isinstance(self.epoch, Time) and self.epoch.isscalar):
+        epoch: object = self.epoch  # checked: callers need not be type-checked
+        if not (isinstance(epoch, Time) and epoch.isscalar):
             raise InvalidElement("epoch", "must be a scalar astropy Time")
         object.__setattr__(self, "epoch", self.epoch.utc)
         for name in _REALS:

@@ -32,7 +32,7 @@ BASES: Final[tuple[Basis, ...]] = get_args(Basis)
 """Every :data:`Basis`."""
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Thresholds:
     """Pc thresholds of the risk levels.
 

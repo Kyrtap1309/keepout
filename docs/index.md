@@ -23,9 +23,9 @@ print(plane.miss_distance, plane.covariance, primary.covariance.repairs)
 
 ```python
 import keepout.cdm
-from keepout import Conjunction, compute_pc
+from keepout import compute_pc
 
-conjunction = Conjunction.from_cdm(keepout.cdm.load("event.cdm"), hard_body_radius=20.0)
+conjunction = keepout.cdm.load("event.cdm").conjunction(hard_body_radius=20.0)
 result = compute_pc(conjunction)  # picks Foster, Hall 3D-Nc or a maximum Pc
 print(result.method, result.value, result.diagnostics)
 print(compute_pc(conjunction, "hall3d").details["nc"])  # a method by name

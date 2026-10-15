@@ -34,7 +34,7 @@ Role: TypeAlias = Literal["primary", "secondary"]
 """Which object of a conjunction."""
 
 
-@dataclass(frozen=True, eq=False)
+@dataclass(frozen=True, eq=False, slots=True)
 class EncounterPlane:
     """A conjunction projected onto the encounter plane.
 

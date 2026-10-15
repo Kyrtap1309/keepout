@@ -42,6 +42,7 @@ select = [
     "E", "F", "W", "I", "B", "UP", "SIM", "RUF", "N", "PT", "NPY",
     "ARG", "BLE", "C4", "D", "DTZ", "FBT", "FURB", "PERF", "PGH", "PIE", "PTH",
     "RET", "TID",
+    "S", "C90", "PL", "PYI", "SLF", "ANN401",
 ]
 ignore = [
     # Exception names follow the spec (SourceUnavailable, ChecksumMismatch, ...).
@@ -51,7 +52,15 @@ ignore = [
     "D205", "D209", "D401",
     # Dunder methods and __init__ are documented on the class.
     "D105", "D107",
+    # Physics and spec numbers are named where they mean something; options
+    # are keyword-only, so long signatures stay readable.
+    "PLR2004", "PLR0913", "PLR0917",
+    # Imports inside a function keep heavy modules off `import keepout`.
+    "PLC0415",
 ]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 12
 
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"
@@ -59,9 +68,14 @@ convention = "numpy"
 [tool.ruff.lint.per-file-ignores]
 # Tests: named test functions need no docstrings; fixtures and fakes take
 # arguments they do not use, and parametrized tests take booleans.
-"tests/**" = ["D", "ARG", "FBT"]
-# Stubs mirror the names sgp4 gives its attributes (jdsatepochF).
-"stubs/**" = ["N815"]
+# They assert, pickle round-trips, parse the XML they wrote, reach into the
+# fault-injection seams and fake callables with Any.
+"tests/**" = ["D", "ARG", "FBT", "S101", "S301", "S314", "SLF001", "ANN401"]
+# The tools run git and Python with arguments they build themselves.
+"tools/**" = ["S603", "S607"]
+# Stubs mirror the names sgp4 gives its attributes (jdsatepochF), and type
+# what astropy leaves dynamic (units, array-or-scalar values) as Any.
+"stubs/**" = ["N815", "ANN401"]
 
 [tool.mypy]
 strict = true
@@ -79,7 +93,7 @@ enable_error_code = [
 ]
 
 [[tool.mypy.overrides]]
-module = ["astropy.*", "erfa.*", "xlrd.*"]
+module = ["erfa.*", "xlrd.*"]
 ignore_missing_imports = true
 
 [tool.codespell]
@@ -110,6 +124,7 @@ show_missing = true
 dev = [
     "codespell>=2.4.3",
     "hypothesis>=6.168.1",
+    "import-linter>=2.15",
     "keepout[validation]",
     "matplotlib>=3.11.2",
     "mkdocs>=1.6,<2",
@@ -125,4 +140,25 @@ dev = [
     "scipy-stubs>=1.17.1.5",
     "types-openpyxl>=3.1.5.20260827",
     "xmlschema>=4.3.2",
+]
+
+[tool.importlinter]
+root_package = "keepout"
+exclude_type_checking_imports = true
+
+[[tool.importlinter.contracts]]
+name = "Layers: data sources and formats above the geometry they build"
+type = "layers"
+layers = [
+    "keepout.validation",
+    "keepout.sources",
+    "keepout.risk | keepout.screening",
+    "keepout.pc | keepout.cdm | keepout.propagation",
+    "keepout.omm | keepout.conjunction",
+    "keepout.ccsds | keepout.encounter",
+    "keepout.objects | keepout.equinoctial",
+    "keepout.covariance | keepout.orbits",
+    "keepout.frames",
+    "keepout.state",
+    "keepout._types | keepout._units | keepout.errors",
 ]

@@ -93,7 +93,7 @@ def test_observations_are_keepouts_pc_of_each_cdm() -> None:
     first = b1_cdm("A", created="2010-03-11T22:37:52.618")
     second = b1_cdm("B")
     seen = ConjunctionEvent("E", (second, first)).observations(hard_body_radius=HBR)
-    expected = compute_pc(Conjunction.from_cdm(first, hard_body_radius=HBR))
+    expected = compute_pc(first.conjunction(hard_body_radius=HBR))
     assert [o.message_id for o in seen] == ["A", "B"]
     assert seen[0].pc == expected.value
     assert seen[0].source == "keepout (foster)"  # what "auto" chose
@@ -163,7 +163,7 @@ def test_hbr_from_the_cdms() -> None:
         )
     )
     (seen,) = ConjunctionEvent("E", (message,)).observations(method="foster")
-    conjunction = Conjunction.from_cdm(message)
+    conjunction = message.conjunction()
     assert conjunction.hard_body_radius == 6.0
     assert seen.pc == compute_pc(conjunction, "foster").value
 

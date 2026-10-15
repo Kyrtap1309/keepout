@@ -40,7 +40,7 @@ def as_ref_frame(name: str | None) -> RefFrame:
     )
 
 
-@dataclass(frozen=True, eq=False, init=False)
+@dataclass(frozen=True, eq=False, init=False, slots=True)
 class StateVector:
     """Position and velocity at an epoch, in an explicit frame (SI units).
 

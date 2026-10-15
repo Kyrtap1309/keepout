@@ -6,7 +6,7 @@ import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Literal, TypeAlias
+from typing import Literal, Self, TypeAlias
 
 __all__ = ["Method", "PcResult"]
 
@@ -17,7 +17,7 @@ Method: TypeAlias = Literal[
 (``montecarlo``) and maximum Pc (``frisbee``, ``dilution``, ``alfano``)."""
 
 
-@dataclass(frozen=True, eq=False)
+@dataclass(frozen=True, eq=False, slots=True)
 class PcResult:
     """Probability of collision with the method used and what to watch out for.
 
@@ -52,6 +52,15 @@ class PcResult:
         object.__setattr__(self, "value", float(self.value))
         object.__setattr__(self, "diagnostics", tuple(self.diagnostics))
         object.__setattr__(self, "details", MappingProxyType(dict(self.details)))
+
+    def __reduce__(self) -> tuple[type[Self], tuple[object, ...]]:
+        # A mapping proxy does not pickle: pickle the plain mapping.
+        return type(self), (
+            self.value,
+            self.method,
+            self.diagnostics,
+            dict(self.details),
+        )
 
     @classmethod
     def clamped(

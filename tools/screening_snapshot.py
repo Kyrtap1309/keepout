@@ -181,7 +181,7 @@ class BodyRecord(TypedDict):
     retrieved: str
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Body:
     """One response body saved in the ``RAW`` directory.
 
@@ -586,7 +586,7 @@ def summarise_socrates(
     )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Inputs:
     """What the committed files are made from.
 

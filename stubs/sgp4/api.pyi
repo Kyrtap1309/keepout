@@ -1,4 +1,4 @@
-from typing import Final, Self
+from typing import Final, Self, TypeAlias
 
 import numpy as np
 import numpy.typing as npt
@@ -8,10 +8,10 @@ WGS72OLD: Final[int]
 WGS72: Final[int]
 WGS84: Final[int]
 
-_Vector = tuple[float, float, float]
+_Vector: TypeAlias = tuple[float, float, float]
 
 class Satrec:
-    """The compiled SGP4 satellite record (sgp4.wrapper.Satrec)."""
+    # The compiled SGP4 satellite record (sgp4.wrapper.Satrec).
 
     # Elements and identification, as initialised.
     satnum: int
@@ -58,7 +58,7 @@ class Satrec:
     ]: ...
 
 class SatrecArray:
-    """The compiled SGP4 over several records (sgp4.wrapper.SatrecArray)."""
+    # The compiled SGP4 over several records (sgp4.wrapper.SatrecArray).
 
     def __init__(self, satrecs: list[Satrec]) -> None: ...
     def __len__(self) -> int: ...

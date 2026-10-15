@@ -5,7 +5,6 @@ from __future__ import annotations
 import dataclasses
 from collections.abc import Callable, Mapping
 from typing import (
-    Any,
     Concatenate,
     Final,
     Literal,
@@ -127,7 +126,7 @@ _Runner: TypeAlias = Callable[Concatenate[Conjunction, ...], PcResult]
 def _on_plane(method: Callable[..., PcResult]) -> _Runner:
     """Adapt a 2-D method ``f(plane, radius, **options)`` to a conjunction."""
 
-    def run(conjunction: Conjunction, /, **options: Any) -> PcResult:
+    def run(conjunction: Conjunction, /, **options: object) -> PcResult:
         return method(conjunction.plane, conjunction.hard_body_radius, **options)
 
     return run
@@ -258,7 +257,7 @@ def compute_pc(
 
 
 def compute_pc(
-    conjunction: Conjunction, method: MethodChoice = "auto", **options: Any
+    conjunction: Conjunction, method: MethodChoice = "auto", **options: object
 ) -> PcResult:
     """Probability of collision of a conjunction.
 

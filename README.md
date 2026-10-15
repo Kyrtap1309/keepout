@@ -69,9 +69,9 @@ print(plane.miss_distance, plane.covariance, primary.covariance.repairs)
 ## Probability of collision
 
 ```python
-from keepout import Conjunction, compute_pc
+from keepout import compute_pc
 
-conjunction = Conjunction.from_cdm(cdm, hard_body_radius=20.0)
+conjunction = cdm.conjunction(hard_body_radius=20.0)
 result = compute_pc(conjunction)  # picks Foster, Hall 3D-Nc or a maximum Pc
 print(result.method, result.value, result.diagnostics)
 print(compute_pc(conjunction, "hall3d").details["nc"])  # a method by name

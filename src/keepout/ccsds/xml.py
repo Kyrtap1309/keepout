@@ -48,7 +48,9 @@ def parse(text: str, message: str, error: type[CcsdsParseError]) -> ElementTree.
     if "<!DOCTYPE" in text.upper():
         raise error(f"DOCTYPE declarations are not allowed in {message} XML")
     try:
-        return ElementTree.fromstring(text)
+        # Safe without defusedxml: with no DOCTYPE no entity can be declared,
+        # and ElementTree never fetches external resources.
+        return ElementTree.fromstring(text)  # noqa: S314
     except ElementTree.ParseError as exc:
         raise error(f"malformed XML: {exc}", line=exc.position[0] or None) from exc
 

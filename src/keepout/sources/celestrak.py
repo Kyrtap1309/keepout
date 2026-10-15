@@ -123,7 +123,7 @@ and :class:`~keepout.errors.SourceUnavailable` for other failures, like
 _T = TypeVar("_T")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Retrieval:
     """Where and when a cached CelesTrak file came from.
 
@@ -146,7 +146,7 @@ class Retrieval:
     checked: Time
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class GpGroup:
     """The element sets of one CelesTrak GP group.
 
@@ -165,7 +165,7 @@ class GpGroup:
     retrieval: Retrieval
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Catalog:
     """Element sets of several GP groups, one per object.
 
@@ -186,7 +186,7 @@ class Catalog:
     groups: tuple[GpGroup, ...]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class SocratesReport:
     """A SOCRATES Plus report as CelesTrak publishes it (CSV text).
 
@@ -408,7 +408,7 @@ def _read_socrates(data: bytes) -> str:
     return text
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _Meta:
     """What the ``.meta.json`` file of a cached copy records."""
 
@@ -420,7 +420,7 @@ class _Meta:
     """Unix time CelesTrak last confirmed the copy current."""
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _Cached:
     meta: _Meta
     data: bytes

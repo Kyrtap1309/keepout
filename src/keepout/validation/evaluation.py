@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import multiprocessing
 from collections.abc import Iterable
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 
 from keepout.pc import compute_pc
@@ -35,7 +37,7 @@ def judge(case: ValidationCase, result: PcResult) -> Verdict:
     )
 
 
-@dataclass(frozen=True, eq=False)
+@dataclass(frozen=True, eq=False, slots=True)
 class Outcome:
     """One method on one case.
 
@@ -86,8 +88,27 @@ def run(case: ValidationCase, method: Method) -> PcResult:
     return compute_pc(conjunction, method)
 
 
-def evaluate(cases: Iterable[ValidationCase]) -> list[Outcome]:
-    """Run each case's methods on it."""
-    return [
-        Outcome(case, run(case, method)) for case in cases for method in case.methods
-    ]
+def evaluate(cases: Iterable[ValidationCase], *, workers: int = 1) -> list[Outcome]:
+    """Run each case's methods on it, in order.
+
+    Parameters
+    ----------
+    cases
+        The cases.
+    workers
+        Processes to run them in; 1 runs them in this one. The results do
+        not depend on it (Monte Carlo cases have their own seeds).
+    """
+    if workers < 1:
+        raise ValueError(f"workers must be at least 1, got {workers}")
+    tasks = [(case, method) for case in cases for method in case.methods]
+    if workers == 1 or len(tasks) < 2:
+        return [_outcome(task) for task in tasks]
+    context = multiprocessing.get_context("spawn")
+    with ProcessPoolExecutor(max_workers=workers, mp_context=context) as pool:
+        return list(pool.map(_outcome, tasks))
+
+
+def _outcome(task: tuple[ValidationCase, Method]) -> Outcome:
+    case, method = task
+    return Outcome(case, run(case, method))

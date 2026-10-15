@@ -373,13 +373,12 @@ def to_gcrf_all(states: Sequence[StateVector]) -> list[StateVector]:
     list of StateVector
         GCRF states in the same order; GCRF inputs are returned as they are.
     """
-    converted: list[StateVector] = []
-    for state in states:
-        if state.frame == "EME2000":
-            state = StateVector(
-                state.epoch, FRAME_BIAS.T @ state.r, FRAME_BIAS.T @ state.v, "GCRF"
-            )
-        converted.append(state)
+    converted = [
+        StateVector(state.epoch, FRAME_BIAS.T @ state.r, FRAME_BIAS.T @ state.v, "GCRF")
+        if state.frame == "EME2000"
+        else state
+        for state in states
+    ]
     # All states of a frame in one call: the conversions are vectorised.
     for frame, convert in (("ITRF", _itrf_to_gcrf), ("TEME", _teme_states_to_gcrf)):
         indices = [i for i, state in enumerate(converted) if state.frame == frame]
@@ -436,7 +435,8 @@ def frame_to_gcrf(
     velocity = np.broadcast_to(velocity, (*shape, 3))
     if frame == "GCRF":
         return position.copy(), velocity.copy()
-    times = np.broadcast_to(epochs, shape).ravel()
+    # Time broadcasts through numpy's __array_function__, unknown to its stubs.
+    times = np.broadcast_to(epochs, shape).ravel()  # type: ignore[call-overload]
     states = to_gcrf_all(
         [
             StateVector(times[i], r_i, v_i, frame)

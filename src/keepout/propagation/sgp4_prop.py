@@ -146,7 +146,7 @@ class Sgp4Propagator:
             elements.append(omm)
             satrecs.append(satrec)
         propagator = object.__new__(cls)
-        propagator._set(tuple(elements), tuple(satrecs))
+        propagator._set(tuple(elements), tuple(satrecs))  # noqa: SLF001
         return propagator, np.array(kept, dtype=np.intp), rejected
 
     def _set(self, omms: tuple[Omm, ...], satrecs: tuple[Satrec, ...]) -> None:
@@ -197,7 +197,7 @@ class Sgp4Propagator:
         """
         chosen = _indices(indices, len(self))
         subset = object.__new__(type(self))
-        subset._set(
+        subset._set(  # noqa: SLF001
             tuple(self._omms[i] for i in chosen),
             tuple(self._satrecs[i] for i in chosen),
         )

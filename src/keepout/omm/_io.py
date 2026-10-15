@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NamedTuple, TypeVar
 
@@ -57,6 +58,28 @@ def load_file(path: str | Path, loads: Callable[[str], _T]) -> _T:
     return files.load_file(path, loads, OmmParseError)
 
 
+@dataclass(frozen=True, slots=True)
+class _Errors:
+    """Makes the parse errors of one object, placed at the keyword's value."""
+
+    values: Mapping[str, object]
+    record: int | None
+    line: int | None
+    path: str | None
+
+    def __call__(self, message: str, keyword: str) -> OmmParseError:
+        place = self.values.get(keyword)
+        if not isinstance(place, Text):
+            place = Text("")
+        return OmmParseError(
+            message,
+            record=self.record,
+            line=self.line if place.line is None else place.line,
+            path=self.path if place.path is None else place.path,
+            keyword=keyword,
+        )
+
+
 def parse_record(
     values: Mapping[str, object],
     *,
@@ -88,26 +111,16 @@ def parse_record(
         If a keyword is missing or has an invalid value or unit, the metadata
         are not those of SGP4 elements, or the elements are invalid.
     """
-
-    def error(message: str, keyword: str) -> OmmParseError:
-        place = values.get(keyword)
-        if not isinstance(place, Text):
-            place = Text("")
-        return OmmParseError(
-            message,
-            record=record,
-            line=line if place.line is None else place.line,
-            path=path if place.path is None else place.path,
-            keyword=keyword,
-        )
+    error = _Errors(values, record, line, path)
 
     def text_of(keyword: str) -> Text:
-        value = values[keyword]
-        if isinstance(value, Text):
-            return value._replace(text=value.text.strip())
-        if isinstance(value, str):
-            return Text(value.strip())
-        raise error(f"must be text, got {value!r}", keyword)
+        match values[keyword]:
+            case Text() as value:
+                return value._replace(text=value.text.strip())
+            case str() as value:
+                return Text(value.strip())
+            case value:
+                raise error(f"must be text, got {value!r}", keyword)
 
     for keyword, accepted in FIXED_METADATA.items():
         if keyword in values and (stated := text_of(keyword).text) not in accepted:

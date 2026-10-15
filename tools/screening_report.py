@@ -71,7 +71,7 @@ Group: TypeAlias = Literal["fast", "slow"]
 GROUPS: Final[tuple[Group, ...]] = get_args(Group)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Tolerance:
     """How far keepout's values of an approach may be from SOCRATES's.
 
@@ -120,7 +120,7 @@ KNOWN_DIFFERENCES: Final[Mapping[int, str]] = {
 SOCRATES used, though the epochs match: why their approaches differ."""
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Inputs:
     """What the report compares.
 
@@ -169,7 +169,7 @@ def window_start(approaches: Sequence[SocratesApproach]) -> Time:
     return Time(first.tca.isot[:10], scale="utc")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Match:
     """A SOCRATES approach and keepout's.
 
@@ -230,7 +230,7 @@ class Match:
         )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Comparison:
     """SOCRATES's approaches against keepout's.
 

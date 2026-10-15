@@ -42,7 +42,7 @@ from keepout.screening import ScreeningResult, ScreeningVolume, VolumeRule, scre
 from keepout.screening.volume import SOCRATES_RADIUS
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Timing:
     """How long a screening took.
 

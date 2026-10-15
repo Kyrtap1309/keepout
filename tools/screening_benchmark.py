@@ -411,7 +411,7 @@ def reduced_catalog(
     ]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Run:
     """One timed screening of ``compare`` (``tools/screening_timing.py``).
 
@@ -457,7 +457,7 @@ def run_timing(command: Sequence[str]) -> Run:
     return Run(wall=output["wall"], cpu=output["cpu"], approaches=output["approaches"])
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Comparison:
     """The runs of this tree and of the base.
 

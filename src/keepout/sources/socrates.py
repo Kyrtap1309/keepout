@@ -51,7 +51,7 @@ _TCA_TOLERANCE: Final = 0.5e-3
 """Half the last digit of a TCA in the report [s]: TCA is to the millisecond."""
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class SocratesApproach:
     """One row of a SOCRATES report: a close approach of two objects.
 

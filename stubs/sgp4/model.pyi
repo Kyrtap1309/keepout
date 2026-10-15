@@ -1,13 +1,13 @@
-from typing import Final
+from typing import Final, TypeAlias
 
 WGS72OLD: Final = 0
 WGS72: Final = 1
 WGS84: Final = 2
 
-_Vector = tuple[float, float, float]
+_Vector: TypeAlias = tuple[float, float, float]
 
 class Satrec:
-    """sgp4's pure-Python SGP4 satellite record."""
+    # sgp4's pure-Python SGP4 satellite record.
 
     # Every attribute is set by sgp4init (``__slots__`` at run time); these
     # are the ones read by name, the rest through ``getattr``.

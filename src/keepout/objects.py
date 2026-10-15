@@ -44,7 +44,7 @@ def require_same_epoch(first: Time, second: Time, what: str) -> None:
         raise GeometryError(f"{what} epochs differ by {offset:.3g} s")
 
 
-@dataclass(frozen=True, eq=False)
+@dataclass(frozen=True, eq=False, slots=True)
 class ObjectState:
     """One object of a conjunction, in GCRF.
 
@@ -91,7 +91,7 @@ class ObjectState:
             require_non_negative(self.hard_body_radius, "hard_body_radius")
 
 
-@dataclass(frozen=True, eq=False)
+@dataclass(frozen=True, eq=False, slots=True)
 class ReportedObject:
     """One object as a conjunction message reports it.
 

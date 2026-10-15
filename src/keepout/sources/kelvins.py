@@ -177,7 +177,7 @@ def fetch_raw(
     return target
 
 
-@dataclass(frozen=True, eq=False)
+@dataclass(frozen=True, eq=False, slots=True)
 class KelvinsEvent:
     """The CDMs of one event of the data set, in the table's order.
 

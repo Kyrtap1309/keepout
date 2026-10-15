@@ -112,7 +112,7 @@ def test_monte_carlo_mode_writes_its_own_page_and_block(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(report, "load_monte_carlo_cases", list)
-    monkeypatch.setattr(report, "evaluate", lambda cases: [monte_carlo_outcome()])
+    monkeypatch.setattr(report, "evaluate", lambda cases, **_: [monte_carlo_outcome()])
     readme = tmp_path / "README.md"
     readme.write_text(
         f"{report.MONTE_CARLO.start}\n{report.MONTE_CARLO.end}\n", encoding="utf-8"
@@ -177,7 +177,8 @@ def run_monte_carlo(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shift: float, *flags: str
 ) -> int:
     monkeypatch.setattr(report, "load_monte_carlo_cases", list)
-    monkeypatch.setattr(report, "evaluate", lambda _: [monte_carlo_outcome(shift)])
+    outcomes = [monte_carlo_outcome(shift)]
+    monkeypatch.setattr(report, "evaluate", lambda _, **__: outcomes)
     readme = tmp_path / "README.md"
     if not readme.exists():
         readme.write_text(

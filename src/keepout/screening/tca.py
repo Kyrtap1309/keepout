@@ -243,7 +243,7 @@ def speed_bounds(bounds: RadiusBounds) -> FloatArray:
     return speeds * (1.0 + SPEED_MARGIN)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ObjectFailure:
     """The earliest failed state of an object seen by a search.
 
@@ -259,7 +259,7 @@ class ObjectFailure:
     code: int
 
 
-@dataclass(frozen=True, eq=False)
+@dataclass(frozen=True, eq=False, slots=True)
 class RangeMinimum:
     """A local minimum of a pair's range, inside the primary's volume.
 
@@ -312,7 +312,7 @@ def _earliest(
         failures[index] = failure
 
 
-@dataclass(frozen=True, eq=False)
+@dataclass(frozen=True, eq=False, slots=True)
 class SearchResult:
     """What a search finds.
 
@@ -423,7 +423,7 @@ def _check(own: ErrorArray, other: ErrorArray, stamps: FloatArray) -> None:
         raise _Failed(*failed)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _Failures:
     """The earliest failure seen of each primary and catalog object, by
     position."""

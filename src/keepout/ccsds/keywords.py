@@ -40,7 +40,7 @@ ValueKind: TypeAlias = Literal["str", "int", "float", "time"]
 FieldValue: TypeAlias = str | int | float | Time
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Keyword:
     """How one CCSDS message keyword is typed, converted and placed.
 
@@ -272,12 +272,7 @@ def parse_value(keyword: Keyword, text: str, unit: str | None) -> FieldValue:
     ValueError
         If the unit does not match, or the text is not a valid value.
     """
-    if unit is not None:
-        if keyword.unit is None:
-            if normalize_unit(unit) not in _UNITLESS:
-                raise ValueError(f"{keyword.name} takes no unit, got [{unit}]")
-        elif normalize_unit(unit) != normalize_unit(keyword.unit):
-            raise ValueError(f"unit [{unit}] does not match expected [{keyword.unit}]")
+    _check_unit(keyword, unit)
     if keyword.kind == "str":
         return text
     if not text:
@@ -301,6 +296,17 @@ def parse_value(keyword: Keyword, text: str, unit: str | None) -> FieldValue:
             assert_never(keyword.kind)
 
 
+def _check_unit(keyword: Keyword, unit: str | None) -> None:
+    """Raise :class:`ValueError` if ``unit`` is given and is not the keyword's."""
+    if unit is None:
+        return
+    if keyword.unit is None:
+        if normalize_unit(unit) not in _UNITLESS:
+            raise ValueError(f"{keyword.name} takes no unit, got [{unit}]")
+    elif normalize_unit(unit) != normalize_unit(keyword.unit):
+        raise ValueError(f"unit [{unit}] does not match expected [{keyword.unit}]")
+
+
 def format_value(keyword: Keyword, value: FieldValue) -> tuple[str, str | None]:
     """Convert a stored value back to message text and unit.
 
@@ -311,15 +317,14 @@ def format_value(keyword: Keyword, value: FieldValue) -> tuple[str, str | None]:
     value
         Stored (SI) value.
     """
-    match keyword.kind:
-        case "time":
+    match keyword.kind, value:
+        case "time", Time():
             return format_epoch(value), None
-        case "float":
+        case "float", int() | float():
             return _shortest(float(value), keyword.scale).upper(), keyword.unit
-        case "str" | "int":
+        case "str" | "int", _:
             return str(value), None
-        case _:
-            assert_never(keyword.kind)
+    raise TypeError(f"{keyword.name} is a {keyword.kind} value, got {value!r}")
 
 
 def _shortest(value: float, scale: float) -> str:

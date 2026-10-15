@@ -258,7 +258,7 @@ def screen(
     )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _Window:
     """The window and the search's settings, shared by every part."""
 
@@ -268,7 +268,7 @@ class _Window:
     max_states: int
 
 
-@dataclass(frozen=True, eq=False)
+@dataclass(frozen=True, eq=False, slots=True)
 class _Part:
     """The primaries and one part of the catalog, to screen in one process."""
 
@@ -283,7 +283,7 @@ class _Part:
     """Position of each of ``catalog`` in the whole catalog."""
 
 
-@dataclass(frozen=True, eq=False)
+@dataclass(frozen=True, eq=False, slots=True)
 class _PartResult:
     """What one part found; catalog positions are in the whole catalog."""
 

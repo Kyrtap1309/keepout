@@ -26,6 +26,7 @@ from keepout.cdm.keywords import (
     covariance_matrix,
     covariance_names,
 )
+from keepout.conjunction import Conjunction, combined_hard_body_radius
 from keepout.covariance import Covariance, Policy, make_covariance
 from keepout.objects import ObjectState, ReportedObject, gcrf_object_states
 from keepout.state import StateVector, as_ref_frame
@@ -75,7 +76,7 @@ class DuplicateKeyword(ValueError):
         self.index = index
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Field:
     """One ``KEYWORD = value`` entry (or a ``COMMENT``).
 
@@ -548,3 +549,25 @@ class Cdm:
             [self.object1.reported(), self.object2.reported()], policy=policy
         )
         return first, second
+
+    def conjunction(
+        self, *, hard_body_radius: float | None = None, policy: Policy = "repair"
+    ) -> Conjunction:
+        """The conjunction of this message (``OBJECT1`` is the primary).
+
+        Parameters
+        ----------
+        hard_body_radius
+            Combined radius [m]; if ``None``, the sum of both objects' ``HBR``
+            (CDM 2.0).
+        policy
+            Covariance policy; see :func:`keepout.covariance.make_covariance`.
+
+        Raises
+        ------
+        ValueError
+            If no radius is given and an object has no ``HBR``.
+        """
+        primary, secondary = self.object_states(policy=policy)
+        radius = combined_hard_body_radius(primary, secondary, hard_body_radius)
+        return Conjunction(primary, secondary, radius)

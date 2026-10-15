@@ -32,7 +32,7 @@ Runs on different CPUs differ by up to ~1/20 of it (BLAS kernels, adaptive
 quadrature paths, Monte Carlo hits at the sphere boundary)."""
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Criterion:
     """How a method's value is compared with a case's reference.
 

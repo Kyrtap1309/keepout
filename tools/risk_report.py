@@ -68,11 +68,11 @@ Label: TypeAlias = Literal["high", "low"]
 """The challenge's risk label of an event."""
 
 ACTIONS: Final[tuple[ActionName, ...]] = get_args(ActionName)
-DIRECTIONS: Final[tuple[Direction, ...]] = (
-    "rising",
-    "steady",
-    "falling",
-    "undetermined",
+DIRECTIONS: Final = (
+    Direction.RISING,
+    Direction.STEADY,
+    Direction.FALLING,
+    Direction.UNDETERMINED,
 )
 LEVELS: Final[tuple[LevelName, ...]] = get_args(LevelName)
 LABELS: Final[tuple[Label, ...]] = get_args(Label)
@@ -164,7 +164,7 @@ def at_decision_point(observations: Iterable[PcObservation]) -> RiskLevel | None
     return assess_with_settings(known).level if known else None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Example:
     """An example event chosen for a plot."""
 
@@ -189,14 +189,17 @@ EXAMPLES: Final = (
         "Green but rising towards yellow: monitor",
         lambda a: (
             a.level is RiskLevel.GREEN
-            and a.trend.direction == "rising"
+            and a.trend.direction is Direction.RISING
             and a.decision.action is Action.MONITOR
         ),
     ),
     Example(
         "falling",
         "Falling to green: ignore",
-        lambda a: a.decision.action is Action.IGNORE and a.trend.direction == "falling",
+        lambda a: (
+            a.decision.action is Action.IGNORE
+            and a.trend.direction is Direction.FALLING
+        ),
     ),
 )
 """For each, the event it picks with the most CDMs before TCA (the lowest

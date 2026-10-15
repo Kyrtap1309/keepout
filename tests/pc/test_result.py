@@ -1,3 +1,5 @@
+import pickle
+
 import pytest
 
 from keepout.pc.result import PcResult
@@ -17,3 +19,14 @@ def test_result_is_read_only() -> None:
 def test_value_must_be_a_probability(value: float) -> None:
     with pytest.raises(ValueError, match=r"Pc must be in \[0, 1\]"):
         PcResult(value, "foster")
+
+
+def test_a_result_pickles() -> None:
+    result = PcResult(0.25, "montecarlo", ("note",), {"ci_low": 0.2, "ci_high": 0.3})
+    copy = pickle.loads(pickle.dumps(result))
+    assert (copy.value, copy.method, copy.diagnostics) == (
+        0.25,
+        "montecarlo",
+        ("note",),
+    )
+    assert copy.details == {"ci_low": 0.2, "ci_high": 0.3}

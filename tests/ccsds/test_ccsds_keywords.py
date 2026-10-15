@@ -311,6 +311,16 @@ def test_format_value() -> None:
 
 
 @pytest.mark.parametrize(
+    ("keyword", "value"),
+    [("TIME_LASTOB_START", "2010-03-13"), ("X", "1500")],
+    ids=["text for an epoch", "text for a number"],
+)
+def test_format_value_refuses_a_value_of_another_kind(keyword: str, value: str) -> None:
+    with pytest.raises(TypeError, match=f"{keyword} is a"):
+        format_value(SEGMENT[keyword], value)
+
+
+@pytest.mark.parametrize(
     ("text", "value"),
     [("+1.5", 1.5), (".5", 0.5), ("5.", 5.0), ("1E+05", 1e5), ("-2.5e-3", -2.5e-3)],
 )

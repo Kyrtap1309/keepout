@@ -18,7 +18,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path, PurePosixPath
-from typing import Any, Final, TypeAlias
+from typing import Final, TypeAlias
 
 from keepout.errors import CaraFormatError
 from keepout.sources.cache import cache_dir, has_digest, http_download, store
@@ -39,6 +39,7 @@ __all__ = [
     "PC_METHOD_TABLE",
     "PREFETCH_WORKERS",
     "CaraFile",
+    "Cell",
     "Downloader",
     "fetch",
     "load_csv",
@@ -53,7 +54,7 @@ CARA_COMMIT: Final = "1c78beb1f7aefc384886c3be1d09e4681acb5d37"
 Downloader: TypeAlias = Callable[[str], bytes]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class CaraFile:
     """A file in the CARA repository at :data:`CARA_COMMIT`.
 
@@ -224,6 +225,11 @@ def prefetch(
         list(pool.map(lambda file: fetch(file, cache=cache, download=download), files))
 
 
+Cell: TypeAlias = object
+"""A worksheet or table cell as the reader gives it (text, a number, a date,
+``None`` or ``""`` when empty, ...): narrowed where it is used."""
+
+
 def load_csv(path: Path) -> list[dict[str, str]]:
     """Read a CSV file with a header row into one dict per row.
 
@@ -244,7 +250,7 @@ def _blank(value: object) -> bool:
     return value in (None, "")
 
 
-def load_xlsx(path: Path) -> list[dict[str, Any]]:
+def load_xlsx(path: Path) -> list[dict[str, Cell]]:
     """Read the first sheet of an Excel 2007+ workbook, header in row 1.
 
     Empty cells after the last header name, and rows with no value, are
@@ -274,7 +280,7 @@ def load_xlsx(path: Path) -> list[dict[str, Any]]:
     header = [str(name) for name in cells if not _blank(name)]
     if len(header) != len(cells) or len(set(header)) != len(header):
         raise CaraFormatError(f"{path}: header has empty or repeated names")
-    records: list[dict[str, Any]] = []
+    records: list[dict[str, Cell]] = []
     for number, row in enumerate(rows[1:], start=2):
         if all(map(_blank, row)):
             continue
@@ -285,7 +291,7 @@ def load_xlsx(path: Path) -> list[dict[str, Any]]:
     return records
 
 
-def load_xls_rows(path: Path) -> list[list[Any]]:
+def load_xls_rows(path: Path) -> list[list[Cell]]:
     """Read the first sheet of a legacy Excel (.xls) workbook as rows.
 
     Needs the ``validation`` extra (``xlrd``). Empty cells are ``""``.

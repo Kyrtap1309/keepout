@@ -58,7 +58,7 @@ def _reported(cdm: Cdm) -> tuple[float | None, tuple[str, ...]]:
     return None, (f"reported COLLISION_PROBABILITY {reported} is not in [0, 1]",)
 
 
-@dataclass(frozen=True, eq=False)
+@dataclass(frozen=True, eq=False, slots=True)
 class ConjunctionEvent:
     """The CDMs of one encounter, from the oldest to the latest.
 
@@ -251,9 +251,7 @@ def _observe(
     reported, notes = _reported(cdm)
     when = time_to_tca(cdm)
     try:
-        conjunction = Conjunction.from_cdm(
-            cdm, hard_body_radius=hard_body_radius, policy=policy
-        )
+        conjunction = cdm.conjunction(hard_body_radius=hard_body_radius, policy=policy)
         result = compute(conjunction)
     except KeepoutError as exc:
         return PcObservation(

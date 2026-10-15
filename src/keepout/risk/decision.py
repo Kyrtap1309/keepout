@@ -10,7 +10,13 @@ from keepout._types import OrderedEnum, require_positive
 from keepout._units import DAY
 from keepout.risk.observation import PC_FLOOR, PcObservation
 from keepout.risk.thresholds import RiskLevel, Thresholds
-from keepout.risk.trend import Trend, TrendConfig, TrendPoint, analyse_trend
+from keepout.risk.trend import (
+    Direction,
+    Trend,
+    TrendConfig,
+    TrendPoint,
+    analyse_trend,
+)
 
 __all__ = [
     "Action",
@@ -37,7 +43,7 @@ class Action(OrderedEnum):
     """Plan and execute an avoidance manoeuvre."""
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class DecisionConfig:
     """When a red event becomes a manoeuvre.
 
@@ -60,7 +66,7 @@ class DecisionConfig:
         require_positive(self.decision_point, "decision_point")
 
 
-@dataclass(frozen=True, eq=False)
+@dataclass(frozen=True, eq=False, slots=True)
 class Decision:
     """A recommended action and why.
 
@@ -177,14 +183,14 @@ def decide(trend: Trend, *, config: DecisionConfig | None = None) -> Decision:
             return Decision(Action.MONITOR, tuple(reasons))
         reasons += [_describe(point, before_a_failure=True), _trend_reason(trend)]
         return _red(latest.time_to_tca, settings, reasons, _concerns(point))
-    assert point is not None  # the latest observation has a Pc
+    assert point is not None  # noqa: S101 (the latest observation has a Pc)
     reasons = [_describe(point), _trend_reason(trend)]
     concerns = _concerns(point)
     if point.level is RiskLevel.RED:
         return _red(point.time_to_tca, settings, reasons, concerns)
     if point.level is RiskLevel.YELLOW:
         return Decision(Action.MONITOR, (*reasons, *concerns))
-    if trend.direction == "rising" and trend.slope is not None:
+    if trend.direction is Direction.RISING and trend.slope is not None:
         reaches = _reaches(point, trend.slope, limits.green_below)
         if reaches:
             concerns.insert(
@@ -199,7 +205,7 @@ def decide(trend: Trend, *, config: DecisionConfig | None = None) -> Decision:
     return Decision(action, (*reasons, *concerns))
 
 
-@dataclass(frozen=True, eq=False)
+@dataclass(frozen=True, eq=False, slots=True)
 class Assessment:
     """An event's trend and the recommended action.
 

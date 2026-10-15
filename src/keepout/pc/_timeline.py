@@ -78,7 +78,7 @@ _ROUNDING_SLACK: Final = 1e-9
 gains no node from rounding."""
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Segment:
     """A stretch of time where the collision rate is not negligible.
 
@@ -95,7 +95,7 @@ class Segment:
     nc: float
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class RateIntegral:
     """The time integral of a collision rate over a window.
 
@@ -119,7 +119,7 @@ class RateIntegral:
     agreement: float = 0.0
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Candidate:
     """A stretch of time where a screen could not rule the rate negligible.
 
@@ -179,7 +179,7 @@ def regions(significant: BoolArray) -> list[tuple[int, int]]:
     return [(int(a), int(b)) for a, b in zip(starts, ends, strict=True)]
 
 
-@dataclass(frozen=True, eq=False)
+@dataclass(frozen=True, eq=False, slots=True)
 class RateScan:
     """A collision rate sampled over a window, with its encounter segments.
 

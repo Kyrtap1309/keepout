@@ -34,7 +34,7 @@ def _probability(name: str, value: float) -> None:
         raise ValueError(f"{name} must be in [0, 1], got {value}")
 
 
-@dataclass(frozen=True, eq=False)
+@dataclass(frozen=True, eq=False, slots=True)
 class PcObservation:
     """The Pc of one message of a conjunction event.
 

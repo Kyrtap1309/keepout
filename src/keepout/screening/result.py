@@ -200,7 +200,7 @@ class SkipReason(enum.StrEnum):
 _REASONS: Final = tuple(SkipReason)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class SkippedObject:
     """An element set screening left out, and why.
 
@@ -249,7 +249,7 @@ def _skip_order(skipped: SkippedObject) -> tuple[int, int, float, float, int]:
     )
 
 
-@dataclass(frozen=True, eq=False)
+@dataclass(frozen=True, eq=False, slots=True)
 class ScreeningResult:
     """The close approaches of a screening and the objects it left out.
 

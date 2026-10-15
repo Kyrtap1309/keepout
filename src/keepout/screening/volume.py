@@ -64,7 +64,7 @@ NASA_GP_DATA_RADIUS: Final = 10_000.0
 """Radius [m] of :meth:`ScreeningVolume.nasa_gp_data`."""
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ScreeningVolume:
     """An ellipsoid around the primary, with semi-axes along its RTN axes.
 

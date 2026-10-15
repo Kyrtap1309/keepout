@@ -105,6 +105,7 @@ def excerpt_with(tmp_path: Path, old: str, new: str) -> Path:
         ("event_id,time_to_tca", "event,time_to_tca", r"missing \['event_id'\]"),
         ("30,1.0878610185185187,5,", "30,1.08,5,1,", "line 2: 104 values"),
         ("30,1.0878610185185187,5,", "30,soon,5,", "time_to_tca is not a number"),
+        ("1.389,,0.010742,", "1.389,,oops,", "is not a number: 'oops'"),
         ("30,1.0878610185185187,5,", "30.5,1.0878610185185187,5,", "event_id must be"),
         ("30,1.0878610185185187,5,", "30,,5,", "line 2: time_to_tca is missing"),
         (",-9.683610248926804,", ",0.5,", "line 6: risk .* is above 0"),

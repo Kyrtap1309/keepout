@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
+import os
 import sys
 from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
@@ -96,7 +97,7 @@ NOT_COMPARED_MONTE_CARLO: Final = """\
 """
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Report:
     """One validation page and its README summary block."""
 
@@ -123,7 +124,7 @@ MONTE_CARLO: Final = Report(
 )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Row:
     """One method on one case as published: CARA's data and keepout's result.
 
@@ -214,7 +215,7 @@ class Row:
         return None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Record:
     """A validation run as published: the CARA commit and every row."""
 
@@ -303,7 +304,7 @@ Cells: TypeAlias = Callable[[Row, Mapping[Method, Row]], list[str]]
 its rows by method."""
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _Columns:
     """Adjacent table columns: their titles and how to fill them for a case."""
 
@@ -467,11 +468,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--page", type=Path, default=None, help="the page; its results go next to it"
     )
     parser.add_argument("--readme", type=Path, default=REPO / "README.md")
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=os.cpu_count() or 1,
+        help="processes to run the cases in (default: one per CPU)",
+    )
     args = parser.parse_args(argv)
 
     report = MONTE_CARLO if args.monte_carlo else MAIN
     cases = load_monte_carlo_cases() if args.monte_carlo else load_all()
-    fresh = Record.of(evaluate(cases))
+    fresh = Record.of(evaluate(cases, workers=args.workers))
     page = args.page if args.page is not None else report.page
     data = page.with_suffix(".json")
     record, differences = published(fresh, data)

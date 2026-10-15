@@ -21,6 +21,7 @@ import stat
 import tempfile
 import threading
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Callable
 from http import HTTPStatus
@@ -124,10 +125,19 @@ def http_stream(url: str, sink: Sink) -> None:
         If the server answers with a status other than 200 OK.
     SourceUnavailable
         On any other network or HTTP error, also one in the middle of the body.
+    ValueError
+        If ``url`` is not an ``http`` or ``https`` URL.
     """
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    if urllib.parse.urlsplit(url).scheme not in {"http", "https"}:
+        raise ValueError(f"not an HTTP URL: {url!r}")
+    # The scheme is checked above, so urllib cannot open a local file.
+    request = urllib.request.Request(  # noqa: S310
+        url, headers={"User-Agent": USER_AGENT}
+    )
     try:
-        with urllib.request.urlopen(request, timeout=DOWNLOAD_TIMEOUT) as response:
+        with urllib.request.urlopen(  # noqa: S310
+            request, timeout=DOWNLOAD_TIMEOUT
+        ) as response:
             if response.status != HTTPStatus.OK:
                 raise HttpStatusError(
                     f"cannot download {url}: HTTP {response.status} {response.reason}",
