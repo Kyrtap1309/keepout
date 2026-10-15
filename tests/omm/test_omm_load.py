@@ -31,7 +31,7 @@ SAMPLE = celestrak.load_csv(SAMPLE_CSV)
 )
 def test_every_format_is_recognised(text: str) -> None:
     assert loads(text) == SAMPLE
-    assert loads("﻿\n  \n" + text) == SAMPLE
+    assert loads("\ufeff\n  \n" + text) == SAMPLE
 
 
 @pytest.mark.parametrize(

@@ -3,6 +3,7 @@ however the grid is cut into chunks, and on SGP4 every minimum the
 brute-force oracle and SOCRATES find."""
 
 import dataclasses
+import functools
 import math
 import pickle
 from dataclasses import dataclass, field
@@ -554,19 +555,27 @@ FAILING = StraightLines(
 interval of the minimum at 2890.45 s."""
 
 
-@settings(deadline=None, max_examples=30)
-@given(max_states=st.integers(min_value=1, max_value=40))
-def test_chunks_do_not_change_the_result(max_states: int) -> None:
-    # 7 objects: chunks of 2 to 5 of the 61 samples, or all of them.
-    searched = search(FAILING)
-    whole = searched.run()
-    # The failure loses the minimum of its own interval only.
+@functools.cache
+def failing_whole() -> SearchResult:
+    """FAILING searched in one chunk (computed once: it is slow)."""
+    return search(FAILING).run()
+
+
+def test_a_failure_loses_the_minimum_of_its_own_interval_only() -> None:
+    whole = failing_whole()
     companion = [m.offset for m in whole.minima if m.secondary_index == 5]
     expected = (math.pi - 0.3) / CIRCLING + 200.0 * np.arange(36)
     np.testing.assert_allclose(companion, np.delete(expected, 14), rtol=0, atol=1e-5)
     assert len(whole.minima) == 4 + 35
     assert dict(whole.catalog_failures) == {5: ObjectFailure(2901.0, 6)}
-    assert summary(searched.run(max_states=max_states)) == summary(whole)
+
+
+@settings(deadline=None, max_examples=30)
+@given(max_states=st.integers(min_value=1, max_value=40))
+def test_chunks_do_not_change_the_result(max_states: int) -> None:
+    # 7 objects: chunks of 2 to 5 of the 61 samples, or all of them.
+    chunked = search(FAILING).run(max_states=max_states)
+    assert summary(chunked) == summary(failing_whole())
 
 
 def test_catalog_parts_merge_into_the_whole() -> None:
@@ -874,7 +883,7 @@ def test_a_window_with_minima_against_the_oracle() -> None:
     inside = check_against_oracle(
         primaries, WEEK_START, 6 * HOUR, DEFAULT_VOLUME, DEFAULT_STEP
     )
-    assert inside >= 20
+    assert inside == 22
 
 
 def test_every_socrates_approach_of_the_fixture_is_found() -> None:

@@ -148,7 +148,7 @@ def test_unsupported_ref_frame() -> None:
     cdm = minimal_cdm(segment1=replace(segment_fields(1), "REF_FRAME", "TOD"))
     with pytest.raises(UnsupportedFrame, match="unsupported reference frame 'TOD'"):
         cdm.object1.state()
-    with pytest.raises(UnsupportedFrame):
+    with pytest.raises(UnsupportedFrame, match="unsupported reference frame 'TOD'"):
         cdm.object_states()
 
 

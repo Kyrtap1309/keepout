@@ -21,7 +21,7 @@ from typing import Final
 
 from astropy.time import Time
 
-from keepout._units import DAY
+from keepout._units import DAY, KM, seconds_between
 from keepout.errors import SourceFormatError
 from keepout.omm import Omm
 
@@ -102,7 +102,7 @@ def read_socrates(text: str) -> tuple[SocratesApproach, ...]:
         values, or a value cannot be read.
     """
     header, *lines = text.splitlines(keepends=True) or [""]
-    columns = next(csv.reader([header.removeprefix("﻿")]), [])
+    columns = next(csv.reader([header.removeprefix("\ufeff")]), [])
     if tuple(columns) != COLUMNS:
         raise SourceFormatError(f"not a SOCRATES report header: {header.strip()!r}")
     rows = [next(csv.reader([line])) for line in lines]
@@ -124,8 +124,8 @@ def read_socrates(text: str) -> tuple[SocratesApproach, ...]:
                     + _TCA_TOLERANCE
                 ),
                 tca=tcas[index],
-                miss_distance=float(row[7]) * 1e3,
-                relative_speed=float(row[8]) * 1e3,
+                miss_distance=float(row[7]) * KM,
+                relative_speed=float(row[8]) * KM,
                 line=line,
             )
             for index, (row, line) in enumerate(zip(rows, lines, strict=True))
@@ -152,15 +152,10 @@ def epoch_matches(approach: SocratesApproach, primary: Omm, secondary: Omm) -> b
         Element sets of its two objects.
     """
     return all(
-        abs(_seconds_between(omm.epoch, approach.tca) - since)
+        abs(seconds_between(omm.epoch, approach.tca) - since)
         <= approach.since_epoch_tolerance
         for omm, since in (
             (primary, approach.since_epoch_primary),
             (secondary, approach.since_epoch_secondary),
         )
     )
-
-
-def _seconds_between(start: Time, end: Time) -> float:
-    """Seconds from ``start`` to ``end``, from their UTC Julian days."""
-    return float((end.jd1 - start.jd1) * DAY + (end.jd2 - start.jd2) * DAY)

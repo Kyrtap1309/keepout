@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final, TypeAlias
 
-from generated import replace_block, write_or_check
+from generated import replace_block, table, write_or_check
 
 from keepout.pc.result import Method
 from keepout.sources.cara import CARA_COMMIT
@@ -284,19 +284,14 @@ def _groups(rows: Sequence[Row]) -> dict[str, list[Row]]:
 
 def render_summary(rows: Sequence[Row]) -> str:
     """Markdown table: per suite and method, cases passed and worst error."""
-    lines = [
-        "| Suite | Method | Cases passed | Worst relative error |",
-        "|---|---|---|---|",
-    ]
+    cells = []
     for suite, members in _groups(rows).items():
-        methods = dict.fromkeys(r.method for r in members)
-        for method in methods:
+        for method in dict.fromkeys(r.method for r in members):
             mine = [r for r in members if r.method == method]
             passed = sum(r.passed for r in mine)
-            lines.append(
-                f"| {suite} | {method} | {passed} / {len(mine)} | {_worst(mine)} |"
-            )
-    return "\n".join(lines)
+            cells.append((suite, method, f"{passed} / {len(mine)}", _worst(mine)))
+    header = ("Suite", "Method", "Cases passed", "Worst relative error")
+    return "\n".join(table(header, cells))
 
 
 def _criteria(members: Sequence[Row]) -> list[str]:
@@ -387,15 +382,13 @@ def _suite_table(members: Sequence[Row]) -> list[str]:
             _Columns(("Criterion",), lambda case, _: [case.criterion.describe()])
         )
     titles = [title for group in columns for title in group.titles]
-    lines = [_row(titles), "|" + "---|" * len(titles)]
-    for case_id, case in cases.items():
-        rows = by_case[case_id]
-        lines.append(_row([cell for g in columns for cell in g.cells(case, rows)]))
-    return lines
-
-
-def _row(cells: Sequence[str]) -> str:
-    return "| " + " | ".join(cells) + " |"
+    return table(
+        titles,
+        [
+            [cell for g in columns for cell in g.cells(case, by_case[case_id])]
+            for case_id, case in cases.items()
+        ],
+    )
 
 
 def render_page(record: Record, report: Report = MAIN) -> str:

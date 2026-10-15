@@ -37,6 +37,8 @@ def require_same_epoch(first: Time, second: Time, what: str) -> None:
     what
         What is compared, for the error message (e.g. ``"state and covariance"``).
     """
+    if first is second:
+        return
     offset = abs(float((first - second).to_value("s")))
     if offset > EPOCH_TOLERANCE_S:
         raise GeometryError(f"{what} epochs differ by {offset:.3g} s")

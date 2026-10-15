@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import enum
 import math
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Final, TypeAlias
@@ -51,6 +51,7 @@ __all__ = [
     "ScreeningVolume",
     "SfsRegime",
     "VolumeRule",
+    "per_primary",
     "sfs_regime",
     "volume_for",
 ]
@@ -266,6 +267,30 @@ def volume_for(volume: ScreeningVolume | VolumeRule, primary: Omm) -> ScreeningV
             f"a volume rule must return a ScreeningVolume, got {type(chosen).__name__}"
         )
     return chosen
+
+
+def per_primary(
+    volumes: ScreeningVolume | Sequence[ScreeningVolume], count: int
+) -> tuple[ScreeningVolume, ...]:
+    """One volume per primary: ``volumes`` repeated, or checked for length.
+
+    Parameters
+    ----------
+    volumes
+        A volume for every primary, or one per primary.
+    count
+        Number of primaries.
+
+    Raises
+    ------
+    ValueError
+        If ``volumes`` is a sequence of another length than ``count``.
+    """
+    if isinstance(volumes, ScreeningVolume):
+        return (volumes,) * count
+    if len(volumes) != count:
+        raise ValueError(f"{len(volumes)} volumes given for {count} primaries")
+    return tuple(volumes)
 
 
 class SfsRegime(enum.StrEnum):

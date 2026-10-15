@@ -2,7 +2,8 @@
 
 Only tests marked ``validation`` (which download the NASA CARA reference data
 or ESA's Kelvins data on first run) may; the others fail on any
-``urllib.request.urlopen``, and astropy never downloads IERS tables.
+``urllib.request.urlopen``, and astropy never downloads IERS tables (nor
+refuses the bundled one for its age).
 
 Hypothesis profiles: ``default`` (random examples, the local database) and
 ``ci`` (derandomized, so a CI failure reproduces exactly, and printing the
@@ -23,6 +24,8 @@ import pytest
 from astropy.utils import iers
 from hypothesis import settings
 
+from keepout.sources import cache
+
 settings.register_profile("default")
 settings.register_profile("ci", derandomize=True, print_blob=True, deadline=None)
 settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE", "default"))
@@ -42,7 +45,12 @@ def pytest_xdist_auto_num_workers(config: pytest.Config) -> int | None:
 
 @pytest.fixture(autouse=True, scope="session")
 def _offline_iers() -> Iterator[None]:
-    with iers.conf.set_temp("auto_download", False):
+    # Without downloads the bundled table ages; refusing its predictions
+    # after 30 days would make the suite fail by the calendar.
+    with (
+        iers.conf.set_temp("auto_download", False),
+        iers.conf.set_temp("auto_max_age", None),
+    ):
         yield
 
 
@@ -56,3 +64,9 @@ def no_network(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) 
         raise AssertionError("tests must not access the network; pass download=")
 
     monkeypatch.setattr(urllib.request, "urlopen", refuse)
+
+
+@pytest.fixture(autouse=True)
+def _forget_verified(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Start every test without the process-wide memo of verified files."""
+    monkeypatch.setattr(cache, "_verified", {})

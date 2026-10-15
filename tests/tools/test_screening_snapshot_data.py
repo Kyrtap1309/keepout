@@ -2,7 +2,6 @@
 the catalog, the SOCRATES excerpt and the manifest."""
 
 import hashlib
-import json
 from typing import Any
 
 import pytest
@@ -15,8 +14,8 @@ DATA = snapshot.DATA
 
 
 @pytest.fixture(scope="module")
-def manifest() -> Any:
-    return json.loads((DATA / snapshot.MANIFEST).read_text(encoding="utf-8"))
+def manifest() -> snapshot.Manifest:
+    return snapshot.read_manifest(DATA)
 
 
 @pytest.fixture(scope="module")

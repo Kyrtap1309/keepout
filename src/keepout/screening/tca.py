@@ -120,7 +120,7 @@ from keepout.propagation.base import (
     RadiusBounds,
     propagate_in_chunks,
 )
-from keepout.screening.volume import ScreeningVolume
+from keepout.screening.volume import ScreeningVolume, per_primary
 
 __all__ = [
     "DEFAULT_STEP",
@@ -619,12 +619,7 @@ class ApproachSearch:
                 f"pairs must be booleans of shape ({len(primaries)}, {len(catalog)}), "
                 f"got {mask.dtype} {mask.shape}"
             )
-        if isinstance(volumes, ScreeningVolume):
-            volumes = (volumes,) * len(primaries)
-        if len(volumes) != len(primaries):
-            raise ValueError(
-                f"{len(volumes)} volumes given for {len(primaries)} primaries"
-            )
+        volumes = per_primary(volumes, len(primaries))
         if len(primary_bounds) != len(primaries) or len(catalog_bounds) != len(catalog):
             raise ValueError(
                 f"radius bounds of {len(primary_bounds)} primaries and "
@@ -635,7 +630,7 @@ class ApproachSearch:
         self._catalog = catalog
         self._start = start
         self._duration = float(duration)
-        self._volumes = tuple(volumes)
+        self._volumes = volumes
         self._pairs = mask
         self._speed_primary = speed_bounds(primary_bounds)
         self._speed_catalog = speed_bounds(catalog_bounds)

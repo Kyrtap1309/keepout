@@ -8,6 +8,7 @@ import screening_snapshot as snapshot
 import screening_timing as timing
 from astropy.time import Time
 
+from keepout._units import DAY
 from keepout.omm import load
 from keepout.screening import DEFAULT_VOLUME, screen
 
@@ -28,7 +29,7 @@ def test_main_prints_the_measurement(capsys: pytest.CaptureFixture[str]) -> None
         [by_number[63216], by_number[58509]],
         catalog,
         Time(START, scale="utc"),
-        timing.DAY,
+        DAY,
         DEFAULT_VOLUME,
     )
     assert printed["approaches"] == len(expected.approaches) > 0

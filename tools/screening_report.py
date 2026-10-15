@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -33,7 +34,7 @@ from astropy.time import Time
 from generated import relative, replace_block, table, write_or_check
 from screening_snapshot import SocratesSummary
 
-from keepout._units import DAY
+from keepout._units import DAY, seconds_between
 from keepout.omm import Omm
 from keepout.screening import (
     DEFAULT_VOLUME,
@@ -152,11 +153,6 @@ def read_inputs(data: Path) -> Inputs:
     )
 
 
-def seconds_between(start: Time, end: Time) -> float:
-    """Seconds from ``start`` to ``end``, from their UTC Julian days."""
-    return float((end.jd1 - start.jd1) * DAY + (end.jd2 - start.jd2) * DAY)
-
-
 def objects(approaches: Sequence[SocratesApproach]) -> set[int]:
     """The catalog numbers of the objects of ``approaches``."""
     return {a.primary for a in approaches} | {a.secondary for a in approaches}
@@ -262,7 +258,9 @@ class Comparison:
     primaries: int
 
 
-def _pair_of(approach: CloseApproach) -> tuple[int, int]:
+def _pair_of(approach: CloseApproach | SocratesApproach) -> tuple[int, int]:
+    if isinstance(approach, SocratesApproach):
+        return approach.primary, approach.secondary
     return approach.primary_number, approach.secondary_number
 
 
@@ -282,9 +280,9 @@ def compare(
     approach at most once.
     """
     by_number = {omm.catalog_number: omm for omm in catalog}
-    first = sorted({a.primary for a in approaches})
+    primary_numbers = sorted({a.primary for a in approaches})
     result = screen(
-        [by_number[number] for number in first],
+        [by_number[number] for number in primary_numbers],
         [by_number[number] for number in sorted(objects(approaches))],
         start,
         DEFAULT_DURATION,
@@ -293,28 +291,48 @@ def compare(
     )
     left_out = {item.catalog_number for item in result.skipped}
     compared = [
-        index
-        for index, a in enumerate(approaches)
+        a
+        for a in approaches
         if a.primary not in left_out and a.secondary not in left_out
     ]
-    not_compared = set(range(len(approaches))) - set(compared)
-    pairs = {
-        (approaches[index].primary, approaches[index].secondary) for index in compared
-    }
+    pairs = {_pair_of(a) for a in compared}
     found = [a for a in result.approaches if _pair_of(a) in pairs]
-    by_pair: dict[tuple[int, int], list[int]] = {}
+    chosen = _nearest_matches(compared, found, start)
+    taken = set(chosen.values())
+    return Comparison(
+        matches=tuple(
+            Match(a, found[chosen[i]] if i in chosen else None)
+            for i, a in enumerate(compared)
+        ),
+        skipped=tuple(
+            a for a in approaches if a.primary in left_out or a.secondary in left_out
+        ),
+        keepout_only=tuple(a for p, a in enumerate(found) if p not in taken),
+        result=result,
+        primaries=len(primary_numbers),
+    )
+
+
+def _nearest_matches(
+    socrates: Sequence[SocratesApproach], found: Sequence[CloseApproach], start: Time
+) -> dict[int, int]:
+    """Index in ``found`` matched to each index in ``socrates`` that has one.
+
+    Candidates are approaches of the same pair within :data:`MATCH_WINDOW`,
+    taken nearest first; each of ``found`` is matched at most once.
+    """
+    by_pair: defaultdict[tuple[int, int], list[int]] = defaultdict(list)
     for position, approach in enumerate(found):
-        by_pair.setdefault(_pair_of(approach), []).append(position)
+        by_pair[_pair_of(approach)].append(position)
     found_at = [seconds_between(start, approach.tca) for approach in found]
-    socrates_at = {
-        index: seconds_between(start, approaches[index].tca) for index in compared
-    }
     candidates = sorted(
-        (abs(found_at[position] - socrates_at[index]), index, position)
-        for index in compared
-        for position in by_pair.get(
-            (approaches[index].primary, approaches[index].secondary), []
+        (
+            abs(found_at[position] - seconds_between(start, approach.tca)),
+            index,
+            position,
         )
+        for index, approach in enumerate(socrates)
+        for position in by_pair[_pair_of(approach)]
     )
     chosen: dict[int, int] = {}
     taken: set[int] = set()
@@ -322,16 +340,7 @@ def compare(
         if gap <= MATCH_WINDOW and index not in chosen and position not in taken:
             chosen[index] = position
             taken.add(position)
-    return Comparison(
-        matches=tuple(
-            Match(approaches[index], found[chosen[index]] if index in chosen else None)
-            for index in compared
-        ),
-        skipped=tuple(approaches[index] for index in sorted(not_compared)),
-        keepout_only=tuple(a for p, a in enumerate(found) if p not in taken),
-        result=result,
-        primaries=len(first),
-    )
+    return chosen
 
 
 def closest(primary: Omm, secondary: Omm, tca: Time) -> CloseApproach | None:

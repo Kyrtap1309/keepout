@@ -103,6 +103,7 @@ omit = ["*/keepout/cli/*", "*/keepout/dashboard/*"]
 
 [tool.coverage.report]
 fail_under = 90
+exclude_also = ["assert_never\\("]
 show_missing = true
 
 [dependency-groups]

@@ -149,8 +149,7 @@ def fetch_raw(
     KelvinsFormatError
         If the archive is not a zip file holding :data:`RAW_MEMBER`.
     """
-    root = cache if cache is not None else cache_dir()
-    folder = root / "kelvins" / ZENODO_RECORD
+    folder = cache_dir(cache) / "kelvins" / ZENODO_RECORD
     target = folder / "raw_data_2015-2019.gz"
     archive = folder / "dataset.zip"
     if has_digest(target, RAW_SHA256):

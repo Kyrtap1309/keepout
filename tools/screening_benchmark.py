@@ -57,7 +57,7 @@ from typing import Final, TypedDict
 
 import screening_snapshot as snapshot
 from astropy.time import Time
-from generated import replace_block, write_or_check
+from generated import replace_block, table, write_or_check
 from screening_timing import TimingOutput, select, timed
 
 from keepout._units import DAY
@@ -298,10 +298,14 @@ def render_summary(summary: Summary) -> str:
         skipped = ", ".join(f"{n} {reason}" for reason, n in numbers["skipped"].items())
         times = measured.get(numbers["volume"])
         rows.append(
-            f"| {numbers['volume']} | {numbers['screened']} | {skipped or '-'} "
-            f"| {numbers['approaches']} "
-            f"| {'-' if times is None else _seconds(times['wall'])} "
-            f"| {'-' if times is None else _seconds(times['cpu'])} |"
+            (
+                numbers["volume"],
+                numbers["screened"],
+                skipped or "-",
+                numbers["approaches"],
+                "-" if times is None else _seconds(times["wall"]),
+                "-" if times is None else _seconds(times["cpu"]),
+            )
         )
     if timings is None:
         machine = "Not measured yet."
@@ -320,9 +324,17 @@ def render_summary(summary: Summary) -> str:
             f"{_days(settings['days'])} from {settings['start']} UTC, "
             f"{_processes(settings['workers'])} (`{TOOL}`):",
             "",
-            "| Volume | Screened | Left out | Approaches | Wall time | CPU time |",
-            "|---|---|---|---|---|---|",
-            *rows,
+            *table(
+                (
+                    "Volume",
+                    "Screened",
+                    "Left out",
+                    "Approaches",
+                    "Wall time",
+                    "CPU time",
+                ),
+                rows,
+            ),
             "",
             machine,
         ]
@@ -514,19 +526,27 @@ def render_comparison(
         lines.append("The base cannot run the benchmark, so there is no comparison:")
         lines += ["", "```text", comparison.skipped, "```"]
         return "\n".join(lines), False
-    lines += [
-        "| Tree | Median CPU time | CPU time range | Median wall time | Approaches |",
-        "|---|---|---|---|---|",
-    ]
+    rows = []
     for name, runs in (("base", comparison.base), ("this", comparison.head)):
         cpu = [run.cpu for run in runs]
         approaches = sorted({run.approaches for run in runs})
-        lines.append(
-            f"| {name} | {statistics.median(cpu):.2f} s "
-            f"| {min(cpu):.2f} - {max(cpu):.2f} s "
-            f"| {statistics.median(run.wall for run in runs):.2f} s "
-            f"| {', '.join(map(str, approaches))} |"
+        rows.append(
+            (
+                name,
+                f"{statistics.median(cpu):.2f} s",
+                f"{min(cpu):.2f} - {max(cpu):.2f} s",
+                f"{statistics.median(run.wall for run in runs):.2f} s",
+                ", ".join(map(str, approaches)),
+            )
         )
+    header = (
+        "Tree",
+        "Median CPU time",
+        "CPU time range",
+        "Median wall time",
+        "Approaches",
+    )
+    lines += table(header, rows)
     regression = comparison.change > threshold
     verdict = "slower than allowed" if regression else "within the limit"
     lines += [

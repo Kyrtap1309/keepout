@@ -128,15 +128,10 @@ def _red(
     concerns: Sequence[str],
 ) -> Decision:
     """The decision on a red event, judged ``time_to_tca`` seconds before TCA."""
+    point = f"the decision point ({_days(settings.decision_point)} before TCA)"
     if time_to_tca <= settings.decision_point:
-        timing = (
-            f"within the decision point ({_days(settings.decision_point)} before TCA)"
-        )
-        return Decision(Action.MANOEUVRE, (*reasons, timing, *concerns))
-    timing = (
-        f"before the decision point ({_days(settings.decision_point)} before "
-        "TCA): prepare a manoeuvre"
-    )
+        return Decision(Action.MANOEUVRE, (*reasons, f"within {point}", *concerns))
+    timing = f"before {point}: prepare a manoeuvre"
     return Decision(Action.PREPARE_MANOEUVRE, (*reasons, timing, *concerns))
 
 

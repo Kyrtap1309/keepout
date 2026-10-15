@@ -184,7 +184,7 @@ def test_arrays_in_any_frame_convert_as_their_state_vectors(frame: RefFrame) -> 
 
 
 def test_array_conversion_needs_a_frame_and_matching_shapes() -> None:
-    with pytest.raises(UnsupportedFrame):
+    with pytest.raises(UnsupportedFrame, match="'ICRF'"):
         frame_to_gcrf("ICRF", EPOCH, LEO_R, LEO_V)  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="do not broadcast"):
         frame_to_gcrf("GCRF", Time([EPOCH] * 2), np.zeros((3, 3)), np.zeros((3, 3)))

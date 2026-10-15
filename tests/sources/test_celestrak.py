@@ -53,11 +53,6 @@ def clock() -> Clock:
     return Clock()
 
 
-@pytest.fixture(autouse=True)
-def _forget_verified(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(cache, "_verified", {})
-
-
 def later(omm: Omm, days: float) -> Omm:
     return dataclasses.replace(omm, epoch=omm.epoch + days * u.day)
 
@@ -403,13 +398,14 @@ def test_a_catalog_fetch_stops_at_the_first_failure(
     tmp_path: Path, clock: Clock
 ) -> None:
     server = FakeCelesTrak({ACTIVE: ACTIVE_CSV, STATIONS: 500})
-    with pytest.raises(HttpStatusError):
+    with pytest.raises(HttpStatusError) as raised:
         fetch_catalog(
             ["active", "stations", "analyst"],
             cache=tmp_path,
             download=server,
             now=clock,
         )
+    assert raised.value.status == 500
     assert server.urls == [ACTIVE, STATIONS]
     # The group fetched before the failure stays cached.
     assert (

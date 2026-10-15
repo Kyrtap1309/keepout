@@ -188,9 +188,7 @@ def comparison() -> report.Comparison:
 
 @pytest.fixture(scope="module")
 def inputs() -> report.Inputs:
-    manifest = json.loads(
-        (snapshot.DATA / snapshot.MANIFEST).read_text(encoding="utf-8")
-    )
+    manifest = snapshot.read_manifest(snapshot.DATA)
     return report.Inputs(tuple(ROWS), tuple(objects()), manifest["socrates"], "day")
 
 

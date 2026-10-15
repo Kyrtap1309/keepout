@@ -21,7 +21,6 @@ from __future__ import annotations
 from typing import Final
 
 import numpy as np
-from scipy import stats
 
 from keepout._types import BoolArray, FloatArray, IndexArray, require_positive
 from keepout.conjunction import Conjunction
@@ -289,6 +288,9 @@ def sample(
     check_fallbacks(encounters.scan_fallbacks, found)
     if not found.segments:
         return _no_encounter(found, confidence)
+    # Imported here: scipy.stats would add ~0.2 s to every `import keepout`.
+    from scipy import stats
+
     rng = np.random.default_rng(seed)
     budget = samples if samples is not None else max_samples
     hits = inside = done = 0

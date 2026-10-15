@@ -16,7 +16,6 @@ from typing import (
 
 import numpy as np
 
-from keepout._types import require_positive
 from keepout.conjunction import Conjunction
 from keepout.errors import GeometryError, PcConvergenceError
 from keepout.orbits import orbital_period
@@ -28,7 +27,7 @@ from keepout.pc._duration import (
 )
 from keepout.pc.elrod import elrod
 from keepout.pc.foster import foster
-from keepout.pc.hall3d import HALL_RTOL, Encounters, integrate
+from keepout.pc.hall3d import Encounters, hall3d, integrate
 from keepout.pc.maxpc import alfano, dilution, frisbee
 from keepout.pc.montecarlo import montecarlo, sample
 from keepout.pc.result import Method, PcResult
@@ -75,14 +74,8 @@ def applicability(conjunction: Conjunction, duration: float) -> tuple[str, ...]:
     duration
         Its :func:`encounter_duration` [s].
     """
-    return _warnings(conjunction, duration, long_encounter(conjunction, duration))
-
-
-def _warnings(
-    conjunction: Conjunction, duration: float, fraction: float | None
-) -> tuple[str, ...]:
-    """:func:`applicability`, given the :func:`long_encounter` fraction."""
     warnings: list[str] = []
+    fraction = long_encounter(conjunction, duration)
     if fraction is not None:
         lasts = "at least about" if conjunction.unknown_covariance else "about"
         warnings.append(
@@ -108,9 +101,6 @@ class _Assessment(NamedTuple):
     """Applicability warnings."""
     details: dict[str, float]
     """``encounter_duration_s``, when it is meaningful."""
-    long: bool
-    """Whether the encounter is too long for 2-D Pc (a sample can then leave
-    the hard body and enter it again: Hall's Nc says so)."""
 
 
 def _assess(conjunction: Conjunction) -> _Assessment:
@@ -121,59 +111,26 @@ def _assess(conjunction: Conjunction) -> _Assessment:
     detail is not, since it is then only a lower bound.
     """
     if conjunction.relative_speed == 0.0:
-        return _Assessment((), {}, long=False)
+        return _Assessment((), {})
     duration = encounter_duration(conjunction)
-    fraction = long_encounter(conjunction, duration)
-    notes = _warnings(conjunction, duration, fraction)
+    notes = applicability(conjunction, duration)
     details = (
         {} if conjunction.unknown_covariance else {"encounter_duration_s": duration}
     )
-    return _Assessment(notes, details, long=fraction is not None)
+    return _Assessment(notes, details)
 
 
-_Runner: TypeAlias = Callable[Concatenate[Conjunction, bool, ...], PcResult]
-"""A method run on a conjunction whose encounter :func:`_assess` tested for
-length (the ``bool``), with the method's keyword options. Every runner takes
-the length test positionally, whether it uses it or not (hence the ``noqa``
-on their definitions)."""
+_Runner: TypeAlias = Callable[Concatenate[Conjunction, ...], PcResult]
+"""A method run on a conjunction, with the method's keyword options."""
 
 
 def _on_plane(method: Callable[..., PcResult]) -> _Runner:
     """Adapt a 2-D method ``f(plane, radius, **options)`` to a conjunction."""
 
-    def run(
-        conjunction: Conjunction,
-        long: bool,  # noqa: FBT001, ARG001
-        /,
-        **options: Any,
-    ) -> PcResult:
+    def run(conjunction: Conjunction, /, **options: Any) -> PcResult:
         return method(conjunction.plane, conjunction.hard_body_radius, **options)
 
     return run
-
-
-def _hall3d(
-    conjunction: Conjunction,
-    long: bool,  # noqa: FBT001
-    /,
-    *,
-    window: tuple[float, float] | None = None,
-    rtol: float = HALL_RTOL,
-) -> PcResult:
-    """:func:`~keepout.pc.hall3d.hall3d`, with the length test already made."""
-    require_positive(rtol, "rtol")
-    encounters = Encounters.scan(conjunction, "hall3d", window)
-    return integrate(conjunction, encounters, rtol=rtol, long=long)
-
-
-def _montecarlo(
-    conjunction: Conjunction,
-    long: bool,  # noqa: FBT001, ARG001
-    /,
-    **options: Any,
-) -> PcResult:
-    """:func:`~keepout.pc.montecarlo.montecarlo`; the length test is unused."""
-    return montecarlo(conjunction, **options)
 
 
 _METHODS: Final[Mapping[Method, _Runner]] = {
@@ -182,8 +139,8 @@ _METHODS: Final[Mapping[Method, _Runner]] = {
     "frisbee": _on_plane(frisbee),
     "dilution": _on_plane(dilution),
     "alfano": _on_plane(alfano),
-    "hall3d": _hall3d,
-    "montecarlo": _montecarlo,
+    "hall3d": hall3d,
+    "montecarlo": montecarlo,
 }
 
 
@@ -203,9 +160,9 @@ def _auto(conjunction: Conjunction) -> _Choice:
     if conjunction.relative_speed == 0.0:
         _require_three_d(conjunction)
         notes: tuple[str, ...] = ("relative velocity is zero: 2-D Pc is undefined",)
-        return _three_d(conjunction, notes, {}, long=False)
+        return _three_d(conjunction, notes, {})
     unknown = conjunction.unknown_covariance
-    notes, details, long = _assess(conjunction)
+    notes, details = _assess(conjunction)
     if len(unknown) == 2:
         return alfano(conjunction.plane, conjunction.hard_body_radius), notes, details
     if unknown:
@@ -213,7 +170,7 @@ def _auto(conjunction: Conjunction) -> _Choice:
     if not notes or not _bound(conjunction):
         return foster(conjunction.plane, conjunction.hard_body_radius), notes, details
     two_d = foster(conjunction.plane, conjunction.hard_body_radius).value
-    return _three_d(conjunction, notes, {**details, "pc_2d": two_d}, long=long)
+    return _three_d(conjunction, notes, {**details, "pc_2d": two_d})
 
 
 def _require_three_d(conjunction: Conjunction) -> None:
@@ -238,13 +195,11 @@ def _three_d(
     conjunction: Conjunction,
     notes: tuple[str, ...],
     details: dict[str, float],
-    *,
-    long: bool,
 ) -> _Choice:
     """Hall's 3D-Nc, or Monte Carlo over the same encounter scan if it fails."""
     encounters = Encounters.scan(conjunction, "hall3d", None)
     try:
-        return integrate(conjunction, encounters, long=long), notes, details
+        return integrate(conjunction, encounters), notes, details
     except PcConvergenceError as error:
         fallback = (
             f"{error}; Monte Carlo used instead (seed {AUTO_MC_SEED}, at most "
@@ -331,9 +286,8 @@ def compute_pc(
         ``"auto"`` is reproducible. A failure of the encounter scan itself
         is not covered: Monte Carlo reuses that scan
         (:func:`~keepout.pc._rate.encounter_scan`), so its error propagates.
-        The 2-D and
-        maximum-Pc methods take milliseconds; ``"hall3d"`` about 1-60 s and the
-        Monte Carlo fallback up to about a minute.
+        The 2-D and maximum-Pc methods take milliseconds; ``"hall3d"`` about
+        1-60 s and the Monte Carlo fallback up to about a minute.
     **options
         The keyword-only parameters of an explicitly chosen method (e.g.
         ``rtol``, ``order``, ``window``, ``samples``, ``seed``), as typed by
@@ -383,8 +337,8 @@ def compute_pc(
                 f"unknown Pc method {method!r}; expected 'auto' or one of "
                 f"{tuple(_METHODS)}"
             )
-        notes, details, long = _assess(conjunction)
-        result = run(conjunction, long, **options)
+        notes, details = _assess(conjunction)
+        result = run(conjunction, **options)
     return dataclasses.replace(
         result,
         diagnostics=conjunction.diagnostics + notes + result.diagnostics,

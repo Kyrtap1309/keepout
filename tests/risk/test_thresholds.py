@@ -40,7 +40,7 @@ def test_levels_are_ordered_by_severity() -> None:
 
 
 def test_levels_do_not_compare_with_other_types() -> None:
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match="not supported"):
         operator.lt(RiskLevel.GREEN, 1)
 
 

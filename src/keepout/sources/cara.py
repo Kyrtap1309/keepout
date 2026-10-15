@@ -193,8 +193,7 @@ def fetch(
         If the downloaded bytes do not match ``file.sha256``. Nothing is
         written to the cache in this case.
     """
-    root = cache if cache is not None else cache_dir()
-    target = root / "cara" / CARA_COMMIT / file.path
+    target = cache_dir(cache) / "cara" / CARA_COMMIT / file.path
     if has_digest(target, file.sha256):
         return target
 

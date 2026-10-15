@@ -185,7 +185,8 @@ def dumps(cdm: Cdm) -> str:
 
 
 def load(path: str | Path) -> Cdm:
-    """Read a KVN CDM file (UTF-8; a byte-order mark is ignored).
+    """Read a KVN CDM file (UTF-8, gzip-compressed or not; a
+    byte-order mark is ignored).
 
     Parameters
     ----------

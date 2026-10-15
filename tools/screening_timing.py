@@ -32,15 +32,14 @@ import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final, TypedDict
+from typing import TypedDict
 
 from astropy.time import Time
 
+from keepout._units import DAY
 from keepout.omm import Omm, load
 from keepout.screening import ScreeningResult, ScreeningVolume, VolumeRule, screen
 from keepout.screening.volume import SOCRATES_RADIUS
-
-DAY: Final = 86400.0
 
 
 @dataclass(frozen=True)

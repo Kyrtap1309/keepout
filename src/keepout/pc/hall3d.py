@@ -155,7 +155,7 @@ def hall3d(
     """
     require_positive(rtol, "rtol")
     encounters = Encounters.scan(conjunction, "hall3d", window)
-    return integrate(conjunction, encounters, rtol=rtol, long=is_long(conjunction))
+    return integrate(conjunction, encounters, rtol=rtol)
 
 
 @dataclass(frozen=True, eq=False)
@@ -224,16 +224,15 @@ def integrate(
     conjunction: Conjunction,
     encounters: Encounters,
     *,
-    long: bool,
     rtol: float = HALL_RTOL,
 ) -> PcResult:
     """Hall's 3D-Nc over an encounter scan.
 
     The core of :func:`hall3d`, without its argument checks: for
     :func:`~keepout.pc.compute_pc`, which has already scanned the rate or
-    tested the encounter's duration. ``long`` is :func:`is_long`; a long
-    encounter only adds the note that Nc counts repeated entries (the
-    duration itself is in ``compute_pc``'s applicability warning).
+    already scanned the rate. A long encounter (:func:`is_long`) only adds
+    the note that Nc counts repeated entries (the duration itself is in
+    ``compute_pc``'s applicability warning).
     """
     rate, found = encounters.rate, encounters.found
     integral = integrate_segments(rate, found, rtol=rtol)
@@ -259,7 +258,6 @@ def integrate(
             rate,
             integral,
             window_given=encounters.window_given,
-            long=long,
         ),
     ]
     return PcResult.clamped(min(integral.nc, 1.0), "hall3d", tuple(notes), details)
@@ -287,7 +285,6 @@ def _entry_notes(
     integral: RateIntegral,
     *,
     window_given: bool,
-    long: bool,
 ) -> list[str]:
     """Notes on what ``Nc`` counts and on an encounter the scan did not find."""
     notes: list[str] = []
@@ -298,7 +295,7 @@ def _entry_notes(
     if conjunction.relative_speed == 0.0:
         notes.append(f"relative velocity is zero: {repeated}")
     else:
-        if long:
+        if is_long(conjunction):
             notes.append(f"long encounter: {repeated}")
         if integral.scan.peak <= 0.0 and not window_given:
             extent = reach(

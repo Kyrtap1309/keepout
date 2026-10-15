@@ -18,17 +18,12 @@ PAYLOAD = b"reference bytes"
 DIGEST = hashlib.sha256(PAYLOAD).hexdigest()
 
 
-@pytest.fixture(autouse=True)
-def _forget_verified(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Start every test without the process-wide memo of verified files."""
-    monkeypatch.setattr(cache, "_verified", {})
-
-
 def test_cache_dir_env_override(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setenv("KEEPOUT_CACHE_DIR", str(tmp_path / "custom"))
     assert cache.cache_dir() == tmp_path / "custom"
+    assert cache.cache_dir(tmp_path / "given") == tmp_path / "given"
 
 
 linux_only = pytest.mark.skipif(

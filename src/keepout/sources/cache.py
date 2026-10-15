@@ -67,14 +67,16 @@ class Sink(Protocol):
         """Take the next chunk."""
 
 
-def cache_dir() -> Path:
+def cache_dir(given: Path | None = None) -> Path:
     """Root cache directory for downloaded reference data.
 
-    ``$KEEPOUT_CACHE_DIR`` if set, else the platform's user cache directory
-    for keepout (on Linux ``$XDG_CACHE_HOME/keepout`` or
-    ``~/.cache/keepout``; on macOS ``~/Library/Caches/keepout``). The
-    directory is not created here.
+    ``given`` if not ``None``, else ``$KEEPOUT_CACHE_DIR`` if set, else the
+    platform's user cache directory for keepout (on Linux
+    ``$XDG_CACHE_HOME/keepout`` or ``~/.cache/keepout``; on macOS
+    ``~/Library/Caches/keepout``). The directory is not created here.
     """
+    if given is not None:
+        return given
     override = os.environ.get("KEEPOUT_CACHE_DIR")
     if override:
         return Path(override)

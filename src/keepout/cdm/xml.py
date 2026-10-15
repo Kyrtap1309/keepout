@@ -248,7 +248,8 @@ def dumps(cdm: Cdm) -> str:
 
 
 def load(path: str | Path) -> Cdm:
-    """Read an XML CDM file (UTF-8; a byte-order mark is ignored).
+    """Read an XML CDM file (UTF-8, gzip-compressed or not; a
+    byte-order mark is ignored).
 
     Parameters
     ----------

@@ -87,7 +87,7 @@ def test_describe_error() -> None:
 
 def test_error_codes_are_sgp4s() -> None:
     assert set(ERROR_MESSAGES) == set(SGP4_ERRORS)
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match="does not support item assignment"):
         ERROR_MESSAGES[7] = "new"  # type: ignore[index]
 
 

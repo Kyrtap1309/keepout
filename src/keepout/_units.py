@@ -1,8 +1,13 @@
 """Unit constants shared across keepout."""
 
-from typing import Final
+from __future__ import annotations
 
-__all__ = ["DAY", "KM", "MINUTE"]
+from typing import TYPE_CHECKING, Final
+
+if TYPE_CHECKING:
+    from astropy.time import Time
+
+__all__ = ["DAY", "KM", "MINUTE", "seconds_between"]
 
 KM: Final = 1e3
 """Metres in a kilometre."""
@@ -12,3 +17,8 @@ MINUTE: Final = 60.0
 
 DAY: Final = 86400.0
 """Seconds in a day."""
+
+
+def seconds_between(start: Time, end: Time) -> float:
+    """Seconds from ``start`` to ``end``, from their UTC Julian days."""
+    return float((end.jd1 - start.jd1) * DAY + (end.jd2 - start.jd2) * DAY)

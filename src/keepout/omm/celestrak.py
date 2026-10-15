@@ -65,7 +65,9 @@ def loads_csv(text: str) -> tuple[Omm, ...]:
         keyword, a row has more or fewer values than the header, the CSV
         quoting is broken, or an object's values are invalid.
     """
-    reader = csv.reader(io.StringIO(text.removeprefix("﻿"), newline=""), strict=True)
+    reader = csv.reader(
+        io.StringIO(text.removeprefix("\ufeff"), newline=""), strict=True
+    )
     try:
         header = next(reader, None)
         if header is None:
@@ -125,7 +127,7 @@ def loads_json(text: str) -> tuple[Omm, ...]:
     """
     try:
         data = json.loads(
-            text.removeprefix("﻿"),
+            text.removeprefix("\ufeff"),
             parse_float=str,
             parse_int=str,
             parse_constant=str,

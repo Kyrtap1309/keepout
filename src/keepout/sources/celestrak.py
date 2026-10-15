@@ -378,7 +378,7 @@ def _check_max_age(max_age: float) -> None:
 
 
 def _root(cache: Path | None) -> Path:
-    return (cache if cache is not None else cache_dir()) / "celestrak"
+    return cache_dir(cache) / "celestrak"
 
 
 def _gp_reader(url: str) -> Callable[[bytes], tuple[Omm, ...]]:

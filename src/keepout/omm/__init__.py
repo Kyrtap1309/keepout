@@ -55,7 +55,7 @@ def loads(text: str) -> tuple[Omm, ...]:
         If the text is in none of these formats, or the format's reader
         refuses it.
     """
-    body = text.removeprefix("﻿")
+    body = text.removeprefix("\ufeff")
     start = body.lstrip()
     first, *second = start.splitlines()[:2] or [""]
     if start.startswith("<"):

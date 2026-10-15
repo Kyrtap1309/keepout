@@ -6,14 +6,21 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import NamedTuple
 
+from keepout.ccsds import files
 from keepout.cdm.keywords import SectionKind
 from keepout.cdm.model import Cdm, DuplicateKeyword, Field, Section
 from keepout.errors import CdmParseError
 
 
 def load_file(path: str | Path, loads: Callable[[str], Cdm]) -> Cdm:
-    """Parse a UTF-8 message file with ``loads``; a byte-order mark is ignored."""
-    return loads(Path(path).read_text(encoding="utf-8-sig"))
+    """Parse a message file with ``loads``; see :func:`keepout.ccsds.files.read_file`.
+
+    Raises
+    ------
+    CdmParseError
+        If the file is broken gzip data or not UTF-8 text.
+    """
+    return files.load_file(path, loads, CdmParseError)
 
 
 def dump_file(cdm: Cdm, path: str | Path, dumps: Callable[[Cdm], str]) -> None:

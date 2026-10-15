@@ -42,7 +42,7 @@ def test_a_report_without_approaches_is_empty() -> None:
 
 
 def test_a_byte_order_mark_is_skipped() -> None:
-    assert read_socrates("﻿" + REPORT) == read_socrates(REPORT)
+    assert read_socrates("\ufeff" + REPORT) == read_socrates(REPORT)
 
 
 @pytest.mark.parametrize(

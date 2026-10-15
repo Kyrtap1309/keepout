@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import gzip
-import zlib
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any, Final, NamedTuple, TypeVar
+from typing import Any, NamedTuple, TypeVar
 
 from astropy.time import Time
 
+from keepout.ccsds import files
 from keepout.ccsds.keywords import format_epoch, parse_value
 from keepout.errors import OmmParseError
 from keepout.omm.keywords import (
@@ -22,8 +21,6 @@ from keepout.omm.keywords import (
 from keepout.omm.model import InvalidElement, Omm
 
 _KEYWORD_OF: dict[str, str] = {attribute: key for key, attribute in ATTRIBUTES.items()}
-
-_GZIP_MAGIC: Final = b"\x1f\x8b"
 
 _T = TypeVar("_T")
 
@@ -49,32 +46,15 @@ class Text(NamedTuple):
     path: str | None = None
 
 
-def read_file(path: str | Path) -> str:
-    """The text of a UTF-8 file, decompressed first if it is gzip data.
-
-    gzip data is recognised by its magic bytes, whatever the file name. A
-    byte-order mark is ignored.
+def load_file(path: str | Path, loads: Callable[[str], _T]) -> _T:
+    """Parse a file with ``loads``; see :func:`keepout.ccsds.files.read_file`.
 
     Raises
     ------
     OmmParseError
         If the file is broken gzip data or not UTF-8 text.
     """
-    data = Path(path).read_bytes()
-    if data.startswith(_GZIP_MAGIC):
-        try:
-            data = gzip.decompress(data)
-        except (OSError, EOFError, zlib.error) as exc:
-            raise OmmParseError(f"{path}: invalid gzip data: {exc}") from exc
-    try:
-        return data.decode("utf-8-sig")
-    except UnicodeDecodeError as exc:
-        raise OmmParseError(f"{path}: not UTF-8 text: {exc}") from exc
-
-
-def load_file(path: str | Path, loads: Callable[[str], _T]) -> _T:
-    """Parse a file with ``loads``; see :func:`read_file`."""
-    return loads(read_file(path))
+    return files.load_file(path, loads, OmmParseError)
 
 
 def parse_record(

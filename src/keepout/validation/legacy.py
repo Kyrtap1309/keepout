@@ -18,6 +18,7 @@ from typing import Final
 
 from astropy.time import Time
 
+from keepout._units import KM
 from keepout.cdm.keywords import covariance_matrix
 from keepout.errors import CaraFormatError, UnsupportedFrame
 from keepout.objects import ObjectState, ReportedObject, gcrf_object_states
@@ -56,7 +57,7 @@ def _reported(
         frame = as_ref_frame(fields.get("REF_FRAME"))
     except UnsupportedFrame as exc:
         raise CaraFormatError(f"{path}: bad REF_FRAME ({exc})") from exc
-    values = [1e3 * _number(fields, k, path) for k in _STATE]  # km, km/s
+    values = [KM * _number(fields, k, path) for k in _STATE]  # km, km/s
     return ReportedObject(
         fields.get("OBJECT_DESIGNATOR", _UNKNOWN_DESIGNATOR),
         StateVector(tca, values[:3], values[3:], frame),

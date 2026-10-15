@@ -31,6 +31,6 @@ def load(path: str | Path) -> Cdm:
     Parameters
     ----------
     path
-        File to read (UTF-8).
+        File to read (UTF-8, gzip-compressed or not).
     """
     return load_file(path, loads)

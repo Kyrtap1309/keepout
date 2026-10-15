@@ -46,7 +46,7 @@ import numpy as np
 
 from keepout._types import BoolArray
 from keepout.propagation.base import RadiusBounds
-from keepout.screening.volume import ScreeningVolume
+from keepout.screening.volume import ScreeningVolume, per_primary
 
 __all__ = ["apogee_perigee_filter"]
 
@@ -82,14 +82,9 @@ def apogee_perigee_filter(
     ValueError
         If ``volumes`` is a sequence of another length than ``primaries``.
     """
-    if isinstance(volumes, ScreeningVolume):
-        reach = np.full(len(primaries), volumes.bounding_radius)
-    else:
-        if len(volumes) != len(primaries):
-            raise ValueError(
-                f"{len(volumes)} volumes given for {len(primaries)} primaries"
-            )
-        reach = np.array([volume.bounding_radius for volume in volumes])
+    reach = np.array(
+        [volume.bounding_radius for volume in per_primary(volumes, len(primaries))]
+    )
     highest = (primaries.highest + reach)[:, None]
     lowest = (primaries.lowest - reach)[:, None]
     keep: BoolArray = (catalog.lowest <= highest) & (catalog.highest >= lowest)

@@ -225,44 +225,53 @@ class ConjunctionEvent:
                     f"no HBR for both objects in {', '.join(missing)}: pass "
                     "hard_body_radius= (combined, in metres)"
                 )
-        source = "keepout" if callable(method) else f"keepout ({method})"
-        observations: list[PcObservation] = []
-        for cdm in self.cdms:
-            reported, notes = _reported(cdm)
-            when = time_to_tca(cdm)
-            try:
-                conjunction = Conjunction.from_cdm(
-                    cdm, hard_body_radius=hard_body_radius, policy=policy
-                )
-                result = (
-                    method(conjunction)
-                    if callable(method)
-                    else compute_pc(conjunction, method)
-                )
-            except KeepoutError as exc:
-                observations.append(
-                    PcObservation(
-                        time_to_tca=when,
-                        source=source,
-                        error=f"{type(exc).__name__}: {exc}",
-                        message_id=cdm.message_id,
-                        reported_pc=reported,
-                        diagnostics=notes,
-                    )
-                )
-                continue
-            observation = PcObservation.from_result(
-                result,
-                time_to_tca=when,
-                message_id=cdm.message_id,
-                reported_pc=reported,
-            )
-            if notes:
-                observation = replace(
-                    observation, diagnostics=(*observation.diagnostics, *notes)
-                )
-            observations.append(observation)
-        return tuple(observations)
+        if callable(method):
+            compute, source = method, "keepout"
+        else:
+            choice = method
+
+            def compute(conjunction: Conjunction) -> PcResult:
+                return compute_pc(conjunction, choice)
+
+            source = f"keepout ({method})"
+        return tuple(
+            _observe(cdm, compute, source, policy, hard_body_radius)
+            for cdm in self.cdms
+        )
+
+
+def _observe(
+    cdm: Cdm,
+    compute: PcComputation,
+    source: str,
+    policy: Policy,
+    hard_body_radius: float | None,
+) -> PcObservation:
+    """The observation of one CDM (see :meth:`ConjunctionEvent.observations`)."""
+    reported, notes = _reported(cdm)
+    when = time_to_tca(cdm)
+    try:
+        conjunction = Conjunction.from_cdm(
+            cdm, hard_body_radius=hard_body_radius, policy=policy
+        )
+        result = compute(conjunction)
+    except KeepoutError as exc:
+        return PcObservation(
+            time_to_tca=when,
+            source=source,
+            error=f"{type(exc).__name__}: {exc}",
+            message_id=cdm.message_id,
+            reported_pc=reported,
+            diagnostics=notes,
+        )
+    observation = PcObservation.from_result(
+        result, time_to_tca=when, message_id=cdm.message_id, reported_pc=reported
+    )
+    if notes:
+        observation = replace(
+            observation, diagnostics=(*observation.diagnostics, *notes)
+        )
+    return observation
 
 
 def group_events(

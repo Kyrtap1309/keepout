@@ -106,7 +106,7 @@ def test_the_handbook_table() -> None:
         assert volume.label.startswith("SFS Handbook v1.7 Table 3, ")
     assert "outside" in SFS_HANDBOOK_VOLUMES[SfsRegime.OUTSIDE].label
     assert list(SFS_LEO_PERIGEES.values()) == [500e3, 750e3, 1200e3, 2000e3]
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match="does not support item assignment"):
         SFS_HANDBOOK_VOLUMES[SfsRegime.LEO_1] = DEFAULT_VOLUME  # type: ignore[index]
 
 

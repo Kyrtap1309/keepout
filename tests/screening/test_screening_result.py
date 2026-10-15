@@ -198,7 +198,7 @@ def test_a_result_keeps_approaches_in_time_order_and_skipped_by_object() -> None
         ("catalog", FIXTURE[5].catalog_number, SkipReason.STALE),
     ]
     assert list(result.volumes) == [25544, 20580]
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match="does not support item assignment"):
         result.volumes[1] = DEFAULT_VOLUME  # type: ignore[index]
     assert result.end == TCA + 1 * u.hour
     assert result.catalog_count == 120

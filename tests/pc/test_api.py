@@ -426,8 +426,7 @@ def test_auto_uses_hall_at_zero_relative_velocity(
 ) -> None:
     # Hall's accuracy at zero relative velocity is checked on Alfano case 12
     # (validation); here only the choice is.
-    def run(_: Conjunction, encounters: Encounters, *, long: bool) -> PcResult:
-        assert not long
+    def run(_: Conjunction, encounters: Encounters) -> PcResult:
         return PcResult(0.5, "hall3d", (), {})
 
     monkeypatch.setattr(api, "integrate", run)
