@@ -27,6 +27,18 @@ settings.register_profile("default")
 settings.register_profile("ci", derandomize=True, print_blob=True, deadline=None)
 settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE", "default"))
 
+MAX_AUTO_WORKERS = 4
+
+
+def pytest_xdist_auto_num_workers(config: pytest.Config) -> int | None:
+    """Cap ``-n auto`` at ``MAX_AUTO_WORKERS``: a worker per CPU runs out of memory.
+
+    ``PYTEST_XDIST_AUTO_NUM_WORKERS`` still sets the number when given.
+    """
+    if os.environ.get("PYTEST_XDIST_AUTO_NUM_WORKERS"):
+        return None
+    return min(MAX_AUTO_WORKERS, os.cpu_count() or 1)
+
 
 @pytest.fixture(autouse=True, scope="session")
 def _offline_iers() -> Iterator[None]:
