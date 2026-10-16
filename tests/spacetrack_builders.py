@@ -1,10 +1,13 @@
-"""Space-Track test data: a fake server and ``gp`` answers in its JSON layout.
+"""Space-Track test data: a fake server, and ``gp`` and ``cdm_public``
+answers in its JSON layout.
 
-The answers are made from :data:`celestrak_builders.SAMPLE` (CelesTrak data,
-which Space-Track's user agreement allows to redistribute with citation):
-every value a string and Space-Track's further keywords added, as the
-``gp`` class's model definition lists them. They were not downloaded from
-Space-Track.
+The ``gp`` answers are made from :data:`celestrak_builders.SAMPLE`
+(CelesTrak data, which Space-Track's user agreement allows to redistribute
+with citation): every value a string and Space-Track's further keywords
+added, as the ``gp`` class's model definition lists them. The
+``cdm_public`` rows are invented (Space-Track's may not be redistributed):
+their layout is the class's model definition, every value a string. None
+was downloaded from Space-Track.
 """
 
 import json
@@ -63,6 +66,36 @@ def space_track_gp(omms: Iterable[Omm] = SAMPLE) -> bytes:
         record.update({key: str(value) for key, value in item.items()})
         records.append(record)
     return json.dumps(records).encode()
+
+
+def public_cdm(**values: str | None) -> dict[str, str | None]:
+    """An invented ``cdm_public`` row: an approach of two of the sample's
+    objects (Calsphere 1 and the ISS), with ``values`` replacing columns."""
+    row: dict[str, str | None] = {
+        "CDM_ID": "1000001",
+        "CREATED": "2026-10-15 06:12:44.000000",
+        "EMERGENCY_REPORTABLE": "Y",
+        "TCA": "2026-10-17T03:25:31.250000",
+        "MIN_RNG": "640",
+        "PC": "2.5e-05",
+        "SAT_1_ID": "900",
+        "SAT_1_NAME": "CALSPHERE 1",
+        "SAT1_OBJECT_TYPE": "PAYLOAD",
+        "SAT1_RCS": "MEDIUM",
+        "SAT_1_EXCL_VOL": "5.00",
+        "SAT_2_ID": "25544",
+        "SAT_2_NAME": "ISS (ZARYA)",
+        "SAT2_OBJECT_TYPE": "PAYLOAD",
+        "SAT2_RCS": "LARGE",
+        "SAT_2_EXCL_VOL": "5.00",
+    }
+    row.update(values)
+    return row
+
+
+def space_track_cdm_public(*rows: Mapping[str, object]) -> bytes:
+    """A ``cdm_public`` answer holding ``rows``."""
+    return json.dumps(list(rows)).encode()
 
 
 class FakeSpaceTrack:

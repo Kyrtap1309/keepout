@@ -175,6 +175,7 @@ uv run python tools/risk_report.py   # Kelvins risk report (downloads 221 MB onc
 uv run python tools/screening_report.py   # SOCRATES screening report (offline)
 uv run python tools/screening_benchmark.py   # screening benchmark (offline, minutes)
 uv run python tools/synthetic_operator_report.py   # synthetic operator report (offline)
+uv run python tools/spacetrack_snapshot.py verify   # frozen Space-Track catalog (offline)
 uv run ruff check && uv run ruff format --check
 uv run mypy
 ```
@@ -182,5 +183,6 @@ uv run mypy
 ## Licence
 
 MIT. The third-party data committed for tests is not covered: the CelesTrak
-data in `tests/screening/data/` (see its `NOTICE`) and the Kelvins excerpt in
-`tests/sources/data/` (see its `README.md`).
+data in `tests/screening/data/`, the Space-Track data in
+`tests/screening/spacetrack-data/` (see their `NOTICE` files) and the Kelvins
+excerpt in `tests/sources/data/` (see its `README.md`).

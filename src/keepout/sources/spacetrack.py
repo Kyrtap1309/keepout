@@ -8,7 +8,10 @@ free account. :func:`fetch_catalog` downloads the catalog with the query
 Space-Track recommends for it (:data:`CATALOG`: element sets of objects not
 decayed, with an epoch in the last 10 days, as OMM JSON) and gives the same
 :class:`~keepout.sources.celestrak.Catalog` as CelesTrak's client.
-:class:`SpaceTrackClient` is the session underneath, for other queries.
+:func:`fetch_public_cdms` downloads the public summaries of the conjunction
+data messages of approaches still to come (``cdm_public``, :data:`PUBLIC_CDMS`)
+as :class:`PublicCdm` rows. :class:`SpaceTrackClient` is the session
+underneath, for other queries.
 
 **Credentials** come only from the environment: ``SPACETRACK_IDENTITY``
 (the account's user name) and ``SPACETRACK_PASSWORD``
@@ -116,8 +119,13 @@ __all__ = [
     "PASSWORD_VARIABLE",
     "PER_HOUR",
     "PER_MINUTE",
+    "PUBLIC_CDMS",
+    "PUBLIC_CDM_COLUMNS",
     "QUERY_URL",
     "Credentials",
+    "PublicCdm",
+    "PublicCdmObject",
+    "PublicCdms",
     "Query",
     "Request",
     "Response",
@@ -126,7 +134,9 @@ __all__ = [
     "Transport",
     "UrllibTransport",
     "fetch_catalog",
+    "fetch_public_cdms",
     "read_catalog",
+    "read_public_cdms",
 ]
 
 BASE_URL: Final = "https://www.space-track.org"
@@ -170,6 +180,13 @@ HIDDEN: Final = "<hidden>"
 
 _RATE_LIMIT_TEXT: Final = b"violated your query rate limit"
 """What Space-Track's answer says when a query broke the per-minute limit."""
+
+_MIN_RANGE_UNIT: Final = 1.0
+"""Metres in a unit of ``cdm_public``'s ``MIN_RNG`` (checked against keepout's
+screening of the same pairs)."""
+
+_YES_NO: Final[Mapping[str, bool]] = MappingProxyType({"Y": True, "N": False})
+"""``EMERGENCY_REPORTABLE``'s values."""
 
 _EXCERPT: Final = 200
 """Characters of a server answer quoted in an error message."""
@@ -314,6 +331,32 @@ CATALOG: Final = Query(
 )
 """Space-Track's recommended query for the whole GP catalog: objects not
 decayed with an epoch in the last 10 days, by catalog number, as OMM JSON."""
+
+PUBLIC_CDMS: Final = Query(
+    "cdm_public", "TCA/>now/orderby/TCA asc/format/json", "upcoming"
+)
+"""The public CDM summaries of every approach still to come, by TCA, as
+JSON. Space-Track allows this query once every 8 hours."""
+
+PUBLIC_CDM_COLUMNS: Final = (
+    "CDM_ID",
+    "CREATED",
+    "EMERGENCY_REPORTABLE",
+    "TCA",
+    "MIN_RNG",
+    "PC",
+    "SAT_1_ID",
+    "SAT_1_NAME",
+    "SAT1_OBJECT_TYPE",
+    "SAT1_RCS",
+    "SAT_1_EXCL_VOL",
+    "SAT_2_ID",
+    "SAT_2_NAME",
+    "SAT2_OBJECT_TYPE",
+    "SAT2_RCS",
+    "SAT_2_EXCL_VOL",
+)
+"""The 16 columns of the ``cdm_public`` class, as Space-Track names them."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -640,6 +683,24 @@ class SpaceTrackClient:
         ordered = tuple(sorted(kept, key=lambda omm: omm.catalog_number))
         return Catalog(ordered, dropped, (GpGroup(GROUP, omms, retrieval),))
 
+    def fetch_public_cdms(self, *, max_age: float | None = None) -> PublicCdms:
+        """The public CDM summaries of the approaches still to come
+        (:data:`PUBLIC_CDMS`), from the cache or Space-Track.
+
+        Parameters
+        ----------
+        max_age
+            Seconds a cached copy is used; 8 hours (the ``cdm_public``
+            interval) if ``None``, and not less.
+
+        Raises
+        ------
+        ValueError, RateLimited, AuthError, SourceUnavailable, SourceFormatError
+            As :meth:`fetch`.
+        """
+        cdms, retrieval = self.fetch(PUBLIC_CDMS, read_public_cdms, max_age=max_age)
+        return PublicCdms(cdms, retrieval)
+
     def close(self) -> None:
         """Log out, if logged in and not stopped by a rate-limit answer.
 
@@ -790,6 +851,236 @@ def read_catalog(data: bytes) -> tuple[Omm, ...]:
         raise SourceFormatError(
             f"Space-Track did not send OMM JSON ({exc}); it starts with {data[:60]!r}"
         ) from exc
+
+
+@dataclass(frozen=True, slots=True)
+class PublicCdmObject:
+    """One of the two objects of a :class:`PublicCdm`.
+
+    Parameters
+    ----------
+    catalog_number
+        Its catalog number (``SAT_1_ID``, ``SAT_2_ID``).
+    name
+        Its name (``SAT_1_NAME``); ``None`` if not given.
+    object_type
+        ``PAYLOAD``, ``ROCKET BODY``, ``DEBRIS``, ``UNKNOWN``, ...
+        (``SAT1_OBJECT_TYPE``); ``None`` if not given.
+    rcs_size
+        Its radar cross-section class, ``SMALL``, ``MEDIUM`` or ``LARGE``
+        (``SAT1_RCS``); ``None`` if not given.
+    exclusion_volume
+        ``SAT_1_EXCL_VOL`` as Space-Track gives it (e.g. ``5.00``); its
+        meaning and unit are not published. ``None`` if not given.
+    """
+
+    catalog_number: int
+    name: str | None
+    object_type: str | None
+    rcs_size: str | None
+    exclusion_volume: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class PublicCdm:
+    """A row of Space-Track's ``cdm_public`` class: the public summary of a
+    conjunction data message (CDM) of the 18th Space Defense Squadron.
+
+    The summary has no states, covariances or hard-body radii (the CDMs
+    themselves are for the objects' operators); it may not be redistributed
+    without Space-Track's approval.
+
+    Parameters
+    ----------
+    cdm_id
+        The CDM's number at Space-Track (``CDM_ID``).
+    created
+        When the CDM was made (``CREATED``, UTC).
+    emergency_reportable
+        Whether the approach meets 18 SDS's emergency reporting criteria
+        (``EMERGENCY_REPORTABLE``, ``Y`` or ``N``).
+    tca
+        Time of closest approach (``TCA``, UTC).
+    min_range
+        Range at TCA [m] (``MIN_RNG``, metres in the answer).
+    probability
+        Probability of collision (``PC``); ``None`` if not given.
+    object1, object2
+        The two objects (``SAT_1_*`` and ``SAT_2_*`` columns).
+    """
+
+    cdm_id: int
+    created: Time
+    emergency_reportable: bool
+    tca: Time
+    min_range: float
+    probability: float | None
+    object1: PublicCdmObject
+    object2: PublicCdmObject
+
+
+@dataclass(frozen=True, slots=True)
+class PublicCdms:
+    """Public CDM summaries as one query returned them.
+
+    Parameters
+    ----------
+    cdms
+        The rows, in Space-Track's order.
+    retrieval
+        Where and when they were downloaded.
+    """
+
+    cdms: tuple[PublicCdm, ...]
+    retrieval: Retrieval
+
+
+def read_public_cdms(data: bytes) -> tuple[PublicCdm, ...]:
+    """The rows of a Space-Track ``cdm_public`` answer in JSON.
+
+    Each row must have the 16 columns of :data:`PUBLIC_CDM_COLUMNS` (more
+    are ignored); values are JSON strings or numbers, and ``null`` or an
+    empty string is a missing value, which only the names, object types,
+    radar cross-sections, exclusion volumes and ``PC`` may be.
+
+    Raises
+    ------
+    SourceFormatError
+        If ``data`` is not UTF-8 JSON, not an array of objects, or a row
+        lacks a column or has a value that cannot be read.
+    """
+    try:
+        records: object = json.loads(data.decode("utf-8"))
+    except ValueError as exc:
+        raise SourceFormatError(
+            f"Space-Track did not send JSON ({exc}); it starts with {data[:60]!r}"
+        ) from exc
+    if not isinstance(records, list):
+        raise SourceFormatError(
+            f"Space-Track did not send an array of cdm_public rows; it starts "
+            f"with {data[:60]!r}"
+        )
+    cdms: list[PublicCdm] = []
+    for number, record in enumerate(records, start=1):
+        try:
+            cdms.append(_public_cdm(record))
+        except ValueError as exc:
+            raise SourceFormatError(f"cdm_public row {number}: {exc}") from exc
+    return tuple(cdms)
+
+
+def _public_cdm(record: object) -> PublicCdm:
+    """A ``cdm_public`` row; ``ValueError`` if it cannot be read."""
+    if not isinstance(record, dict):
+        raise ValueError(f"not a JSON object: {record!r}")
+    missing = [column for column in PUBLIC_CDM_COLUMNS if column not in record]
+    if missing:
+        raise ValueError(f"no {', '.join(missing)}")
+    values = {column: _cell(record[column], column) for column in PUBLIC_CDM_COLUMNS}
+
+    def required(column: str) -> str:
+        value = values[column]
+        if value is None:
+            raise ValueError(f"{column} is empty")
+        return value
+
+    def number(column: str) -> float:
+        value = float(required(column))
+        if not math.isfinite(value) or value < 0.0:
+            raise ValueError(f"{column} must be finite and >= 0, got {value}")
+        return value
+
+    def catalog_number(column: str) -> int:
+        value = int(required(column))
+        if value < 1:
+            raise ValueError(f"{column} must be at least 1, got {value}")
+        return value
+
+    reportable = required("EMERGENCY_REPORTABLE")
+    if reportable not in _YES_NO:
+        raise ValueError(f"EMERGENCY_REPORTABLE must be Y or N, got {reportable!r}")
+    probability = None if values["PC"] is None else number("PC")
+    if probability is not None and probability > 1.0:
+        raise ValueError(f"PC must be at most 1, got {probability}")
+    return PublicCdm(
+        cdm_id=catalog_number("CDM_ID"),
+        created=_time(required("CREATED"), "CREATED"),
+        emergency_reportable=_YES_NO[reportable],
+        tca=_time(required("TCA"), "TCA"),
+        min_range=number("MIN_RNG") * _MIN_RANGE_UNIT,
+        probability=probability,
+        object1=PublicCdmObject(
+            catalog_number=catalog_number("SAT_1_ID"),
+            name=values["SAT_1_NAME"],
+            object_type=values["SAT1_OBJECT_TYPE"],
+            rcs_size=values["SAT1_RCS"],
+            exclusion_volume=values["SAT_1_EXCL_VOL"],
+        ),
+        object2=PublicCdmObject(
+            catalog_number=catalog_number("SAT_2_ID"),
+            name=values["SAT_2_NAME"],
+            object_type=values["SAT2_OBJECT_TYPE"],
+            rcs_size=values["SAT2_RCS"],
+            exclusion_volume=values["SAT_2_EXCL_VOL"],
+        ),
+    )
+
+
+def _cell(value: object, column: str) -> str | None:
+    """A JSON value as text, without surrounding blanks; ``None`` if missing."""
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, str | int | float):
+        raise ValueError(f"{column} must be text or a number, got {value!r}")
+    text = str(value).strip()
+    return text or None
+
+
+def _time(text: str, column: str) -> Time:
+    """A UTC time in ISO 8601 (``T`` or a space between date and time)."""
+    try:
+        return Time(text.replace(" ", "T", 1), format="isot", scale="utc")
+    except ValueError as exc:
+        raise ValueError(f"{column} is not an ISO 8601 time: {text!r}") from exc
+
+
+def fetch_public_cdms(
+    *,
+    cache: Path | None = None,
+    max_age: float | None = None,
+    credentials: Credentials | None = None,
+    transport: Transport | None = None,
+    now: Callable[[], float] = time.time,
+) -> PublicCdms:
+    """The public CDM summaries of the approaches still to come
+    (:data:`PUBLIC_CDMS`), from Space-Track or its cache.
+
+    Opens a :class:`SpaceTrackClient`, calls its
+    :meth:`~SpaceTrackClient.fetch_public_cdms` and closes it (logging out).
+    The rows may not be redistributed without Space-Track's approval.
+
+    Parameters
+    ----------
+    cache
+        Cache root; :func:`~keepout.sources.cache.cache_dir` if ``None``.
+    max_age
+        Seconds a cached copy is used; 8 hours if ``None``, and not less.
+    credentials
+        The account; from the environment if ``None`` and needed.
+    transport
+        Sends the requests; a new :class:`UrllibTransport` if ``None``.
+    now
+        Gives the current Unix time [s].
+
+    Raises
+    ------
+    ValueError, RateLimited, AuthError, SourceUnavailable, SourceFormatError
+        As :meth:`SpaceTrackClient.fetch`.
+    """
+    with SpaceTrackClient(
+        credentials, cache=cache, transport=transport, now=now
+    ) as client:
+        return client.fetch_public_cdms(max_age=max_age)
 
 
 def fetch_catalog(

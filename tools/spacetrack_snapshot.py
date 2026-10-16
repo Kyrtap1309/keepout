@@ -1,0 +1,866 @@
+"""Download Space-Track's GP catalog and public CDMs once; freeze the catalog.
+
+Usage::
+
+    uv run python tools/spacetrack_snapshot.py download RAW [--cache DIR]
+    uv run python tools/spacetrack_snapshot.py build RAW [--check] [--data DIR]
+    uv run python tools/spacetrack_snapshot.py verify [--data DIR]
+    uv run python tools/spacetrack_snapshot.py compare RAW [--workers N]
+
+``download`` needs a Space-Track account (``SPACETRACK_IDENTITY`` and
+``SPACETRACK_PASSWORD``, see :mod:`keepout.sources.spacetrack`). With one
+:class:`~keepout.sources.spacetrack.SpaceTrackClient` it sends four requests,
+each once: the login, the full GP catalog
+(:data:`~keepout.sources.spacetrack.CATALOG`), the public CDM summaries of
+the approaches to come (:data:`~keepout.sources.spacetrack.PUBLIC_CDMS`) and
+the logout. Each answer is saved unchanged in the new directory ``RAW``
+(listed with its status, digest and time in :data:`RAW_INDEX`) before the
+client reads it; an answer holding the account's identity or password is
+saved with them replaced by ``<hidden>``. Nothing is retried: a second
+request to a URL, or a ``RAW`` that already holds a download, is refused.
+The client's cache (the user's, or ``--cache``) records the queries, so the
+client's limits (``gp`` once an hour, ``cdm_public`` once every 8 hours)
+also hold for the next ``download`` or ``keepout fetch``.
+
+``build`` works offline from ``RAW`` alone: it replays the saved answers to
+keepout's client (:func:`~keepout.sources.spacetrack.fetch_catalog` with a
+new, empty cache), so the catalog is read exactly as a download would be,
+and writes the committed data in ``tests/screening/spacetrack-data/``:
+
+- :data:`SNAPSHOT`: the catalog, one element set per object (the newest),
+  by catalog number, as gzipped CelesTrak CSV (the OMM keywords;
+  Space-Track's further columns are left out);
+- :data:`NOTICE` and :data:`MANIFEST`: source, citation and licence; the
+  download, counts and SHA-256 digests.
+
+``build --check`` fails instead of writing when a file is out of date;
+``verify`` checks the committed files against each other offline. Output is
+deterministic (gzip without a time stamp; a gzipped file whose contents are
+unchanged is kept as it is).
+
+``compare`` reads the public CDMs in ``RAW`` and screens, for each, its two
+objects with the catalog's element sets around Space-Track's TCA
+(:func:`compare`), printing a summary. Public CDMs, and anything derived
+from them, may not be redistributed without Space-Track's approval
+(user agreement): ``RAW`` stays on the maintainer's disk, nothing of it is
+committed, and the summary is printed, not written. Only the GP data, basic
+space situational awareness data that Space-Track allows to redistribute
+with citation, is committed.
+"""
+
+from __future__ import annotations
+
+import argparse
+import gzip
+import hashlib
+import json
+import statistics
+import sys
+import tempfile
+import time
+import zlib
+from collections import Counter
+from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import ProcessPoolExecutor
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Final, TypedDict, TypeGuard
+
+import astropy.units as u
+from generated import write_or_check
+from screening_snapshot import REGIMES, SIX_DIGITS, Regime, regime, utc_text
+
+from keepout._units import seconds_between
+from keepout.errors import SourceFormatError, SourceUnavailable
+from keepout.omm import Omm, load
+from keepout.omm.celestrak import dumps_csv, loads_csv
+from keepout.screening import ScreeningVolume, screen
+from keepout.screening.result import CloseApproach
+from keepout.sources.cache import store_bytes
+from keepout.sources.celestrak import Catalog
+from keepout.sources.spacetrack import (
+    CATALOG,
+    HIDDEN,
+    LOGIN_URL,
+    LOGOUT_URL,
+    PUBLIC_CDMS,
+    Credentials,
+    PublicCdm,
+    Request,
+    Response,
+    SpaceTrackClient,
+    Transport,
+    UrllibTransport,
+    fetch_catalog,
+    fetch_public_cdms,
+    read_catalog,
+    read_public_cdms,
+)
+
+REPO: Final = Path(__file__).resolve().parents[1]
+TOOL: Final = "tools/spacetrack_snapshot.py"
+DATA: Final = REPO / "tests/screening/spacetrack-data"
+"""Where ``build`` writes the committed data."""
+
+RAW_VARIABLE: Final = "KEEPOUT_SPACETRACK_RAW"
+"""The environment variable naming a ``RAW`` directory for the local
+validation tests (they are skipped without it)."""
+
+RAW_INDEX: Final = "raw.json"
+"""The file in ``RAW`` listing each saved answer."""
+
+RAW_FORMAT: Final = 1
+"""Version of the :data:`RAW_INDEX` layout."""
+
+RAW_FILES: Final[Mapping[str, str]] = {
+    LOGIN_URL: "login.json",
+    CATALOG.url: "gp.json",
+    PUBLIC_CDMS.url: "cdm_public.json",
+    LOGOUT_URL: "logout.json",
+}
+"""The only URLs ``download`` sends to, in order, and the file of each
+answer in ``RAW``."""
+
+SNAPSHOT: Final = "spacetrack-gp.csv.gz"
+"""The catalog: CelesTrak CSV of every object, one element set per object,
+by catalog number, gzipped."""
+
+NOTICE: Final = "NOTICE"
+"""Source, citation, retrieval time and licence of the data."""
+
+MANIFEST: Final = "manifest.json"
+"""The download, counts and the SHA-256 digest of every other file."""
+
+MANIFEST_FORMAT: Final = 1
+"""Version of the :data:`MANIFEST` layout."""
+
+REPLAY: Final = Credentials("replay", "replay")
+"""Credentials for replaying saved answers (no server sees them)."""
+
+WINDOW: Final = 600.0
+"""Time searched on each side of a public CDM's TCA [s] (:func:`compare`)."""
+
+SEARCH_RADIUS: Final = 100e3
+"""Radius of the sphere searched around the first object [m]: far beyond
+the errors of GP data, so the range minimum is found wherever it is."""
+
+
+class SavedRecord(TypedDict):
+    """A :class:`Saved` answer as JSON, in :data:`RAW_INDEX` and the manifest."""
+
+    method: str
+    url: str
+    status: int
+    file: str
+    sha256: str
+    size: int
+    retrieved: str
+    redacted: bool
+
+
+@dataclass(frozen=True, slots=True)
+class Saved:
+    """One answer saved in ``RAW``.
+
+    Parameters
+    ----------
+    method
+        The request's method, ``GET`` or ``POST``.
+    url
+        The URL it answered.
+    status
+        Its HTTP status.
+    file
+        Its file name in ``RAW``.
+    sha256
+        SHA-256 hex digest of the saved body.
+    size
+        Length of the saved body in bytes.
+    retrieved
+        When it was received, UTC, ISO 8601 with milliseconds and a ``Z``.
+    redacted
+        Whether the identity or password were replaced by ``<hidden>``.
+    """
+
+    method: str
+    url: str
+    status: int
+    file: str
+    sha256: str
+    size: int
+    retrieved: str
+    redacted: bool
+
+    def record(self) -> SavedRecord:
+        """The answer as JSON."""
+        return {
+            "method": self.method,
+            "url": self.url,
+            "status": self.status,
+            "file": self.file,
+            "sha256": self.sha256,
+            "size": self.size,
+            "retrieved": self.retrieved,
+            "redacted": self.redacted,
+        }
+
+
+class RawIndex(TypedDict):
+    """The :data:`RAW_INDEX` file."""
+
+    format: int
+    answers: list[SavedRecord]
+
+
+def read_index(raw: Path) -> tuple[Saved, ...]:
+    """The answers saved in ``raw`` (none if it has no index).
+
+    Raises
+    ------
+    ValueError
+        If the index is not one this tool wrote.
+    """
+    path = raw / RAW_INDEX
+    if not path.exists():
+        return ()
+    record: object = json.loads(path.read_text(encoding="utf-8"))
+    if not _is_raw_index(record):
+        raise ValueError(f"{path} is not a raw index of format {RAW_FORMAT}")
+    return tuple(Saved(**answer) for answer in record["answers"])
+
+
+def _is_raw_index(value: object) -> TypeGuard[RawIndex]:
+    return isinstance(value, dict) and value.get("format") == RAW_FORMAT
+
+
+def write_index(raw: Path, answers: Sequence[Saved]) -> None:
+    """Write the :data:`RAW_INDEX` file atomically."""
+    record: RawIndex = {
+        "format": RAW_FORMAT,
+        "answers": [answer.record() for answer in answers],
+    }
+    store_bytes(raw / RAW_INDEX, (json.dumps(record, indent=2) + "\n").encode())
+
+
+def read_body(raw: Path, saved: Saved) -> bytes:
+    """A saved body, checked against its digest.
+
+    Raises
+    ------
+    ValueError
+        If the file's digest is not the one listed.
+    """
+    data = (raw / saved.file).read_bytes()
+    if hashlib.sha256(data).hexdigest() != saved.sha256:
+        raise ValueError(f"{raw / saved.file} does not match its digest in {RAW_INDEX}")
+    return data
+
+
+def scrub(body: bytes, credentials: Credentials) -> bytes:
+    """``body`` with the identity and password hidden
+    (:meth:`~keepout.sources.spacetrack.Credentials.redact`); the same bytes
+    if it holds neither."""
+    text = body.decode("utf-8", "surrogateescape")
+    clean = credentials.redact(text)
+    return body if clean == text else clean.encode("utf-8", "surrogateescape")
+
+
+class Recorder:
+    """A transport that sends each of :data:`RAW_FILES`'s URLs at most once
+    and saves every answer in ``raw`` before returning it.
+
+    Parameters
+    ----------
+    transport
+        Sends the requests.
+    raw
+        The directory; created when the first answer is saved.
+    credentials
+        The account, hidden in the saved answers.
+    clock
+        The current Unix time.
+    """
+
+    def __init__(
+        self,
+        transport: Transport,
+        raw: Path,
+        credentials: Credentials,
+        clock: Callable[[], float] = time.time,
+    ) -> None:
+        self.transport = transport
+        self.raw = raw
+        self.credentials = credentials
+        self.clock = clock
+        self.saved: dict[str, Saved] = {}
+        self.sent: set[str] = set()
+
+    def __call__(self, request: Request, /) -> Response:
+        """Send ``request`` once and save its answer.
+
+        Raises
+        ------
+        SourceUnavailable
+            If the URL is not one of :data:`RAW_FILES` or was sent before
+            (nothing is sent).
+        """
+        name = RAW_FILES.get(request.url)
+        if name is None:
+            raise SourceUnavailable(f"{TOOL} does not send to {request.url}")
+        if request.url in self.sent:
+            raise SourceUnavailable(
+                f"{TOOL} sends each request once; {request.url} was sent already"
+            )
+        self.sent.add(request.url)
+        response = self.transport(request)
+        body = scrub(response.body, self.credentials)
+        digest = store_bytes(self.raw / name, body)
+        self.saved[request.url] = Saved(
+            method=request.method,
+            url=request.url,
+            status=response.status,
+            file=name,
+            sha256=digest,
+            size=len(body),
+            retrieved=utc_text(self.clock()),
+            redacted=body != response.body,
+        )
+        write_index(self.raw, tuple(self.saved.values()))
+        return response
+
+
+class Replay:
+    """A transport answering from the answers saved in ``raw`` (offline).
+
+    Raises
+    ------
+    ValueError
+        If ``raw`` has no index, or a saved body does not match its digest.
+    """
+
+    def __init__(self, raw: Path) -> None:
+        self.raw = raw
+        self.saved = {saved.url: saved for saved in read_index(raw)}
+        if not self.saved:
+            raise ValueError(f"no answers saved in {raw}")
+
+    def __call__(self, request: Request, /) -> Response:
+        """The saved answer to ``request``.
+
+        Raises
+        ------
+        SourceUnavailable
+            If no answer to its URL is saved.
+        """
+        saved = self.saved.get(request.url)
+        if saved is None:
+            raise SourceUnavailable(f"{request.url} is not saved in {self.raw}")
+        return Response(saved.status, read_body(self.raw, saved))
+
+
+def download(
+    raw: Path,
+    *,
+    cache: Path | None = None,
+    credentials: Credentials | None = None,
+    transport: Transport | None = None,
+    clock: Callable[[], float] = time.time,
+) -> tuple[Saved, ...]:
+    """Send the four requests of :data:`RAW_FILES` once, saving the answers.
+
+    Parameters
+    ----------
+    raw
+        A directory without a download; created.
+    cache
+        The client's cache root (its request record keeps the limits);
+        the user's if ``None``.
+    credentials
+        The account; from the environment if ``None``.
+    transport
+        Sends the requests; a new
+        :class:`~keepout.sources.spacetrack.UrllibTransport` if ``None``.
+    clock
+        The current Unix time.
+
+    Returns
+    -------
+    tuple[Saved, ...]
+        The saved answers, in the order received.
+
+    Raises
+    ------
+    ValueError
+        If ``raw`` already holds a download, or a query was answered from the
+        client's cache instead of Space-Track (nothing more is sent).
+    RateLimited, AuthError, SourceUnavailable, SourceFormatError
+        As :meth:`~keepout.sources.spacetrack.SpaceTrackClient.fetch`; the
+        answers received so far are saved.
+    """
+    if (raw / RAW_INDEX).exists():
+        raise ValueError(
+            f"{raw} already holds a download; Space-Track data is downloaded "
+            "once, into a new directory"
+        )
+    if credentials is None:
+        credentials = Credentials.from_env()
+    recorder = Recorder(
+        UrllibTransport() if transport is None else transport,
+        raw,
+        credentials,
+        clock,
+    )
+    with SpaceTrackClient(
+        credentials, cache=cache, transport=recorder, now=clock
+    ) as client:
+        for query in (CATALOG, PUBLIC_CDMS):
+            # The answer is read after the download, from RAW.
+            _, retrieval = client.fetch(query, bytes)
+            if query.url not in recorder.saved:
+                raise ValueError(
+                    f"{query.url} was answered from the cache "
+                    f"({retrieval.path}); download into a new cache"
+                )
+    return tuple(recorder.saved.values())
+
+
+def saved_answer(raw: Path, url: str) -> bytes:
+    """The body of the answer to ``url`` saved in ``raw``.
+
+    Raises
+    ------
+    ValueError
+        If no answer to ``url`` is saved, or the body does not match its
+        digest.
+    """
+    for saved in read_index(raw):
+        if saved.url == url:
+            return read_body(raw, saved)
+    raise ValueError(f"no answer to {url} in {raw}")
+
+
+def replay_catalog(raw: Path) -> Catalog:
+    """The catalog, read by keepout's client from the answers in ``raw``."""
+    with tempfile.TemporaryDirectory() as cache:
+        return fetch_catalog(
+            cache=Path(cache), credentials=REPLAY, transport=Replay(raw)
+        )
+
+
+def replay_public_cdms(raw: Path) -> tuple[PublicCdm, ...]:
+    """The public CDMs, read by keepout's client from the answers in ``raw``."""
+    with tempfile.TemporaryDirectory() as cache:
+        return fetch_public_cdms(
+            cache=Path(cache), credentials=REPLAY, transport=Replay(raw)
+        ).cdms
+
+
+class CatalogSummary(TypedDict):
+    """What the manifest records of the catalog."""
+
+    rows: int
+    duplicates: int
+    objects: int
+    six_digit: int
+    regimes: dict[Regime, int]
+    oldest_epoch: str
+    newest_epoch: str
+
+
+class FileDigest(TypedDict):
+    """Length and SHA-256 hex digest of a committed file as stored."""
+
+    bytes: int
+    sha256: str
+
+
+class Manifest(TypedDict):
+    """The :data:`MANIFEST` file."""
+
+    format: int
+    download: SavedRecord
+    catalog: CatalogSummary
+    files: dict[str, FileDigest]
+
+
+@dataclass(frozen=True, slots=True)
+class Inputs:
+    """What the committed files are made from.
+
+    Parameters
+    ----------
+    download
+        The saved ``gp`` answer.
+    rows
+        Element sets in it.
+    duplicates
+        Element sets left out because the object has a newer one.
+    omms
+        The catalog, one element set per object, by catalog number.
+    """
+
+    download: Saved
+    rows: int
+    duplicates: int
+    omms: tuple[Omm, ...]
+
+
+def inputs_from_raw(raw: Path) -> Inputs:
+    """The inputs, from the answers saved in ``raw`` (no network).
+
+    Raises
+    ------
+    ValueError
+        If ``raw`` has no ``gp`` answer, or the catalog would not read back
+        from CSV as the same element sets.
+    """
+    catalog = replay_catalog(raw)
+    if loads_csv(dumps_csv(catalog.omms)) != catalog.omms:
+        raise ValueError("the catalog does not read back unchanged from CSV")
+    (gp,) = (saved for saved in read_index(raw) if saved.url == CATALOG.url)
+    return Inputs(
+        download=gp,
+        rows=len(catalog.groups[0].omms),
+        duplicates=len(catalog.duplicates),
+        omms=catalog.omms,
+    )
+
+
+def read_manifest(data: Path) -> Manifest:
+    """The :data:`MANIFEST` in ``data``."""
+    manifest: Manifest = json.loads((data / MANIFEST).read_text(encoding="utf-8"))
+    return manifest
+
+
+def inputs_from_data(data: Path) -> Inputs:
+    """The inputs, from the committed catalog and what only the manifest
+    records (the download, the rows and duplicates)."""
+    manifest = read_manifest(data)
+    return Inputs(
+        download=Saved(**manifest["download"]),
+        rows=manifest["catalog"]["rows"],
+        duplicates=manifest["catalog"]["duplicates"],
+        omms=load(data / SNAPSHOT),
+    )
+
+
+def render_notice(inputs: Inputs) -> str:
+    """The NOTICE: the data's source, citation, retrieval time and licence."""
+    retrieved = inputs.download.retrieved[:19].replace("T", " ")
+    return (
+        "Data: USSPACECOM/18 SDS via Space-Track.org (www.space-track.org),\n"
+        f"retrieved on {retrieved[:10]}.\n"
+        "\n"
+        f"Retrieved {retrieved} UTC by tools/spacetrack_snapshot.py with\n"
+        "Space-Track's recommended query for the GP catalog (see manifest.json):\n"
+        "\n"
+        f"- {SNAPSHOT}: the GP element sets of every object not decayed\n"
+        "  with an epoch in the 10 days before, one (the newest) per object, by\n"
+        "  catalog number, as gzipped CelesTrak CSV (the OMM keywords).\n"
+        "\n"
+        f"{MANIFEST} lists the URL, retrieval time, counts and SHA-256\n"
+        "digests.\n"
+        "\n"
+        "This is basic space situational awareness data, which the\n"
+        "Space-Track.org user agreement allows to redistribute with the\n"
+        "citation above. It is not covered by keepout's MIT licence.\n"
+    )
+
+
+def contents(inputs: Inputs) -> dict[str, bytes]:
+    """Every committed file but the manifest, uncompressed, by name."""
+    return {
+        SNAPSHOT: dumps_csv(inputs.omms).encode(),
+        NOTICE: render_notice(inputs).encode(),
+    }
+
+
+def render_manifest(inputs: Inputs, files: Mapping[str, bytes]) -> str:
+    """The manifest: the download, counts and file digests.
+
+    Parameters
+    ----------
+    inputs
+        What the files are made from.
+    files
+        The stored bytes of every other committed file, by name.
+    """
+    omms = inputs.omms
+    regimes = Counter(regime(omm) for omm in omms)
+    manifest: Manifest = {
+        "format": MANIFEST_FORMAT,
+        "download": inputs.download.record(),
+        "catalog": {
+            "rows": inputs.rows,
+            "duplicates": inputs.duplicates,
+            "objects": len(omms),
+            "six_digit": sum(omm.catalog_number >= SIX_DIGITS for omm in omms),
+            "regimes": {name: regimes[name] for name in REGIMES},
+            "oldest_epoch": min(omm.epoch for omm in omms).isot,
+            "newest_epoch": max(omm.epoch for omm in omms).isot,
+        },
+        "files": {
+            name: {"bytes": len(stored), "sha256": hashlib.sha256(stored).hexdigest()}
+            for name, stored in files.items()
+        },
+    }
+    return json.dumps(manifest, indent=2) + "\n"
+
+
+def stored_files(data: Path, inputs: Inputs) -> dict[str, bytes]:
+    """The bytes every committed file should hold, the manifest last.
+
+    A gzipped file already in ``data`` with the right contents is kept as it
+    is, so a different zlib build does not change a file whose data did not.
+    """
+    files: dict[str, bytes] = {}
+    for name, content in contents(inputs).items():
+        path = data / name
+        if name != SNAPSHOT:
+            files[name] = content
+        elif path.exists() and _gunzip(path.read_bytes()) == content:
+            files[name] = path.read_bytes()
+        else:
+            files[name] = gzip.compress(content, compresslevel=9, mtime=0)
+    files[MANIFEST] = render_manifest(inputs, files).encode()
+    return files
+
+
+def _gunzip(data: bytes) -> bytes | None:
+    try:
+        return gzip.decompress(data)
+    except (OSError, EOFError, zlib.error):
+        return None
+
+
+@dataclass(frozen=True, slots=True)
+class Match:
+    """A public CDM and keepout's nearest approach of the same two objects.
+
+    Parameters
+    ----------
+    cdm
+        The public CDM.
+    tca_difference
+        keepout's TCA minus Space-Track's [s]; ``None`` if keepout found no
+        range minimum within :data:`WINDOW` of Space-Track's TCA.
+    miss_distance
+        keepout's range at its TCA [m]; ``None`` likewise.
+    """
+
+    cdm: PublicCdm
+    tca_difference: float | None
+    miss_distance: float | None
+
+
+def nearest_approach(cdm: PublicCdm, first: Omm, second: Omm) -> Match:
+    """The approach of the CDM's two objects keepout finds nearest its TCA.
+
+    The two objects are screened with each other from :data:`WINDOW` before
+    to :data:`WINDOW` after the CDM's TCA, in a :data:`SEARCH_RADIUS` sphere.
+    """
+    start = cdm.tca - WINDOW * u.s
+    result = screen(
+        [first],
+        [second],
+        start,
+        2 * WINDOW,
+        ScreeningVolume.sphere(SEARCH_RADIUS),
+    )
+    differences = [
+        (seconds_between(cdm.tca, approach.tca), approach)
+        for approach in result.approaches
+    ]
+    if not differences:
+        return Match(cdm, None, None)
+    difference, approach = min(differences, key=_by_size)
+    return Match(cdm, difference, approach.miss_distance)
+
+
+def _by_size(item: tuple[float, CloseApproach]) -> float:
+    return abs(item[0])
+
+
+def _nearest(job: tuple[PublicCdm, Omm, Omm]) -> Match:
+    return nearest_approach(*job)
+
+
+@dataclass(frozen=True, slots=True)
+class Comparison:
+    """Public CDMs compared with keepout's screening of the same pairs.
+
+    Parameters
+    ----------
+    matches
+        The CDMs whose two objects are in the catalog, in the CDMs' order.
+    outside_catalog
+        The CDMs with an object not in the catalog.
+    """
+
+    matches: tuple[Match, ...]
+    outside_catalog: int
+
+
+def compare(
+    cdms: Sequence[PublicCdm], omms: Sequence[Omm], *, workers: int = 1
+) -> Comparison:
+    """Screen the two objects of every public CDM with the catalog's
+    element sets around its TCA (:func:`nearest_approach`).
+
+    Parameters
+    ----------
+    cdms
+        The public CDMs.
+    omms
+        The catalog, one element set per object.
+    workers
+        Processes to screen in; 1 screens in this one.
+    """
+    by_number = {omm.catalog_number: omm for omm in omms}
+    jobs = [
+        (
+            cdm,
+            by_number[cdm.object1.catalog_number],
+            by_number[cdm.object2.catalog_number],
+        )
+        for cdm in cdms
+        if cdm.object1.catalog_number in by_number
+        and cdm.object2.catalog_number in by_number
+    ]
+    if workers == 1:
+        matches = [_nearest(job) for job in jobs]
+    else:
+        with ProcessPoolExecutor(workers) as pool:
+            matches = list(pool.map(_nearest, jobs, chunksize=16))
+    return Comparison(tuple(matches), len(cdms) - len(jobs))
+
+
+class Spread(TypedDict):
+    """Median and 90th percentile of a quantity; ``None`` without values."""
+
+    median: float | None
+    p90: float | None
+
+
+class ComparisonSummary(TypedDict):
+    """What :func:`summarise` reports of a comparison."""
+
+    cdms: int
+    outside_catalog: int
+    compared: int
+    found: int
+    tca_difference: Spread
+    """Of |keepout's TCA - Space-Track's| [s]."""
+    range_difference: Spread
+    """Of |keepout's range - MIN_RNG| [m]."""
+    range_ratio: Spread
+    """Of MIN_RNG [m] / keepout's range: of order 1 (below 1, GP data's
+    errors lengthening keepout's ranges), not 1000 as if MIN_RNG were in
+    kilometres."""
+
+
+def spread(values: Sequence[float]) -> Spread:
+    """The median and 90th percentile of ``values``."""
+    if not values:
+        return {"median": None, "p90": None}
+    ordered = sorted(values)
+    return {
+        "median": statistics.median(ordered),
+        "p90": ordered[min(len(ordered) - 1, (9 * len(ordered)) // 10)],
+    }
+
+
+def summarise(comparison: Comparison) -> ComparisonSummary:
+    """Counts, and how keepout's approaches differ from the public CDMs."""
+    found = [
+        (match, match.tca_difference, match.miss_distance)
+        for match in comparison.matches
+        if match.tca_difference is not None and match.miss_distance is not None
+    ]
+    return {
+        "cdms": len(comparison.matches) + comparison.outside_catalog,
+        "outside_catalog": comparison.outside_catalog,
+        "compared": len(comparison.matches),
+        "found": len(found),
+        "tca_difference": spread([abs(dt) for _, dt, _ in found]),
+        "range_difference": spread(
+            [abs(miss - match.cdm.min_range) for match, _, miss in found]
+        ),
+        "range_ratio": spread(
+            [match.cdm.min_range / miss for match, _, miss in found if miss > 0.0]
+        ),
+    }
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Download the answers, build the data from them, verify it, or compare.
+
+    Returns
+    -------
+    int
+        0 on success; 1 if ``build --check`` or ``verify`` found a file out
+        of date, or ``download`` saved an answer keepout cannot read.
+    """
+    parser = argparse.ArgumentParser(prog=TOOL)
+    commands = parser.add_subparsers(dest="command", required=True)
+    get = commands.add_parser(
+        "download", help="send the four requests once, saving the answers in RAW"
+    )
+    get.add_argument("raw", type=Path)
+    get.add_argument("--cache", type=Path, default=None)
+    build = commands.add_parser("build", help="write the data from the answers in RAW")
+    build.add_argument("raw", type=Path)
+    build.add_argument("--check", action="store_true", help="fail if out of date")
+    build.add_argument("--data", type=Path, default=DATA)
+    verify = commands.add_parser(
+        "verify", help="check the committed files against each other (offline)"
+    )
+    verify.add_argument("--data", type=Path, default=DATA)
+    check = commands.add_parser(
+        "compare", help="compare the public CDMs in RAW with keepout (offline)"
+    )
+    check.add_argument("raw", type=Path)
+    check.add_argument("--workers", type=int, default=1)
+    args = parser.parse_args(argv)
+    if args.command == "download":
+        return _download(args.raw, args.cache)
+    if args.command == "compare":
+        comparison = compare(
+            replay_public_cdms(args.raw),
+            replay_catalog(args.raw).omms,
+            workers=args.workers,
+        )
+        print(json.dumps(summarise(comparison), indent=2))
+        return 0
+    if args.command == "build":
+        inputs, checking = inputs_from_raw(args.raw), args.check
+    else:
+        inputs, checking = inputs_from_data(args.data), True
+    files = stored_files(args.data, inputs)
+    return write_or_check(
+        {args.data / name: stored for name, stored in files.items()},
+        check=checking,
+        tool=f"{TOOL} build",
+    )
+
+
+def _download(raw: Path, cache: Path | None) -> int:
+    """``download``: save the answers, then read them from ``raw``."""
+    for saved in download(raw, cache=cache):
+        hidden = f" ({HIDDEN} credentials)" if saved.redacted else ""
+        print(
+            f"{saved.method} {saved.url}: HTTP {saved.status}, "
+            f"{saved.size} bytes in {saved.file}{hidden}"
+        )
+    try:
+        omms = read_catalog(saved_answer(raw, CATALOG.url))
+        cdms = read_public_cdms(saved_answer(raw, PUBLIC_CDMS.url))
+    except SourceFormatError as exc:
+        print(f"saved, but keepout cannot read it: {exc}")
+        return 1
+    print(f"{len(omms)} element sets, {len(cdms)} public CDMs")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
