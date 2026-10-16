@@ -7,13 +7,14 @@ from typing import NamedTuple
 
 from rich.table import Table
 
-from keepout.cdm import CdmObject
+from keepout.cdm import Cdm, CdmObject
 from keepout.cli.output import JsonValue, minute, table
 from keepout.risk import Action, Assessment, ConjunctionEvent, PcObservation
 
 __all__ = [
     "AssessedEvent",
     "action_name",
+    "assumed_covariances",
     "event_json",
     "events_table",
     "reasons",
@@ -30,6 +31,20 @@ class AssessedEvent(NamedTuple):
 def action_name(action: Action) -> str:
     """The action in words, e.g. ``prepare manoeuvre``."""
     return action.name.lower().replace("_", " ")
+
+
+def _assumed(cdm: Cdm) -> bool:
+    return any(
+        o.section.get("COVARIANCE_METHOD") == "DEFAULT"
+        for o in (cdm.object1, cdm.object2)
+    )
+
+
+def assumed_covariances(item: AssessedEvent) -> bool:
+    """Whether a CDM of the event has an object whose covariance is assumed
+    (``COVARIANCE_METHOD = DEFAULT``), not from orbit determination: its Pc
+    then rests on a model."""
+    return any(_assumed(cdm) for cdm in item.event.cdms)
 
 
 def _level(item: AssessedEvent) -> str | None:
@@ -117,4 +132,5 @@ def event_json(item: AssessedEvent) -> dict[str, JsonValue]:
         "reasons": list(decision.reasons),
         "notes": list(trend.notes),
         "observations": [_observation_json(o) for o in trend.observations],
+        "assumed_covariances": assumed_covariances(item),
     }

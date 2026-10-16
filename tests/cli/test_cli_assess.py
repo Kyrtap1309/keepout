@@ -41,8 +41,12 @@ def test_assess_prints_each_event_and_why(tmp_path: Path) -> None:
     assert lines[3].split()[-4:] == ["1", "4.37e-08", "green", "ignore"]
     assert lines[4].split()[-4:] == ["1", "7.38e-06", "yellow", "monitor"]
     assert lines[5] == "2 events from 2 CDMs: 1 monitor, 1 ignore."
-    assert lines[6].startswith("44476/55841/2026-10-08T12:03:02.771792: monitor (")
-    assert len(lines) == 7
+    assert lines[6] == (
+        "2 of 2 events rest on assumed covariances (COVARIANCE_METHOD = DEFAULT), "
+        "not orbit determination."
+    )
+    assert lines[7].startswith("44476/55841/2026-10-08T12:03:02.771792: monitor (")
+    assert len(lines) == 8
 
 
 def test_assess_exits_with_3_when_an_event_needs_a_manoeuvre(tmp_path: Path) -> None:
@@ -54,7 +58,7 @@ def test_assess_exits_with_3_when_an_event_needs_a_manoeuvre(tmp_path: Path) -> 
     assert lines[3].split()[-4:] == ["1", "4.25e-02", "red", "manoeuvre"]
     assert lines[4].split()[-3:] == ["1.73e-02", "red", "prepare"]
     assert lines[6] == "2 events from 2 CDMs: 1 manoeuvre, 1 prepare manoeuvre."
-    assert lines[7].startswith(
+    assert lines[8].startswith(
         "52939/47826/2026-10-06T19:36:42.717332: manoeuvre (latest Pc 4.25e-02 "
         "is red, 0.82 d before TCA; trend undetermined; within the decision "
         "point (2.00 d before TCA))"
@@ -189,11 +193,11 @@ def test_assess_shows_a_pc_that_failed_or_is_missing(tmp_path: Path) -> None:
     assert lines[3].split()[-4:] == ["1", "failed", "-", "monitor"]
     assert lines[4].split()[-4:] == ["1", "-", "-", "monitor"]
     assert lines[5] == "2 events from 2 CDMs: 2 monitor."
-    assert lines[6].endswith(
+    assert lines[7].endswith(
         "monitor (latest observation has no Pc: GeometryError: relative "
         "velocity is zero: the encounter plane is undefined)"
     )
-    assert lines[7].endswith(
+    assert lines[8].endswith(
         "monitor (no observation before TCA: nothing to decide on)"
     )
     payload = json.loads(keepout("assess", late, "--json").stdout)
@@ -206,3 +210,30 @@ def test_assess_shows_a_pc_that_failed_or_is_missing(tmp_path: Path) -> None:
 def test_assess_counts_in_the_singular(tmp_path: Path) -> None:
     result = keepout("assess", write(tmp_path, "green.kvn", GREEN))
     assert "1 event from 1 CDM: 1 ignore." in result.stdout
+
+
+def test_assess_labels_events_whose_covariances_are_assumed(tmp_path: Path) -> None:
+    calculated = YELLOW.replace(
+        "COVARIANCE_METHOD              = DEFAULT",
+        "COVARIANCE_METHOD              = CALCULATED",
+    )
+    assert "= DEFAULT" not in calculated
+    files = [
+        write(tmp_path, "green.kvn", GREEN),
+        write(tmp_path, "yellow.kvn", calculated),
+    ]
+    result = keepout("assess", *files, "--hbr", "1000")
+    assert result.exit_code == ExitCode.MANOEUVRE
+    assert (
+        "1 of 2 events rests on assumed covariances (COVARIANCE_METHOD = "
+        "DEFAULT), not orbit determination."
+    ) in result.stdout.splitlines()
+    as_json = keepout("assess", *files, "--hbr", "1000", "--json")
+    assert as_json.exit_code == ExitCode.MANOEUVRE
+    payload = json.loads(as_json.stdout)
+    assert payload["assumed_covariances"] == 1
+    assert [e["assumed_covariances"] for e in payload["events"]] == [True, False]
+    only = keepout("assess", files[1], "--hbr", "1000")
+    assert "assumed covariances" not in only.stdout
+    payload = json.loads(keepout("assess", files[1], "--json").stdout)
+    assert payload["assumed_covariances"] == 0

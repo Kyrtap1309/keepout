@@ -86,6 +86,9 @@ keepout assess cdms/*.kvn --hbr 1000  # a 1 km hard body: exit status 3
 With a combined hard-body radius of 1 km instead of each CDM's `HBR`, the
 second prints `12 events from 12 CDMs: 2 manoeuvre, 4 prepare manoeuvre,
 1 monitor, 5 ignore.` and ends with status 3, so a script can act on it.
+The next line, `12 of 12 events rest on assumed covariances
+(COVARIANCE_METHOD = DEFAULT), not orbit determination.`, is the reminder
+that these decisions rest on keepout's covariance model.
 
 On live data, download the catalog and screen from now on:
 
@@ -164,7 +167,15 @@ the latest CDM's creation date.
   sum of both objects' `HBR` (CDM 2.0), and a CDM without them is an error:
   keepout never falls back to a default radius.
 
-The exit status is 3 when at least one event's action is `manoeuvre`.
+A CDM object whose `COVARIANCE_METHOD` is `DEFAULT` has an assumed
+covariance, not one from orbit determination; keepout's synthetic operator
+writes all its CDMs so. `assess` counts the events with such a CDM in a
+line below the counts, e.g. `1 of 2 events rests on assumed covariances
+(COVARIANCE_METHOD = DEFAULT), not orbit determination.`, so that a Pc from
+a model is not taken for one from tracking.
+
+The exit status is 3 when at least one event's action is `manoeuvre`,
+whether or not its covariances are assumed.
 
 ## `validate`
 
@@ -196,6 +207,9 @@ errors still go to standard error with the same exit status. `screen` and
 `trend`, `action` (`ignore`, `monitor`, `prepare_manoeuvre` or
 `manoeuvre`), `reasons`, `notes` and `observations` (each CDM's
 `message_id`, `time_to_tca` [s], `pc`, `method`, `error`, `reported_pc`
-and `diagnostics`). `screen` adds each approach's `relative_speed` [m/s]
-and `cdm_file`, and lists the element sets it `skipped` with the reason;
+and `diagnostics`) and `assumed_covariances` (true when a CDM of the event
+has an object with `COVARIANCE_METHOD = DEFAULT`). Both commands also give
+`assumed_covariances` at the top: the number of such events, every event
+for `screen`. `screen` adds each approach's `relative_speed` [m/s] and
+`cdm_file`, and lists the element sets it `skipped` with the reason;
 `assess` adds `manoeuvre` (true when it exits with status 3).

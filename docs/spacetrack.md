@@ -34,8 +34,17 @@ loaded into the environment of the command that needs it:
 mkdir -p ~/.config/keepout
 install -m 600 /dev/null ~/.config/keepout/spacetrack.env  # readable by you only
 "$EDITOR" ~/.config/keepout/spacetrack.env  # SPACETRACK_IDENTITY=... and SPACETRACK_PASSWORD=...
-(set -a; . ~/.config/keepout/spacetrack.env; set +a; keepout fetch catalog --source spacetrack)
+(while IFS= read -r line || [ -n "$line" ]; do export "$line"; done \
+    < ~/.config/keepout/spacetrack.env
+ keepout fetch catalog --source spacetrack)
 ```
+
+The file holds the two lines `SPACETRACK_IDENTITY=...` and
+`SPACETRACK_PASSWORD=...` and nothing else, the values written as they are,
+without quotes. The loop exports each line exactly as written, so a password
+with `$`, `` ` ``, `#`, quotes or spaces arrives unchanged. Do not load the
+file with `.` or `source`: the shell would read it as code, change or cut
+such a password (the login is then refused) and even run a `$(...)` in it.
 
 keepout never writes the credentials anywhere and never shows them: they
 are hidden in `repr`, and any text from the server quoted in an error has

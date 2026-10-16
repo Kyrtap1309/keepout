@@ -2,7 +2,7 @@
 
 Space-Track.org (https://www.space-track.org) is where the 18th Space
 Defense Squadron publishes its general perturbations (GP) element sets, for
-every tracked object in orbit: about 30 000, against the 20 000 of
+every tracked object in orbit: about 32 000, against the 20 000 of
 CelesTrak's public groups (:mod:`keepout.sources.celestrak`). It needs a
 free account. :func:`fetch_catalog` downloads the catalog with the query
 Space-Track recommends for it (:data:`CATALOG`: element sets of objects not

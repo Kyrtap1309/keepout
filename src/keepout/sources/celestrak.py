@@ -4,7 +4,7 @@ CelesTrak (https://celestrak.org) republishes the general perturbations (GP)
 element sets of the 18th Space Defense Squadron from Space-Track.org in
 groups; there is no single query for every object. The groups of
 :data:`PUBLIC_GROUPS` together form the public catalog, about 20 000
-objects: not the whole catalog of about 30 000, as most rocket bodies and
+objects: not the whole catalog of about 32 000, as most rocket bodies and
 debris are in no group (the full catalog is Space-Track's ``gp`` query,
 :func:`keepout.sources.spacetrack.fetch_catalog`, which needs an account).
 Element sets are fetched as CSV (one OMM keyword per column), a third of the

@@ -13,6 +13,7 @@ from keepout import cdm
 from keepout.cli.events import (
     AssessedEvent,
     action_name,
+    assumed_covariances,
     event_json,
     events_table,
     reasons,
@@ -123,9 +124,11 @@ def assess_command(
         fail(str(exc))
     actions = Counter(item.assessment.decision.action for item in assessed)
     manoeuvre = actions[Action.MANOEUVRE] > 0
+    assumed = sum(assumed_covariances(item) for item in assessed)
     payload: dict[str, JsonValue] = {
         "cdms": len(messages),
         "events": [event_json(item) for item in assessed],
+        "assumed_covariances": assumed,
         "manoeuvre": manoeuvre,
     }
     counted = ", ".join(
@@ -135,8 +138,14 @@ def assess_command(
     text = [
         f"{plural(len(assessed), 'event')} from {plural(len(messages), 'CDM')}: "
         f"{counted}.",
-        *reasons(assessed, Action.MONITOR),
     ]
+    if assumed:
+        text.append(
+            f"{assumed} of {plural(len(assessed), 'event')} "
+            f"{'rests' if assumed == 1 else 'rest'} on assumed covariances "
+            "(COVARIANCE_METHOD = DEFAULT), not orbit determination."
+        )
+    text += reasons(assessed, Action.MONITOR)
     if manoeuvre:
         text.append("At least one event needs a manoeuvre (exit status 3).")
     show(

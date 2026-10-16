@@ -2,6 +2,10 @@ site_name: keepout
 site_description: Spacecraft conjunction assessment in Python
 copyright: Copyright &copy; 2026 Patryk Niczke — MIT licence
 
+# Local working notes (git-ignored), never part of the site.
+exclude_docs: |
+  superpowers/
+
 theme:
   name: material
   features:

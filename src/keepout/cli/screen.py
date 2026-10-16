@@ -14,6 +14,7 @@ from keepout._units import DAY
 from keepout.cdm import kvn
 from keepout.cli.events import (
     AssessedEvent,
+    assumed_covariances,
     event_json,
     events_table,
     reasons,
@@ -167,6 +168,7 @@ def screen_command(
         "start": screening.start.utc.isot,
         "end": screening.end.utc.isot,
         "events": [_event_json(e, files) for e in result.events],
+        "assumed_covariances": sum(assumed_covariances(e) for e in assessed),
         "skipped": [_skipped_json(s) for s in screening.skipped],
         "cdm_dir": None if cdm_dir is None else str(cdm_dir),
     }

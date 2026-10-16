@@ -24,7 +24,7 @@ class CatalogSource(enum.StrEnum):
     CELESTRAK = "celestrak"
     """CelesTrak's public groups: no account, about 20 000 objects."""
     SPACETRACK = "spacetrack"
-    """Space-Track's full catalog: an account, about 30 000 objects."""
+    """Space-Track's full catalog: an account, about 32 000 objects."""
 
 
 JsonFlag: TypeAlias = Annotated[

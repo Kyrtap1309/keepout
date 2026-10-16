@@ -139,6 +139,14 @@ def test_screen_prints_json(tmp_path: Path) -> None:
     assert second["level"] == "yellow"
 
 
+def test_screen_json_says_the_covariances_are_assumed(tmp_path: Path) -> None:
+    result = keepout(*screen_fixture(tmp_path, "--json"))
+    assert result.exit_code == ExitCode.OK
+    payload = json.loads(result.stdout)
+    assert payload["assumed_covariances"] == len(payload["events"]) == 2
+    assert all(event["assumed_covariances"] for event in payload["events"])
+
+
 def test_screens_on_two_days_issue_successive_cdms_of_each_event(
     tmp_path: Path,
 ) -> None:

@@ -107,7 +107,7 @@ def fetch_catalog(
 
     From CelesTrak (default): its public groups, about 20 000 objects, no
     account; a copy is reused for 2 hours (CelesTrak's update interval).
-    From Space-Track: the full catalog, about 30 000 objects, with the
+    From Space-Track: the full catalog, about 32 000 objects, with the
     account in SPACETRACK_IDENTITY and SPACETRACK_PASSWORD; a copy is
     reused for an hour, and Space-Track is asked at most once an hour.
     The data is basic SSA data of USSPACECOM (18th Space Defense
