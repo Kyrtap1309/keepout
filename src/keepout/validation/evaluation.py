@@ -13,12 +13,14 @@ from keepout.validation.cases import ValidationCase
 from keepout.validation.criteria import Verdict
 
 __all__ = [
+    "MethodSummary",
     "Outcome",
     "Verdict",
     "confidence_interval",
     "evaluate",
     "judge",
     "run",
+    "summarise",
 ]
 
 
@@ -112,3 +114,55 @@ def evaluate(cases: Iterable[ValidationCase], *, workers: int = 1) -> list[Outco
 def _outcome(task: tuple[ValidationCase, Method]) -> Outcome:
     case, method = task
     return Outcome(case, run(case, method))
+
+
+@dataclass(frozen=True, slots=True)
+class MethodSummary:
+    """One method on the cases of one suite: how many passed, the worst error.
+
+    Parameters
+    ----------
+    suite
+        The suite (:attr:`~keepout.validation.cases.ValidationCase.suite`).
+    method
+        The keepout method.
+    passed
+        Cases whose criterion the method meets.
+    total
+        Cases the method ran on.
+    worst_relative_error
+        Largest relative error among the cases judged by a relative bound;
+        ``None`` if none is.
+    """
+
+    suite: str
+    method: Method
+    passed: int
+    total: int
+    worst_relative_error: float | None
+
+
+def summarise(outcomes: Iterable[Outcome]) -> tuple[MethodSummary, ...]:
+    """Per suite and method, the cases passed and the worst relative error.
+
+    Suites are in the order they first appear, and so are the methods
+    within a suite (the order of the summary in ``docs/validation.md``).
+    """
+    suites: dict[str, dict[Method, list[Outcome]]] = {}
+    for outcome in outcomes:
+        methods = suites.setdefault(outcome.case.suite, {})
+        methods.setdefault(outcome.result.method, []).append(outcome)
+    return tuple(
+        MethodSummary(
+            suite,
+            method,
+            sum(o.passed for o in members),
+            len(members),
+            max(
+                (o.verdict.error for o in members if o.verdict.relative),
+                default=None,
+            ),
+        )
+        for suite, methods in suites.items()
+        for method, members in methods.items()
+    )

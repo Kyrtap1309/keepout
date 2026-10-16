@@ -23,7 +23,13 @@ dependencies = [
     "sgp4>=2.27",
 ]
 
+[project.scripts]
+keepout = "keepout.cli:main"
+
 [project.optional-dependencies]
+cli = [
+    "typer>=0.27.2",
+]
 validation = [
     "openpyxl>=3.1.5",
     "xlrd>=2.0.2",
@@ -113,7 +119,7 @@ markers = [
 
 [tool.coverage.run]
 source = ["keepout", "tools"]
-omit = ["*/keepout/cli/*", "*/keepout/dashboard/*"]
+omit = ["*/keepout/dashboard/*"]
 
 [tool.coverage.report]
 fail_under = 90
@@ -125,7 +131,7 @@ dev = [
     "codespell>=2.4.3",
     "hypothesis>=6.168.1",
     "import-linter>=2.15",
-    "keepout[validation]",
+    "keepout[cli,validation]",
     "matplotlib>=3.11.2",
     "mkdocs>=1.6,<2",
     "mkdocs-material>=9.7.7",
@@ -145,11 +151,13 @@ dev = [
 [tool.importlinter]
 root_package = "keepout"
 exclude_type_checking_imports = true
+include_external_packages = true
 
 [[tool.importlinter.contracts]]
 name = "Layers: data sources and formats above the geometry they build"
 type = "layers"
 layers = [
+    "keepout.cli",
     "keepout.validation",
     "keepout.sources | keepout.synthetic",
     "keepout.risk | keepout.screening",
@@ -162,3 +170,10 @@ layers = [
     "keepout.state",
     "keepout._types | keepout._units | keepout.errors",
 ]
+
+[[tool.importlinter.contracts]]
+name = "Only the command line uses the cli extra"
+type = "forbidden"
+source_modules = ["keepout"]
+forbidden_modules = ["typer", "rich"]
+ignore_imports = ["keepout.cli.** -> typer", "keepout.cli.** -> rich"]

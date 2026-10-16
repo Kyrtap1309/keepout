@@ -43,6 +43,14 @@ def test_manifest_entries_are_well_formed() -> None:
         assert re.fullmatch(r"[0-9a-f]{64}", entry.sha256)
 
 
+def test_commit_dir_holds_the_files_of_the_pinned_commit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert cara.commit_dir(tmp_path) == tmp_path / "cara" / cara.CARA_COMMIT
+    monkeypatch.setenv("KEEPOUT_CACHE_DIR", str(tmp_path / "env"))
+    assert cara.commit_dir() == tmp_path / "env" / "cara" / cara.CARA_COMMIT
+
+
 def test_fetch_downloads_into_cache(tmp_path: Path) -> None:
     download = FakeDownloader(PAYLOAD)
     path = fetch(FILE, cache=tmp_path, download=download)
