@@ -7,6 +7,7 @@ __all__ = [
     "CdmWriteError",
     "ChecksumMismatch",
     "CovarianceError",
+    "FleetError",
     "GeometryError",
     "HttpStatusError",
     "KeepoutError",
@@ -143,6 +144,11 @@ class CovarianceError(KeepoutError):
 
 class PcConvergenceError(KeepoutError):
     """A probability-of-collision method did not converge; no value is returned."""
+
+
+class FleetError(KeepoutError):
+    """A synthetic operator's fleet file is invalid, or a fleet satellite has
+    no element set in the catalog."""
 
 
 class GeometryError(KeepoutError):

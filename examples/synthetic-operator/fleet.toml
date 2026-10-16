@@ -1,0 +1,31 @@
+# The fleet of keepout's example synthetic operator: three real satellites
+# in three kinds of orbit, screened against public GP data (see
+# keepout.synthetic.fleet for the format). keepout is not their operator.
+#
+# Hard-body radii are illustrative round numbers (the radius of a sphere
+# enclosing each spacecraft), not the operators' own values.
+
+# Radius assumed for every catalog object [m]: debris is mostly smaller,
+# some spacecraft are much larger.
+catalog_hard_body_radius = 1.0
+
+# The International Space Station: crewed, low Earth orbit at 51.6 deg.
+[[satellites]]
+catalog_number = 25544
+name = "ISS (ZARYA)"
+hard_body_radius = 50.0
+maneuverable = true
+
+# Metop-B: weather satellite in a sun-synchronous orbit at about 820 km.
+[[satellites]]
+catalog_number = 38771
+name = "METOP-B"
+hard_body_radius = 10.0
+maneuverable = true
+
+# Intelsat 39: communications satellite in geostationary orbit.
+[[satellites]]
+catalog_number = 44476
+name = "INTELSAT 39 (IS-39)"
+hard_body_radius = 20.0
+maneuverable = true
