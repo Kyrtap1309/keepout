@@ -1,19 +1,24 @@
 """Exception hierarchy for keepout."""
 
 __all__ = [
+    "AuthError",
     "CaraFormatError",
     "CcsdsParseError",
     "CdmParseError",
     "CdmWriteError",
     "ChecksumMismatch",
     "CovarianceError",
+    "EventError",
+    "FleetError",
     "GeometryError",
+    "HardBodyRadiusError",
     "HttpStatusError",
     "KeepoutError",
     "KelvinsFormatError",
     "OmmParseError",
     "OmmWriteError",
     "PcConvergenceError",
+    "RateLimited",
     "SourceFormatError",
     "SourceUnavailable",
     "UnsupportedElements",
@@ -46,6 +51,28 @@ class HttpStatusError(SourceUnavailable):
         super().__init__(message)
         self.url = url
         self.status = status
+
+
+class AuthError(SourceUnavailable):
+    """A data source that needs an account refused the login, or no
+    credentials were given (Space-Track)."""
+
+
+class RateLimited(SourceUnavailable):
+    """A request would exceed, or exceeded, a data source's published limits.
+
+    Parameters
+    ----------
+    message
+        What happened.
+    retry_after
+        Seconds until keepout allows the request again; ``None`` when the
+        server refused it, as it does not say when (Space-Track).
+    """
+
+    def __init__(self, message: str, *, retry_after: float | None = None) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
 
 
 class ChecksumMismatch(KeepoutError):
@@ -143,6 +170,30 @@ class CovarianceError(KeepoutError):
 
 class PcConvergenceError(KeepoutError):
     """A probability-of-collision method did not converge; no value is returned."""
+
+
+class FleetError(KeepoutError):
+    """A synthetic operator's fleet file is invalid, or a fleet satellite has
+    no element set in the catalog."""
+
+
+class EventError(KeepoutError, ValueError):
+    """CDMs do not make one conjunction event: a ``MESSAGE_ID`` repeats, they
+    are about different objects, their TCAs spread too far, or they give
+    different ``CONJUNCTION_ID`` values.
+
+    It is also a :class:`ValueError`, as raised for any other invalid
+    argument of :class:`~keepout.risk.ConjunctionEvent`.
+    """
+
+
+class HardBodyRadiusError(KeepoutError, ValueError):
+    """No combined hard-body radius: an object has none (no ``HBR`` in its
+    CDM) and none was given.
+
+    It is also a :class:`ValueError`, as raised for any other invalid
+    argument.
+    """
 
 
 class GeometryError(KeepoutError):

@@ -1,7 +1,7 @@
 [project]
 name = "keepout"
 version = "0.1.0.dev0"
-description = "Spacecraft conjunction assessment: screening, CDM ingest, probability of collision, risk trends and avoidance manoeuvre planning."
+description = "Spacecraft conjunction assessment: screening, CDM ingest and generation, probability of collision, risk trends, a synthetic operator, a command line and avoidance manoeuvre planning."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -23,7 +23,14 @@ dependencies = [
     "sgp4>=2.27",
 ]
 
+[project.scripts]
+keepout = "keepout.cli:main"
+
 [project.optional-dependencies]
+cli = [
+    "rich>=15.0.0",
+    "typer>=0.27.2",
+]
 validation = [
     "openpyxl>=3.1.5",
     "xlrd>=2.0.2",
@@ -43,7 +50,12 @@ select = [
     "ARG", "BLE", "C4", "D", "DTZ", "FBT", "FURB", "PERF", "PGH", "PIE", "PTH",
     "RET", "TID",
     "S", "C90", "PL", "PYI", "SLF", "ANN401",
+    # Preview: every exception a function raises is in its docstring.
+    "DOC501",
 ]
+# Only the preview rules selected by code above, not all of them.
+preview = true
+explicit-preview-rules = true
 ignore = [
     # Exception names follow the spec (SourceUnavailable, ChecksumMismatch, ...).
     "N818",
@@ -70,7 +82,11 @@ convention = "numpy"
 # arguments they do not use, and parametrized tests take booleans.
 # They assert, pickle round-trips, parse the XML they wrote, reach into the
 # fault-injection seams and fake callables with Any.
-"tests/**" = ["D", "ARG", "FBT", "S101", "S301", "S314", "SLF001", "ANN401"]
+"tests/**" = ["D", "DOC", "ARG", "FBT", "S101", "S301", "S314", "SLF001", "ANN401"]
+# Inline snapshots hold the commands' output line for line.
+"tests/cli/test_cli_{assess,screen}.py" = ["E501"]
+# A command's docstring is its --help text, which states its exit statuses.
+"src/keepout/cli/{assess,screen}.py" = ["DOC501"]
 # The tools run git and Python with arguments they build themselves.
 "tools/**" = ["S603", "S607"]
 # Stubs mirror the names sgp4 gives its attributes (jdsatepochF), and type
@@ -105,15 +121,24 @@ ignore-words-list = "aas,oint,precesses"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["tools"]
-addopts = ["-ra", "--strict-markers", "-m", "not validation"]
+# --disable-socket: no test reaches the network; conftest.py lets the
+# validation tests, which download their data, open sockets.
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "-m",
+    "not validation",
+    "--disable-socket",
+    "--allow-unix-socket",
+]
 filterwarnings = ["error"]
 markers = [
-    "validation: slow checks against reference data (NASA CARA and ESA Kelvins data download on first run; screening uses the committed CelesTrak data)",
+    "validation: slow checks against reference data (NASA CARA and ESA Kelvins data download on first run; screening and the synthetic operator use the committed GP data; the Space-Track answers check needs KEEPOUT_SPACETRACK_RAW)",
 ]
 
 [tool.coverage.run]
 source = ["keepout", "tools"]
-omit = ["*/keepout/cli/*", "*/keepout/dashboard/*"]
+omit = ["*/keepout/dashboard/*"]
 
 [tool.coverage.report]
 fail_under = 90
@@ -123,9 +148,11 @@ show_missing = true
 [dependency-groups]
 dev = [
     "codespell>=2.4.3",
+    "deptry>=0.25.1",
     "hypothesis>=6.168.1",
     "import-linter>=2.15",
-    "keepout[validation]",
+    "inline-snapshot>=0.36.1",
+    "keepout[cli,validation]",
     "matplotlib>=3.11.2",
     "mkdocs>=1.6,<2",
     "mkdocs-material>=9.7.7",
@@ -135,6 +162,7 @@ dev = [
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
     "pytest-randomly>=5.0.0",
+    "pytest-socket>=0.8.1",
     "pytest-xdist>=3.8.0",
     "ruff>=0.16.8",
     "scipy-stubs>=1.17.1.5",
@@ -142,16 +170,25 @@ dev = [
     "xmlschema>=4.3.2",
 ]
 
+[tool.deptry]
+# The tools and tests are not shipped: only the package's imports are checked.
+known_first_party = ["keepout"]
+
+[tool.deptry.package_module_name_map]
+pyerfa = "erfa"
+
 [tool.importlinter]
 root_package = "keepout"
 exclude_type_checking_imports = true
+include_external_packages = true
 
 [[tool.importlinter.contracts]]
 name = "Layers: data sources and formats above the geometry they build"
 type = "layers"
 layers = [
+    "keepout.cli",
     "keepout.validation",
-    "keepout.sources",
+    "keepout.sources | keepout.synthetic",
     "keepout.risk | keepout.screening",
     "keepout.pc | keepout.cdm | keepout.propagation",
     "keepout.omm | keepout.conjunction",
@@ -160,5 +197,12 @@ layers = [
     "keepout.covariance | keepout.orbits",
     "keepout.frames",
     "keepout.state",
-    "keepout._types | keepout._units | keepout.errors",
+    "keepout._types | keepout._units | keepout._workers | keepout.errors",
 ]
+
+[[tool.importlinter.contracts]]
+name = "Only the command line uses the cli extra"
+type = "forbidden"
+source_modules = ["keepout"]
+forbidden_modules = ["typer", "rich"]
+ignore_imports = ["keepout.cli.** -> typer", "keepout.cli.** -> rich"]

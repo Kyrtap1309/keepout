@@ -2,11 +2,15 @@
 
 The core types, the Pc entry point, the event assessment, screening (with
 its volume) and the exception hierarchy are available from the package
-itself; CDM input is in :mod:`keepout.cdm`, the individual Pc methods in
-:mod:`keepout.pc`, risk levels, trends and decisions in :mod:`keepout.risk`,
-element sets in :mod:`keepout.omm`, the screening search, its parts and the
-reasons for skipped element sets in :mod:`keepout.screening`, propagators in
-:mod:`keepout.propagation` and data sources in :mod:`keepout.sources`.
+itself; CDM input and output are in :mod:`keepout.cdm`, the individual Pc
+methods in :mod:`keepout.pc`, risk levels, trends and decisions in
+:mod:`keepout.risk`, element sets in :mod:`keepout.omm`, the screening
+search, its parts and the reasons for skipped element sets in
+:mod:`keepout.screening`, propagators in :mod:`keepout.propagation`, the
+synthetic operator (covariance model, fleet, run) in
+:mod:`keepout.synthetic` and data sources (CelesTrak, Space-Track, CARA,
+Kelvins) in :mod:`keepout.sources`. The ``keepout`` command
+(:mod:`keepout.cli`) needs the ``cli`` extra.
 """
 
 from importlib.metadata import version
@@ -14,19 +18,24 @@ from importlib.metadata import version
 from keepout.conjunction import Conjunction
 from keepout.covariance import Covariance, make_covariance
 from keepout.errors import (
+    AuthError,
     CaraFormatError,
     CcsdsParseError,
     CdmParseError,
     CdmWriteError,
     ChecksumMismatch,
     CovarianceError,
+    EventError,
+    FleetError,
     GeometryError,
+    HardBodyRadiusError,
     HttpStatusError,
     KeepoutError,
     KelvinsFormatError,
     OmmParseError,
     OmmWriteError,
     PcConvergenceError,
+    RateLimited,
     SourceFormatError,
     SourceUnavailable,
     UnsupportedElements,
@@ -46,6 +55,7 @@ from keepout.state import RefFrame, StateVector
 __version__ = version("keepout")
 
 __all__ = [
+    "AuthError",
     "CaraFormatError",
     "CcsdsParseError",
     "CdmParseError",
@@ -56,7 +66,10 @@ __all__ = [
     "ConjunctionEvent",
     "Covariance",
     "CovarianceError",
+    "EventError",
+    "FleetError",
     "GeometryError",
+    "HardBodyRadiusError",
     "HttpStatusError",
     "KeepoutError",
     "KelvinsFormatError",
@@ -68,6 +81,7 @@ __all__ = [
     "PcConvergenceError",
     "PcObservation",
     "PcResult",
+    "RateLimited",
     "RefFrame",
     "ScreeningResult",
     "ScreeningVolume",

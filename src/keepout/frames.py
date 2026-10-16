@@ -259,7 +259,13 @@ def _teme_rotation(
 
 
 def _components(value: npt.ArrayLike, name: str) -> FloatArray:
-    """``value`` as a float64 array whose last axis has length 3."""
+    """``value`` as a float64 array whose last axis has length 3.
+
+    Raises
+    ------
+    ValueError
+        If ``value`` is a scalar or its last axis does not have length 3.
+    """
     array = np.asarray(value, dtype=np.float64)
     if array.ndim == 0 or array.shape[-1] != 3:
         raise ValueError(f"{name} must have 3 components on its last axis")
@@ -269,7 +275,14 @@ def _components(value: npt.ArrayLike, name: str) -> FloatArray:
 def _broadcast(
     epochs: Time, position: FloatArray, velocity: FloatArray
 ) -> tuple[int, ...]:
-    """The broadcast shape of states at ``epochs``, without the 3 components."""
+    """The broadcast shape of states at ``epochs``, without the 3 components.
+
+    Raises
+    ------
+    ValueError
+        If the shapes of ``epochs``, ``position`` and ``velocity`` (without
+        its components) do not broadcast.
+    """
     try:
         return np.broadcast_shapes(
             epochs.shape, position.shape[:-1], velocity.shape[:-1]

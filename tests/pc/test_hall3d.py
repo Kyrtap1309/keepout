@@ -31,7 +31,7 @@ from keepout.objects import ObjectState
 from keepout.orbits import orbital_period
 from keepout.pc import _rate as rate_module
 from keepout.pc import _timeline as timeline_module
-from keepout.pc import compute_pc, foster, hall3d
+from keepout.pc import foster, hall3d
 from keepout.pc._timeline import RateIntegral, RateScan, Segment
 
 # The package exports the function hall3d under the module's name.
@@ -358,10 +358,9 @@ def test_states_before_closest_approach_find_the_encounter(dt: float) -> None:
     # automatic window must cover it, not only t = 0.
     conjunction = shifted_back(TYPICAL_HEAD_ON, dt)
     expected = foster(conjunction.plane, 5.0).value
-    auto = compute_pc(conjunction)
-    assert auto.method == "hall3d"
-    assert auto.value == pytest.approx(expected, rel=1e-4)
-    assert auto.details["window_end_s"] > dt
+    result = hall3d(conjunction)
+    assert result.value == pytest.approx(expected, rel=1e-4)
+    assert result.details["window_end_s"] > dt
 
 
 def test_an_encounter_beyond_the_initial_window_is_searched_for(

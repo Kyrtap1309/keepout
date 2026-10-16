@@ -14,7 +14,7 @@ Data: ESA, *Collision Avoidance Challenge dataset*, Zenodo, 2021, doi:[10.5281/z
 |---|---|---|
 | ignore | 13823 | 90.2% |
 | monitor | 1468 | 9.6% |
-| monitor, prepare manoeuvre | 6 | <0.1% |
+| prepare manoeuvre | 6 | <0.1% |
 | manoeuvre | 24 | 0.2% |
 
 ## Trend at the last CDM before TCA
@@ -45,7 +45,7 @@ The challenge called an event high-risk when its last CDM has log10 Pc >= -6. ke
 |---|---|---|
 | ignore | 1 | 13822 |
 | monitor | 484 | 984 |
-| monitor, prepare manoeuvre | 6 | 0 |
+| prepare manoeuvre | 6 | 0 |
 | manoeuvre | 24 | 0 |
 
 ## Example events

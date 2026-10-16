@@ -15,7 +15,6 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
-import os
 import sys
 from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
@@ -471,8 +470,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--workers",
         type=int,
-        default=os.cpu_count() or 1,
-        help="processes to run the cases in (default: one per CPU)",
+        default=None,
+        help="processes to run the cases in (default: one per CPU, at most 4)",
     )
     args = parser.parse_args(argv)
 

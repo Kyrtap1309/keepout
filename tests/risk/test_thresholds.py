@@ -94,3 +94,7 @@ def test_a_higher_pc_is_never_a_lower_level(
     low, high = sorted((low, high))
     limits = Thresholds(basis=basis)
     assert classify(seen(low), limits) <= classify(seen(high), limits)
+
+
+def test_a_level_is_labelled_in_lower_case() -> None:
+    assert [level.label for level in RiskLevel] == ["green", "yellow", "red"]

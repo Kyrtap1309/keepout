@@ -50,7 +50,14 @@ _NDM_PARTS: Final = frozenset({"COMMENT", "MESSAGE_ID"})
 
 
 def _messages(root: ElementTree.Element) -> list[tuple[ElementTree.Element, str]]:
-    """The ``<omm>`` elements of a document and their paths."""
+    """The ``<omm>`` elements of a document and their paths.
+
+    Raises
+    ------
+    OmmParseError
+        If the root element is neither ``<omm>`` nor ``<ndm>``, or an
+        ``<ndm>`` holds a message other than an OMM.
+    """
     name = local(root.tag)
     if name == "omm":
         return [(root, "omm")]

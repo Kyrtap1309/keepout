@@ -96,8 +96,12 @@ eigenvalue(s) ...`), and every Pc result repeats them.
 - **CDM 2.0 as issued by TraCSS** (based on the 508.0-P-1.1 draft) — read and
   written; keywords beyond 508.0-B-1 are preserved as text, except `HBR`,
   which is typed.
-- JSON and CSV variants are not supported yet (planned with the Space-Track
-  client).
+- JSON and CSV variants are not supported. Space-Track's public CDM
+  summaries (`cdm_public`) are not CDMs: they carry no states or
+  covariances (see [Space-Track data](spacetrack.md#public-cdms)).
+- keepout writes CDMs of its own with `keepout.cdm.make_cdm` (version 2.0
+  when both objects have a hard-body radius, else 1.0); the
+  [synthetic operator](synthetic.md#the-cdms) issues them.
 
 ## References
 

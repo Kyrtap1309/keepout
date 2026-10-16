@@ -4,8 +4,16 @@ import pytest
 from builders import case_with_reference
 
 from keepout.pc.result import PcResult
+from keepout.validation.cases import ValidationCase
 from keepout.validation.criteria import HALL, MONTE_CARLO, TWO_D, Criterion
-from keepout.validation.evaluation import Outcome, Verdict, evaluate, judge
+from keepout.validation.evaluation import (
+    MethodSummary,
+    Outcome,
+    Verdict,
+    evaluate,
+    judge,
+    summarise,
+)
 
 SMALL = TWO_D.small
 RELATIVE = TWO_D.relative or 0.0
@@ -94,3 +102,27 @@ def test_outcome_verdict_follows_its_value() -> None:
     assert foster.result.value == 0.0
     assert foster.verdict == Verdict(1.0, True, False)
     assert not foster.passed
+
+
+def test_summarise_groups_by_suite_then_method_in_order() -> None:
+    def case(suite: str, reference: float, case_id: str) -> ValidationCase:
+        return dataclasses.replace(
+            case_with_reference(reference, case_id=case_id), suite=suite
+        )
+
+    outcomes = evaluate(
+        [
+            case("b", 1e-3, "relative"),
+            case("a", 0.0, "absolute"),
+            dataclasses.replace(
+                case("b", 2e-3, "loose"), criterion=Criterion(relative=2.0)
+            ),
+        ]
+    )
+    assert summarise(outcomes) == (
+        MethodSummary("b", "foster", 1, 2, 1.0),
+        MethodSummary("b", "elrod", 1, 2, 1.0),
+        MethodSummary("a", "foster", 1, 1, None),
+        MethodSummary("a", "elrod", 1, 1, None),
+    )
+    assert summarise([]) == ()

@@ -41,6 +41,7 @@ __all__ = [
     "CaraFile",
     "Cell",
     "Downloader",
+    "commit_dir",
     "fetch",
     "load_csv",
     "load_xls_rows",
@@ -173,6 +174,16 @@ DILUTION_CDMS: Final[Mapping[str, CaraFile]] = {
 """Omitron test CDMs of CARA's ``DilutionMaxPc_UnitTest.m``."""
 
 
+def commit_dir(cache: Path | None = None) -> Path:
+    """The folder of the cached files of :data:`CARA_COMMIT`.
+
+    ``<cache>/cara/<CARA_COMMIT>``, ``<cache>`` being
+    :func:`~keepout.sources.cache.cache_dir` of ``cache``; a file's copy is
+    at its :attr:`CaraFile.path` below it.
+    """
+    return cache_dir(cache) / "cara" / CARA_COMMIT
+
+
 def fetch(
     file: CaraFile,
     *,
@@ -194,7 +205,7 @@ def fetch(
         If the downloaded bytes do not match ``file.sha256``. Nothing is
         written to the cache in this case.
     """
-    target = cache_dir(cache) / "cara" / CARA_COMMIT / file.path
+    target = commit_dir(cache) / file.path
     if has_digest(target, file.sha256):
         return target
 

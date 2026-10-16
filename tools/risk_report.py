@@ -55,9 +55,7 @@ DECISION: Final = DecisionConfig()
 HIGH_RISK: Final = -6.0
 """The challenge's high-risk label: log10 Pc of an event's last CDM >= -6."""
 
-ActionName: TypeAlias = Literal[
-    "ignore", "monitor", "monitor, prepare manoeuvre", "manoeuvre"
-]
+ActionName: TypeAlias = Literal["ignore", "monitor", "prepare manoeuvre", "manoeuvre"]
 """An :class:`~keepout.risk.Action` as the report names it."""
 
 LevelName: TypeAlias = Literal["green", "yellow", "red", "none"]
@@ -99,7 +97,7 @@ def action_name(assessment: Assessment) -> ActionName:
         case Action.MONITOR:
             return "monitor"
         case Action.PREPARE_MANOEUVRE:
-            return "monitor, prepare manoeuvre"
+            return "prepare manoeuvre"
         case Action.MANOEUVRE:
             return "manoeuvre"
         case _:

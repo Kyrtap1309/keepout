@@ -2,16 +2,24 @@
 
 Usage::
 
-    uv run python tools/screening_benchmark.py [--check] [--workers N] [--repeat N]
-    uv run python tools/screening_benchmark.py compare --base-python PYTHON
-        [--every K] [--repeat N] [--threshold FRACTION]
+    uv run python tools/screening_benchmark.py [--source SOURCE] [--check]
+        [--workers N] [--repeat N]
+    uv run python tools/screening_benchmark.py [--source SOURCE] compare
+        --base-python PYTHON [--every K] [--repeat N] [--threshold FRACTION]
+
+``--source`` picks the frozen catalog screened (:data:`SOURCES`):
+``celestrak`` (the default), the public catalog of ``tests/screening/data/``
+(19 914 objects, see ``tools/screening_snapshot.py``), or ``spacetrack``,
+the full catalog of ``tests/screening/spacetrack-data/`` (31 930 objects,
+see ``tools/spacetrack_snapshot.py``), which adds most rocket bodies and
+debris. Each has its own results file and README block.
 
 The first form screens :data:`PRIMARIES` (20 LEO satellites, 390 to 1340 km
-up) against the whole frozen public catalog (``tests/screening/data/``, see
-``tools/screening_snapshot.py``) for 7 days from 0 h UTC of the day it was
+up) against the whole catalog for 7 days from 0 h UTC of the day it was
 retrieved, with each volume of :data:`VOLUMES` and ``--workers`` processes
-(4), ``--repeat`` times (3), and writes ``docs/screening-benchmark.json`` and
-the README summary block: the settings and what each volume found (the
+(4), ``--repeat`` times (3), and writes the source's results file
+(``docs/screening-benchmark.json``, ``docs/screening-benchmark-spacetrack.json``)
+and README summary block: the settings and what each volume found (the
 data), and the median wall and CPU time of the runs with the CPU model
 (the timings). ``--check`` screens once and fails when the data differs from
 the committed files; it takes the timings from the committed JSON, so they
@@ -19,17 +27,17 @@ are shown but never checked (they depend on the machine and the run). The
 runs of a volume must find the same, or the tool fails.
 
 ``compare`` is CI's regression check. It screens :data:`PRIMARIES` against
-every ``--every``-th object of the catalog (:func:`reduced_catalog`; 8th:
-about 2 500 objects) for 7 days with the 5 km sphere in one process, timed
-by ``tools/screening_timing.py`` in fresh processes, alternately with this
-tree's Python and with ``--base-python``, the environment of another tree
-(the merge base), ``--repeat`` times each (5). Both sides run the same
-measurement file, with one thread for numerical libraries, so only keepout
-differs. It fails if the median CPU time of this tree exceeds the base's by
-more than ``--threshold`` (0.2). Alternate runs share whatever else the
-machine does, and the CPU time of one process is less disturbed by it than
-the wall time. If the base cannot run
-the measurement (a tree from before ``keepout.screening``, or one whose
+every ``--every``-th object of the catalog (:func:`reduced_catalog`; 8th of
+the public catalog: about 2 500 objects) for 7 days with the 5 km sphere in
+one process, timed by ``tools/screening_timing.py`` in fresh processes,
+alternately with this tree's Python and with ``--base-python``, the
+environment of another tree (the merge base), ``--repeat`` times each (5).
+Both sides run the same measurement file, with one thread for numerical
+libraries, so only keepout differs. It fails if the median CPU time of this
+tree exceeds the base's by more than ``--threshold`` (0.2). Alternate runs
+share whatever else the machine does, and the CPU time of one process is
+less disturbed by it than the wall time. If the base cannot run the
+measurement (a tree from before ``keepout.screening``, or one whose
 ``screen`` takes other arguments), the comparison is skipped (exit 0).
 ``compare`` also appends its Markdown summary to ``$GITHUB_STEP_SUMMARY``
 when that is set (in GitHub Actions).
@@ -56,6 +64,7 @@ from pathlib import Path
 from typing import Final, TypedDict
 
 import screening_snapshot as snapshot
+import spacetrack_snapshot
 from astropy.time import Time
 from generated import replace_block, table, write_or_check
 from screening_timing import TimingOutput, select, timed
@@ -75,9 +84,12 @@ from keepout.screening.volume import SOCRATES_RADIUS
 
 REPO: Final = Path(__file__).resolve().parents[1]
 RESULTS: Final = REPO / "docs/screening-benchmark.json"
+SPACETRACK_RESULTS: Final = REPO / "docs/screening-benchmark-spacetrack.json"
 TIMING: Final = Path(__file__).resolve().with_name("screening_timing.py")
 START: Final = "<!-- screening-benchmark-summary:start -->"
 END: Final = "<!-- screening-benchmark-summary:end -->"
+SPACETRACK_START: Final = "<!-- screening-benchmark-spacetrack-summary:start -->"
+SPACETRACK_END: Final = "<!-- screening-benchmark-spacetrack-summary:end -->"
 TOOL: Final = "tools/screening_benchmark.py"
 CPUINFO: Final = Path("/proc/cpuinfo")
 
@@ -145,6 +157,7 @@ each, so their CPU time does not depend on idle cores."""
 class Settings(TypedDict):
     """What the benchmark screens."""
 
+    source: str
     primaries: list[int]
     objects: int
     retrieved: str
@@ -213,6 +226,84 @@ def read_catalog(data: Path) -> tuple[tuple[Omm, ...], str]:
     return snapshot.read_catalog(data), snapshot.retrieval_day(manifest)
 
 
+def read_spacetrack(data: Path) -> tuple[tuple[Omm, ...], str]:
+    """The frozen Space-Track catalog's element sets and the day it was
+    retrieved (UTC, ISO)."""
+    manifest = spacetrack_snapshot.read_manifest(data)
+    return (
+        spacetrack_snapshot.read_snapshot(data),
+        spacetrack_snapshot.retrieval_day(manifest),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class Source:
+    """A frozen catalog the benchmark screens.
+
+    Parameters
+    ----------
+    name
+        Its ``--source`` name.
+    catalog, provider
+        What the README block calls it: the frozen ``catalog`` catalog
+        (``provider``, retrieved ...).
+    data
+        Its directory (the default of ``--data``).
+    read
+        Reads the directory: the element sets and the day they were
+        retrieved (UTC, ISO).
+    results
+        Its results file (the default of ``--results``).
+    start, end
+        The markers of its README block.
+    """
+
+    name: str
+    catalog: str
+    provider: str
+    data: Path
+    read: Callable[[Path], tuple[tuple[Omm, ...], str]]
+    results: Path
+    start: str
+    end: str
+
+    @property
+    def command(self) -> str:
+        """The command that writes this source's files."""
+        return TOOL if self.name == DEFAULT_SOURCE else f"{TOOL} --source {self.name}"
+
+
+DEFAULT_SOURCE: Final = "celestrak"
+"""The source benchmarked unless told otherwise."""
+
+SOURCES: Final[Mapping[str, Source]] = {
+    source.name: source
+    for source in (
+        Source(
+            name="celestrak",
+            catalog="public",
+            provider="CelesTrak",
+            data=snapshot.DATA,
+            read=read_catalog,
+            results=RESULTS,
+            start=START,
+            end=END,
+        ),
+        Source(
+            name="spacetrack",
+            catalog="full",
+            provider="Space-Track",
+            data=spacetrack_snapshot.DATA,
+            read=read_spacetrack,
+            results=SPACETRACK_RESULTS,
+            start=SPACETRACK_START,
+            end=SPACETRACK_END,
+        ),
+    )
+}
+"""The frozen catalogs the benchmark can screen, by ``--source`` name."""
+
+
 def window_start(retrieved: str) -> Time:
     """0 h UTC of the retrieval day: the benchmark's window starts there."""
     return Time(retrieved, scale="utc")
@@ -277,7 +368,13 @@ def read_timings(path: Path) -> Timings | None:
 
 
 def positive(text: str) -> int:
-    """A command-line count: an integer of at least 1."""
+    """A command-line count: an integer of at least 1.
+
+    Raises
+    ------
+    argparse.ArgumentTypeError
+        If the integer in ``text`` is less than 1.
+    """
     value = int(text)
     if value < 1:
         raise argparse.ArgumentTypeError(f"must be at least 1, got {value}")
@@ -291,6 +388,7 @@ def _seconds(value: float) -> str:
 def render_summary(summary: Summary) -> str:
     """The README block."""
     settings = summary["settings"]
+    source = SOURCES[settings["source"]]
     timings = summary["timings"]
     measured = {} if timings is None else {m["volume"]: m for m in timings["volumes"]}
     rows = []
@@ -319,10 +417,10 @@ def render_summary(summary: Summary) -> str:
     return "\n".join(
         [
             f"Screening {len(settings['primaries'])} LEO primaries against the "
-            f"{settings['objects']} element sets of the frozen public catalog "
-            f"(CelesTrak, retrieved {settings['retrieved']}) for "
+            f"{settings['objects']} element sets of the frozen {source.catalog} "
+            f"catalog ({source.provider}, retrieved {settings['retrieved']}) for "
             f"{_days(settings['days'])} from {settings['start']} UTC, "
-            f"{_processes(settings['workers'])} (`{TOOL}`):",
+            f"{_processes(settings['workers'])} (`{source.command}`):",
             "",
             *table(
                 (
@@ -349,7 +447,8 @@ def benchmark_main(args: argparse.Namespace) -> int:
     int
         1 if, with ``--check``, a file is out of date, else 0.
     """
-    catalog, retrieved = read_catalog(args.data)
+    source = SOURCES[args.source]
+    catalog, retrieved = source.read(args.data)
     start = window_start(retrieved)
     primaries = select(catalog, args.primaries)
     data, measured = benchmark(
@@ -379,6 +478,7 @@ def benchmark_main(args: argparse.Namespace) -> int:
         }
     summary: Summary = {
         "settings": {
+            "source": source.name,
             "primaries": list(args.primaries),
             "objects": len(catalog),
             "retrieved": retrieved,
@@ -392,10 +492,13 @@ def benchmark_main(args: argparse.Namespace) -> int:
     files = {
         args.results: json.dumps(summary, indent=2) + "\n",
         args.readme: replace_block(
-            args.readme.read_text(encoding="utf-8"), START, END, render_summary(summary)
+            args.readme.read_text(encoding="utf-8"),
+            source.start,
+            source.end,
+            render_summary(summary),
         ),
     }
-    return write_or_check(files, check=args.check, tool=TOOL)
+    return write_or_check(files, check=args.check, tool=source.command)
 
 
 def reduced_catalog(
@@ -565,7 +668,7 @@ def compare_main(args: argparse.Namespace) -> int:
     int
         1 if this tree is slower than the threshold allows, else 0.
     """
-    catalog, retrieved = read_catalog(args.data)
+    catalog, retrieved = SOURCES[args.source].read(args.data)
     select(catalog, args.primaries)  # all there, or ValueError
     reduced = reduced_catalog(catalog, args.primaries, args.every)
     with tempfile.TemporaryDirectory() as directory:
@@ -614,7 +717,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         ``compare`` finds a regression.
     """
     data = argparse.ArgumentParser(add_help=False)
-    data.add_argument("--data", type=Path, default=snapshot.DATA)
+    data.add_argument("--data", type=Path, help="default: the source's")
     data.add_argument(
         "--primaries",
         type=int,
@@ -623,8 +726,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         help=argparse.SUPPRESS,
     )
     parser = argparse.ArgumentParser(prog=TOOL, parents=[data])
+    parser.add_argument(
+        "--source",
+        choices=list(SOURCES),
+        default=DEFAULT_SOURCE,
+        help="the frozen catalog screened",
+    )
     parser.add_argument("--check", action="store_true", help="fail if out of date")
-    parser.add_argument("--results", type=Path, default=RESULTS)
+    parser.add_argument("--results", type=Path, help="default: the source's")
     parser.add_argument("--readme", type=Path, default=REPO / "README.md")
     parser.add_argument("--workers", type=positive, default=WORKERS)
     parser.add_argument(
@@ -648,6 +757,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     comparing.add_argument("--repeat", type=positive, default=COMPARE_REPEAT)
     comparing.add_argument("--threshold", type=float, default=THRESHOLD)
     args = parser.parse_args(argv)
+    source = SOURCES[args.source]
+    args.data = args.data or source.data
+    args.results = args.results or source.results
     if args.command == "compare":
         return compare_main(args)
     return benchmark_main(args)

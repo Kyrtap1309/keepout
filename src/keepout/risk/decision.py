@@ -42,6 +42,11 @@ class Action(OrderedEnum):
     MANOEUVRE = 3
     """Plan and execute an avoidance manoeuvre."""
 
+    @property
+    def label(self) -> str:
+        """The action in words, as keepout prints it: ``prepare manoeuvre``."""
+        return self.name.lower().replace("_", " ")
+
 
 @dataclass(frozen=True, slots=True)
 class DecisionConfig:
@@ -91,7 +96,7 @@ def _describe(point: TrendPoint, *, before_a_failure: bool = False) -> str:
     """The point's Pc, level and time; ``before_a_failure`` phrases it as the
     latest observation with a Pc, followed by one without."""
     observation = point.observation
-    level = point.level.name.lower()
+    level = point.level.label
     if before_a_failure:
         text = f"the latest observation with a Pc was {level}: Pc {point.value:.2e}"
     else:

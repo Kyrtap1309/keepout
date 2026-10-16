@@ -52,7 +52,13 @@ def _number(fields: dict[str, str], keyword: str, path: Path) -> float:
 def _reported(
     fields: dict[str, str], tca: Time, path: Path, *, known: bool
 ) -> ReportedObject:
-    """One object section; its covariance only if ``known``."""
+    """One object section; its covariance only if ``known``.
+
+    Raises
+    ------
+    CaraFormatError
+        If the section's ``REF_FRAME`` is not supported.
+    """
     try:
         frame = as_ref_frame(fields.get("REF_FRAME"))
     except UnsupportedFrame as exc:

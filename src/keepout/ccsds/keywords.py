@@ -297,7 +297,14 @@ def parse_value(keyword: Keyword, text: str, unit: str | None) -> FieldValue:
 
 
 def _check_unit(keyword: Keyword, unit: str | None) -> None:
-    """Raise :class:`ValueError` if ``unit`` is given and is not the keyword's."""
+    """Raise :class:`ValueError` if ``unit`` is given and is not the keyword's.
+
+    Raises
+    ------
+    ValueError
+        If ``unit`` is given for a unitless keyword, or does not match the
+        keyword's unit.
+    """
     if unit is None:
         return
     if keyword.unit is None:
@@ -316,6 +323,11 @@ def format_value(keyword: Keyword, value: FieldValue) -> tuple[str, str | None]:
         Table entry of the keyword.
     value
         Stored (SI) value.
+
+    Raises
+    ------
+    TypeError
+        If ``value`` is not of the keyword's kind.
     """
     match keyword.kind, value:
         case "time", Time():

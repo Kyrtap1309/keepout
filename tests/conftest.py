@@ -2,8 +2,10 @@
 
 Only tests marked ``validation`` (which download the NASA CARA reference data
 or ESA's Kelvins data on first run) may; the others fail on any
-``urllib.request.urlopen``, and astropy never downloads IERS tables (nor
-refuses the bundled one for its age).
+``urllib.request.urlopen`` and on any HTTP or HTTPS request of a
+``urllib.request`` opener (the Space-Track client's cookie session), and
+astropy never downloads IERS tables (nor refuses the bundled one for its
+age).
 
 Hypothesis profiles: ``default`` (random examples, the local database) and
 ``ci`` (derandomized, so a CI failure reproduces exactly, and printing the
@@ -11,9 +13,9 @@ blob to ``@reproduce_failure``); pick one with ``HYPOTHESIS_PROFILE``.
 
 Layout: ``geometry/`` tests the top-level domain modules (state, objects,
 covariance, frames, orbits, equinoctial, encounter, conjunction); the other
-directories mirror the ``keepout`` subpackages (``cdm``, ``omm``, ``pc``,
-``propagation``, ``risk``, ``screening``, ``sources``, ``validation``) and
-``tools``.
+directories mirror the ``keepout`` subpackages (``cdm``, ``cli``, ``omm``, ``pc``,
+``propagation``, ``risk``, ``screening``, ``sources``, ``synthetic``,
+``validation``) and ``tools``.
 """
 
 import os
@@ -54,6 +56,14 @@ def _offline_iers() -> Iterator[None]:
         yield
 
 
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Let the validation tests download their data: every other test runs
+    with sockets disabled (``--disable-socket``, pytest-socket)."""
+    for item in items:
+        if item.get_closest_marker("validation") is not None:
+            item.add_marker(pytest.mark.enable_socket)
+
+
 @pytest.fixture(autouse=True)
 def no_network(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
     """Fail a test that reaches the network; tests that fake it patch again."""
@@ -64,6 +74,8 @@ def no_network(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) 
         raise AssertionError("tests must not access the network; pass download=")
 
     monkeypatch.setattr(urllib.request, "urlopen", refuse)
+    monkeypatch.setattr(urllib.request.HTTPHandler, "http_open", refuse)
+    monkeypatch.setattr(urllib.request.HTTPSHandler, "https_open", refuse)
 
 
 @pytest.fixture(autouse=True)

@@ -1,0 +1,16 @@
+Data: USSPACECOM/18 SDS via Space-Track.org (www.space-track.org),
+retrieved on 2026-10-15.
+
+Retrieved 2026-10-15 16:28:59 UTC by tools/spacetrack_snapshot.py with
+Space-Track's recommended query for the GP catalog (see manifest.json):
+
+- spacetrack-gp.csv.gz: the GP element sets of every object not decayed
+  with an epoch in the 10 days before, one (the newest) per object, by
+  catalog number, as gzipped CelesTrak CSV (the OMM keywords).
+
+manifest.json lists the URL, retrieval time, counts and SHA-256
+digests.
+
+This is basic space situational awareness data, which the
+Space-Track.org user agreement allows to redistribute with the
+citation above. It is not covered by keepout's MIT licence.

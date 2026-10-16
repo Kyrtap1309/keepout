@@ -16,6 +16,7 @@ from typing import (
 import numpy as np
 
 from keepout.conjunction import Conjunction
+from keepout.encounter import Role
 from keepout.errors import GeometryError, PcConvergenceError
 from keepout.orbits import orbital_period
 from keepout.pc._duration import (
@@ -143,6 +144,9 @@ _METHODS: Final[Mapping[Method, _Runner]] = {
 }
 
 
+_VELOCITY_METHODS: Final[frozenset[Method]] = frozenset({"hall3d", "montecarlo"})
+"""The methods that use the velocity uncertainty (the 3-D ones)."""
+
 _Choice: TypeAlias = tuple[PcResult, tuple[str, ...], dict[str, float]]
 """A method's result, applicability notes and extra details."""
 
@@ -168,8 +172,40 @@ def _auto(conjunction: Conjunction) -> _Choice:
         return frisbee(conjunction.plane, conjunction.hard_body_radius), notes, details
     if not notes or not _bound(conjunction):
         return foster(conjunction.plane, conjunction.hard_body_radius), notes, details
+    position_only = conjunction.position_only_covariance
+    if position_only:
+        note = (
+            f"{_known_only_in_position(conjunction, position_only)}: the 3-D "
+            "methods need the velocity uncertainty, so the 2-D Pc is used"
+        )
+        return (
+            foster(conjunction.plane, conjunction.hard_body_radius),
+            (*notes, note),
+            details,
+        )
     two_d = foster(conjunction.plane, conjunction.hard_body_radius).value
     return _three_d(conjunction, notes, {**details, "pc_2d": two_d})
+
+
+def _known_only_in_position(conjunction: Conjunction, roles: tuple[Role, ...]) -> str:
+    """``the covariance of <object> is known only in position (...)``."""
+    labels = " and ".join(conjunction.label(role) for role in roles)
+    whose = "covariances of" if len(roles) == 2 else "covariance of"
+    verb = "are" if len(roles) == 2 else "is"
+    return f"the {whose} {labels} {verb} known only in position (zero velocity block)"
+
+
+def _velocity_notes(conjunction: Conjunction, method: Method) -> tuple[str, ...]:
+    """A note when ``method`` needs the velocity uncertainty and a covariance
+    has none: whichever way the method was chosen, it takes that velocity as
+    exact."""
+    position_only = conjunction.position_only_covariance
+    if method not in _VELOCITY_METHODS or not position_only:
+        return ()
+    return (
+        f"{_known_only_in_position(conjunction, position_only)}: {method} "
+        "takes its velocity as exact",
+    )
 
 
 def _require_three_d(conjunction: Conjunction) -> None:
@@ -177,6 +213,11 @@ def _require_three_d(conjunction: Conjunction) -> None:
 
     Without an encounter plane only the 3-D methods remain, and they need
     both covariances and elliptic orbits.
+
+    Raises
+    ------
+    GeometryError
+        If a covariance is unknown or an orbit is not elliptic.
     """
     reason = "no Pc method applies: the relative velocity is zero (no encounter plane)"
     unknown = [conjunction.label(role) for role in conjunction.unknown_covariance]
@@ -273,9 +314,17 @@ def compute_pc(
         2. ``"alfano"`` if both covariances are unknown, ``"frisbee"`` if one
            is (maximum Pc: upper bounds);
         3. ``"hall3d"`` if a 2-D assumption is questionable (see
-           :func:`applicability`) and both orbits are elliptic, with the 2-D
-           Pc kept in ``details["pc_2d"]``;
-        4. ``"foster"`` otherwise.
+           :func:`applicability`), both orbits are elliptic and both
+           covariances have a velocity block, with the 2-D Pc kept in
+           ``details["pc_2d"]``;
+        4. ``"foster"`` otherwise, with a note when a 2-D assumption is
+           questionable but a covariance is known only in position (zero
+           velocity block, e.g. a synthetic covariance; see
+           :attr:`~keepout.conjunction.Conjunction.position_only_covariance`):
+           the 3-D methods would take its velocity as exact.
+
+        However chosen, ``"hall3d"`` and ``"montecarlo"`` note a covariance
+        known only in position: they take its velocity as exact.
 
         When ``"hall3d"`` raises :class:`PcConvergenceError` after its
         encounter scan (the peak-overlap iteration failed where the rate
@@ -338,6 +387,7 @@ def compute_pc(
             )
         notes, details = _assess(conjunction)
         result = run(conjunction, **options)
+    notes += _velocity_notes(conjunction, result.method)
     return dataclasses.replace(
         result,
         diagnostics=conjunction.diagnostics + notes + result.diagnostics,

@@ -111,6 +111,11 @@ def require_known_covariance(unknown: tuple[Role, ...], method: Method) -> None:
         Objects whose covariance is unknown.
     method
         Method name, for the message.
+
+    Raises
+    ------
+    CovarianceError
+        If ``unknown`` is not empty.
     """
     if unknown:
         raise CovarianceError(

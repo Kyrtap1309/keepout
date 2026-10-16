@@ -13,7 +13,7 @@
   "actions": {
     "ignore": 13823,
     "monitor": 1468,
-    "monitor, prepare manoeuvre": 6,
+    "prepare manoeuvre": 6,
     "manoeuvre": 24
   },
   "directions": {
@@ -57,7 +57,7 @@
       "high": 484,
       "low": 984
     },
-    "monitor, prepare manoeuvre": {
+    "prepare manoeuvre": {
       "high": 6,
       "low": 0
     },

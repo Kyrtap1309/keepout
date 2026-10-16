@@ -85,6 +85,22 @@ def test_diagnostics_label_each_objects_covariance_repairs() -> None:
     )
 
 
+def test_covariances_known_only_in_position_are_listed() -> None:
+    base = TYPICAL_HEAD_ON  # its builder gives both a zero velocity block
+    assert base.position_only_covariance == ("primary", "secondary")
+    moving = object_state(
+        base.secondary.state.r,
+        base.secondary.state.v,
+        velocity_sigma=0.1,
+        object_id="SEC",
+    )
+    assert Conjunction(base.primary, moving, 5.0).position_only_covariance == (
+        "primary",
+    )
+    unknown = ObjectState("99999", base.secondary.state, None)
+    assert Conjunction(unknown, moving, 5.0).position_only_covariance == ()
+
+
 def test_unknown_covariance_is_reported() -> None:
     base = TYPICAL_HEAD_ON
     secondary = ObjectState("99999", base.secondary.state, None)

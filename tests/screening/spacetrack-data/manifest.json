@@ -1,0 +1,37 @@
+{
+  "format": 1,
+  "download": {
+    "method": "GET",
+    "url": "https://www.space-track.org/basicspacedata/query/class/gp/decay_date/null-val/epoch/%3Enow-10/orderby/norad_cat_id/format/json",
+    "status": 200,
+    "file": "gp.json",
+    "sha256": "9f8a475a3e6036c1feddcb961f9d886fa107186e71783bfb4924823c16eaaf7e",
+    "size": 36270275,
+    "retrieved": "2026-10-15T16:28:59.977Z",
+    "redacted": false
+  },
+  "catalog": {
+    "rows": 31930,
+    "duplicates": 0,
+    "objects": 31930,
+    "six_digit": 1230,
+    "regimes": {
+      "LEO": 27888,
+      "MEO": 844,
+      "GEO": 1570,
+      "HEO": 1628
+    },
+    "oldest_epoch": "2026-10-05T16:37:56.620416",
+    "newest_epoch": "2026-10-19T22:38:02.196672"
+  },
+  "files": {
+    "spacetrack-gp.csv.gz": {
+      "bytes": 1746407,
+      "sha256": "b06192c80072470e62075a1fe6d551558e024945264a53a17b85e3450631ead9"
+    },
+    "NOTICE": {
+      "bytes": 699,
+      "sha256": "7c251d175b9ffeb30df20cebe253125378c6ffca060f4770c19c4d9f68a52b68"
+    }
+  }
+}

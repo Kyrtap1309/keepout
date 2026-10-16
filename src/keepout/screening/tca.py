@@ -417,7 +417,14 @@ def _first_failure(errors: ErrorArray, stamps: FloatArray) -> ObjectFailure | No
 
 
 def _check(own: ErrorArray, other: ErrorArray, stamps: FloatArray) -> None:
-    """Raise :class:`_Failed` if either object failed at some of ``stamps``."""
+    """Raise :class:`_Failed` if either object failed at some of ``stamps``.
+
+    Raises
+    ------
+    _Failed
+        If ``own`` or ``other`` holds an SGP4 error code; it carries the
+        earliest failure of each.
+    """
     failed = _first_failure(own, stamps), _first_failure(other, stamps)
     if failed != (None, None):
         raise _Failed(*failed)

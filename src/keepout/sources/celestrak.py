@@ -4,8 +4,9 @@ CelesTrak (https://celestrak.org) republishes the general perturbations (GP)
 element sets of the 18th Space Defense Squadron from Space-Track.org in
 groups; there is no single query for every object. The groups of
 :data:`PUBLIC_GROUPS` together form the public catalog, about 20 000
-objects: not the whole catalog of about 30 000, as most rocket bodies and
-debris are in no group (the full catalog is Space-Track's ``gp`` query).
+objects: not the whole catalog of about 32 000, as most rocket bodies and
+debris are in no group (the full catalog is Space-Track's ``gp`` query,
+:func:`keepout.sources.spacetrack.fetch_catalog`, which needs an account).
 Element sets are fetched as CSV (one OMM keyword per column), a third of the
 size of the JSON form, and read by :func:`keepout.omm.celestrak.loads_csv`.
 A SOCRATES report is kept as text and read by
@@ -39,16 +40,13 @@ such when you republish it.
 from __future__ import annotations
 
 import dataclasses
-import hashlib
-import json
-import math
 import re
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from http import HTTPStatus
 from pathlib import Path
-from typing import Final, TypeAlias, TypeGuard, TypeVar
+from typing import Final, TypeAlias, TypeVar
 
 from astropy.time import Time
 
@@ -60,7 +58,15 @@ from keepout.errors import (
 )
 from keepout.omm.celestrak import loads_csv
 from keepout.omm.model import Omm, deduplicate
-from keepout.sources.cache import cache_dir, http_download, store_bytes
+from keepout.sources.cache import (
+    CachedCopy,
+    CopyMeta,
+    cache_dir,
+    http_download,
+    read_copy,
+    store_bytes,
+    write_meta,
+)
 from keepout.sources.socrates import COLUMNS, SocratesApproach, read_socrates
 
 __all__ = [
@@ -108,9 +114,6 @@ ephemerides) is not GP data of the 18th SDS and is left out."""
 _GROUP_NAME: Final = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 """A CelesTrak group name, lower case: ``active``, ``last-30-days``."""
 
-_META_FORMAT: Final = 1
-"""Version of the ``.meta.json`` layout; another version is not read."""
-
 _SOCRATES_COLUMN: Final = COLUMNS[0]
 """A column of the SOCRATES CSV header, to recognise the report."""
 
@@ -125,7 +128,7 @@ _T = TypeVar("_T")
 
 @dataclass(frozen=True, slots=True)
 class Retrieval:
-    """Where and when a cached CelesTrak file came from.
+    """Where and when a cached download (CelesTrak, Space-Track) came from.
 
     Parameters
     ----------
@@ -134,10 +137,10 @@ class Retrieval:
     path
         The cached copy.
     retrieved
-        When CelesTrak sent this copy (UTC).
+        When the source sent this copy (UTC).
     checked
-        When CelesTrak last confirmed it current: the download, or a later
-        HTTP 403 for unchanged data (UTC).
+        When the source last confirmed it current: the download, or a later
+        CelesTrak HTTP 403 for unchanged data (UTC).
     """
 
     url: str
@@ -148,12 +151,13 @@ class Retrieval:
 
 @dataclass(frozen=True, slots=True)
 class GpGroup:
-    """The element sets of one CelesTrak GP group.
+    """The element sets of one CelesTrak GP group, or of Space-Track's catalog.
 
     Parameters
     ----------
     name
-        The group, e.g. ``active``.
+        The group, e.g. ``active``; ``space-track`` for Space-Track's full
+        catalog (:func:`keepout.sources.spacetrack.fetch_catalog`).
     omms
         Its element sets, in CelesTrak's order.
     retrieval
@@ -167,7 +171,7 @@ class GpGroup:
 
 @dataclass(frozen=True, slots=True)
 class Catalog:
-    """Element sets of several GP groups, one per object.
+    """Element sets of several GP groups (or Space-Track's), one per object.
 
     Parameters
     ----------
@@ -408,62 +412,7 @@ def _read_socrates(data: bytes) -> str:
     return text
 
 
-@dataclass(frozen=True, slots=True)
-class _Meta:
-    """What the ``.meta.json`` file of a cached copy records."""
-
-    url: str
-    sha256: str
-    retrieved: float
-    """Unix time of the download."""
-    checked: float
-    """Unix time CelesTrak last confirmed the copy current."""
-
-
-@dataclass(frozen=True, slots=True)
-class _Cached:
-    meta: _Meta
-    data: bytes
-
-
-def _meta_path(target: Path) -> Path:
-    return target.with_name(f"{target.name}.meta.json")
-
-
-def _read_cache(target: Path, url: str) -> _Cached | None:
-    """The cached copy of ``url`` at ``target``, if it is complete and intact."""
-    try:
-        record = json.loads(_meta_path(target).read_bytes())
-        data = target.read_bytes()
-    except (OSError, ValueError):
-        return None
-    if not isinstance(record, dict) or record.get("format") != _META_FORMAT:
-        return None
-    url_, digest = record.get("url"), record.get("sha256")
-    retrieved, checked = record.get("retrieved"), record.get("checked")
-    if (
-        url_ != url
-        or not isinstance(digest, str)
-        or not _is_time(retrieved)
-        or not _is_time(checked)
-        or hashlib.sha256(data).hexdigest() != digest
-    ):
-        return None
-    meta = _Meta(url=url, sha256=digest, retrieved=retrieved, checked=checked)
-    return _Cached(meta, data)
-
-
-def _is_time(value: object) -> TypeGuard[float]:
-    """Whether ``value`` is a Unix time as :func:`_write_meta` writes one."""
-    return isinstance(value, float) and math.isfinite(value)
-
-
-def _write_meta(target: Path, meta: _Meta) -> None:
-    record = {"format": _META_FORMAT, **dataclasses.asdict(meta)}
-    store_bytes(_meta_path(target), (json.dumps(record, indent=2) + "\n").encode())
-
-
-def _retrieval(target: Path, meta: _Meta) -> Retrieval:
+def _retrieval(target: Path, meta: CopyMeta) -> Retrieval:
     return Retrieval(
         url=meta.url,
         path=target,
@@ -472,7 +421,7 @@ def _retrieval(target: Path, meta: _Meta) -> Retrieval:
     )
 
 
-def _parsed(read: Callable[[bytes], _T], cached: _Cached | None) -> _T | None:
+def _parsed(read: Callable[[bytes], _T], cached: CachedCopy | None) -> _T | None:
     """The cached copy read, or ``None`` if there is none or it cannot be read."""
     if cached is None:
         return None
@@ -490,9 +439,19 @@ def _fetch(
     download: Downloader,
     clock: Callable[[], float],
 ) -> tuple[_T, Retrieval]:
-    """``url`` read from the cache at ``target`` or downloaded, by the policy."""
+    """``url`` read from the cache at ``target`` or downloaded, by the policy.
+
+    Raises
+    ------
+    ValueError
+        If ``max_age`` is shorter than CelesTrak's update interval.
+    HttpStatusError
+        If the download fails with an HTTP status other than 403 (re-raised).
+    SourceUnavailable
+        If CelesTrak answers HTTP 403 and there is no usable cached copy.
+    """
     _check_max_age(max_age)
-    cached = _read_cache(target, url)
+    cached = read_copy(target, url)
     now = clock()
     if cached is not None and 0.0 <= now - cached.meta.checked < max_age:
         value = _parsed(read, cached)
@@ -512,10 +471,10 @@ def _fetch(
                 "after CelesTrak's next update (about every two hours)"
             ) from exc
         meta = dataclasses.replace(cached.meta, checked=now)
-        _write_meta(target, meta)
+        write_meta(target, meta)
         return value, _retrieval(target, meta)
     value = read(data)
     digest = store_bytes(target, data)
-    meta = _Meta(url=url, sha256=digest, retrieved=now, checked=now)
-    _write_meta(target, meta)
+    meta = CopyMeta(url=url, sha256=digest, retrieved=now, checked=now)
+    write_meta(target, meta)
     return value, _retrieval(target, meta)

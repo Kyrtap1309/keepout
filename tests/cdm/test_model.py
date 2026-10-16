@@ -14,9 +14,16 @@ from cdm_builders import (
 
 from keepout.cdm import model
 from keepout.cdm.keywords import covariance_names
-from keepout.cdm.model import Cdm, CdmObject, DuplicateKeyword, Field, Section
+from keepout.cdm.model import (
+    Cdm,
+    CdmObject,
+    CovarianceMethod,
+    DuplicateKeyword,
+    Field,
+    Section,
+)
 from keepout.conjunction import Conjunction
-from keepout.errors import CovarianceError, UnsupportedFrame
+from keepout.errors import CdmParseError, CovarianceError, UnsupportedFrame
 from keepout.frames import teme_to_gcrf
 
 
@@ -42,6 +49,31 @@ def test_typed_accessors() -> None:
     np.testing.assert_array_equal(first.velocity, [0.0, 7500.0, 0.0])
     np.testing.assert_array_equal(first.covariance_rtn, DIAGONAL_COVARIANCE)
     assert cdm.object2.designator == "10002"
+
+
+@pytest.mark.parametrize(
+    ("value", "method", "assumed"),
+    [
+        ("CALCULATED", CovarianceMethod.CALCULATED, False),
+        ("DEFAULT", CovarianceMethod.DEFAULT, True),
+    ],
+)
+def test_the_covariance_method_is_typed(
+    value: str, method: CovarianceMethod, assumed: bool
+) -> None:
+    cdm = minimal_cdm(segment2=replace(segment_fields(2), "COVARIANCE_METHOD", value))
+    assert cdm.object2.covariance_method is method
+    assert cdm.object2.assumed_covariance is assumed
+    assert cdm.assumed_covariance is assumed
+    assert not cdm.object1.assumed_covariance
+
+
+def test_an_unknown_covariance_method_is_a_parse_error() -> None:
+    cdm = minimal_cdm(segment1=replace(segment_fields(1), "COVARIANCE_METHOD", "X"))
+    with pytest.raises(CdmParseError, match="must be CALCULATED or DEFAULT, got 'X'"):
+        _ = cdm.object1.covariance_method
+    with pytest.raises(CdmParseError, match="keyword COVARIANCE_METHOD"):
+        _ = cdm.assumed_covariance
 
 
 def test_a_cdm_has_exactly_two_object_sections() -> None:

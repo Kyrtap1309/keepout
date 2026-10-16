@@ -65,6 +65,10 @@ class PcObservation:
         Warnings about ``pc`` (covariance repairs, questionable assumptions).
     result
         keepout's full result, when keepout computed ``pc``.
+    assumed_covariance
+        Whether the message gives an object's covariance as assumed
+        (``COVARIANCE_METHOD = DEFAULT``), not from orbit determination:
+        ``pc`` then rests on a model.
 
     Raises
     ------
@@ -85,6 +89,7 @@ class PcObservation:
     reported_pc: float | None = None
     diagnostics: tuple[str, ...] = ()
     result: PcResult | None = None
+    assumed_covariance: bool = False
 
     def __post_init__(self) -> None:
         if not math.isfinite(self.time_to_tca):
@@ -129,6 +134,7 @@ class PcObservation:
         time_to_tca: float,
         message_id: str | None = None,
         reported_pc: float | None = None,
+        assumed_covariance: bool = False,
     ) -> PcObservation:
         """The observation of a keepout result.
 
@@ -145,6 +151,8 @@ class PcObservation:
             Identifier of the message.
         reported_pc
             The Pc the message's originator reported.
+        assumed_covariance
+            Whether the message gives an object's covariance as assumed.
         """
         ci_high = (
             result.details.get("ci_high") if result.method == "montecarlo" else None
@@ -159,4 +167,5 @@ class PcObservation:
             reported_pc=reported_pc,
             diagnostics=result.diagnostics,
             result=result,
+            assumed_covariance=assumed_covariance,
         )

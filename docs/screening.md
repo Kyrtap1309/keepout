@@ -229,10 +229,13 @@ standard input (`python -`) cannot use workers.
 A `CloseApproach` holds the catalog numbers and both GCRF states at TCA; the
 miss distance, the miss vector in the primary's RTN frame (`miss_rtn`), the
 relative velocity and speed follow from them. `to_conjunction` turns an
-approach into a `Conjunction` for `compute_pc`, with a hard-body radius and
-covariances at TCA from elsewhere (your own orbit determination, a CDM).
-Without covariances only the maximum-Pc methods apply: an upper bound, not
-an estimate.
+approach into a `Conjunction` for `compute_pc`, with a hard-body radius (the
+combined one, or each object's: `primary_radius` and `secondary_radius`)
+and covariances at TCA from elsewhere (your own orbit determination, a
+CDM). Without covariances only the maximum-Pc methods apply: an upper
+bound, not an estimate. The [synthetic operator](synthetic.md) supplies
+assumed covariances from a model of GP errors instead, and turns each
+approach into a CDM.
 
 ```python
 from astropy.time import Time
@@ -352,10 +355,10 @@ Space-Track.org (24 194 objects appear in its report of that day). Most
 rocket bodies and debris are in no public group: 40 211 of the 186 229
 approaches of SOCRATES's report of 2026-10-06 involve an object outside the
 public catalog, and screening against `fetch_catalog()` misses such
-approaches. The full catalog comes with the Space-Track.org client
-(milestone M6); `screen` takes any element sets, so a catalog downloaded
-from Space-Track.org and read with `keepout.omm.load` can be screened
-already.
+approaches. The full catalog, about 32 000 objects (31 930 on
+2026-10-15), comes from Space-Track.org with a free account:
+`keepout.sources.spacetrack.fetch_catalog()` gives it as the same `Catalog`
+(see [Space-Track data](spacetrack.md)).
 
 ## Validation and performance
 
@@ -368,9 +371,12 @@ already.
   left out as stale. `tools/screening_report.py` generates the report; CI
   runs it with `--check`.
 - **Benchmark.** 20 LEO primaries against the 19 914 objects of the frozen
-  public catalog for 7 days take about 9 s with 4 workers on a desktop CPU
-  (the target is under 60 s); `tools/screening_benchmark.py` writes the
-  numbers to the [README](https://github.com/Kyrtap1309/keepout#performance).
+  public catalog for 7 days take about 9 s with 4 workers on a desktop CPU,
+  and against the 31 930 objects of the frozen full catalog (Space-Track,
+  2026-10-15) 13 s, finding 866 approaches in the 5 km sphere (the target
+  is under 60 s); `tools/screening_benchmark.py` (`--source spacetrack` for
+  the full catalog) writes the numbers to the
+  [README](https://github.com/Kyrtap1309/keepout#performance).
   CI also times every change against its merge base on the same runner (a
   reduced catalog, one process, five runs each, alternately) and fails when
   the median CPU time rises by more than 20 %.
@@ -385,3 +391,8 @@ Space-Track.org user agreement allows to be redistributed with this
 citation; it is not covered by keepout's MIT licence. Cite data you
 download from CelesTrak in the same way when you publish results computed
 from it.
+
+The frozen full catalog in `tests/screening/spacetrack-data/` (see the
+`NOTICE` there): Data: USSPACECOM/18 SDS via Space-Track.org, retrieved on
+2026-10-15; also basic SSA data, redistributed with this citation and not
+covered by keepout's MIT licence.

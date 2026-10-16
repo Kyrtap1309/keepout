@@ -6,7 +6,7 @@ from builders import CDM_DATA
 from risk_builders import b1_cdm
 
 import keepout.cdm
-from keepout import Conjunction, PcConvergenceError, compute_pc
+from keepout import Conjunction, EventError, PcConvergenceError, compute_pc
 from keepout.cdm import Cdm
 from keepout.risk import DAY, Action, assess
 from keepout.risk.event import ConjunctionEvent, group_events, time_to_tca
@@ -84,6 +84,11 @@ def test_invalid_events_are_refused(
         ConjunctionEvent.from_cdms(cdms, tca_tolerance=tolerance)
 
 
+def test_cdms_that_do_not_make_an_event_are_a_keepout_error() -> None:
+    with pytest.raises(EventError, match="MESSAGE_ID repeated: A"):
+        ConjunctionEvent.from_cdms((b1_cdm("A"), b1_cdm("A")))
+
+
 def test_an_empty_event_id_is_refused() -> None:
     with pytest.raises(ValueError, match="event_id must not be empty"):
         ConjunctionEvent("", (b1_cdm(),))
@@ -100,6 +105,16 @@ def test_observations_are_keepouts_pc_of_each_cdm() -> None:
     assert seen[0].time_to_tca == pytest.approx(2 * DAY, abs=1e-6)
     assert seen[1].time_to_tca == pytest.approx(B1_TIME_TO_TCA, abs=1e-6)
     assert seen[0].reported_pc == 4.835e-05
+
+
+def test_an_assumed_covariance_is_flagged_on_its_observation_and_event() -> None:
+    measured = b1_cdm("A", created="2010-03-11T22:37:52.618")
+    assumed = b1_cdm("B", assumed_covariance=True)
+    event = ConjunctionEvent("E", (measured, assumed))
+    seen = event.observations(hard_body_radius=HBR)
+    assert [o.assumed_covariance for o in seen] == [False, True]
+    assert event.assumed_covariance
+    assert not ConjunctionEvent("F", (measured,)).assumed_covariance
 
 
 def test_a_named_method_is_used() -> None:

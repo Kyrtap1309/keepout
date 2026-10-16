@@ -40,7 +40,16 @@ def _utc_dates(epoch: Time, seconds: FloatArray) -> tuple[FloatArray, FloatArray
 
 
 def _indices(indices: npt.ArrayLike, size: int) -> IndexArray:
-    """``indices`` checked as positions in a sequence of ``size`` items."""
+    """``indices`` checked as positions in a sequence of ``size`` items.
+
+    Raises
+    ------
+    ValueError
+        If ``indices`` is not one-dimensional, or not integers when not
+        empty.
+    IndexError
+        If an index is outside ``[0, size)``.
+    """
     array = np.asarray(indices)
     if array.ndim != 1:
         raise ValueError(f"indices must be one-dimensional, got shape {array.shape}")

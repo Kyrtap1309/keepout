@@ -14,7 +14,7 @@ from keepout._types import require_non_negative
 from keepout.cdm.model import Cdm
 from keepout.conjunction import Conjunction
 from keepout.covariance import Policy
-from keepout.errors import KeepoutError
+from keepout.errors import EventError, HardBodyRadiusError, KeepoutError
 from keepout.pc.api import MethodChoice, compute_pc
 from keepout.pc.result import PcResult
 from keepout.risk.observation import PcObservation
@@ -75,10 +75,12 @@ class ConjunctionEvent:
     Raises
     ------
     ValueError
-        If ``event_id`` is empty, there are no CDMs, a ``MESSAGE_ID`` repeats,
-        the CDMs are about different objects (``OBJECT1`` and ``OBJECT2``
-        by designator, in that order), their TCAs spread over more than
-        ``tca_tolerance``, or they give different ``CONJUNCTION_ID`` values.
+        If ``event_id`` is empty or there are no CDMs.
+    EventError
+        If a ``MESSAGE_ID`` repeats, the CDMs are about different objects
+        (``OBJECT1`` and ``OBJECT2`` by designator, in that order), their TCAs
+        spread over more than ``tca_tolerance``, or they give different
+        ``CONJUNCTION_ID`` values.
     """
 
     event_id: str
@@ -105,15 +107,15 @@ class ConjunctionEvent:
         counts = Counter(cdm.message_id for cdm in ordered)
         repeated = sorted(i for i, n in counts.items() if n > 1)
         if repeated:
-            raise ValueError(f"MESSAGE_ID repeated: {', '.join(repeated)}")
+            raise EventError(f"MESSAGE_ID repeated: {', '.join(repeated)}")
         pairs = {_pair(cdm) for cdm in ordered}
         if len(pairs) > 1:
             listed = ", ".join(f"{a}/{b}" for a, b in sorted(pairs))
-            raise ValueError(f"CDMs of one event must share both objects, got {listed}")
+            raise EventError(f"CDMs of one event must share both objects, got {listed}")
         offsets = [_seconds(cdm.tca, first.tca) for cdm in ordered]
         spread = max(offsets) - min(offsets)
         if spread > self.tca_tolerance:
-            raise ValueError(
+            raise EventError(
                 f"TCAs spread over {spread:.3g} s, more than tca_tolerance "
                 f"({self.tca_tolerance:g} s)"
             )
@@ -121,7 +123,7 @@ class ConjunctionEvent:
             cdm.conjunction_id for cdm in ordered if cdm.conjunction_id is not None
         }
         if len(conjunction_ids) > 1:
-            raise ValueError(
+            raise EventError(
                 "CDMs of one event give different CONJUNCTION_ID values: "
                 f"{', '.join(sorted(conjunction_ids))}"
             )
@@ -180,6 +182,13 @@ class ConjunctionEvent:
         """The most recently created CDM."""
         return self.cdms[-1]
 
+    @property
+    def assumed_covariance(self) -> bool:
+        """Whether a CDM of the event has an assumed covariance
+        (:attr:`~keepout.cdm.Cdm.assumed_covariance`): its Pc rests on a model.
+        """
+        return any(cdm.assumed_covariance for cdm in self.cdms)
+
     def observations(
         self,
         *,
@@ -210,7 +219,7 @@ class ConjunctionEvent:
 
         Raises
         ------
-        ValueError
+        HardBodyRadiusError
             If ``hard_body_radius`` is ``None`` and a CDM lacks ``HBR`` for an
             object (checked before any Pc is computed).
         """
@@ -221,7 +230,7 @@ class ConjunctionEvent:
                 if cdm.object1.hbr is None or cdm.object2.hbr is None
             ]
             if missing:
-                raise ValueError(
+                raise HardBodyRadiusError(
                     f"no HBR for both objects in {', '.join(missing)}: pass "
                     "hard_body_radius= (combined, in metres)"
                 )
@@ -250,6 +259,7 @@ def _observe(
     """The observation of one CDM (see :meth:`ConjunctionEvent.observations`)."""
     reported, notes = _reported(cdm)
     when = time_to_tca(cdm)
+    assumed = cdm.assumed_covariance
     try:
         conjunction = cdm.conjunction(hard_body_radius=hard_body_radius, policy=policy)
         result = compute(conjunction)
@@ -261,9 +271,14 @@ def _observe(
             message_id=cdm.message_id,
             reported_pc=reported,
             diagnostics=notes,
+            assumed_covariance=assumed,
         )
     observation = PcObservation.from_result(
-        result, time_to_tca=when, message_id=cdm.message_id, reported_pc=reported
+        result,
+        time_to_tca=when,
+        message_id=cdm.message_id,
+        reported_pc=reported,
+        assumed_covariance=assumed,
     )
     if notes:
         observation = replace(
@@ -297,9 +312,10 @@ def group_events(
     Raises
     ------
     ValueError
-        If ``tca_tolerance`` is invalid, or a group is not a valid event
-        (e.g. a repeated ``MESSAGE_ID``, or different ``CONJUNCTION_ID``
-        values within ``tca_tolerance``).
+        If ``tca_tolerance`` is invalid.
+    EventError
+        If a group is not a valid event (e.g. a repeated ``MESSAGE_ID``, or
+        different ``CONJUNCTION_ID`` values within ``tca_tolerance``).
     """
     require_non_negative(tca_tolerance, "tca_tolerance")
     messages = list(cdms)

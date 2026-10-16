@@ -1,10 +1,11 @@
 # keepout
 
 Spacecraft conjunction assessment in Python: screening against the public
-catalog, CCSDS CDM ingest, probability of collision (Pc), risk trends and
+catalog, CCSDS CDM ingest and generation, probability of collision (Pc),
+risk trends, a synthetic operator on public data, a command line and
 collision-avoidance manoeuvre planning.
 
-> **Status:** pre-alpha (milestone M5 — screening).
+> **Status:** pre-alpha (milestone M6 — synthetic operator and command line).
 
 Pc algorithms are implemented from the published literature and validated
 against the public test cases of the
@@ -101,7 +102,7 @@ keepout's decision for each of the 15321 events of ESA's Kelvins data, from ESA'
 |---|---|---|
 | ignore | 13823 | 90.2% |
 | monitor | 1468 | 9.6% |
-| monitor, prepare manoeuvre | 6 | <0.1% |
+| prepare manoeuvre | 6 | <0.1% |
 | manoeuvre | 24 | 0.2% |
 
 ![Kelvins event 734: manoeuvre](docs/img/risk-kelvins/event-734.svg)
@@ -142,13 +143,15 @@ comparison with SOCRATES is under [Validation](#validation).
 
 GP data: USSPACECOM/18 SDS via Space-Track.org, retrieved from CelesTrak
 (celestrak.org); the frozen copy in `tests/screening/data/` was retrieved
-on 2026-10-06 and is not covered by keepout's MIT licence (see its `NOTICE`).
+on 2026-10-06, the frozen full catalog in `tests/screening/spacetrack-data/`
+from Space-Track.org on 2026-10-15; neither is covered by keepout's MIT
+licence (see their `NOTICE` files).
 
 ### Performance
 
-The target: 20 primaries against the public catalog for a week in under 60 s
-with 4 worker processes. CI also times each change against its merge base and
-fails on a slowdown of more than 20 %.
+The target: 20 primaries against the public catalog, and against the full
+catalog, for a week in under 60 s with 4 worker processes. CI also times each
+change against its merge base and fails on a slowdown of more than 20 %.
 
 <!-- screening-benchmark-summary:start -->
 Screening 20 LEO primaries against the 19914 element sets of the frozen public catalog (CelesTrak, retrieved 2026-10-06) for 7 days from 2026-10-06 00:00 UTC, with 4 worker processes (`tools/screening_benchmark.py`):
@@ -162,6 +165,47 @@ Screening 20 LEO primaries against the 19914 element sets of the frozen public c
 Times: median of 3 runs on 2026-10-07, Intel(R) Core(TM) i5-14600K (20 logical CPUs), Python 3.13.7; `--check` checks the counts, not the times.
 <!-- screening-benchmark-summary:end -->
 
+On the full catalog, which adds most of the rocket bodies and debris the
+public catalog lacks (retrieved nine days later, so the week differs):
+
+<!-- screening-benchmark-spacetrack-summary:start -->
+Screening 20 LEO primaries against the 31930 element sets of the frozen full catalog (Space-Track, retrieved 2026-10-15) for 7 days from 2026-10-15 00:00 UTC, with 4 worker processes (`tools/screening_benchmark.py --source spacetrack`):
+
+| Volume | Screened | Left out | Approaches | Wall time | CPU time |
+|---|---|---|---|---|---|
+| 5 km sphere (default) | 31914 | 5 future epoch, 11 propagation failed | 866 | 13.1 s | 56.1 s |
+| 10 km sphere (NASA, GP data) | 31914 | 5 future epoch, 11 propagation failed | 2689 | 14.2 s | 59.3 s |
+| SFS Handbook Table 3 | 31914 | 5 future epoch, 11 propagation failed | 787 | 20.1 s | 83.9 s |
+
+Times: median of 3 runs on 2026-10-16, Intel(R) Core(TM) i5-14600K (20 logical CPUs), Python 3.13.7; `--check` checks the counts, not the times.
+<!-- screening-benchmark-spacetrack-summary:end -->
+
+## Synthetic operator and command line
+
+```bash
+pip install "keepout[cli]"
+keepout screen --fleet examples/synthetic-operator/fleet.toml \
+    --catalog tests/screening/data/celestrak-public.csv.gz \
+    --start 2026-10-06 --days 7 --cdm-dir cdms
+keepout assess cdms/*.kvn   # exit status 3 if an event needs a manoeuvre
+```
+
+`keepout screen` plays a conjunction assessment service for a fleet of real
+satellites (here, in a clone of the repository, the ISS, Metop-B and
+Intelsat 39 against the public catalog frozen on 2026-10-06): it screens
+them, issues a CCSDS CDM for every close approach, computes the Pc from each
+CDM and assesses each event (12 approaches that week, 2 to monitor;
+[report](docs/synthetic-operator.md)). GP data has no covariance, so the
+CDMs carry keepout's model of GP element-set errors, an explicit
+[assumption](docs/assumptions.md) from the literature, not orbit
+determination: the Pc values show what the model implies, not the
+satellites' real risk. `keepout fetch catalog` downloads the live catalog,
+from CelesTrak (no account) or Space-Track.org (the full catalog, with an
+account, within its published limits); `keepout fetch cdm` lists
+Space-Track's public CDM summaries; `keepout validate` checks keepout's Pc
+against CARA's cases. See [Synthetic operator](docs/synthetic.md), [Command
+line](docs/cli.md) and [Space-Track data](docs/spacetrack.md).
+
 ## Development
 
 ```bash
@@ -174,6 +218,9 @@ uv run python tools/validation_report.py --monte-carlo   # Monte Carlo (slow)
 uv run python tools/risk_report.py   # Kelvins risk report (downloads 221 MB once)
 uv run python tools/screening_report.py   # SOCRATES screening report (offline)
 uv run python tools/screening_benchmark.py   # screening benchmark (offline, minutes)
+uv run python tools/screening_benchmark.py --source spacetrack   # on the full catalog
+uv run python tools/synthetic_operator_report.py   # synthetic operator report (offline)
+uv run python tools/spacetrack_snapshot.py verify   # frozen Space-Track catalog (offline)
 uv run ruff check && uv run ruff format --check
 uv run mypy
 ```
@@ -181,5 +228,6 @@ uv run mypy
 ## Licence
 
 MIT. The third-party data committed for tests is not covered: the CelesTrak
-data in `tests/screening/data/` (see its `NOTICE`) and the Kelvins excerpt in
-`tests/sources/data/` (see its `README.md`).
+data in `tests/screening/data/`, the Space-Track data in
+`tests/screening/spacetrack-data/` (see their `NOTICE` files) and the Kelvins
+excerpt in `tests/sources/data/` (see its `README.md`).

@@ -36,6 +36,11 @@ def require_same_epoch(first: Time, second: Time, what: str) -> None:
         Epochs to compare.
     what
         What is compared, for the error message (e.g. ``"state and covariance"``).
+
+    Raises
+    ------
+    GeometryError
+        If the epochs differ by more than :data:`EPOCH_TOLERANCE_S`.
     """
     if first is second:
         return

@@ -296,7 +296,13 @@ class PcMethodInput:
 
 
 def load_alfano_inputs(cache: Path | None = None) -> list[AlfanoInput]:
-    """Every Alfano (2009) case: CARA's results table and the ``.xls`` sheets."""
+    """Every Alfano (2009) case: CARA's results table and the ``.xls`` sheets.
+
+    Raises
+    ------
+    CaraFormatError
+        If the results table has no row for a case.
+    """
     results = {
         int(_number(row, "Case")): row
         for row in cara.load_csv(cara.fetch(cara.ALFANO_2009_RESULTS, cache=cache))
@@ -324,7 +330,13 @@ def load_alfano_windows(cache: Path | None = None) -> dict[int, float]:
 
 
 def load_pc_method_inputs(cache: Path | None = None) -> list[PcMethodInput]:
-    """Every conjunction of the CARA Pc method test set: table row and CDM."""
+    """Every conjunction of the CARA Pc method test set: table row and CDM.
+
+    Raises
+    ------
+    CaraFormatError
+        If a conjunction of the table has no pinned CDM.
+    """
     inputs: list[PcMethodInput] = []
     for row in cara.load_xlsx(cara.fetch(cara.PC_METHOD_TABLE, cache=cache)):
         conjunction_id = str(_field(row, "Conjunction_ID"))
