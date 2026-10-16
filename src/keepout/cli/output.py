@@ -15,11 +15,24 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import NoReturn, ParamSpec, TypeAlias, TypeVar
 
 import typer
+from astropy.time import Time
+from rich import box
 from rich.console import Console, RenderableType
+from rich.table import Table
 
 from keepout.errors import KeepoutError
 
-__all__ = ["ExitCode", "JsonValue", "fail", "reported", "show"]
+__all__ = [
+    "ExitCode",
+    "JsonValue",
+    "fail",
+    "minute",
+    "plural",
+    "reported",
+    "show",
+    "table",
+    "utc",
+]
 
 
 class ExitCode(enum.IntEnum):
@@ -81,6 +94,36 @@ def fail(message: str, status: ExitCode = ExitCode.ERROR) -> NoReturn:
     """
     typer.echo(f"Error: {message}", err=True)
     raise typer.Exit(status)
+
+
+def utc(time: Time) -> str:
+    """``time`` in UTC to the second, ISO 8601: ``2026-10-06T19:36:42``."""
+    return str(time.utc.isot)[:19]
+
+
+def minute(time: Time) -> str:
+    """``time`` in UTC to the minute, for tables: ``2026-10-06 19:36``."""
+    return utc(time)[:16].replace("T", " ")
+
+
+def plural(count: int, noun: str, nouns: str | None = None) -> str:
+    """``count`` and ``noun``, or its plural ``nouns`` (default: ``noun`` and
+    ``s``) unless ``count`` is one: ``1 event``, ``2 events``."""
+    if count == 1:
+        return f"{count} {noun}"
+    return f"{count} {nouns or noun + 's'}"
+
+
+def table(title: str) -> Table:
+    """An empty table with a header rule and no borders, narrow enough for
+    rows of events in 80 columns."""
+    return Table(
+        title=title,
+        box=box.SIMPLE_HEAD,
+        show_edge=False,
+        pad_edge=False,
+        collapse_padding=True,
+    )
 
 
 _P = ParamSpec("_P")

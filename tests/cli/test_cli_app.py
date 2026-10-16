@@ -3,12 +3,22 @@ import math
 
 import pytest
 import typer
+from astropy.time import Time
 from cli_builders import keepout
 from rich.table import Table
 from typer.testing import CliRunner
 
 import keepout as package
-from keepout.cli.output import ExitCode, JsonValue, fail, reported, show
+from keepout.cli.output import (
+    ExitCode,
+    JsonValue,
+    fail,
+    minute,
+    plural,
+    reported,
+    show,
+    utc,
+)
 from keepout.errors import CdmParseError, SourceUnavailable
 
 
@@ -25,10 +35,10 @@ def test_version() -> None:
 def test_help_lists_the_commands() -> None:
     result = keepout("--help")
     assert result.exit_code == ExitCode.OK
-    for command in ("fetch", "validate"):
+    for command in ("fetch", "screen", "assess", "validate"):
         assert command in result.stdout
     fetch = keepout("fetch", "--help")
-    for source in ("cara", "kelvins"):
+    for source in ("catalog", "cdm", "cara", "kelvins"):
         assert source in fetch.stdout
 
 
@@ -126,3 +136,16 @@ def test_show_prints_json_or_text(capsys: pytest.CaptureFixture[str]) -> None:
 def test_show_refuses_values_json_cannot_hold() -> None:
     with pytest.raises(ValueError, match="JSON compliant"):
         show({"pc": math.nan}, as_json=True)
+
+
+def test_plural() -> None:
+    assert plural(1, "event") == "1 event"
+    assert plural(0, "event") == "0 events"
+    assert plural(2, "approach", "approaches") == "2 approaches"
+    assert plural(1, "approach", "approaches") == "1 approach"
+
+
+def test_times_in_utc() -> None:
+    time = Time("2026-10-06T19:36:42.717", scale="tai")
+    assert utc(time) == "2026-10-06T19:36:05"
+    assert minute(time) == "2026-10-06 19:36"
