@@ -53,6 +53,7 @@ nav:
       - Monte Carlo validation report: validation-monte-carlo.md
       - Risk on ESA's Kelvins data: risk-kelvins.md
       - Screening against SOCRATES: screening-socrates.md
+      - Synthetic operator on public data: synthetic-operator.md
   - Reference:
       - Probability of collision: reference/pc.md
       - Risk: reference/risk.md

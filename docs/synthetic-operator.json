@@ -1,0 +1,362 @@
+{
+  "settings": {
+    "fleet": "examples/synthetic-operator/fleet.toml",
+    "start": "2026-10-06T00:00:00.000",
+    "days": 7.0,
+    "volume": "5 km sphere (as CelesTrak SOCRATES)",
+    "catalog_hard_body_radius": 1.0,
+    "safety_factor": 2.0,
+    "green_below": 1e-07,
+    "red_from": 0.0001,
+    "basis": "conservative",
+    "decision_point_days": 2.0
+  },
+  "catalog": {
+    "retrieved": "2026-10-06",
+    "element_sets": 19914,
+    "screened": 19886,
+    "skipped": 28
+  },
+  "regimes": [
+    {
+      "regime": "LEO",
+      "radial": 102.0,
+      "transverse": 471.0,
+      "normal": 126.0,
+      "transverse_rate_per_day": 1500.0
+    },
+    {
+      "regime": "MEO",
+      "radial": 73.0,
+      "transverse": 131.0,
+      "normal": 54.0,
+      "transverse_rate_per_day": 1500.0
+    },
+    {
+      "regime": "GTO",
+      "radial": 1960.0,
+      "transverse": 3897.0,
+      "normal": 1808.0,
+      "transverse_rate_per_day": 1500.0
+    },
+    {
+      "regime": "HEO",
+      "radial": 824.0,
+      "transverse": 1367.0,
+      "normal": 1059.0,
+      "transverse_rate_per_day": 1500.0
+    },
+    {
+      "regime": "GEO",
+      "radial": 359.0,
+      "transverse": 432.0,
+      "normal": 86.0,
+      "transverse_rate_per_day": 1500.0
+    }
+  ],
+  "fleet": [
+    {
+      "catalog_number": 25544,
+      "name": "ISS (ZARYA)",
+      "regime": "LEO",
+      "hard_body_radius": 50.0,
+      "maneuverable": true,
+      "epoch": "2026-10-06T00:20:47.860512",
+      "approaches": 4
+    },
+    {
+      "catalog_number": 38771,
+      "name": "METOP-B",
+      "regime": "LEO",
+      "hard_body_radius": 10.0,
+      "maneuverable": true,
+      "epoch": "2026-10-06T06:22:34.313952",
+      "approaches": 7
+    },
+    {
+      "catalog_number": 44476,
+      "name": "INTELSAT 39 (IS-39)",
+      "regime": "GEO",
+      "hard_body_radius": 20.0,
+      "maneuverable": true,
+      "epoch": "2026-10-05T04:28:37.438752",
+      "approaches": 1
+    }
+  ],
+  "actions": {
+    "ignore": 10,
+    "monitor": 2,
+    "monitor, prepare manoeuvre": 0,
+    "manoeuvre": 0
+  },
+  "events": [
+    {
+      "message_id": "25544_58180_20261006T051233.772Z",
+      "primary": 25544,
+      "secondary": 58180,
+      "secondary_name": "STARLINK-30806",
+      "secondary_regime": "LEO",
+      "tca": "2026-10-06 05:12:33.772",
+      "miss_distance": 4632.544,
+      "relative_speed": 7914.354,
+      "transverse_sigmas": [
+        1549.8,
+        1041.0
+      ],
+      "pc": 1.44e-30,
+      "method": "foster",
+      "max_pc": 1.63e-05,
+      "scale_factor": 63.3,
+      "diluted": false,
+      "level": "green",
+      "action": "ignore",
+      "notes": []
+    },
+    {
+      "message_id": "38771_35434_20261006T092538.107Z",
+      "primary": 38771,
+      "secondary": 35434,
+      "secondary_name": "COSMOS 2251 DEB",
+      "secondary_regime": "LEO",
+      "tca": "2026-10-06 09:25:38.107",
+      "miss_distance": 4084.68,
+      "relative_speed": 8627.114,
+      "transverse_sigmas": [
+        1323.4,
+        3002.5
+      ],
+      "pc": 1.46e-17,
+      "method": "foster",
+      "max_pc": 9.81e-07,
+      "scale_factor": 29.3,
+      "diluted": false,
+      "level": "green",
+      "action": "ignore",
+      "notes": []
+    },
+    {
+      "message_id": "25544_58180_20261006T121037.724Z",
+      "primary": 25544,
+      "secondary": 58180,
+      "secondary_name": "STARLINK-30806",
+      "secondary_regime": "LEO",
+      "tca": "2026-10-06 12:10:37.724",
+      "miss_distance": 4901.72,
+      "relative_speed": 7936.935,
+      "transverse_sigmas": [
+        2420.8,
+        1714.0
+      ],
+      "pc": 4.33e-59,
+      "method": "foster",
+      "max_pc": 5.06e-06,
+      "scale_factor": 129.0,
+      "diluted": false,
+      "level": "green",
+      "action": "ignore",
+      "notes": []
+    },
+    {
+      "message_id": "38771_31882_20261006T234552.713Z",
+      "primary": 38771,
+      "secondary": 31882,
+      "secondary_name": "FENGYUN 1C DEB",
+      "secondary_regime": "LEO",
+      "tca": "2026-10-06 23:45:52.713",
+      "miss_distance": 3374.377,
+      "relative_speed": 12915.013,
+      "transverse_sigmas": [
+        3115.6,
+        11178.4
+      ],
+      "pc": 4.28e-33,
+      "method": "foster",
+      "max_pc": 2.07e-07,
+      "scale_factor": 64.3,
+      "diluted": false,
+      "level": "green",
+      "action": "ignore",
+      "notes": []
+    },
+    {
+      "message_id": "38771_30041_20261007T080602.094Z",
+      "primary": 38771,
+      "secondary": 30041,
+      "secondary_name": "FENGYUN 1C DEB",
+      "secondary_regime": "LEO",
+      "tca": "2026-10-07 08:06:02.094",
+      "miss_distance": 4511.073,
+      "relative_speed": 9441.643,
+      "transverse_sigmas": [
+        4157.5,
+        4505.9
+      ],
+      "pc": 8.48e-30,
+      "method": "foster",
+      "max_pc": 2.85e-07,
+      "scale_factor": 56.9,
+      "diluted": false,
+      "level": "green",
+      "action": "ignore",
+      "notes": []
+    },
+    {
+      "message_id": "25544_46275_20261007T161003.846Z",
+      "primary": 25544,
+      "secondary": 46275,
+      "secondary_name": "ATHENA",
+      "secondary_regime": "LEO",
+      "tca": "2026-10-07 16:10:03.846",
+      "miss_distance": 4103.983,
+      "relative_speed": 13034.804,
+      "transverse_sigmas": [
+        5919.6,
+        5170.7
+      ],
+      "pc": 7.48e-10,
+      "method": "foster",
+      "max_pc": 2.81e-05,
+      "scale_factor": 14.3,
+      "diluted": false,
+      "level": "green",
+      "action": "ignore",
+      "notes": []
+    },
+    {
+      "message_id": "38771_35884_20261007T221052.498Z",
+      "primary": 38771,
+      "secondary": 35884,
+      "secondary_name": "COSMOS 2251 DEB",
+      "secondary_regime": "LEO",
+      "tca": "2026-10-07 22:10:52.498",
+      "miss_distance": 3313.736,
+      "relative_speed": 14824.688,
+      "transverse_sigmas": [
+        5917.6,
+        6605.1
+      ],
+      "pc": 1.55e-09,
+      "method": "foster",
+      "max_pc": 8.8e-06,
+      "scale_factor": 12.1,
+      "diluted": false,
+      "level": "green",
+      "action": "ignore",
+      "notes": []
+    },
+    {
+      "message_id": "44476_55841_20261008T120302.772Z",
+      "primary": 44476,
+      "secondary": 55841,
+      "secondary_name": "LUCH-5X (OLYMP-K 2)",
+      "secondary_regime": "GEO",
+      "tca": "2026-10-08 12:03:02.772",
+      "miss_distance": 3646.536,
+      "relative_speed": 1.988,
+      "transverse_sigmas": [
+        10810.7,
+        10169.0
+      ],
+      "pc": 7.38e-06,
+      "method": "foster",
+      "max_pc": 7.73e-06,
+      "scale_factor": 0.723,
+      "diluted": true,
+      "level": "yellow",
+      "action": "monitor",
+      "notes": [
+        "2-D Pc assumptions questionable: the encounter lasts about 2.51e+03 s, 2.9% of the primary's orbital period (limit 1%); a 3-D Pc may differ",
+        "the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used"
+      ]
+    },
+    {
+      "message_id": "38771_29734_20261009T092050.228Z",
+      "primary": 38771,
+      "secondary": 29734,
+      "secondary_name": "FENGYUN 1C DEB",
+      "secondary_regime": "LEO",
+      "tca": "2026-10-09 09:20:50.228",
+      "miss_distance": 1476.482,
+      "relative_speed": 14770.629,
+      "transverse_sigmas": [
+        10313.4,
+        10630.8
+      ],
+      "pc": 3.9e-10,
+      "method": "foster",
+      "max_pc": 2.03e-06,
+      "scale_factor": 12.1,
+      "diluted": false,
+      "level": "green",
+      "action": "ignore",
+      "notes": []
+    },
+    {
+      "message_id": "25544_49773_20261010T140854.848Z",
+      "primary": 25544,
+      "secondary": 49773,
+      "secondary_name": "GLOBAL-13",
+      "secondary_regime": "LEO",
+      "tca": "2026-10-10 14:08:54.848",
+      "miss_distance": 2751.197,
+      "relative_speed": 11225.1,
+      "transverse_sigmas": [
+        14667.2,
+        14209.8
+      ],
+      "pc": 1.09e-18,
+      "method": "foster",
+      "max_pc": 3.55e-06,
+      "scale_factor": 33.6,
+      "diluted": false,
+      "level": "green",
+      "action": "ignore",
+      "notes": []
+    },
+    {
+      "message_id": "38771_30131_20261011T105628.854Z",
+      "primary": 38771,
+      "secondary": 30131,
+      "secondary_name": "FENGYUN 1C DEB",
+      "secondary_regime": "LEO",
+      "tca": "2026-10-11 10:56:28.854",
+      "miss_distance": 2019.104,
+      "relative_speed": 6968.359,
+      "transverse_sigmas": [
+        16512.6,
+        17880.5
+      ],
+      "pc": 2.67e-10,
+      "method": "foster",
+      "max_pc": 3.27e-07,
+      "scale_factor": 10.5,
+      "diluted": false,
+      "level": "green",
+      "action": "ignore",
+      "notes": []
+    },
+    {
+      "message_id": "38771_35196_20261012T112828.710Z",
+      "primary": 38771,
+      "secondary": 35196,
+      "secondary_name": "FENGYUN 1C DEB",
+      "secondary_regime": "LEO",
+      "tca": "2026-10-12 11:28:28.710",
+      "miss_distance": 212.372,
+      "relative_speed": 4957.805,
+      "transverse_sigmas": [
+        19579.3,
+        20413.5
+      ],
+      "pc": 4.86e-06,
+      "method": "foster",
+      "max_pc": 1.91e-05,
+      "scale_factor": 0.104,
+      "diluted": true,
+      "level": "yellow",
+      "action": "monitor",
+      "notes": []
+    }
+  ],
+  "example": "38771_35196_20261012T112828.710Z"
+}

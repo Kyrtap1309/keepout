@@ -174,6 +174,7 @@ uv run python tools/validation_report.py --monte-carlo   # Monte Carlo (slow)
 uv run python tools/risk_report.py   # Kelvins risk report (downloads 221 MB once)
 uv run python tools/screening_report.py   # SOCRATES screening report (offline)
 uv run python tools/screening_benchmark.py   # screening benchmark (offline, minutes)
+uv run python tools/synthetic_operator_report.py   # synthetic operator report (offline)
 uv run ruff check && uv run ruff format --check
 uv run mypy
 ```
