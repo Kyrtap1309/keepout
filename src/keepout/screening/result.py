@@ -28,7 +28,7 @@ import numpy as np
 from astropy.time import Time
 
 from keepout._types import FloatArray, read_only
-from keepout.conjunction import Conjunction
+from keepout.conjunction import Conjunction, combined_hard_body_radius
 from keepout.covariance import Covariance
 from keepout.errors import GeometryError
 from keepout.frames import relative_position_rtn
@@ -141,26 +141,32 @@ class CloseApproach:
     def to_conjunction(
         self,
         *,
-        hard_body_radius: float,
+        hard_body_radius: float | None = None,
         primary_covariance: Covariance | None = None,
         secondary_covariance: Covariance | None = None,
+        primary_radius: float | None = None,
+        secondary_radius: float | None = None,
     ) -> Conjunction:
         """The approach as a conjunction, with covariances from elsewhere.
 
         Parameters
         ----------
         hard_body_radius
-            Combined hard-body radius of the two objects [m].
+            Combined hard-body radius of the two objects [m]; if ``None``,
+            the sum of ``primary_radius`` and ``secondary_radius``.
         primary_covariance, secondary_covariance
             Each object's covariance at TCA, in GCRF or in its own RTN frame
             (its RTN axes are taken from its GCRF state here); ``None`` where
             unknown (only the maximum-Pc methods accept that).
+        primary_radius, secondary_radius
+            Each object's own hard-body radius [m], if known (a CDM gives
+            the radius per object, as ``HBR``).
 
         Returns
         -------
         Conjunction
             The two objects at TCA, identified by their catalog numbers
-            (as text), with GCRF covariances.
+            (as text), with GCRF covariances and their own radii.
 
         Raises
         ------
@@ -168,16 +174,30 @@ class CloseApproach:
             If a covariance's epoch differs from the TCA by more than
             :data:`keepout.objects.EPOCH_TOLERANCE_S`.
         ValueError
-            If ``hard_body_radius`` is not finite and positive.
+            If the combined radius is not finite and positive, an object's
+            radius is negative or not finite, or ``hard_body_radius`` is
+            ``None`` and an object's radius is not given.
         """
         objects = []
-        for number, state, covariance in (
-            (self.primary_number, self.primary_state, primary_covariance),
-            (self.secondary_number, self.secondary_state, secondary_covariance),
+        for number, state, covariance, radius in (
+            (
+                self.primary_number,
+                self.primary_state,
+                primary_covariance,
+                primary_radius,
+            ),
+            (
+                self.secondary_number,
+                self.secondary_state,
+                secondary_covariance,
+                secondary_radius,
+            ),
         ):
             gcrf = None if covariance is None else covariance.in_gcrf(state)
-            objects.append(ObjectState(str(number), state, gcrf))
-        return Conjunction(objects[0], objects[1], hard_body_radius)
+            objects.append(ObjectState(str(number), state, gcrf, radius))
+        primary, secondary = objects
+        combined = combined_hard_body_radius(primary, secondary, hard_body_radius)
+        return Conjunction(primary, secondary, combined)
 
 
 class SkipReason(enum.StrEnum):

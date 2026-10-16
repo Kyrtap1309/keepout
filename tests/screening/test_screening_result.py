@@ -152,6 +152,25 @@ def test_a_conjunction_needs_covariances_at_tca_and_a_radius() -> None:
         APPROACH.to_conjunction(hard_body_radius=20.0, secondary_covariance=later)
     with pytest.raises(ValueError, match="hard_body_radius must be finite and > 0"):
         APPROACH.to_conjunction(hard_body_radius=0.0)
+    with pytest.raises(ValueError, match="no hard-body radius for 25544, 48274"):
+        APPROACH.to_conjunction()
+
+
+def test_a_conjunction_keeps_each_objects_radius() -> None:
+    conjunction = APPROACH.to_conjunction(primary_radius=15.0, secondary_radius=0.0)
+    assert conjunction.primary.hard_body_radius == 15.0
+    assert conjunction.secondary.hard_body_radius == 0.0
+    assert conjunction.hard_body_radius == 15.0
+    # A combined radius given wins, as in Conjunction and Cdm.conjunction.
+    given = APPROACH.to_conjunction(
+        hard_body_radius=30.0, primary_radius=15.0, secondary_radius=5.0
+    )
+    assert given.hard_body_radius == 30.0
+    assert given.secondary.hard_body_radius == 5.0
+    with pytest.raises(ValueError, match="no hard-body radius for 48274"):
+        APPROACH.to_conjunction(primary_radius=15.0)
+    with pytest.raises(ValueError, match="hard_body_radius must be finite and >= 0"):
+        APPROACH.to_conjunction(hard_body_radius=20.0, secondary_radius=-1.0)
 
 
 def approach_at(seconds: float, primary: int, secondary: int) -> CloseApproach:
