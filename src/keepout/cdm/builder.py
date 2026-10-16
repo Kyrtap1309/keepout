@@ -1,0 +1,425 @@
+"""Build a CDM from a conjunction: the message keepout itself issues.
+
+:func:`make_cdm` writes a :class:`~keepout.Conjunction` and what a CDM says
+about each object (:class:`ObjectMetadata`: name, designators, type,
+manoeuvrability, covariance method, comments) as a
+:class:`~keepout.cdm.model.Cdm`: header, relative metadata with the miss
+vector and relative velocity in the primary's RTN frame, and one section
+per object with its GCRF state at TCA and its covariance in its own RTN
+frame. The message reads back to the same conjunction:
+``make_cdm(conjunction, ...).conjunction()`` gives the input's objects,
+states, covariances and hard-body radius, also after a KVN or XML
+round-trip.
+
+The builder knows nothing of where the covariances come from; a synthetic
+operator says so in ``COVARIANCE_METHOD = DEFAULT`` and the covariance
+comments of :class:`ObjectMetadata`.
+"""
+
+from __future__ import annotations
+
+import enum
+import math
+from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Final, Protocol
+
+import numpy as np
+from astropy.time import Time
+
+from keepout.cdm.keywords import covariance_entries
+from keepout.cdm.model import COMMENT, Cdm, Field, Section
+from keepout.conjunction import Conjunction
+from keepout.frames import rtn_rotation
+from keepout.objects import ObjectState
+
+__all__ = [
+    "MESSAGE_ID_PRECISION",
+    "ORIGINATOR",
+    "SCREEN_VOLUME_COMMENT",
+    "TCA_PRECISION",
+    "CovarianceMethod",
+    "Maneuverable",
+    "ObjectMetadata",
+    "ObjectType",
+    "RtnSemiAxes",
+    "make_cdm",
+    "make_message_id",
+]
+
+ORIGINATOR: Final = "KEEPOUT"
+"""Default ``ORIGINATOR`` of the messages keepout builds."""
+
+TCA_PRECISION: Final = 6
+"""Fractional digits of the seconds of ``TCA`` (a microsecond: the states
+are at TCA well within :data:`keepout.objects.EPOCH_TOLERANCE_S`)."""
+
+MESSAGE_ID_PRECISION: Final = 3
+"""Fractional digits of the seconds of the TCA in a message id."""
+
+SCREEN_VOLUME_COMMENT: Final = (
+    "SCREEN_VOLUME_X, _Y and _Z are the semi-axes of the RTN ellipsoid"
+)
+"""Relative-metadata comment of a message with a screening volume: CCSDS
+508.0-B-1 calls them the volume's "component size", which leaves open
+whether they are semi-axes or full extents."""
+
+
+class ObjectType(enum.StrEnum):
+    """``OBJECT_TYPE`` values of CCSDS 508.0-B-1."""
+
+    PAYLOAD = "PAYLOAD"
+    """A payload."""
+    ROCKET_BODY = "ROCKET BODY"
+    """A rocket body."""
+    DEBRIS = "DEBRIS"
+    """Debris."""
+    UNKNOWN = "UNKNOWN"
+    """Type not known."""
+    OTHER = "OTHER"
+    """None of the above."""
+
+
+class Maneuverable(enum.StrEnum):
+    """``MANEUVERABLE`` values of CCSDS 508.0-B-1."""
+
+    YES = "YES"
+    """The object can manoeuvre."""
+    NO = "NO"
+    """The object cannot manoeuvre."""
+    NOT_APPLICABLE = "N/A"
+    """Not applicable or not known (e.g. a catalog object)."""
+
+
+class CovarianceMethod(enum.StrEnum):
+    """``COVARIANCE_METHOD`` values of CCSDS 508.0-B-1."""
+
+    CALCULATED = "CALCULATED"
+    """Computed in the orbit determination."""
+    DEFAULT = "DEFAULT"
+    """Assumed (a default or a model), not from an orbit determination."""
+
+
+def _check_comments(comments: Sequence[str], what: str) -> tuple[str, ...]:
+    """``comments`` as a tuple; each must survive a KVN and XML round-trip."""
+    for text in comments:
+        if len(text.splitlines()) > 1 or text != text.strip():
+            raise ValueError(
+                f"{what} comment {text!r} must be one line without leading or "
+                "trailing blanks"
+            )
+    return tuple(comments)
+
+
+@dataclass(frozen=True, slots=True)
+class ObjectMetadata:
+    """What a CDM says about one object besides its state and covariance.
+
+    The object's identifier (``OBJECT_DESIGNATOR``), state, covariance and
+    hard-body radius come from its :class:`~keepout.objects.ObjectState`.
+
+    Parameters
+    ----------
+    name
+        ``OBJECT_NAME``.
+    international_designator
+        ``INTERNATIONAL_DESIGNATOR`` (COSPAR id, e.g. ``1998-067A``; CCSDS
+        allows ``UNKNOWN``).
+    catalog_name
+        ``CATALOG_NAME``: the catalog the designator belongs to.
+    object_type
+        ``OBJECT_TYPE``; not written if ``None``.
+    maneuverable
+        ``MANEUVERABLE``; ``N/A`` (not known) by default.
+    covariance_method
+        ``COVARIANCE_METHOD``: ``DEFAULT`` for an assumed covariance.
+    ephemeris_name
+        ``EPHEMERIS_NAME``: ``NONE`` when no operator ephemeris was used.
+    comments
+        Comments opening the object section.
+    covariance_comments
+        Comments opening the covariance block (e.g. the covariance model).
+
+    Raises
+    ------
+    ValueError
+        If an enumerated field has a value CCSDS does not define, or a
+        comment has more than one line or leading or trailing blanks.
+    """
+
+    name: str
+    international_designator: str
+    catalog_name: str = "SATCAT"
+    object_type: ObjectType | None = None
+    maneuverable: Maneuverable = Maneuverable.NOT_APPLICABLE
+    covariance_method: CovarianceMethod = CovarianceMethod.CALCULATED
+    ephemeris_name: str = "NONE"
+    comments: tuple[str, ...] = ()
+    covariance_comments: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.object_type is not None:
+            object.__setattr__(self, "object_type", ObjectType(self.object_type))
+        object.__setattr__(self, "maneuverable", Maneuverable(self.maneuverable))
+        object.__setattr__(
+            self, "covariance_method", CovarianceMethod(self.covariance_method)
+        )
+        object.__setattr__(self, "comments", _check_comments(self.comments, "object"))
+        object.__setattr__(
+            self,
+            "covariance_comments",
+            _check_comments(self.covariance_comments, "covariance"),
+        )
+
+
+class RtnSemiAxes(Protocol):
+    """Semi-axes of an RTN ellipsoid [m], such as a
+    :class:`keepout.screening.ScreeningVolume`."""
+
+    @property
+    def radial(self) -> float:
+        """Semi-axis along R [m]."""
+
+    @property
+    def transverse(self) -> float:
+        """Semi-axis along T [m]."""
+
+    @property
+    def normal(self) -> float:
+        """Semi-axis along N [m]."""
+
+
+def _with_precision(time: Time, precision: int) -> Time:
+    """A UTC copy of ``time`` written with ``precision`` fractional digits."""
+    copy = Time(time.utc, copy=True)
+    copy.precision = precision
+    return copy
+
+
+def make_message_id(primary_id: str, secondary_id: str, tca: Time) -> str:
+    """The deterministic ``MESSAGE_ID`` of a conjunction.
+
+    Both identifiers and the TCA to the millisecond, e.g.
+    ``25544_49863_20261008T123456.789Z``: the same approach always gets
+    the same id, and the id is also a portable file name for identifiers
+    of letters, digits, ``-`` and ``.``.
+
+    Parameters
+    ----------
+    primary_id, secondary_id
+        Identifiers of the two objects (e.g. catalog numbers).
+    tca
+        Time of closest approach.
+    """
+    stamp = _with_precision(tca, MESSAGE_ID_PRECISION).isot
+    compact = str(stamp).replace("-", "").replace(":", "")
+    return f"{primary_id}_{secondary_id}_{compact}Z"
+
+
+def _radii(conjunction: Conjunction) -> tuple[float, float] | None:
+    """Each object's ``HBR``, or None if neither object has a radius.
+
+    Raises
+    ------
+    ValueError
+        If only one object has a radius, or the two do not add up to the
+        conjunction's combined radius: a CDM gives the radius per object.
+    """
+    first = conjunction.primary.hard_body_radius
+    second = conjunction.secondary.hard_body_radius
+    if first is None and second is None:
+        return None
+    combined = conjunction.hard_body_radius
+    if first is None or second is None or not math.isclose(first + second, combined):
+        raise ValueError(
+            "a CDM gives the hard-body radius per object (HBR): the objects' "
+            f"radii {first} and {second} must add up to the combined radius "
+            f"{combined} m, or both be None"
+        )
+    return first, second
+
+
+def _relative(conjunction: Conjunction) -> list[Field]:
+    """``MISS_DISTANCE`` to ``RELATIVE_VELOCITY_N``, in the primary's RTN."""
+    primary = conjunction.primary.state
+    rotation = rtn_rotation(primary.r, primary.v)
+    position = rotation @ conjunction.relative_position
+    velocity = rotation @ conjunction.relative_velocity
+    return [
+        Field("MISS_DISTANCE", float(np.linalg.norm(conjunction.relative_position))),
+        Field("RELATIVE_SPEED", conjunction.relative_speed),
+        *(
+            Field(f"RELATIVE_POSITION_{axis}", float(value))
+            for axis, value in zip("RTN", position, strict=True)
+        ),
+        *(
+            Field(f"RELATIVE_VELOCITY_{axis}", float(value))
+            for axis, value in zip("RTN", velocity, strict=True)
+        ),
+    ]
+
+
+def _screening(
+    period: tuple[Time, Time] | None, volume: RtnSemiAxes | None
+) -> list[Field]:
+    fields: list[Field] = []
+    if period is not None:
+        start, stop = period
+        if not stop > start:
+            raise ValueError("the screening period must end after it starts")
+        fields += [
+            Field("START_SCREEN_PERIOD", start),
+            Field("STOP_SCREEN_PERIOD", stop),
+        ]
+    if volume is not None:
+        fields += [
+            Field("SCREEN_VOLUME_FRAME", "RTN"),
+            Field("SCREEN_VOLUME_SHAPE", "ELLIPSOID"),
+            Field("SCREEN_VOLUME_X", float(volume.radial)),
+            Field("SCREEN_VOLUME_Y", float(volume.transverse)),
+            Field("SCREEN_VOLUME_Z", float(volume.normal)),
+        ]
+    return fields
+
+
+def _segment(
+    index: int, item: ObjectState, metadata: ObjectMetadata, radius: float | None
+) -> Section:
+    """Object section ``index`` in the field order of the CCSDS schema."""
+    fields = [Field(COMMENT, text) for text in metadata.comments]
+    fields += [
+        Field("OBJECT", f"OBJECT{index}"),
+        Field("OBJECT_DESIGNATOR", item.object_id),
+        Field("CATALOG_NAME", metadata.catalog_name),
+        Field("OBJECT_NAME", metadata.name),
+        Field("INTERNATIONAL_DESIGNATOR", metadata.international_designator),
+    ]
+    if metadata.object_type is not None:
+        fields.append(Field("OBJECT_TYPE", str(metadata.object_type)))
+    fields += [
+        Field("EPHEMERIS_NAME", metadata.ephemeris_name),
+        Field("COVARIANCE_METHOD", str(metadata.covariance_method)),
+        Field("MANEUVERABLE", str(metadata.maneuverable)),
+        Field("REF_FRAME", item.state.frame),
+    ]
+    if radius is not None:
+        fields.append(Field("HBR", radius))
+    state = item.state
+    vector = (*state.r, *state.v)
+    fields += [
+        Field(name, float(value))
+        for name, value in zip(
+            ("X", "Y", "Z", "X_DOT", "Y_DOT", "Z_DOT"), vector, strict=True
+        )
+    ]
+    fields += [Field(COMMENT, text) for text in metadata.covariance_comments]
+    # An unknown covariance is written as zeros, as operators do.
+    matrix = (
+        np.zeros((6, 6))
+        if item.covariance is None
+        else item.covariance.in_rtn(state).matrix
+    )
+    fields += [
+        Field(name, float(matrix[row, column]))
+        for name, row, column in covariance_entries(6)
+    ]
+    return Section("segment", tuple(fields))
+
+
+def make_cdm(
+    conjunction: Conjunction,
+    primary: ObjectMetadata,
+    secondary: ObjectMetadata,
+    *,
+    created: Time,
+    originator: str = ORIGINATOR,
+    message_id: str | None = None,
+    message_for: str | None = None,
+    screening_period: tuple[Time, Time] | None = None,
+    screening_volume: RtnSemiAxes | None = None,
+    comments: Sequence[str] = (),
+) -> Cdm:
+    """The CDM of a conjunction (``OBJECT1`` is the primary).
+
+    Each object's ``OBJECT_DESIGNATOR`` is its ``object_id``; its state is
+    written in GCRF (``REF_FRAME = GCRF``) and its covariance in its own
+    RTN frame, all zeros if unknown. ``MISS_DISTANCE`` is the range at TCA,
+    ``RELATIVE_POSITION_*`` and ``RELATIVE_VELOCITY_*`` are the secondary's
+    position and velocity relative to the primary projected on the
+    primary's RTN axes. The message is CCSDS 508.0-B-1 (version 1.0) unless
+    both objects have a hard-body radius: ``HBR`` is a CDM 2.0 keyword, so
+    the message is then version 2.0. The result is deterministic: the same
+    inputs give the same message.
+
+    Parameters
+    ----------
+    conjunction
+        The conjunction; ``conjunction.tca`` is the ``TCA``, written to the
+        microsecond (:data:`TCA_PRECISION`).
+    primary, secondary
+        What the message says about each object.
+    created
+        ``CREATION_DATE``, as given (no clock is read, so that a message
+        can be built again identically).
+    originator
+        ``ORIGINATOR``.
+    message_id
+        ``MESSAGE_ID``; by default :func:`make_message_id` of the objects'
+        ids and the TCA.
+    message_for
+        ``MESSAGE_FOR`` (the spacecraft operator the message is for), if any.
+    screening_period
+        ``START_SCREEN_PERIOD`` and ``STOP_SCREEN_PERIOD``, if given.
+    screening_volume
+        The screening ellipsoid's RTN semi-axes [m], if given: written as
+        ``SCREEN_VOLUME_X``, ``_Y`` and ``_Z``, with ``SCREEN_VOLUME_FRAME``
+        ``RTN``, ``SCREEN_VOLUME_SHAPE`` ``ELLIPSOID`` and the comment
+        :data:`SCREEN_VOLUME_COMMENT`.
+    comments
+        Header comments.
+
+    Returns
+    -------
+    Cdm
+        The message; ``.conjunction()`` gives ``conjunction`` back.
+
+    Raises
+    ------
+    ValueError
+        If only one object has a hard-body radius or the two do not add up
+        to the combined radius, the screening period does not end after it
+        starts, a comment has more than one line or leading or trailing
+        blanks, or a text field is empty.
+    """
+    radii = _radii(conjunction)
+    tca = _with_precision(conjunction.tca, TCA_PRECISION)
+    if message_id is None:
+        message_id = make_message_id(
+            conjunction.primary.object_id, conjunction.secondary.object_id, tca
+        )
+    header = [
+        Field("CCSDS_CDM_VERS", "1.0" if radii is None else "2.0"),
+        *(Field(COMMENT, text) for text in _check_comments(comments, "header")),
+        Field("CREATION_DATE", created),
+        Field("ORIGINATOR", originator),
+    ]
+    if message_for is not None:
+        header.append(Field("MESSAGE_FOR", message_for))
+    header.append(Field("MESSAGE_ID", message_id))
+    relative = (
+        [] if screening_volume is None else [Field(COMMENT, SCREEN_VOLUME_COMMENT)]
+    )
+    relative += [
+        Field("TCA", tca),
+        *_relative(conjunction),
+        *_screening(screening_period, screening_volume),
+    ]
+    first, second = (None, None) if radii is None else radii
+    return Cdm(
+        Section("header", tuple(header)),
+        Section("relative", tuple(relative)),
+        (
+            _segment(1, conjunction.primary, primary, first),
+            _segment(2, conjunction.secondary, secondary, second),
+        ),
+    )

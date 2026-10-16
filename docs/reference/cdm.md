@@ -10,4 +10,6 @@
 
 ::: keepout.cdm.xml
 
+::: keepout.cdm.builder
+
 ::: keepout.cdm.keywords
