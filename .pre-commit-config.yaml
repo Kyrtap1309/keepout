@@ -31,6 +31,12 @@ repos:
         language: system
         types: [python]
         pass_filenames: false
+      - id: deptry
+        name: deptry
+        entry: uv run deptry src
+        language: system
+        files: ^(pyproject\.toml|src/.*\.py)$
+        pass_filenames: false
       - id: codespell
         name: codespell
         entry: uv run codespell

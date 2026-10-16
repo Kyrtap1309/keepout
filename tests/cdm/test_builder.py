@@ -1,7 +1,9 @@
 """Building a CDM from a conjunction: fields, determinism and round-trips."""
 
 import dataclasses
+from collections.abc import Callable, Sequence
 from pathlib import Path
+from typing import Any, TypedDict, Unpack
 from xml.etree import ElementTree
 
 import astropy.units as u
@@ -25,6 +27,7 @@ from keepout.cdm.builder import (
     Maneuverable,
     ObjectMetadata,
     ObjectType,
+    RtnSemiAxes,
     make_cdm,
     make_message_id,
 )
@@ -82,14 +85,32 @@ def conjunction(
     )
 
 
-def example(**changes: object) -> Cdm:
-    arguments: dict[str, object] = {"created": CREATED, **changes}
-    return make_cdm(conjunction(), ISS, DEBRIS, **arguments)  # type: ignore[arg-type]
+class Options(TypedDict, total=False):
+    """The keyword arguments of :func:`make_cdm` besides ``created``."""
+
+    originator: str
+    message_id: str | None
+    message_for: str | None
+    screening_period: tuple[Time, Time] | None
+    screening_volume: RtnSemiAxes | None
+    comments: Sequence[str]
+
+
+def example(created: Time = CREATED, **options: Unpack[Options]) -> Cdm:
+    return make_cdm(conjunction(), ISS, DEBRIS, created=created, **options)
+
+
+def ccsds_text(text: str) -> Any:
+    """``text`` where an enumeration is typed: :class:`ObjectMetadata` also
+    takes the CCSDS text of its enumerations."""
+    return text
 
 
 def assert_same_conjunction(actual: Conjunction, expected: Conjunction) -> None:
     """Same ids, radii, states (at the TCA) and covariances."""
-    assert actual.hard_body_radius == pytest.approx(expected.hard_body_radius)
+    assert actual.hard_body_radius == pytest.approx(
+        expected.hard_body_radius, rel=1e-12
+    )
     for got, want in zip(
         (actual.primary, actual.secondary),
         (expected.primary, expected.secondary),
@@ -125,7 +146,7 @@ def test_the_message_reads_back_to_the_conjunction() -> None:
     assert_same_conjunction(xml.loads(xml.dumps(cdm)).conjunction(), conjunction())
 
 
-def test_header() -> None:
+def test_the_header_is_keepouts_version_2_message_by_default() -> None:
     cdm = example()
     assert cdm.version == "2.0"
     assert cdm.originator == ORIGINATOR == "KEEPOUT"
@@ -141,7 +162,7 @@ def test_header() -> None:
     ]
 
 
-def test_header_overrides() -> None:
+def test_the_header_takes_the_given_originator_id_recipient_and_comments() -> None:
     cdm = example(
         originator="OPS",
         message_id="M-1",
@@ -156,7 +177,7 @@ def test_header_overrides() -> None:
     assert cdm.header.comments == ("Synthetic operator run", "Not for operations")
 
 
-def test_objects() -> None:
+def test_each_object_section_carries_its_metadata() -> None:
     cdm = example()
     first, second = cdm.object1, cdm.object2
     assert (first.designator, first.name, first.international_designator) == (
@@ -173,6 +194,11 @@ def test_objects() -> None:
         assert item.section.get("CATALOG_NAME") == "SATCAT"
         assert item.section.get("EPHEMERIS_NAME") == "NONE"
         assert item.section.get("COVARIANCE_METHOD") == "CALCULATED"
+
+
+def test_each_object_section_carries_its_state_radius_and_rtn_covariance() -> None:
+    cdm = example()
+    first, second = cdm.object1, cdm.object2
     assert (first.hbr, second.hbr) == (5.0, 2.5)
     np.testing.assert_array_equal(first.position, LEO_R)
     np.testing.assert_array_equal(second.velocity, SECONDARY_V)
@@ -205,13 +231,13 @@ def test_relative_fields_are_in_the_primary_rtn_frame() -> None:
     velocity = numbers(relative, *(f"RELATIVE_VELOCITY_{axis}" for axis in "RTN"))
     np.testing.assert_allclose(velocity, SECONDARY_V - LEO_V, rtol=1e-12)
     speed = relative.get("RELATIVE_SPEED")
-    assert speed == pytest.approx(float(np.linalg.norm(SECONDARY_V - LEO_V)))
+    assert speed == pytest.approx(float(np.linalg.norm(SECONDARY_V - LEO_V)), rel=1e-12)
     assert relative.comments == ()
     assert relative.get("START_SCREEN_PERIOD") is None
     assert relative.get("SCREEN_VOLUME_X") is None
 
 
-def test_screening_period_and_volume() -> None:
+def test_the_screening_period_and_volume_are_written_with_their_comment() -> None:
     start = Time("2026-10-06T00:00:00", scale="utc")
     stop = start + 7 * u.day
     volume = ScreeningVolume(1000.0, 5000.0, 2000.0)
@@ -236,9 +262,12 @@ def test_the_screening_period_must_end_after_it_starts() -> None:
         example(screening_period=(TCA, TCA))
 
 
-def test_message_id_is_deterministic_and_rounded_to_the_millisecond() -> None:
+def test_the_same_inputs_give_the_same_message() -> None:
     assert example().message_id == example().message_id
     assert kvn.dumps(example()) == kvn.dumps(example())
+
+
+def test_message_id_times_are_utc_to_the_millisecond() -> None:
     # The times are written in UTC whatever their scale (TT - UTC = 69.184 s).
     tt = Time("2026-10-08T12:36:05.973", scale="tt")
     created = Time("2026-10-06T00:01:09.1844", scale="tt")
@@ -269,7 +298,9 @@ def test_the_tca_of_the_conjunction_is_not_changed() -> None:
     assert item.tca.precision == precision
 
 
-def test_without_radii_the_message_is_version_1_and_valid() -> None:
+def without_radii() -> tuple[Conjunction, Cdm]:
+    """A conjunction without per-object radii and its message, with comments
+    in the header, the object sections and a covariance block."""
     item = conjunction(first=None, second=None)
     cdm = make_cdm(
         item,
@@ -286,11 +317,23 @@ def test_without_radii_the_message_is_version_1_and_valid() -> None:
         screening_period=(CREATED, CREATED + 7 * u.day),
         screening_volume=ScreeningVolume.sphere(5000.0),
     )
+    return item, cdm
+
+
+def test_without_radii_the_message_is_version_1() -> None:
+    _, cdm = without_radii()
     assert cdm.version == "1.0"
     assert (cdm.object1.hbr, cdm.object2.hbr) == (None, None)
-    text = xml.dumps(cdm)
-    SCHEMA.validate(text)
-    root = ElementTree.fromstring(text)
+
+
+def test_a_version_1_message_is_valid_ccsds_xml() -> None:
+    _, cdm = without_radii()
+    SCHEMA.validate(xml.dumps(cdm))
+
+
+def test_object_and_covariance_comments_open_their_blocks() -> None:
+    _, cdm = without_radii()
+    root = ElementTree.fromstring(xml.dumps(cdm))
     matrix = root.find("body/segment[2]/data/covarianceMatrix")
     assert matrix is not None
     assert [e.tag for e in matrix[:3]] == ["COMMENT", "COMMENT", "CR_R"]
@@ -298,9 +341,18 @@ def test_without_radii_the_message_is_version_1_and_valid() -> None:
     metadata = root.find("body/segment[1]/metadata")
     assert metadata is not None
     assert (metadata[0].tag, metadata[0].text) == ("COMMENT", "Fleet object")
+
+
+def test_without_radii_the_conjunction_needs_the_combined_radius() -> None:
+    item, cdm = without_radii()
     with pytest.raises(ValueError, match="no hard-body radius for 25544, 49863"):
         cdm.conjunction()
-    read = xml.loads(text)
+    assert_same_conjunction(cdm.conjunction(hard_body_radius=7.5), item)
+
+
+def test_a_version_1_message_round_trips() -> None:
+    item, cdm = without_radii()
+    read = xml.loads(xml.dumps(cdm))
     assert_equivalent(read, cdm)
     assert_equivalent(kvn.loads(kvn.dumps(cdm)), cdm)
     assert_same_conjunction(read.conjunction(hard_body_radius=7.5), item)
@@ -344,39 +396,52 @@ def test_metadata_takes_the_ccsds_text_of_its_enumerations() -> None:
     metadata = ObjectMetadata(
         "SAT",
         "UNKNOWN",
-        object_type="ROCKET BODY",  # type: ignore[arg-type]
-        maneuverable="NO",  # type: ignore[arg-type]
-        covariance_method="DEFAULT",  # type: ignore[arg-type]
+        object_type=ccsds_text("ROCKET BODY"),
+        maneuverable=ccsds_text("NO"),
+        covariance_method=ccsds_text("DEFAULT"),
     )
     assert metadata.object_type is ObjectType.ROCKET_BODY
     assert metadata.maneuverable is Maneuverable.NO
     assert metadata.covariance_method is CovarianceMethod.DEFAULT
+
+
+def test_an_unknown_manoeuvrability_is_written_n_a() -> None:
     assert str(Maneuverable.NOT_APPLICABLE) == "N/A"
 
 
 @pytest.mark.parametrize(
-    "changes",
+    ("keyword", "text"),
     [
-        {"maneuverable": "MAYBE"},
-        {"covariance_method": "ESTIMATED"},
-        {"object_type": "UFO"},
+        ("maneuverable", "MAYBE"),
+        ("covariance_method", "ESTIMATED"),
+        ("object_type", "UFO"),
     ],
 )
-def test_metadata_rejects_values_ccsds_does_not_define(
-    changes: dict[str, str],
-) -> None:
+def test_metadata_rejects_values_ccsds_does_not_define(keyword: str, text: str) -> None:
     with pytest.raises(ValueError, match="is not a valid"):
-        ObjectMetadata("SAT", "2000-001A", **changes)  # type: ignore[arg-type]
+        ObjectMetadata("SAT", "2000-001A", **{keyword: ccsds_text(text)})
 
 
+COMMENTED: dict[str, tuple[Callable[[str], object], str]] = {
+    "object": (
+        lambda text: ObjectMetadata("SAT", "2000-001A", comments=(text,)),
+        r"object comment .* must be one line",
+    ),
+    "covariance": (
+        lambda text: ObjectMetadata("SAT", "2000-001A", covariance_comments=(text,)),
+        "covariance comment",
+    ),
+    "header": (lambda text: example(comments=[text]), "header comment"),
+}
+"""Where a comment goes: what builds it there and the error it raises."""
+
+
+@pytest.mark.parametrize("where", list(COMMENTED))
 @pytest.mark.parametrize("text", ["two\nlines", " leading", "trailing ", "a\rb"])
-def test_comments_must_survive_a_round_trip(text: str) -> None:
-    with pytest.raises(ValueError, match=r"object comment .* must be one line"):
-        ObjectMetadata("SAT", "2000-001A", comments=(text,))
-    with pytest.raises(ValueError, match="covariance comment"):
-        ObjectMetadata("SAT", "2000-001A", covariance_comments=(text,))
-    with pytest.raises(ValueError, match="header comment"):
-        example(comments=[text])
+def test_comments_must_survive_a_round_trip(where: str, text: str) -> None:
+    build, message = COMMENTED[where]
+    with pytest.raises(ValueError, match=message):
+        build(text)
 
 
 def test_an_empty_required_text_is_rejected() -> None:
@@ -470,7 +535,7 @@ metadata = st.builds(
 
 @settings(max_examples=50, deadline=None)
 @given(conjunctions(), metadata, metadata)
-def test_round_trip_property(
+def test_any_conjunction_round_trips_through_the_message(
     item: Conjunction, primary: ObjectMetadata, secondary: ObjectMetadata
 ) -> None:
     cdm = make_cdm(item, primary, secondary, created=CREATED)

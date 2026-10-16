@@ -49,7 +49,7 @@ import enum
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Final, NamedTuple
+from typing import Final, NamedTuple, assert_never
 
 import numpy as np
 from astropy.time import Time
@@ -184,16 +184,25 @@ class RegimeParameters:
         object.__setattr__(self, "transverse_rate", rate)
 
 
-FLOHRER_SIGMAS: Final[Mapping[OrbitRegime, tuple[float, float, float]]] = (
-    MappingProxyType(
-        {
-            OrbitRegime.LEO: (102.0, 471.0, 126.0),
-            OrbitRegime.MEO: (73.0, 131.0, 54.0),
-            OrbitRegime.GTO: (1960.0, 3897.0, 1808.0),
-            OrbitRegime.HEO: (824.0, 1367.0, 1059.0),
-            OrbitRegime.GEO: (359.0, 432.0, 86.0),
-        }
-    )
+class RtnSigmas(NamedTuple):
+    """Position standard deviations along an object's RTN axes [m]."""
+
+    radial: float
+    """Along R, the radial direction."""
+    transverse: float
+    """Along T, the transverse (along-track) direction."""
+    normal: float
+    """Along N, the orbit normal (cross-track)."""
+
+
+FLOHRER_SIGMAS: Final[Mapping[OrbitRegime, RtnSigmas]] = MappingProxyType(
+    {
+        OrbitRegime.LEO: RtnSigmas(102.0, 471.0, 126.0),
+        OrbitRegime.MEO: RtnSigmas(73.0, 131.0, 54.0),
+        OrbitRegime.GTO: RtnSigmas(1960.0, 3897.0, 1808.0),
+        OrbitRegime.HEO: RtnSigmas(824.0, 1367.0, 1059.0),
+        OrbitRegime.GEO: RtnSigmas(359.0, 432.0, 86.0),
+    }
 )
 """Radial, along-track and cross-track 1-sigma position errors [m] of GP
 element sets near their epoch, per regime: Table 1 of Flohrer et al.
@@ -226,17 +235,6 @@ PUBLISHED_PARAMETERS: Final[Mapping[OrbitRegime, RegimeParameters]] = MappingPro
 """The default parameters of each regime: the sigmas of
 :data:`FLOHRER_SIGMAS` and the rate :data:`LEVIT_MARSHALL_RATE`, before
 the safety factor."""
-
-
-class RtnSigmas(NamedTuple):
-    """Position standard deviations along an object's RTN axes [m]."""
-
-    radial: float
-    """Along R, the radial direction."""
-    transverse: float
-    """Along T, the transverse (along-track) direction."""
-    normal: float
-    """Along N, the orbit normal (cross-track)."""
 
 
 def _require_scalar(time: Time) -> None:
@@ -282,8 +280,19 @@ class SyntheticCovarianceModel:
 
     def parameters(self, regime: OrbitRegime) -> RegimeParameters:
         """The parameters of ``regime``, before the safety factor."""
-        found: RegimeParameters = getattr(self, regime.name.lower())
-        return found
+        match regime:
+            case OrbitRegime.LEO:
+                return self.leo
+            case OrbitRegime.MEO:
+                return self.meo
+            case OrbitRegime.GTO:
+                return self.gto
+            case OrbitRegime.HEO:
+                return self.heo
+            case OrbitRegime.GEO:
+                return self.geo
+            case _:
+                assert_never(regime)
 
     def sigmas(self, omm: Omm, time: Time) -> RtnSigmas:
         """The model's position sigmas of an element set at a time.
@@ -304,7 +313,9 @@ class SyntheticCovarianceModel:
             If ``time`` is not a single time.
         """
         _require_scalar(time)
-        parameters = self.parameters(orbit_regime(omm))
+        return self._sigmas(self.parameters(orbit_regime(omm)), omm, time)
+
+    def _sigmas(self, parameters: RegimeParameters, omm: Omm, time: Time) -> RtnSigmas:
         age = abs(seconds_between(omm.epoch, time.utc))
         transverse = parameters.transverse + parameters.transverse_rate * age
         factor = self.safety_factor
@@ -362,9 +373,10 @@ class SyntheticCovarianceModel:
         ValueError
             If ``time`` is not a single time.
         """
-        sigmas = self.sigmas(omm, time)
+        _require_scalar(time)
         regime = orbit_regime(omm)
         parameters = self.parameters(regime)
+        sigmas = self._sigmas(parameters, omm, time)
         age = seconds_between(omm.epoch, time.utc) / DAY
         epoch = omm.epoch.utc.isot
         return (

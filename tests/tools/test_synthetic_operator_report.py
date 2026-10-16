@@ -9,6 +9,7 @@ import pytest
 import screening_snapshot as snapshot
 import synthetic_operator_report as report
 from astropy.time import Time
+from cli_builders import FLEET_TOML
 from screening_data import load_fixture
 
 from keepout._units import DAY
@@ -16,23 +17,6 @@ from keepout.cdm import kvn
 from keepout.omm.celestrak import dumps_csv
 from keepout.synthetic import Fleet, FleetSatellite
 from keepout.synthetic.operator import run
-
-FLEET = """\
-catalog_hard_body_radius = 1.0
-
-[[satellites]]
-catalog_number = 52939
-name = "FLEET ONE"
-hard_body_radius = 5.0
-maneuverable = true
-
-[[satellites]]
-catalog_number = 44476
-hard_body_radius = 20.0
-maneuverable = false
-"""
-"""A LEO satellite of the fixture with two approaches in the week, and
-Intelsat 39 with the Luch-5X inspector drifting past."""
 
 
 def arguments(tmp_path: Path) -> list[str]:
@@ -43,7 +27,7 @@ def arguments(tmp_path: Path) -> list[str]:
     (data / snapshot.SNAPSHOT).write_bytes(gzip.compress(csv))
     shutil.copy(snapshot.DATA / snapshot.MANIFEST, data / snapshot.MANIFEST)
     fleet = tmp_path / "fleet.toml"
-    fleet.write_text(FLEET, encoding="utf-8")
+    fleet.write_text(FLEET_TOML, encoding="utf-8")
     page = tmp_path / "docs" / "synthetic-operator.md"
     return [
         "--data",
@@ -71,14 +55,20 @@ def page(tmp_path: Path) -> str:
 def generated(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """A directory where the report was written once from the fixture."""
     tmp_path = tmp_path_factory.mktemp("report")
+    report.main(arguments(tmp_path))
+    return tmp_path
+
+
+def test_main_writes_then_checks(tmp_path: Path) -> None:
     args = arguments(tmp_path)
     assert report.main(["--check", *args]) == 1
     assert report.main(args) == 0
     assert report.main(["--check", *args]) == 0
-    return tmp_path
 
 
-def test_main_writes_then_checks(generated: Path) -> None:
+def test_the_summary_has_the_settings_catalog_fleet_and_actions(
+    generated: Path,
+) -> None:
     summary = written(generated)
     settings = summary["settings"]
     assert settings["fleet"] == (generated / "fleet.toml").as_posix()
@@ -100,7 +90,7 @@ def test_main_writes_then_checks(generated: Path) -> None:
     assert summary["actions"] == {
         "ignore": 2,
         "monitor": 1,
-        "monitor, prepare manoeuvre": 0,
+        "prepare manoeuvre": 0,
         "manoeuvre": 0,
     }
     assert summary["example"] == "52939_47826_20261006T193642.717Z_20261006T000000.000Z"
@@ -121,8 +111,9 @@ def test_each_event_has_its_pc_the_bound_and_the_decision(generated: Path) -> No
         "yellow",
         "monitor",
     )
-    assert geo["pc"] == pytest.approx(7.38e-6)
-    assert geo["max_pc"] == pytest.approx(7.73e-6)
+    # The report rounds to 3 significant figures.
+    assert geo["pc"] == pytest.approx(7.38e-6, abs=5e-9)
+    assert geo["max_pc"] == pytest.approx(7.73e-6, abs=5e-9)
     assert geo["diluted"] is True
     assert len(geo["notes"]) == 2
     assert [e["diluted"] for e in events] == [False, True, False]

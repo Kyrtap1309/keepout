@@ -22,6 +22,11 @@ class RiskLevel(OrderedEnum):
     RED = 2
     """Pc at or above :attr:`Thresholds.red_from`."""
 
+    @property
+    def label(self) -> str:
+        """The level in words, as keepout prints it: ``yellow``."""
+        return self.name.lower()
+
 
 Basis: TypeAlias = Literal["conservative", "estimate"]
 """Which value of an observation is compared with the thresholds:

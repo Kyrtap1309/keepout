@@ -156,7 +156,13 @@ class Fleet:
 
 
 def _keys(table: Mapping[str, object], allowed: frozenset[str], where: str) -> None:
-    """Raise unless ``table`` has every required key of ``allowed`` and no other."""
+    """Raise unless ``table`` has every required key of ``allowed`` and no other.
+
+    Raises
+    ------
+    FleetError
+        If ``table`` has a key outside ``allowed`` or lacks a required one.
+    """
     unknown = sorted(set(table) - allowed)
     if unknown:
         raise FleetError(
@@ -176,7 +182,14 @@ def _number(table: Mapping[str, object], key: str, where: str) -> float:
 
 
 def _satellite(item: object, where: str) -> FleetSatellite:
-    """The satellite of one ``[[satellites]]`` table."""
+    """The satellite of one ``[[satellites]]`` table.
+
+    Raises
+    ------
+    FleetError
+        If ``item`` is not a table, has unknown or missing keys, a value of
+        the wrong type, or values :class:`FleetSatellite` rejects.
+    """
     if not isinstance(item, dict):
         raise FleetError(f"{where}must be a table, got {item!r}")
     _keys(item, SATELLITE_KEYS, where)

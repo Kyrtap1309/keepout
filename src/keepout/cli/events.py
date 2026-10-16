@@ -7,14 +7,12 @@ from typing import NamedTuple
 
 from rich.table import Table
 
-from keepout.cdm import Cdm, CdmObject
-from keepout.cli.output import JsonValue, minute, table
+from keepout.cdm import CdmObject
+from keepout.cli.output import JsonValue, isot, minute, pc_text, table
 from keepout.risk import Action, Assessment, ConjunctionEvent, PcObservation
 
 __all__ = [
     "AssessedEvent",
-    "action_name",
-    "assumed_covariances",
     "event_json",
     "events_table",
     "reasons",
@@ -28,28 +26,9 @@ class AssessedEvent(NamedTuple):
     assessment: Assessment
 
 
-def action_name(action: Action) -> str:
-    """The action in words, e.g. ``prepare manoeuvre``."""
-    return action.name.lower().replace("_", " ")
-
-
-def _assumed(cdm: Cdm) -> bool:
-    return any(
-        o.section.get("COVARIANCE_METHOD") == "DEFAULT"
-        for o in (cdm.object1, cdm.object2)
-    )
-
-
-def assumed_covariances(item: AssessedEvent) -> bool:
-    """Whether a CDM of the event has an object whose covariance is assumed
-    (``COVARIANCE_METHOD = DEFAULT``), not from orbit determination: its Pc
-    then rests on a model."""
-    return any(_assumed(cdm) for cdm in item.event.cdms)
-
-
 def _level(item: AssessedEvent) -> str | None:
     level = item.assessment.level
-    return None if level is None else level.name.lower()
+    return None if level is None else level.label
 
 
 def _pc(observation: PcObservation | None) -> str:
@@ -57,7 +36,7 @@ def _pc(observation: PcObservation | None) -> str:
         return "-"
     if observation.pc is None:
         return "failed"
-    return f"{observation.pc:.2e}"
+    return pc_text(observation.pc)
 
 
 def events_table(events: Sequence[AssessedEvent], title: str) -> Table:
@@ -79,7 +58,7 @@ def events_table(events: Sequence[AssessedEvent], title: str) -> Table:
             str(len(item.event.cdms)),
             _pc(item.assessment.trend.latest_observation),
             _level(item) or "-",
-            action_name(item.assessment.decision.action),
+            item.assessment.decision.action.label,
         )
     return rows
 
@@ -88,7 +67,7 @@ def reasons(events: Sequence[AssessedEvent], least: Action) -> list[str]:
     """Why each event with an action of at least ``least`` got it, a line
     per event."""
     return [
-        f"{item.event.event_id}: {action_name(decision.action)} "
+        f"{item.event.event_id}: {decision.action.label} "
         f"({'; '.join(decision.reasons)})"
         for item in events
         if (decision := item.assessment.decision).action >= least
@@ -109,6 +88,7 @@ def _observation_json(observation: PcObservation) -> dict[str, JsonValue]:
         "error": observation.error,
         "reported_pc": observation.reported_pc,
         "diagnostics": list(observation.diagnostics),
+        "assumed_covariance": observation.assumed_covariance,
     }
 
 
@@ -120,7 +100,7 @@ def event_json(item: AssessedEvent) -> dict[str, JsonValue]:
     observation = trend.latest_observation
     return {
         "event_id": event.event_id,
-        "tca": latest.tca.utc.isot,
+        "tca": isot(latest.tca),
         "object1": _cdm_object_json(latest.object1),
         "object2": _cdm_object_json(latest.object2),
         "miss_distance": latest.miss_distance,
@@ -132,5 +112,5 @@ def event_json(item: AssessedEvent) -> dict[str, JsonValue]:
         "reasons": list(decision.reasons),
         "notes": list(trend.notes),
         "observations": [_observation_json(o) for o in trend.observations],
-        "assumed_covariances": assumed_covariances(item),
+        "assumed_covariances": event.assumed_covariance,
     }

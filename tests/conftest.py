@@ -56,6 +56,14 @@ def _offline_iers() -> Iterator[None]:
         yield
 
 
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Let the validation tests download their data: every other test runs
+    with sockets disabled (``--disable-socket``, pytest-socket)."""
+    for item in items:
+        if item.get_closest_marker("validation") is not None:
+            item.add_marker(pytest.mark.enable_socket)
+
+
 @pytest.fixture(autouse=True)
 def no_network(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
     """Fail a test that reaches the network; tests that fake it patch again."""

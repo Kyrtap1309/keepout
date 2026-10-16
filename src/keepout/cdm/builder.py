@@ -28,7 +28,7 @@ import numpy as np
 from astropy.time import Time
 
 from keepout.cdm.keywords import covariance_entries
-from keepout.cdm.model import COMMENT, Cdm, Field, Section
+from keepout.cdm.model import COMMENT, Cdm, CovarianceMethod, Field, Section
 from keepout.conjunction import Conjunction
 from keepout.frames import rtn_rotation
 from keepout.objects import ObjectState
@@ -91,17 +91,14 @@ class Maneuverable(enum.StrEnum):
     """Not applicable or not known (e.g. a catalog object)."""
 
 
-class CovarianceMethod(enum.StrEnum):
-    """``COVARIANCE_METHOD`` values of CCSDS 508.0-B-1."""
-
-    CALCULATED = "CALCULATED"
-    """Computed in the orbit determination."""
-    DEFAULT = "DEFAULT"
-    """Assumed (a default or a model), not from an orbit determination."""
-
-
 def _check_comments(comments: Sequence[str], what: str) -> tuple[str, ...]:
-    """``comments`` as a tuple; each must survive a KVN and XML round-trip."""
+    """``comments`` as a tuple; each must survive a KVN and XML round-trip.
+
+    Raises
+    ------
+    ValueError
+        If a comment has more than one line or leading or trailing blanks.
+    """
     for text in comments:
         if len(text.splitlines()) > 1 or text != text.strip():
             raise ValueError(

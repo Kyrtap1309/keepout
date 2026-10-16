@@ -4,7 +4,6 @@ with the element set's age."""
 import dataclasses
 import math
 import pickle
-from typing import Any
 
 import astropy.units as u
 import numpy as np
@@ -235,26 +234,50 @@ def test_the_safety_factor_scales_every_sigma(
     )
 
 
-@given(elements, ages)
-def test_overriding_a_regime_changes_only_that_regime(omm: Omm, age: float) -> None:
-    time = at(omm, age)
-    regime = orbit_regime(omm)
-    custom = RegimeParameters(10.0, 20.0, 30.0, 0.0)
+CUSTOM = RegimeParameters(10.0, 20.0, 30.0, 0.0)
+
+OVERRIDDEN = {
+    OrbitRegime.LEO: dataclasses.replace(MODEL, leo=CUSTOM),
+    OrbitRegime.MEO: dataclasses.replace(MODEL, meo=CUSTOM),
+    OrbitRegime.GTO: dataclasses.replace(MODEL, gto=CUSTOM),
+    OrbitRegime.HEO: dataclasses.replace(MODEL, heo=CUSTOM),
+    OrbitRegime.GEO: dataclasses.replace(MODEL, geo=CUSTOM),
+}
+"""The default model with :data:`CUSTOM` parameters for one regime."""
+
+
+@pytest.mark.parametrize("regime", OrbitRegime)
+def test_each_regime_field_gives_the_parameters_of_its_regime(
+    regime: OrbitRegime,
+) -> None:
+    model = OVERRIDDEN[regime]
+    assert model.parameters(regime) == CUSTOM
     for other in OrbitRegime:
-        overrides: dict[str, Any] = {other.name.lower(): custom}
-        model = dataclasses.replace(MODEL, **overrides)
-        sigmas = model.sigmas(omm, time)
-        if other is regime:
-            assert sigmas == (20.0, 40.0, 60.0)
-        else:
-            assert sigmas == MODEL.sigmas(omm, time)
+        if other is not regime:
+            assert model.parameters(other) == PUBLISHED_PARAMETERS[other]
+
+
+@given(elements, ages, st.sampled_from(OrbitRegime))
+def test_overriding_a_regime_changes_only_that_regime(
+    omm: Omm, age: float, overridden: OrbitRegime
+) -> None:
+    time = at(omm, age)
+    sigmas = OVERRIDDEN[overridden].sigmas(omm, time)
+    if overridden is orbit_regime(omm):
+        assert sigmas == (20.0, 40.0, 60.0)
+    else:
+        assert sigmas == MODEL.sigmas(omm, time)
 
 
 @pytest.mark.parametrize("bad", [0.0, -1.0, math.inf, math.nan])
-def test_parameters_are_checked(bad: float) -> None:
-    for name in ("radial", "transverse", "normal"):
-        with pytest.raises(ValueError, match=f"{name} must be finite and > 0"):
-            dataclasses.replace(PUBLISHED_PARAMETERS[OrbitRegime.LEO], **{name: bad})
+@pytest.mark.parametrize("name", ["radial", "transverse", "normal"])
+def test_the_sigmas_are_checked(name: str, bad: float) -> None:
+    with pytest.raises(ValueError, match=f"{name} must be finite and > 0"):
+        dataclasses.replace(PUBLISHED_PARAMETERS[OrbitRegime.LEO], **{name: bad})
+
+
+@pytest.mark.parametrize("bad", [0.0, -1.0, math.inf, math.nan])
+def test_the_safety_factor_is_checked(bad: float) -> None:
     with pytest.raises(ValueError, match="safety_factor must be finite and > 0"):
         SyntheticCovarianceModel(safety_factor=bad)
 

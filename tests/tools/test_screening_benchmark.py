@@ -297,19 +297,14 @@ def test_main_benchmarks_the_spacetrack_catalog_in_its_own_block(
     ) in text
 
 
-def test_the_sources_read_their_committed_data_by_default() -> None:
-    celestrak = benchmark.SOURCES["celestrak"]
-    spacetrack = benchmark.SOURCES["spacetrack"]
-    assert (celestrak.data, celestrak.results) == (snapshot.DATA, benchmark.RESULTS)
-    assert (spacetrack.data, spacetrack.results) == (
-        spacetrack_snapshot.DATA,
-        benchmark.SPACETRACK_RESULTS,
-    )
-    assert (celestrak.start, celestrak.end) == (benchmark.START, benchmark.END)
-    assert (spacetrack.start, spacetrack.end) == (
-        benchmark.SPACETRACK_START,
-        benchmark.SPACETRACK_END,
-    )
+@pytest.mark.parametrize("name", list(benchmark.SOURCES))
+def test_each_source_defaults_to_its_own_committed_files(name: str) -> None:
+    source = benchmark.SOURCES[name]
+    results = json.loads(source.results.read_text(encoding="utf-8"))
+    assert results["settings"]["source"] == name
+    readme = (benchmark.REPO / "README.md").read_text(encoding="utf-8")
+    assert source.start in readme
+    assert source.end in readme
 
 
 def test_read_spacetrack_gives_the_catalog_and_its_retrieval_day(
@@ -402,7 +397,7 @@ def test_compare_alternates_and_takes_medians() -> None:
     fake = Fake([1.0, 1.1, 5.0, 1.05], [1.0, 1.0, 0.95, 4.0])
     comparison = benchmark.compare(["head"], ["base"], repeat=4, run=fake)
     assert fake.calls == ["head", "base", "base", "head"] * 2
-    assert comparison.change == pytest.approx(1.075 / 1.0 - 1.0)
+    assert comparison.change == pytest.approx(1.075 / 1.0 - 1.0, rel=1e-12)
     text, regression = benchmark.render_comparison(comparison, "setting", 0.2)
     assert not regression
     assert "| base | 1.00 s | 0.95 - 4.00 s | 1.50 s | 7 |" in text

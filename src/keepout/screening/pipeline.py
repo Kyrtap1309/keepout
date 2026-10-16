@@ -52,9 +52,7 @@ script read from standard input (``python -``) cannot.
 
 from __future__ import annotations
 
-import multiprocessing
 from collections.abc import Iterable, Mapping, Sequence
-from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, replace
 from typing import Final
 
@@ -70,6 +68,7 @@ from keepout._types import (
     require_positive,
 )
 from keepout._units import DAY
+from keepout._workers import process_pool, resolve_workers
 from keepout.errors import KeepoutError
 from keepout.frames import frame_to_gcrf
 from keepout.omm import Omm, deduplicate
@@ -125,7 +124,7 @@ def screen(
     duration: float = DEFAULT_DURATION,
     volume: ScreeningVolume | VolumeRule = DEFAULT_VOLUME,
     *,
-    workers: int = 1,
+    workers: int | None = 1,
     max_age: float = MAX_AGE,
     max_lead: float = MAX_LEAD,
     step: float = DEFAULT_STEP,
@@ -154,7 +153,8 @@ def screen(
         :class:`~keepout.errors.KeepoutError` for is left out; any other
         exception the rule raises propagates.
     workers
-        Number of processes to screen in; 1 screens in this process.
+        Number of processes to screen in; 1 screens in this process,
+        ``None`` uses one per CPU, at most 4.
     max_age
         Longest time [s] from an element epoch to the end of the window;
         element sets older than that are left out as stale.
@@ -190,8 +190,7 @@ def screen(
     require_non_negative(max_age, "max_age")
     require_non_negative(max_lead, "max_lead")
     require_positive(step, "step")
-    if workers < 1:
-        raise ValueError(f"workers must be at least 1, got {workers}")
+    processes = resolve_workers(workers)
     if max_states < 1:
         raise ValueError(f"max_states must be at least 1, got {max_states}")
     window = _Window(start, float(duration), float(step), max_states)
@@ -204,7 +203,7 @@ def screen(
     propagator, volumes, unusable_primaries = _primaries(own, volume)
     bounds = propagator.radius_bounds(start, window.duration)
     numbers = np.array([omm.catalog_number for omm in propagator.omms], dtype=np.int64)
-    count = min(workers, len(others))
+    count = min(processes, len(others))
     parts = [
         _Part(
             window,
@@ -217,7 +216,7 @@ def screen(
         )
         for part in range(count)
     ]
-    results = _run(parts, workers)
+    results = _run(parts)
     lost = [
         (others[index], message)
         for result in results
@@ -389,12 +388,11 @@ def _failed(
     return skipped
 
 
-def _run(parts: Sequence[_Part], workers: int) -> list[_PartResult]:
-    """Screen the parts, in this process or in a pool of ``workers``."""
-    if workers == 1 or len(parts) < 2:
+def _run(parts: Sequence[_Part]) -> list[_PartResult]:
+    """Screen the parts, in this process or in a process each."""
+    if len(parts) < 2:
         return [_screen_part(part) for part in parts]
-    context = multiprocessing.get_context("spawn")
-    with ProcessPoolExecutor(max_workers=len(parts), mp_context=context) as pool:
+    with process_pool(len(parts)) as pool:
         return list(pool.map(_screen_part, parts))
 
 

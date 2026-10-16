@@ -22,10 +22,12 @@ def keepout(*args: str, env: Mapping[str, str | None] | None = None) -> Result:
 
     A bug (any exception but :class:`SystemExit`) is raised, not hidden in
     the result. ``env`` sets (or, with ``None``, unsets) environment
-    variables for the run.
+    variables for the run. Tables are drawn 80 columns wide whatever the
+    terminal running the tests, so their rows wrap the same everywhere.
     """
     runner = CliRunner()
-    return runner.invoke(app, list(args), env=env, catch_exceptions=False)
+    environ = {"COLUMNS": "80", **(env or {})}
+    return runner.invoke(app, list(args), env=environ, catch_exceptions=False)
 
 
 class _Response(io.BytesIO):

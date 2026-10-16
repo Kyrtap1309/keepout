@@ -133,6 +133,12 @@ that the velocities are exact:
   assumption is questionable (a long or slow encounter) and a covariance is
   known only in position; with velocity blocks it would choose Hall 3D-Nc
   (see [Choosing a method](pc-3d.md#choosing-a-method)).
+- Hall 3D-Nc and Monte Carlo, when used anyway (by name, or by `auto` at
+  zero relative velocity, where no 2-D Pc exists), add a diagnostic that
+  they take the velocity of such an object as exact.
+- A CDM records the model as `COVARIANCE_METHOD = DEFAULT`; reading it
+  back, `Cdm.assumed_covariance`, `ConjunctionEvent.assumed_covariance` and
+  each `PcObservation.assumed_covariance` say that its Pc rests on it.
 - Measured on approaches of the screening fixture (its 222 objects
   screened against each other for a week) with the model's covariances:
   Hall 3D-Nc and Monte Carlo accept the zero velocity block. On 8 sampled

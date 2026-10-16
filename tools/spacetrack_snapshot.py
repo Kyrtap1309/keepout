@@ -51,14 +51,11 @@ with citation, is committed.
 from __future__ import annotations
 
 import argparse
-import gzip
-import hashlib
 import json
 import statistics
 import sys
 import tempfile
 import time
-import zlib
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ProcessPoolExecutor
@@ -67,8 +64,10 @@ from pathlib import Path
 from typing import Final, TypedDict, TypeGuard
 
 import astropy.units as u
+import snapshot_files
 from generated import write_or_check
 from screening_snapshot import REGIMES, SIX_DIGITS, Regime, regime, utc_text
+from snapshot_files import FileDigest, file_digests, write_json
 
 from keepout._units import seconds_between
 from keepout.errors import SourceFormatError, SourceUnavailable
@@ -230,7 +229,12 @@ def read_index(raw: Path) -> tuple[Saved, ...]:
 
 
 def _is_raw_index(value: object) -> TypeGuard[RawIndex]:
-    return isinstance(value, dict) and value.get("format") == RAW_FORMAT
+    """Whether ``value`` is a raw index as :func:`write_index` writes one."""
+    return (
+        isinstance(value, dict)
+        and value.get("format") == RAW_FORMAT
+        and isinstance(value.get("answers"), list)
+    )
 
 
 def write_index(raw: Path, answers: Sequence[Saved]) -> None:
@@ -239,7 +243,7 @@ def write_index(raw: Path, answers: Sequence[Saved]) -> None:
         "format": RAW_FORMAT,
         "answers": [answer.record() for answer in answers],
     }
-    store_bytes(raw / RAW_INDEX, (json.dumps(record, indent=2) + "\n").encode())
+    write_json(raw / RAW_INDEX, record)
 
 
 def read_body(raw: Path, saved: Saved) -> bytes:
@@ -250,10 +254,7 @@ def read_body(raw: Path, saved: Saved) -> bytes:
     ValueError
         If the file's digest is not the one listed.
     """
-    data = (raw / saved.file).read_bytes()
-    if hashlib.sha256(data).hexdigest() != saved.sha256:
-        raise ValueError(f"{raw / saved.file} does not match its digest in {RAW_INDEX}")
-    return data
+    return snapshot_files.read_body(raw, saved, RAW_INDEX)
 
 
 def scrub(body: bytes, credentials: Credentials) -> bytes:
@@ -467,13 +468,6 @@ class CatalogSummary(TypedDict):
     newest_epoch: str
 
 
-class FileDigest(TypedDict):
-    """Length and SHA-256 hex digest of a committed file as stored."""
-
-    bytes: int
-    sha256: str
-
-
 class Manifest(TypedDict):
     """The :data:`MANIFEST` file."""
 
@@ -532,6 +526,16 @@ def read_manifest(data: Path) -> Manifest:
     return manifest
 
 
+def read_snapshot(data: Path) -> tuple[Omm, ...]:
+    """The catalog in ``data`` (:data:`SNAPSHOT`)."""
+    return load(data / SNAPSHOT)
+
+
+def retrieval_day(manifest: Manifest) -> str:
+    """The day the catalog was retrieved, UTC, ISO 8601."""
+    return manifest["download"]["retrieved"][:10]
+
+
 def inputs_from_data(data: Path) -> Inputs:
     """The inputs, from the committed catalog and what only the manifest
     records (the download, the rows and duplicates)."""
@@ -540,7 +544,7 @@ def inputs_from_data(data: Path) -> Inputs:
         download=Saved(**manifest["download"]),
         rows=manifest["catalog"]["rows"],
         duplicates=manifest["catalog"]["duplicates"],
-        omms=load(data / SNAPSHOT),
+        omms=read_snapshot(data),
     )
 
 
@@ -599,38 +603,17 @@ def render_manifest(inputs: Inputs, files: Mapping[str, bytes]) -> str:
             "oldest_epoch": min(omm.epoch for omm in omms).isot,
             "newest_epoch": max(omm.epoch for omm in omms).isot,
         },
-        "files": {
-            name: {"bytes": len(stored), "sha256": hashlib.sha256(stored).hexdigest()}
-            for name, stored in files.items()
-        },
+        "files": file_digests(files),
     }
     return json.dumps(manifest, indent=2) + "\n"
 
 
 def stored_files(data: Path, inputs: Inputs) -> dict[str, bytes]:
-    """The bytes every committed file should hold, the manifest last.
-
-    A gzipped file already in ``data`` with the right contents is kept as it
-    is, so a different zlib build does not change a file whose data did not.
-    """
-    files: dict[str, bytes] = {}
-    for name, content in contents(inputs).items():
-        path = data / name
-        if name != SNAPSHOT:
-            files[name] = content
-        elif path.exists() and _gunzip(path.read_bytes()) == content:
-            files[name] = path.read_bytes()
-        else:
-            files[name] = gzip.compress(content, compresslevel=9, mtime=0)
+    """The bytes every committed file should hold, the manifest last
+    (:func:`snapshot_files.stored_files`)."""
+    files = snapshot_files.stored_files(data, contents(inputs), {SNAPSHOT})
     files[MANIFEST] = render_manifest(inputs, files).encode()
     return files
-
-
-def _gunzip(data: bytes) -> bytes | None:
-    try:
-        return gzip.decompress(data)
-    except (OSError, EOFError, zlib.error):
-        return None
 
 
 @dataclass(frozen=True, slots=True)

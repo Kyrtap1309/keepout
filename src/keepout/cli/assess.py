@@ -12,8 +12,6 @@ import typer
 from keepout import cdm
 from keepout.cli.events import (
     AssessedEvent,
-    action_name,
-    assumed_covariances,
     event_json,
     events_table,
     reasons,
@@ -111,20 +109,15 @@ def assess_command(
         except KeepoutError as exc:
             fail(f"{path}: {exc}")
     choice = method_choice(method.value)
-    try:
-        events = group_events(messages)
-        assessed = [
-            AssessedEvent(
-                event,
-                assess(event.observations(method=choice, hard_body_radius=hbr)),
-            )
-            for event in events
-        ]
-    except ValueError as exc:  # CDMs that do not make events, an HBR missing
-        fail(str(exc))
+    assessed = [
+        AssessedEvent(
+            event, assess(event.observations(method=choice, hard_body_radius=hbr))
+        )
+        for event in group_events(messages)
+    ]
     actions = Counter(item.assessment.decision.action for item in assessed)
     manoeuvre = actions[Action.MANOEUVRE] > 0
-    assumed = sum(assumed_covariances(item) for item in assessed)
+    assumed = sum(item.event.assumed_covariance for item in assessed)
     payload: dict[str, JsonValue] = {
         "cdms": len(messages),
         "events": [event_json(item) for item in assessed],
@@ -132,8 +125,7 @@ def assess_command(
         "manoeuvre": manoeuvre,
     }
     counted = ", ".join(
-        f"{actions[action]} {action_name(action)}"
-        for action in sorted(actions, reverse=True)
+        f"{actions[action]} {action.label}" for action in sorted(actions, reverse=True)
     )
     text = [
         f"{plural(len(assessed), 'event')} from {plural(len(messages), 'CDM')}: "

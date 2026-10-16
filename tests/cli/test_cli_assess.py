@@ -1,16 +1,18 @@
 import json
 import re
 from pathlib import Path
+from typing import get_args
 
 import pytest
 from astropy.time import Time
 from cli_builders import DAYS, FIXTURE_CSV, FLEET_TOML, START, keepout
+from inline_snapshot import snapshot
 
 from keepout.cdm import kvn, xml
-from keepout.cli.assess import PcMethod, assess_command, method_choice
+from keepout.cli.assess import PcMethod, method_choice
 from keepout.cli.output import ExitCode
 from keepout.omm import load
-from keepout.pc import MethodChoice
+from keepout.pc import Method
 from keepout.synthetic import read_fleet
 from keepout.synthetic.operator import run
 
@@ -36,17 +38,16 @@ def test_assess_prints_each_event_and_why(tmp_path: Path) -> None:
     files = [write(tmp_path, "green.kvn", GREEN), write(tmp_path, "yellow.kvn", YELLOW)]
     result = keepout("assess", *files)
     assert result.exit_code == ExitCode.OK
-    lines = result.stdout.splitlines()
-    assert lines[0] == "Conjunction events"
-    assert lines[3].split()[-4:] == ["1", "4.37e-08", "green", "ignore"]
-    assert lines[4].split()[-4:] == ["1", "7.38e-06", "yellow", "monitor"]
-    assert lines[5] == "2 events from 2 CDMs: 1 monitor, 1 ignore."
-    assert lines[6] == (
-        "2 of 2 events rest on assumed covariances (COVARIANCE_METHOD = DEFAULT), "
-        "not orbit determination."
-    )
-    assert lines[7].startswith("44476/55841/2026-10-08T12:03:02.771792: monitor (")
-    assert len(lines) == 8
+    assert result.stdout == snapshot("""\
+Conjunction events
+TCA (UTC)         Objects        Miss (m)  CDMs        Pc  Level   Action \n\
+──────────────────────────────────────────────────────────────────────────
+2026-10-06 19:36  52939 / 47826      1029     1  4.37e-08  green   ignore \n\
+2026-10-08 12:03  44476 / 55841      3647     1  7.38e-06  yellow  monitor
+2 events from 2 CDMs: 1 monitor, 1 ignore.
+2 of 2 events rest on assumed covariances (COVARIANCE_METHOD = DEFAULT), not orbit determination.
+44476/55841/2026-10-08T12:03:02.771792: monitor (latest Pc 7.38e-06 is yellow, 2.50 d before TCA; trend undetermined; diagnostic: 2-D Pc assumptions questionable: the encounter lasts about 2.51e+03 s, 2.9% of the primary's orbital period (limit 1%); a 3-D Pc may differ; diagnostic: the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used)
+""")
 
 
 def test_assess_exits_with_3_when_an_event_needs_a_manoeuvre(tmp_path: Path) -> None:
@@ -54,16 +55,19 @@ def test_assess_exits_with_3_when_an_event_needs_a_manoeuvre(tmp_path: Path) -> 
     Path(files[1]).write_text(xml.dumps(RESULT.cdms[1]), encoding="utf-8")
     result = keepout("assess", *files, "--hbr", "1000")
     assert result.exit_code == ExitCode.MANOEUVRE
-    lines = result.stdout.splitlines()
-    assert lines[3].split()[-4:] == ["1", "4.25e-02", "red", "manoeuvre"]
-    assert lines[4].split()[-3:] == ["1.73e-02", "red", "prepare"]
-    assert lines[6] == "2 events from 2 CDMs: 1 manoeuvre, 1 prepare manoeuvre."
-    assert lines[8].startswith(
-        "52939/47826/2026-10-06T19:36:42.717332: manoeuvre (latest Pc 4.25e-02 "
-        "is red, 0.82 d before TCA; trend undetermined; within the decision "
-        "point (2.00 d before TCA))"
-    )
-    assert lines[-1] == "At least one event needs a manoeuvre (exit status 3)."
+    assert result.stdout == snapshot("""\
+Conjunction events
+TCA (UTC)         Objects        Miss (m)  CDMs        Pc  Level  Action        \n\
+────────────────────────────────────────────────────────────────────────────────
+2026-10-06 19:36  52939 / 47826      1029     1  4.25e-02  red    manoeuvre     \n\
+2026-10-08 12:03  44476 / 55841      3647     1  1.73e-02  red    prepare       \n\
+                                                                  manoeuvre     \n\
+2 events from 2 CDMs: 1 manoeuvre, 1 prepare manoeuvre.
+2 of 2 events rest on assumed covariances (COVARIANCE_METHOD = DEFAULT), not orbit determination.
+52939/47826/2026-10-06T19:36:42.717332: manoeuvre (latest Pc 4.25e-02 is red, 0.82 d before TCA; trend undetermined; within the decision point (2.00 d before TCA))
+44476/55841/2026-10-08T12:03:02.771792: prepare manoeuvre (latest Pc 1.73e-02 is red, 2.50 d before TCA; trend undetermined; before the decision point (2.00 d before TCA): prepare a manoeuvre; diagnostic: 2-D Pc assumptions questionable: the encounter lasts about 3.5e+03 s, 4.1% of the primary's orbital period (limit 1%); a 3-D Pc may differ; diagnostic: the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used)
+At least one event needs a manoeuvre (exit status 3).
+""")
     assert result.stderr == ""
     as_json = keepout("assess", *files, "--hbr", "1000", "--json")
     assert as_json.exit_code == ExitCode.MANOEUVRE
@@ -100,6 +104,7 @@ def test_assess_follows_the_trend_of_an_event_over_its_cdms(tmp_path: Path) -> N
 def test_assess_computes_with_the_method_given(tmp_path: Path) -> None:
     file = write(tmp_path, "green.kvn", GREEN)
     result = keepout("assess", file, "--method", "elrod", "--json")
+    assert result.exit_code == ExitCode.OK
     (event,) = json.loads(result.stdout)["events"]
     assert event["observations"][0]["method"] == "elrod"
 
@@ -132,41 +137,37 @@ def test_assess_needs_both_hard_body_radii_or_hbr(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "args",
+    ("args", "expected"),
     [
-        (),
-        ("missing.kvn",),
-        (".",),
-        ("--hbr", "0"),
-        ("--method", "nonsense"),
+        ((), "Missing argument 'files'"),
+        (("missing.kvn",), "does not exist"),
+        ((".",), "is a directory"),
+        (("green.kvn", "--hbr", "0"), "must be a positive number"),
+        (("green.kvn", "--method", "nonsense"), "'nonsense' is not one of"),
     ],
 )
 def test_assess_refuses_a_wrong_command_line(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, args: tuple[str, ...]
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    args: tuple[str, ...],
+    expected: str,
 ) -> None:
     monkeypatch.chdir(tmp_path)
     write(tmp_path, "green.kvn", GREEN)
-    extra = ("green.kvn",) if args and args[0].startswith("--") else ()
-    result = keepout("assess", *extra, *args)
+    result = keepout("assess", *args)
     assert result.exit_code == ExitCode.USAGE
+    assert expected in result.stderr
 
 
-def test_every_pc_method_can_be_chosen() -> None:
-    choices: list[MethodChoice] = [method_choice(m.value) for m in PcMethod]
-    assert choices == [m.value for m in PcMethod]
-    assert set(choices) == {
-        "auto",
-        "foster",
-        "elrod",
-        "hall3d",
-        "montecarlo",
-        "frisbee",
-        "dilution",
-        "alfano",
-    }
+def test_the_method_option_offers_every_pc_method() -> None:
+    # PcMethod repeats keepout.pc's names for Typer, which needs an enum.
+    assert {m.value for m in PcMethod} == {"auto", *get_args(Method)}
+    assert [method_choice(m.value) for m in PcMethod] == list(PcMethod)
+
+
+def test_a_name_that_is_no_pc_method_is_refused() -> None:
     with pytest.raises(ValueError, match="not a Pc method: 'best'"):
         method_choice("best")
-    assert assess_command.__doc__ is not None
 
 
 def with_velocity_of_object1(text: str) -> str:
@@ -189,17 +190,17 @@ def test_assess_shows_a_pc_that_failed_or_is_missing(tmp_path: Path) -> None:
     )
     result = keepout("assess", failed, late, "--method", "foster")
     assert result.exit_code == ExitCode.OK
-    lines = result.stdout.splitlines()
-    assert lines[3].split()[-4:] == ["1", "failed", "-", "monitor"]
-    assert lines[4].split()[-4:] == ["1", "-", "-", "monitor"]
-    assert lines[5] == "2 events from 2 CDMs: 2 monitor."
-    assert lines[7].endswith(
-        "monitor (latest observation has no Pc: GeometryError: relative "
-        "velocity is zero: the encounter plane is undefined)"
-    )
-    assert lines[8].endswith(
-        "monitor (no observation before TCA: nothing to decide on)"
-    )
+    assert result.stdout == snapshot("""\
+Conjunction events
+TCA (UTC)         Objects        Miss (m)  CDMs      Pc  Level  Action \n\
+───────────────────────────────────────────────────────────────────────
+2026-10-06 19:36  52939 / 47826      1029     1  failed  -      monitor
+2026-10-08 12:03  44476 / 55841      3647     1       -  -      monitor
+2 events from 2 CDMs: 2 monitor.
+2 of 2 events rest on assumed covariances (COVARIANCE_METHOD = DEFAULT), not orbit determination.
+52939/47826/2026-10-06T19:36:42.717332: monitor (latest observation has no Pc: GeometryError: relative velocity is zero: the encounter plane is undefined)
+44476/55841/2026-10-08T12:03:02.771792: monitor (no observation before TCA: nothing to decide on)
+""")
     payload = json.loads(keepout("assess", late, "--json").stdout)
     (event,) = payload["events"]
     assert event["pc"] is None

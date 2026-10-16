@@ -71,14 +71,6 @@ noise, such as the off-diagonal terms (about 1e-9 m**2) of the model's
 diagonal RTN covariance after its rotations, whose digits depend on the
 machine."""
 
-ACTION_NAMES: Final[Mapping[Action, str]] = {
-    Action.IGNORE: "ignore",
-    Action.MONITOR: "monitor",
-    Action.PREPARE_MANOEUVRE: "monitor, prepare manoeuvre",
-    Action.MANOEUVRE: "manoeuvre",
-}
-"""Each action as the report names it (as ``tools/risk_report.py`` does)."""
-
 
 class Settings(TypedDict):
     """How the operator ran."""
@@ -181,7 +173,7 @@ def _significant(value: float, digits: int = 3) -> float:
 
 def _level(event: OperatorEvent) -> str | None:
     level = event.assessment.level
-    return None if level is None else level.name.lower()
+    return None if level is None else level.label
 
 
 def _satellite(satellite: FleetSatellite, omm: Omm, approaches: int) -> Satellite:
@@ -238,7 +230,7 @@ def _event(
         "scale_factor": scale,
         "diluted": diluted,
         "level": _level(event),
-        "action": ACTION_NAMES[event.action],
+        "action": event.action.label,
         "notes": notes,
     }
 
@@ -311,7 +303,7 @@ def summarise(
             )
             for satellite in result.fleet.satellites
         ],
-        "actions": {name: actions[action] for action, name in ACTION_NAMES.items()},
+        "actions": {action.label: actions[action] for action in Action},
         "events": [_event(event, elements, model) for event in result.events],
         "example": None if example is None else example.cdm.message_id,
     }

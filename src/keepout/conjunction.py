@@ -11,6 +11,7 @@ from astropy.time import Time
 
 from keepout._types import FloatArray, require_positive
 from keepout.encounter import EncounterPlane, Role, encounter_plane
+from keepout.errors import HardBodyRadiusError
 from keepout.objects import ObjectState, require_same_epoch
 
 __all__ = ["Conjunction", "combined_hard_body_radius"]
@@ -35,7 +36,7 @@ def combined_hard_body_radius(
 
     Raises
     ------
-    ValueError
+    HardBodyRadiusError
         If ``explicit`` is ``None`` and an object has no radius. keepout never
         falls back to a silent default.
     """
@@ -46,7 +47,7 @@ def combined_hard_body_radius(
         missing = [
             o.object_id for o in (primary, secondary) if o.hard_body_radius is None
         ]
-        raise ValueError(
+        raise HardBodyRadiusError(
             f"no hard-body radius for {', '.join(missing)}: pass "
             "hard_body_radius= (combined, in metres) or give HBR for both objects"
         )

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import os
+import dataclasses
 from collections.abc import Sequence
 from typing import Annotated, TypeAlias
 
@@ -10,7 +10,7 @@ import typer
 from rich.table import Table
 
 from keepout.cli.options import CacheDir, JsonFlag, Workers
-from keepout.cli.output import JsonValue, fail, show
+from keepout.cli.output import JsonValue, fail, show, table
 from keepout.sources.cara import CARA_COMMIT
 from keepout.validation.cases import load_all, load_monte_carlo_cases
 from keepout.validation.evaluation import (
@@ -49,7 +49,7 @@ def validate_command(
     docs/validation.md.
     """
     cases = (load_monte_carlo_cases if monte_carlo else load_all)(cache_dir)
-    outcomes = evaluate(cases, workers=workers or os.cpu_count() or 1)
+    outcomes = evaluate(cases, workers=workers)
     summary = summarise(outcomes)
     failed = [o for o in outcomes if not o.passed]
     payload: dict[str, JsonValue] = {
@@ -82,29 +82,23 @@ def _name(outcome: Outcome) -> str:
 
 def _table(summary: Sequence[MethodSummary], *, monte_carlo: bool) -> Table:
     title = "Monte Carlo validation" if monte_carlo else "Validation"
-    table = Table(title=f"{title} against NASA CARA")
+    rows = table(f"{title} against NASA CARA")
     for column in ("Suite", "Method", "Cases passed"):
-        table.add_column(column)
-    table.add_column("Worst relative error", justify="right")
+        rows.add_column(column)
+    rows.add_column("Worst relative error", justify="right")
     for s in summary:
         worst = s.worst_relative_error
-        table.add_row(
+        rows.add_row(
             s.suite,
             s.method,
             f"{s.passed} / {s.total}",
             "-" if worst is None else f"{worst:.1e}",
         )
-    return table
+    return rows
 
 
 def _summary_json(summary: MethodSummary) -> dict[str, JsonValue]:
-    return {
-        "suite": summary.suite,
-        "method": summary.method,
-        "passed": summary.passed,
-        "total": summary.total,
-        "worst_relative_error": summary.worst_relative_error,
-    }
+    return dataclasses.asdict(summary)
 
 
 def _outcome_json(outcome: Outcome) -> dict[str, JsonValue]:

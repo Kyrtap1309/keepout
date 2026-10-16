@@ -46,7 +46,7 @@ def test_the_example_fleet_has_twelve_approaches_in_the_week(
     assert summary["actions"] == {
         "ignore": 10,
         "monitor": 2,
-        "monitor, prepare manoeuvre": 0,
+        "prepare manoeuvre": 0,
         "manoeuvre": 0,
     }
     assert all(e["method"] == "foster" for e in summary["events"])

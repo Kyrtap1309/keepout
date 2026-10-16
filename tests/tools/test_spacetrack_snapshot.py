@@ -2,6 +2,7 @@ import dataclasses
 import gzip
 import hashlib
 import json
+import urllib.parse
 from pathlib import Path
 
 import astropy.units as u
@@ -24,8 +25,11 @@ from keepout.errors import AuthError, HttpStatusError, SourceUnavailable
 from keepout.omm import load
 from keepout.sources.spacetrack import (
     CATALOG,
+    HIDDEN,
+    IDENTITY_VARIABLE,
     LOGIN_URL,
     LOGOUT_URL,
+    PASSWORD_VARIABLE,
     PUBLIC_CDMS,
     Request,
     Response,
@@ -179,9 +183,9 @@ def test_download_hides_the_credentials_and_sends_no_second_login(
 def test_download_reads_the_credentials_from_the_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.delenv("SPACETRACK_IDENTITY", raising=False)
-    monkeypatch.delenv("SPACETRACK_PASSWORD", raising=False)
-    with pytest.raises(AuthError, match="SPACETRACK_IDENTITY and SPACETRACK_PASSWORD"):
+    monkeypatch.delenv(IDENTITY_VARIABLE, raising=False)
+    monkeypatch.delenv(PASSWORD_VARIABLE, raising=False)
+    with pytest.raises(AuthError, match=f"{IDENTITY_VARIABLE} and {PASSWORD_VARIABLE}"):
         snapshot.download(tmp_path / "raw", cache=tmp_path)
     assert not (tmp_path / "raw").exists()
 
@@ -200,9 +204,41 @@ def test_scrub_keeps_bytes_without_credentials(body: bytes) -> None:
         assert clean == body
 
 
-def test_scrub_keeps_other_bytes_around_hidden_credentials() -> None:
-    body = b"\xff" + PASSWORD.encode() + b"\xfe"
-    assert snapshot.scrub(body, CREDENTIALS) == b"\xff<hidden>\xfe"
+SECRET_FORMS = sorted(
+    {
+        form.encode()
+        for secret in (IDENTITY, PASSWORD)
+        for form in (
+            secret,
+            urllib.parse.quote(secret, safe=""),
+            urllib.parse.quote_plus(secret),
+        )
+    }
+)
+"""The identity and password as typed, path- and form-encoded: what
+:meth:`Credentials.redact` hides."""
+NOT_PRINTABLE = st.binary().map(
+    lambda data: bytes(byte for byte in data if not 0x20 <= byte <= 0x7E)
+)
+"""Bytes without printable ASCII, of which every secret form is made: no
+part of a secret, and invalid UTF-8 as often as not."""
+
+
+@given(st.binary(), st.sampled_from(SECRET_FORMS), st.binary())
+def test_scrub_leaves_no_secret_form(
+    prefix: bytes, secret: bytes, suffix: bytes
+) -> None:
+    clean = snapshot.scrub(prefix + secret + suffix, CREDENTIALS)
+    for form in SECRET_FORMS:
+        assert form not in clean
+
+
+@given(NOT_PRINTABLE, st.sampled_from(SECRET_FORMS), NOT_PRINTABLE)
+def test_scrub_keeps_the_bytes_around_a_secret(
+    prefix: bytes, secret: bytes, suffix: bytes
+) -> None:
+    clean = snapshot.scrub(prefix + secret + suffix, CREDENTIALS)
+    assert clean == prefix + HIDDEN.encode() + suffix
 
 
 def test_main_download_reports_the_answers(
@@ -211,8 +247,8 @@ def test_main_download_reports_the_answers(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setenv("SPACETRACK_IDENTITY", IDENTITY)
-    monkeypatch.setenv("SPACETRACK_PASSWORD", PASSWORD)
+    monkeypatch.setenv(IDENTITY_VARIABLE, IDENTITY)
+    monkeypatch.setenv(PASSWORD_VARIABLE, PASSWORD)
     monkeypatch.setattr(snapshot, "UrllibTransport", lambda: server)
     raw = tmp_path / "raw"
     assert snapshot.main(["download", str(raw), "--cache", str(tmp_path)]) == 0
@@ -231,11 +267,12 @@ def test_main_download_keeps_an_answer_keepout_cannot_read(
 ) -> None:
     echo = Response(200, f'"welcome {IDENTITY}"'.encode())
     server = FakeSpaceTrack(
-        {CATALOG.url: GP, PUBLIC_CDMS.url: b'{"error": "later"}'}, login=echo
+        {CATALOG.url: GP, PUBLIC_CDMS.url: b'{"error": "later"}'},
+        login=echo,
+        login_opens_session=True,
     )
-    server.session = True
-    monkeypatch.setenv("SPACETRACK_IDENTITY", IDENTITY)
-    monkeypatch.setenv("SPACETRACK_PASSWORD", PASSWORD)
+    monkeypatch.setenv(IDENTITY_VARIABLE, IDENTITY)
+    monkeypatch.setenv(PASSWORD_VARIABLE, PASSWORD)
     monkeypatch.setattr(snapshot, "UrllibTransport", lambda: server)
     raw = tmp_path / "raw"
     assert snapshot.main(["download", str(raw), "--cache", str(tmp_path)]) == 1
@@ -248,14 +285,21 @@ def test_main_download_keeps_an_answer_keepout_cannot_read(
 def test_replay_answers_from_the_saved_answers(raw: Path) -> None:
     replay = snapshot.Replay(raw)
     assert replay(Request("GET", CATALOG.url)) == Response(200, GP)
+    assert snapshot.replay_public_cdms(raw) == read_public_cdms(CDMS)
+
+
+def test_replay_refuses_a_request_not_saved(raw: Path) -> None:
+    replay = snapshot.Replay(raw)
     with pytest.raises(SourceUnavailable, match="is not saved"):
         replay(Request("GET", f"{CATALOG.url}/limit/1"))
-    assert snapshot.replay_public_cdms(raw) == read_public_cdms(CDMS)
 
 
 def test_replay_needs_a_download(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="no answers saved"):
         snapshot.Replay(tmp_path)
+
+
+def test_a_saved_answer_needs_a_download(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="no answer to"):
         snapshot.saved_answer(tmp_path, CATALOG.url)
 
@@ -407,6 +451,9 @@ def test_main_compare_prints_the_summary(
     assert (summary["cdms"], summary["outside_catalog"], summary["found"]) == (3, 1, 1)
 
 
-def test_spread_of_nothing() -> None:
+def test_the_spread_of_nothing_is_unknown() -> None:
     assert snapshot.spread([]) == {"median": None, "p90": None}
+
+
+def test_the_spread_is_the_median_and_90th_percentile() -> None:
     assert snapshot.spread([3.0, 1.0, 2.0]) == {"median": 2.0, "p90": 3.0}

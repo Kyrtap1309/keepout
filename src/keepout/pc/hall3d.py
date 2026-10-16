@@ -233,6 +233,12 @@ def integrate(
     already scanned the rate. A long encounter (:func:`is_long`) only adds
     the note that Nc counts repeated entries (the duration itself is in
     ``compute_pc``'s applicability warning).
+
+    Raises
+    ------
+    PcConvergenceError
+        If the peak-overlap iteration failed where the rate may matter
+        (:func:`~keepout.pc._rate.check_fallbacks`), or Nc is not finite.
     """
     rate, found = encounters.rate, encounters.found
     integral = integrate_segments(rate, found, rtol=rtol)

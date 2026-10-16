@@ -4,12 +4,14 @@ from pathlib import Path
 
 import pytest
 from astropy.time import Time
-from cli_builders import DAYS, FIXTURE_CSV, START, keepout, write_fleet
+from cli_builders import DAYS, FIXTURE_CSV, FLEET_TOML, START, keepout, write_fleet
+from inline_snapshot import snapshot
 
 from keepout.cdm import kvn
 from keepout.cli import screen
 from keepout.cli.output import ExitCode
 from keepout.omm import load
+from keepout.omm.celestrak import dumps_csv
 from keepout.synthetic import read_fleet
 from keepout.synthetic.operator import run
 
@@ -38,61 +40,19 @@ def test_screen_issues_and_assesses_a_cdm_per_approach(tmp_path: Path) -> None:
     cdms = tmp_path / "cdms"
     result = keepout(*screen_fixture(tmp_path, "--cdm-dir", str(cdms)))
     assert result.exit_code == ExitCode.OK
-    lines = result.stdout.splitlines()
-    assert lines[0] == (
-        "Screened 2 fleet satellites against 217 objects "
-        f"({FIXTURE_CSV}) from 2026-10-06T00:00:00 to 2026-10-09T00:00:00 UTC: "
-        "2 close approaches."
-    )
-    assert lines[1] == "Close approaches"
-    assert lines[2].split() == [
-        "TCA",
-        "(UTC)",
-        "Objects",
-        "Miss",
-        "(m)",
-        "CDMs",
-        "Pc",
-        "Level",
-        "Action",
-    ]
-    assert lines[4].split() == [
-        "2026-10-06",
-        "19:36",
-        "52939",
-        "/",
-        "47826",
-        "1029",
-        "1",
-        "4.37e-08",
-        "green",
-        "ignore",
-    ]
-    assert lines[5].split() == [
-        "2026-10-08",
-        "12:03",
-        "44476",
-        "/",
-        "55841",
-        "3647",
-        "1",
-        "7.38e-06",
-        "yellow",
-        "monitor",
-    ]
-    assert lines[6] == (
-        "5 element sets left out (stale, future epochs, SGP4 failures; "
-        "--json lists them)."
-    )
-    assert lines[7].startswith(
-        "44476/55841/2026-10-08T12:03:02.771792: monitor (latest Pc 7.38e-06 is "
-        "yellow, 2.50 d before TCA; trend undetermined; "
-    )
-    assert lines[8:] == [
-        "Covariances are assumed (keepout's model of GP element set errors), "
-        "not orbit determination.",
-        f"2 CDMs written to {cdms}",
-    ]
+    shown = result.stdout.replace(str(FIXTURE_CSV), "<catalog>")
+    assert shown.replace(str(tmp_path), "<tmp>") == snapshot("""\
+Screened 2 fleet satellites against 217 objects (<catalog>) from 2026-10-06T00:00:00 to 2026-10-09T00:00:00 UTC: 2 close approaches.
+Close approaches
+TCA (UTC)         Objects        Miss (m)  CDMs        Pc  Level   Action \n\
+──────────────────────────────────────────────────────────────────────────
+2026-10-06 19:36  52939 / 47826      1029     1  4.37e-08  green   ignore \n\
+2026-10-08 12:03  44476 / 55841      3647     1  7.38e-06  yellow  monitor
+5 element sets left out (stale, future epochs, SGP4 failures; --json lists them).
+44476/55841/2026-10-08T12:03:02.771792: monitor (latest Pc 7.38e-06 is yellow, 2.50 d before TCA; trend undetermined; diagnostic: 2-D Pc assumptions questionable: the encounter lasts about 2.51e+03 s, 2.9% of the primary's orbital period (limit 1%); a 3-D Pc may differ; diagnostic: the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used)
+Covariances are assumed (keepout's model of GP element set errors), not orbit determination.
+2 CDMs written to <tmp>/cdms
+""")
     expected = run(
         read_fleet((tmp_path / "fleet.toml").read_text()),
         load(FIXTURE_CSV),
@@ -243,6 +203,7 @@ def test_screen_reports_a_bad_fleet_file(tmp_path: Path) -> None:
     result = keepout(*screen_fixture(tmp_path, fleet="satellites = 3\n"))
     assert result.exit_code == ExitCode.ERROR
     assert result.stderr.startswith("Error: ")
+    assert "missing key(s) catalog_hard_body_radius" in result.stderr
     assert "Traceback" not in result.stderr
 
 
@@ -294,3 +255,21 @@ def test_parse_time_reads_one_iso_utc_time() -> None:
     assert screen.parse_time("2026-10-06").scale == "utc"
     with pytest.raises(ValueError, match="not an ISO 8601 UTC time: 'soon'"):
         screen.parse_time("soon")
+
+
+def test_screen_of_a_quiet_window_reports_no_approach(tmp_path: Path) -> None:
+    # The fleet satellite and the Starlink it meets 0.82 d after the start,
+    # both current: half a day sees no approach and leaves nothing out.
+    catalog = tmp_path / "pair.csv"
+    pair = [omm for omm in load(FIXTURE_CSV) if omm.catalog_number in {52939, 47826}]
+    catalog.write_text(dumps_csv(pair), encoding="utf-8")
+    fleet = FLEET_TOML.split("\n\n[[satellites]]\ncatalog_number = 44476")[0]
+    args = screen_fixture(tmp_path, fleet=fleet)
+    args[args.index("--catalog") + 1] = str(catalog)
+    args[args.index("--days") + 1] = "0.5"
+    result = keepout(*args)
+    assert result.exit_code == ExitCode.OK
+    assert result.stdout.replace(str(catalog), "<catalog>") == snapshot("""\
+Screened 1 fleet satellite against 2 objects (<catalog>) from 2026-10-06T00:00:00 to 2026-10-06T12:00:00 UTC: 0 close approaches.
+Covariances are assumed (keepout's model of GP element set errors), not orbit determination.
+""")

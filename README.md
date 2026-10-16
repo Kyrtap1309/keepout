@@ -102,7 +102,7 @@ keepout's decision for each of the 15321 events of ESA's Kelvins data, from ESA'
 |---|---|---|
 | ignore | 13823 | 90.2% |
 | monitor | 1468 | 9.6% |
-| monitor, prepare manoeuvre | 6 | <0.1% |
+| prepare manoeuvre | 6 | <0.1% |
 | manoeuvre | 24 | 0.2% |
 
 ![Kelvins event 734: manoeuvre](docs/img/risk-kelvins/event-734.svg)

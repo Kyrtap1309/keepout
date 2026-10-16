@@ -291,3 +291,12 @@ def test_the_order_of_the_input_does_not_change_the_decision(
     random.shuffle(shuffled)
     first, second = assess(history).decision, assess(shuffled).decision
     assert (first.action, first.reasons) == (second.action, second.reasons)
+
+
+def test_an_action_is_labelled_in_words() -> None:
+    assert [action.label for action in Action] == [
+        "ignore",
+        "monitor",
+        "prepare manoeuvre",
+        "manoeuvre",
+    ]

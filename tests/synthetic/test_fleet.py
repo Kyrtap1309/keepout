@@ -51,10 +51,21 @@ def test_a_fleet_file_is_read() -> None:
         ),
         catalog_hard_body_radius=1.5,
     )
-    assert isinstance(fleet.satellites[0].hard_body_radius, float)
     assert fleet.catalog_numbers == (25544, 270214)
+
+
+def test_an_integer_radius_is_read_as_a_float() -> None:
+    assert isinstance(read_fleet(TEXT).satellites[0].hard_body_radius, float)
+
+
+def test_a_satellite_is_found_by_its_catalog_number() -> None:
+    fleet = read_fleet(TEXT)
     assert fleet.find(270214) is fleet.satellites[1]
     assert fleet.find(25545) is None
+
+
+def test_fleets_pickle_and_hash_by_value() -> None:
+    fleet = read_fleet(TEXT)
     assert pickle.loads(pickle.dumps(fleet)) == fleet
     assert hash(fleet) == hash(read_fleet(TEXT))
 
@@ -150,17 +161,28 @@ def test_a_fleet_is_checked_without_a_file() -> None:
     assert Fleet((FleetSatellite(1, 1.0, maneuverable=True),), 0).find(1) is not None
 
 
-def test_a_fleet_file_is_loaded_with_its_path_in_errors(tmp_path: Path) -> None:
+def test_a_fleet_file_is_loaded_from_a_path_or_a_string(tmp_path: Path) -> None:
     path = tmp_path / "fleet.toml"
     path.write_text(TEXT, encoding="utf-8")
     assert load_fleet(path) == read_fleet(TEXT)
     assert load_fleet(str(path)) == read_fleet(TEXT)
+
+
+def test_errors_in_a_fleet_file_name_its_path(tmp_path: Path) -> None:
+    path = tmp_path / "fleet.toml"
     path.write_text(fleet_text(satellite(name=5)), encoding="utf-8")
     with pytest.raises(FleetError, match=f"^{path}: satellite 1: name must be"):
         load_fleet(path)
+
+
+def test_a_fleet_file_must_be_utf_8(tmp_path: Path) -> None:
+    path = tmp_path / "fleet.toml"
     path.write_bytes(b"\xff" + TEXT.encode())
     with pytest.raises(FleetError, match=f"^{path}: not UTF-8 text"):
         load_fleet(path)
+
+
+def test_a_missing_fleet_file_is_not_found(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
         load_fleet(tmp_path / "missing.toml")
 

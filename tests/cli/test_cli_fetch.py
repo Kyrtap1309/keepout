@@ -6,6 +6,7 @@ import os
 import sys
 import zipfile
 from pathlib import Path
+from typing import Final
 
 import pytest
 from cli_builders import (
@@ -20,6 +21,7 @@ from cli_builders import (
 from spacetrack_builders import (
     IDENTITY,
     PASSWORD,
+    FakeSpaceTrack,
     public_cdm,
     space_track_cdm_public,
     space_track_gp,
@@ -101,7 +103,7 @@ def test_fetch_cara_reports_a_corrupt_download(
     FakeWeb(monkeypatch, dict.fromkeys(CARA_PAGES, b"tampered"))
     result = keepout("fetch", "cara", "--cache-dir", str(tmp_path))
     assert result.exit_code == ExitCode.ERROR
-    assert "SHA-256" in result.stderr or "sha256" in result.stderr.lower()
+    assert "expected sha256" in result.stderr
 
 
 def test_fetch_refuses_a_file_as_the_cache(tmp_path: Path) -> None:
@@ -109,6 +111,7 @@ def test_fetch_refuses_a_file_as_the_cache(tmp_path: Path) -> None:
     file.write_text("")
     result = keepout("fetch", "cara", "--cache-dir", str(file))
     assert result.exit_code == ExitCode.USAGE
+    assert "Invalid value for '--cache-dir'" in result.stderr
 
 
 TABLE = gzip.compress(b"event_id,time_to_tca\n")
@@ -159,7 +162,7 @@ def test_fetch_kelvins_reports_a_bad_archive(
 FIXTURE_OBJECTS = len(load(FIXTURE_CSV))
 
 
-def test_fetch_catalog_from_celestrak(
+def test_fetch_catalog_downloads_every_celestrak_group(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     pages = celestrak_pages()
@@ -173,10 +176,27 @@ def test_fetch_catalog_from_celestrak(
         "objects in several groups left out); cached in "
         f"{tmp_path / 'celestrak' / 'gp'}\n"
     )
-    again = keepout("fetch", "catalog", "--cache-dir", str(tmp_path), "--json")
+
+
+def test_a_second_fetch_catalog_is_served_from_the_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pages = celestrak_pages()
+    web = FakeWeb(monkeypatch, pages)
+    first = keepout("fetch", "catalog", "--cache-dir", str(tmp_path))
+    assert first.exit_code == ExitCode.OK
+    again = keepout("fetch", "catalog", "--cache-dir", str(tmp_path))
     assert again.exit_code == ExitCode.OK
     assert len(web.urls) == len(pages)
-    payload = json.loads(again.stdout)
+
+
+def test_fetch_catalog_as_json_lists_each_group_and_its_copy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    FakeWeb(monkeypatch, celestrak_pages())
+    result = keepout("fetch", "catalog", "--cache-dir", str(tmp_path), "--json")
+    assert result.exit_code == ExitCode.OK
+    payload = json.loads(result.stdout)
     assert payload["source"] == "celestrak"
     assert payload["objects"] == FIXTURE_OBJECTS
     assert payload["duplicates"] == 0
@@ -257,22 +277,29 @@ def test_fetch_catalog_from_space_track_keeps_to_its_limit(
     assert PASSWORD not in first.stderr + second.stderr
 
 
+PUBLIC_ROWS: Final = (
+    public_cdm(),
+    public_cdm(
+        CDM_ID="1000002",
+        TCA="2026-10-16T08:00:00.000000",
+        PC=None,
+        EMERGENCY_REPORTABLE="N",
+        SAT_2_NAME=None,
+    ),
+)
+"""Two public CDM summaries, the later TCA first."""
+
+
+def serve_public_cdms(monkeypatch: pytest.MonkeyPatch) -> FakeSpaceTrack:
+    return fake_space_track(
+        monkeypatch, {spacetrack.PUBLIC_CDMS.url: space_track_cdm_public(*PUBLIC_ROWS)}
+    )
+
+
 def test_fetch_cdm_lists_the_public_summaries_by_tca(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    rows = (
-        public_cdm(),
-        public_cdm(
-            CDM_ID="1000002",
-            TCA="2026-10-16T08:00:00.000000",
-            PC=None,
-            EMERGENCY_REPORTABLE="N",
-            SAT_2_NAME=None,
-        ),
-    )
-    server = fake_space_track(
-        monkeypatch, {spacetrack.PUBLIC_CDMS.url: space_track_cdm_public(*rows)}
-    )
+    server = serve_public_cdms(monkeypatch)
     result = keepout("fetch", "cdm", "--cache-dir", str(tmp_path), env=SPACE_TRACK_ENV)
     assert result.exit_code == ExitCode.OK
     assert server.calls == ["login", spacetrack.PUBLIC_CDMS.url, "logout"]
@@ -298,11 +325,29 @@ def test_fetch_cdm_lists_the_public_summaries_by_tca(
         "yes",
     ]
     assert lines[-1].startswith("2 CDM summaries, retrieved ")
-    again = keepout(
-        "fetch", "cdm", "--cache-dir", str(tmp_path), "--json", env=NO_SPACE_TRACK_ENV
-    )
+
+
+def test_a_second_fetch_cdm_needs_neither_space_track_nor_an_account(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    server = serve_public_cdms(monkeypatch)
+    cache = str(tmp_path)
+    first = keepout("fetch", "cdm", "--cache-dir", cache, env=SPACE_TRACK_ENV)
+    assert first.exit_code == ExitCode.OK
+    again = keepout("fetch", "cdm", "--cache-dir", cache, env=NO_SPACE_TRACK_ENV)
     assert again.exit_code == ExitCode.OK
-    payload = json.loads(again.stdout)
+    assert len(server.calls) == 3
+
+
+def test_fetch_cdm_as_json_gives_every_field_of_a_summary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    serve_public_cdms(monkeypatch)
+    result = keepout(
+        "fetch", "cdm", "--cache-dir", str(tmp_path), "--json", env=SPACE_TRACK_ENV
+    )
+    assert result.exit_code == ExitCode.OK
+    payload = json.loads(result.stdout)
     assert payload["source"] == "spacetrack"
     assert payload["retrieval"]["url"] == spacetrack.PUBLIC_CDMS.url
     assert [cdm["cdm_id"] for cdm in payload["cdms"]] == [1000002, 1000001]
@@ -329,7 +374,6 @@ def test_fetch_cdm_lists_the_public_summaries_by_tca(
         },
     }
     assert payload["cdms"][0]["pc"] is None
-    assert len(server.calls) == 3
 
 
 def test_a_bug_shows_its_traceback_without_the_password(
@@ -359,3 +403,11 @@ def test_a_bug_shows_its_traceback_without_the_password(
     assert "RuntimeError: a bug with 17 characters at hand" in captured.err
     assert "locals" not in captured.err
     assert PASSWORD not in captured.out + captured.err
+
+
+def test_the_cache_variable_is_checked_and_shown_in_the_help(tmp_path: Path) -> None:
+    file = tmp_path / "file"
+    file.write_text("")
+    result = keepout("fetch", "cara", env={"KEEPOUT_CACHE_DIR": str(file)})
+    assert result.exit_code == ExitCode.USAGE
+    assert "KEEPOUT_CACHE_DIR" in keepout("fetch", "cara", "--help").stdout

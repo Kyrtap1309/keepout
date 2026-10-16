@@ -17,6 +17,7 @@ file next to it recording its URL, digest and times (:class:`CopyMeta`);
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import hashlib
 import http.client
@@ -30,7 +31,7 @@ import threading
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Collection, Iterator, Mapping
 from dataclasses import dataclass
 from http import HTTPStatus
 from importlib.metadata import version
@@ -52,8 +53,10 @@ __all__ = [
     "cache_dir",
     "has_digest",
     "http_download",
+    "http_request",
     "http_stream",
     "meta_path",
+    "network_errors",
     "read_copy",
     "store",
     "store_bytes",
@@ -117,6 +120,51 @@ def http_download(url: str) -> bytes:
     return buffer.getvalue()
 
 
+def http_request(
+    url: str,
+    *,
+    schemes: Collection[str] = ("http", "https"),
+    data: bytes | None = None,
+    method: str | None = None,
+    headers: Mapping[str, str] | None = None,
+) -> urllib.request.Request:
+    """A request for ``url`` that names keepout in its ``User-Agent``
+    (:data:`USER_AGENT`), with ``headers`` added.
+
+    Raises
+    ------
+    ValueError
+        If ``url``'s scheme is not one of ``schemes``: urllib must never
+        open a local file.
+    """
+    if urllib.parse.urlsplit(url).scheme not in schemes:
+        named = " or ".join(scheme.upper() for scheme in schemes)
+        raise ValueError(f"not an {named} URL: {url!r}")
+    # The scheme is checked above, so urllib cannot open a local file.
+    return urllib.request.Request(  # noqa: S310
+        url,
+        data=data,
+        headers={"User-Agent": USER_AGENT, **(headers or {})},
+        method=method,
+    )
+
+
+@contextlib.contextmanager
+def network_errors(message: str) -> Iterator[None]:
+    """Turn a network or protocol error inside into
+    :class:`~keepout.errors.SourceUnavailable`, ``<message>: <error>``.
+
+    Raises
+    ------
+    SourceUnavailable
+        On an :class:`OSError` or :class:`http.client.HTTPException`.
+    """
+    try:
+        yield
+    except (OSError, http.client.HTTPException) as exc:
+        raise SourceUnavailable(f"{message}: {exc}") from exc
+
+
 def http_stream(url: str, sink: Sink) -> None:
     """Download ``url`` into ``sink`` in chunks of :data:`CHUNK_SIZE` bytes.
 
@@ -141,30 +189,25 @@ def http_stream(url: str, sink: Sink) -> None:
     ValueError
         If ``url`` is not an ``http`` or ``https`` URL.
     """
-    if urllib.parse.urlsplit(url).scheme not in {"http", "https"}:
-        raise ValueError(f"not an HTTP URL: {url!r}")
-    # The scheme is checked above, so urllib cannot open a local file.
-    request = urllib.request.Request(  # noqa: S310
-        url, headers={"User-Agent": USER_AGENT}
-    )
-    try:
-        with urllib.request.urlopen(  # noqa: S310
-            request, timeout=DOWNLOAD_TIMEOUT
-        ) as response:
-            if response.status != HTTPStatus.OK:
-                raise HttpStatusError(
-                    f"cannot download {url}: HTTP {response.status} {response.reason}",
-                    url=url,
-                    status=response.status,
-                )
-            while chunk := response.read(CHUNK_SIZE):
-                sink.write(chunk)
-    except urllib.error.HTTPError as exc:
-        raise HttpStatusError(
-            f"cannot download {url}: {exc}", url=url, status=exc.code
-        ) from exc
-    except (OSError, http.client.HTTPException) as exc:
-        raise SourceUnavailable(f"cannot download {url}: {exc}") from exc
+    request = http_request(url)
+    with network_errors(f"cannot download {url}"):
+        try:
+            with urllib.request.urlopen(  # noqa: S310
+                request, timeout=DOWNLOAD_TIMEOUT
+            ) as response:
+                if response.status != HTTPStatus.OK:
+                    raise HttpStatusError(
+                        f"cannot download {url}: "
+                        f"HTTP {response.status} {response.reason}",
+                        url=url,
+                        status=response.status,
+                    )
+                while chunk := response.read(CHUNK_SIZE):
+                    sink.write(chunk)
+        except urllib.error.HTTPError as exc:
+            raise HttpStatusError(
+                f"cannot download {url}: {exc}", url=url, status=exc.code
+            ) from exc
 
 
 _Signature: TypeAlias = tuple[int, int, int]

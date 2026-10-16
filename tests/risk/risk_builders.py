@@ -54,8 +54,11 @@ def b1_cdm(
     secondary: str = "30337",
     conjunction_id: str | None = None,
     reported_pc: str = "4.835E-05",
+    assumed_covariance: bool = False,
 ) -> Cdm:
-    """The annex example with its header, TCA and secondary changed."""
+    """The annex example with its header, TCA and secondary changed; with
+    ``assumed_covariance``, the secondary's covariance is assumed
+    (``COVARIANCE_METHOD = DEFAULT``)."""
     text = _set(B1_TEXT, "MESSAGE_ID", message_id)
     text = _set(text, "CREATION_DATE", created)
     text = _set(text, "TCA", tca)
@@ -67,4 +70,7 @@ def b1_cdm(
             f"MESSAGE_ID = {message_id}",
             f"MESSAGE_ID = {message_id}\nCONJUNCTION_ID = {conjunction_id}",
         )
+    if assumed_covariance:
+        head, keyword, secondary_part = text.rpartition("COVARIANCE_METHOD")
+        text = head + _set(keyword + secondary_part, keyword, "DEFAULT")
     return keepout.cdm.loads(text)

@@ -7,7 +7,9 @@ from keepout.errors import (
     AuthError,
     CcsdsParseError,
     CdmParseError,
+    EventError,
     GeometryError,
+    HardBodyRadiusError,
     HttpStatusError,
     KeepoutError,
     OmmParseError,
@@ -85,6 +87,16 @@ def test_unsupported_elements_are_a_keepout_and_value_error() -> None:
     # screening catches to leave the element set out.
     assert issubclass(UnsupportedElements, KeepoutError)
     assert issubclass(UnsupportedElements, ValueError)
+
+
+@pytest.mark.parametrize("error", [EventError, HardBodyRadiusError])
+def test_cdm_data_errors_are_keepout_and_value_errors(
+    error: type[KeepoutError],
+) -> None:
+    # A ValueError like the other invalid arguments of an event, and a keepout
+    # error the command line reports as a data error, not a bug.
+    assert issubclass(error, KeepoutError)
+    assert issubclass(error, ValueError)
 
 
 def test_an_unsupported_frame_is_a_geometry_and_value_error() -> None:

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import os
 import time
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Annotated, TypeAlias
 
@@ -14,14 +14,19 @@ from keepout._units import DAY
 from keepout.cdm import kvn
 from keepout.cli.events import (
     AssessedEvent,
-    assumed_covariances,
     event_json,
     events_table,
     reasons,
 )
 from keepout.cli.fetch import SOURCE_NAMES, load_catalog
-from keepout.cli.options import CacheDir, CatalogSource, JsonFlag, Workers, positive
-from keepout.cli.output import JsonValue, plural, show, utc
+from keepout.cli.options import (
+    CacheDir,
+    CatalogSource,
+    JsonFlag,
+    Workers,
+    positive,
+)
+from keepout.cli.output import JsonValue, isot, plural, show, utc
 from keepout.omm import load
 from keepout.risk import Action
 from keepout.screening import ScreeningRole, SkippedObject
@@ -151,7 +156,7 @@ def screen_command(
         omms,
         began,
         days * DAY,
-        workers=workers or os.cpu_count() or 1,
+        workers=workers,
     )
     files: dict[str, Path] = {}
     if cdm_dir is not None:
@@ -165,10 +170,10 @@ def screen_command(
         "fleet": list(satellites.catalog_numbers),
         "catalog": described,
         "catalog_objects": screening.catalog_count,
-        "start": screening.start.utc.isot,
-        "end": screening.end.utc.isot,
+        "start": isot(screening.start),
+        "end": isot(screening.end),
         "events": [_event_json(e, files) for e in result.events],
-        "assumed_covariances": sum(assumed_covariances(e) for e in assessed),
+        "assumed_covariances": sum(e.event.assumed_covariance for e in result.events),
         "skipped": [_skipped_json(s) for s in screening.skipped],
         "cdm_dir": None if cdm_dir is None else str(cdm_dir),
     }
@@ -179,33 +184,28 @@ def screen_command(
         if not unscreened
         else f"{count - len(unscreened)} of {plural(count, 'fleet satellite')}"
     )
-    text: list[str] = [
+    head = [
         f"Screened {screened} "
         f"against {plural(screening.catalog_count, 'object')} ({described}) "
         f"from {utc(screening.start)} to {utc(screening.end)} UTC: "
         f"{plural(len(result.events), 'close approach', 'close approaches')}.",
         *(_not_screened(skipped, satellites) for skipped in unscreened),
     ]
+    tail: list[str] = []
     if screening.skipped:
-        text.append(
+        tail.append(
             f"{plural(len(screening.skipped), 'element set')} left out (stale, "
             "future epochs, SGP4 failures; --json lists them)."
         )
-    text += reasons(assessed, Action.MONITOR)
-    text.append(
+    tail += reasons(assessed, Action.MONITOR)
+    tail.append(
         "Covariances are assumed (keepout's model of GP element set errors), "
         "not orbit determination."
     )
     if cdm_dir is not None:
-        text.append(f"{plural(len(files), 'CDM')} written to {cdm_dir}")
-    heading = 1 + len(unscreened)
-    show(
-        payload,
-        *text[:heading],
-        events_table(assessed, "Close approaches"),
-        *text[heading:],
-        as_json=as_json,
-    )
+        tail.append(f"{plural(len(files), 'CDM')} written to {cdm_dir}")
+    table = [events_table(assessed, "Close approaches")] if assessed else []
+    show(payload, *head, *table, *tail, as_json=as_json)
 
 
 def _not_screened(skipped: SkippedObject, fleet: Fleet) -> str:
@@ -220,7 +220,9 @@ def _not_screened(skipped: SkippedObject, fleet: Fleet) -> str:
     )
 
 
-def _event_json(event: OperatorEvent, files: dict[str, Path]) -> dict[str, JsonValue]:
+def _event_json(
+    event: OperatorEvent, files: Mapping[str, Path]
+) -> dict[str, JsonValue]:
     path = files.get(event.cdm.message_id)
     return event_json(AssessedEvent(event.event, event.assessment)) | {
         "relative_speed": event.approach.relative_speed,

@@ -191,7 +191,7 @@ def run(
     volume: ScreeningVolume | VolumeRule = DEFAULT_VOLUME,
     *,
     model: SyntheticCovarianceModel = DEFAULT_MODEL,
-    workers: int = 1,
+    workers: int | None = 1,
     created: Time | None = None,
     originator: str = ORIGINATOR,
     method: MethodChoice | PcComputation = "auto",
@@ -215,9 +215,9 @@ def run(
     model
         The covariance model of every object.
     workers
-        Number of processes to screen in (see :func:`~keepout.screening.screen`:
-        a script calling with more than 1 needs an
-        ``if __name__ == "__main__":`` guard).
+        Number of processes to screen in, or ``None`` for the default (see
+        :func:`~keepout.screening.screen`: a script calling with more than 1
+        needs an ``if __name__ == "__main__":`` guard).
     created
         ``CREATION_DATE`` of the CDMs, and so the time their risk is judged
         at; ``start`` if ``None``.

@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import multiprocessing
 from collections.abc import Iterable
-from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 
+from keepout._workers import process_pool, resolve_workers
 from keepout.pc import compute_pc
 from keepout.pc.result import Method, PcResult
 from keepout.validation.cases import ValidationCase
@@ -90,7 +89,9 @@ def run(case: ValidationCase, method: Method) -> PcResult:
     return compute_pc(conjunction, method)
 
 
-def evaluate(cases: Iterable[ValidationCase], *, workers: int = 1) -> list[Outcome]:
+def evaluate(
+    cases: Iterable[ValidationCase], *, workers: int | None = 1
+) -> list[Outcome]:
     """Run each case's methods on it, in order.
 
     Parameters
@@ -98,16 +99,20 @@ def evaluate(cases: Iterable[ValidationCase], *, workers: int = 1) -> list[Outco
     cases
         The cases.
     workers
-        Processes to run them in; 1 runs them in this one. The results do
-        not depend on it (Monte Carlo cases have their own seeds).
+        Processes to run them in; 1 runs them in this one, ``None`` one per
+        CPU, at most 4. The results do not depend on it (Monte Carlo cases
+        have their own seeds).
+
+    Raises
+    ------
+    ValueError
+        If ``workers`` is below 1.
     """
-    if workers < 1:
-        raise ValueError(f"workers must be at least 1, got {workers}")
+    count = resolve_workers(workers)
     tasks = [(case, method) for case in cases for method in case.methods]
-    if workers == 1 or len(tasks) < 2:
+    if count == 1 or len(tasks) < 2:
         return [_outcome(task) for task in tasks]
-    context = multiprocessing.get_context("spawn")
-    with ProcessPoolExecutor(max_workers=workers, mp_context=context) as pool:
+    with process_pool(count) as pool:
         return list(pool.map(_outcome, tasks))
 
 

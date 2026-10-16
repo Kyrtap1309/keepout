@@ -8,6 +8,7 @@ import urllib.request
 import urllib.response
 from collections.abc import Iterator
 from pathlib import Path
+from typing import cast
 
 import pytest
 from celestrak_builders import SAMPLE
@@ -15,11 +16,15 @@ from hypothesis import given
 from hypothesis import strategies as st
 from spacetrack_builders import (
     CREDENTIALS,
+    HOUR,
     IDENTITY,
     LOGGED_OUT,
     LOGIN_FAILED,
     PASSWORD,
     RATE_LIMITED,
+    START,
+    Answer,
+    Clock,
     FakeSpaceTrack,
     space_track_gp,
 )
@@ -32,18 +37,20 @@ from keepout.errors import (
     SourceUnavailable,
 )
 from keepout.omm import deduplicate
-from keepout.sources import spacetrack
 from keepout.sources.cache import read_copy
 from keepout.sources.spacetrack import (
     CATALOG,
     CLASS_INTERVALS,
     GROUP,
     HIDDEN,
+    IDENTITY_VARIABLE,
     LOGIN_URL,
     LOGOUT_URL,
+    PASSWORD_VARIABLE,
     Credentials,
     Query,
     Request,
+    RequestClass,
     Response,
     SpaceTrackClient,
     Throttle,
@@ -52,25 +59,12 @@ from keepout.sources.spacetrack import (
     read_catalog,
 )
 
-START = 1_790_000_000.0
-"""A Unix time in September 2026."""
-HOUR = 3600.0
 TINY = 1e-9
 """Seconds of rounding in a fake clock's sum."""
 GP = space_track_gp()
 CDM_QUERY = Query("cdm_public", "TCA/>now/orderby/TCA asc/format/json", "upcoming")
 ISS_CDMS = Query("cdm_public", "SAT_1_ID/25544/format/json", "iss")
 ISS_GP = Query("gp", "NORAD_CAT_ID/25544/format/json", "iss")
-
-
-class Clock:
-    """A settable Unix time."""
-
-    def __init__(self) -> None:
-        self.now = START
-
-    def __call__(self) -> float:
-        return self.now
 
 
 @pytest.fixture
@@ -80,8 +74,8 @@ def clock() -> Clock:
 
 @pytest.fixture(autouse=True)
 def _no_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("SPACETRACK_IDENTITY", raising=False)
-    monkeypatch.delenv("SPACETRACK_PASSWORD", raising=False)
+    monkeypatch.delenv(IDENTITY_VARIABLE, raising=False)
+    monkeypatch.delenv(PASSWORD_VARIABLE, raising=False)
 
 
 def client_for(
@@ -114,25 +108,22 @@ def assert_hidden(*texts: str) -> None:
 
 
 def test_credentials_come_from_the_environment() -> None:
-    environ = {"SPACETRACK_IDENTITY": IDENTITY, "SPACETRACK_PASSWORD": PASSWORD}
+    environ = {IDENTITY_VARIABLE: IDENTITY, PASSWORD_VARIABLE: PASSWORD}
     assert Credentials.from_env(environ) == CREDENTIALS
 
 
 def test_credentials_default_to_os_environ(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("SPACETRACK_IDENTITY", IDENTITY)
-    monkeypatch.setenv("SPACETRACK_PASSWORD", PASSWORD)
+    monkeypatch.setenv(IDENTITY_VARIABLE, IDENTITY)
+    monkeypatch.setenv(PASSWORD_VARIABLE, PASSWORD)
     assert Credentials.from_env() == CREDENTIALS
 
 
 @pytest.mark.parametrize(
     ("environ", "missing"),
     [
-        ({}, "SPACETRACK_IDENTITY and SPACETRACK_PASSWORD"),
-        ({"SPACETRACK_IDENTITY": IDENTITY}, "SPACETRACK_PASSWORD"),
-        (
-            {"SPACETRACK_IDENTITY": "", "SPACETRACK_PASSWORD": PASSWORD},
-            "SPACETRACK_IDENTITY",
-        ),
+        ({}, f"{IDENTITY_VARIABLE} and {PASSWORD_VARIABLE}"),
+        ({IDENTITY_VARIABLE: IDENTITY}, PASSWORD_VARIABLE),
+        ({IDENTITY_VARIABLE: "", PASSWORD_VARIABLE: PASSWORD}, IDENTITY_VARIABLE),
     ],
 )
 def test_missing_credentials_name_the_variables(
@@ -186,6 +177,9 @@ def test_the_catalog_query_is_space_tracks_recommended_one() -> None:
 def test_the_class_limits_are_the_published_ones() -> None:
     assert dict(CLASS_INTERVALS) == {"gp": HOUR, "cdm_public": 8 * HOUR}
     assert CDM_QUERY.interval == 8 * HOUR
+
+
+def test_a_query_url_is_its_class_and_quoted_path() -> None:
     assert CDM_QUERY.url.endswith(
         "/class/cdm_public/TCA/%3Enow/orderby/TCA%20asc/format/json"
     )
@@ -214,7 +208,7 @@ def test_a_query_is_checked(
     request_class: str, path: str, name: str, message: str
 ) -> None:
     with pytest.raises(ValueError, match=message):
-        Query(request_class, path, name)
+        Query(cast("RequestClass", request_class), path, name)
 
 
 # Throttle
@@ -257,11 +251,12 @@ def test_the_throttle_keeps_the_hourly_limit() -> None:
     assert fake.now == HOUR
 
 
-def test_the_throttle_limits_are_checked() -> None:
+@pytest.mark.parametrize(
+    ("per_minute", "per_hour"), [(0, 200), (20, 0)], ids=["minute", "hour"]
+)
+def test_a_throttle_limit_below_one_is_refused(per_minute: int, per_hour: int) -> None:
     with pytest.raises(ValueError, match="limits must be at least 1"):
-        Throttle(per_minute=0)
-    with pytest.raises(ValueError, match="limits must be at least 1"):
-        Throttle(per_hour=0)
+        Throttle(per_minute=per_minute, per_hour=per_hour)
 
 
 @given(
@@ -348,8 +343,15 @@ def test_a_copy_is_used_up_to_max_age(tmp_path: Path, clock: Clock) -> None:
     clock.now += 2 * HOUR
     fetch_catalog(cache=tmp_path, transport=server, now=clock, max_age=3 * HOUR)
     assert server.calls == ["login", CATALOG.url, "logout"]
+
+
+def test_a_max_age_below_the_class_interval_is_refused(
+    tmp_path: Path, clock: Clock
+) -> None:
+    server = FakeSpaceTrack({CATALOG.url: GP})
     with pytest.raises(ValueError, match=r"max_age must be at least 3600 s .* got 60"):
         fetch_catalog(cache=tmp_path, transport=server, now=clock, max_age=60.0)
+    assert server.requests == []
 
 
 def test_an_old_copy_is_downloaded_again(tmp_path: Path, clock: Clock) -> None:
@@ -416,12 +418,12 @@ def test_credentials_are_read_from_the_environment_when_needed(
     tmp_path: Path, clock: Clock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     server = FakeSpaceTrack({CATALOG.url: GP})
-    with pytest.raises(AuthError, match="set SPACETRACK_IDENTITY and"):
+    with pytest.raises(AuthError, match=f"set {IDENTITY_VARIABLE} and"):
         fetch_catalog(cache=tmp_path, transport=server, now=clock)
     assert server.requests == []
     assert not (tmp_path / "spacetrack" / "requests.json").exists()
-    monkeypatch.setenv("SPACETRACK_IDENTITY", IDENTITY)
-    monkeypatch.setenv("SPACETRACK_PASSWORD", PASSWORD)
+    monkeypatch.setenv(IDENTITY_VARIABLE, IDENTITY)
+    monkeypatch.setenv(PASSWORD_VARIABLE, PASSWORD)
     fetch_catalog(cache=tmp_path, transport=server, now=clock)
     assert server.calls == ["login", CATALOG.url, "logout"]
 
@@ -608,46 +610,67 @@ def test_a_request_record_that_cannot_be_opened_stops_every_query(
         fetch_catalog(cache=tmp_path, transport=FakeSpaceTrack(), now=clock)
 
 
-def test_closing_logs_out_once_and_ignores_a_failed_logout(
-    tmp_path: Path, clock: Clock
+def test_closing_an_unused_client_sends_nothing(tmp_path: Path, clock: Clock) -> None:
+    server = FakeSpaceTrack()
+    client_for(server, tmp_path, clock).close()
+    assert server.requests == []
+
+
+def test_a_client_shows_whether_it_is_logged_in(tmp_path: Path, clock: Clock) -> None:
+    client = client_for(FakeSpaceTrack({CATALOG.url: GP}), tmp_path, clock)
+    assert repr(client) == f"<SpaceTrackClient {tmp_path}/spacetrack>"
+    client.fetch_catalog()
+    assert repr(client) == f"<SpaceTrackClient {tmp_path}/spacetrack (logged in)>"
+    client.close()
+    assert repr(client) == f"<SpaceTrackClient {tmp_path}/spacetrack>"
+
+
+@pytest.mark.parametrize(
+    "logout",
+    [
+        b'"Successfully logged out"',
+        SourceUnavailable("timed out"),
+        Response(500, b"oops"),
+    ],
+    ids=["ok", "unreachable", "error-status"],
+)
+def test_closing_logs_out_once_whatever_the_logout_answers(
+    tmp_path: Path, clock: Clock, logout: Answer
 ) -> None:
-    unused = FakeSpaceTrack()
-    client_for(unused, tmp_path, clock).close()
-    assert unused.requests == []
-    for logout in (SourceUnavailable("timed out"), Response(500, b"oops")):
-        server = FakeSpaceTrack({CATALOG.url: GP}, logout=logout)
-        clock.now += HOUR
-        client = client_for(server, tmp_path, clock)
-        assert repr(client) == f"<SpaceTrackClient {tmp_path}/spacetrack>"
+    server = FakeSpaceTrack({CATALOG.url: GP}, logout=logout)
+    client = client_for(server, tmp_path, clock)
+    client.fetch_catalog()
+    client.close()
+    client.close()
+    assert server.calls == ["login", CATALOG.url, "logout"]
+
+
+ECHO = f"bad form identity={IDENTITY}&password={PASSWORD}".encode()
+"""An answer that quotes the login form back."""
+
+
+@pytest.mark.parametrize(
+    ("login", "catalog"),
+    [
+        (Response(200, b'{"Login":"%s"}' % ECHO), GP),
+        (Response(400, ECHO), GP),
+        (None, Response(500, ECHO)),
+        (None, Response(500, ECHO + b" violated your query rate limit")),
+        (None, LOGGED_OUT),
+    ],
+    ids=["login-refused", "login-error", "query-error", "rate-limited", "second-401"],
+)
+def test_the_credentials_are_never_shown(
+    tmp_path: Path, clock: Clock, login: Response | None, catalog: Answer
+) -> None:
+    server = FakeSpaceTrack({CATALOG.url: catalog}, login=login)
+    client = client_for(server, tmp_path, clock)
+    with pytest.raises(SourceUnavailable) as caught:
         client.fetch_catalog()
-        assert repr(client) == f"<SpaceTrackClient {tmp_path}/spacetrack (logged in)>"
-        client.close()
-        client.close()
-        assert server.calls == ["login", CATALOG.url, "logout"]
-
-
-def test_the_password_is_never_shown(tmp_path: Path, clock: Clock) -> None:
-    echo = f"bad form identity={IDENTITY}&password={PASSWORD}".encode()
-    failures = [
-        FakeSpaceTrack(
-            {CATALOG.url: GP}, login=Response(200, b'{"Login":"%s"}' % echo)
-        ),
-        FakeSpaceTrack({CATALOG.url: GP}, login=Response(400, echo)),
-        FakeSpaceTrack({CATALOG.url: Response(500, echo)}),
-        FakeSpaceTrack(
-            {CATALOG.url: Response(500, echo + b" violated your query rate limit")}
-        ),
-        FakeSpaceTrack({CATALOG.url: LOGGED_OUT}),
-    ]
-    for server in failures:
-        clock.now += HOUR
-        client = client_for(server, tmp_path, clock)
-        with pytest.raises(SourceUnavailable) as caught:
-            client.fetch_catalog()
-        client.close()
-        for error in errors_in_chain(caught.value):
-            assert_hidden(str(error), repr(error))
-        assert_hidden(repr(client), *(repr(request) for request in server.requests))
+    client.close()
+    for error in errors_in_chain(caught.value):
+        assert_hidden(str(error), repr(error))
+    assert_hidden(repr(client), *(repr(request) for request in server.requests))
     for path in (tmp_path / "spacetrack").rglob("*"):
         if path.is_file():
             assert_hidden(path.read_text())
@@ -859,9 +882,12 @@ def test_the_default_transport_is_offline_in_tests() -> None:
         UrllibTransport()(Request("GET", LOGOUT_URL))
 
 
-def test_a_client_has_a_urllib_transport_by_default(tmp_path: Path) -> None:
+def test_a_client_sends_over_urllib_by_default(tmp_path: Path) -> None:
     client = SpaceTrackClient(CREDENTIALS, cache=tmp_path)
-    assert isinstance(client._transport, UrllibTransport)
+    with pytest.raises(AssertionError, match="must not access the network"):
+        client.fetch_catalog()
+
+
+def test_the_request_record_is_in_the_cache(tmp_path: Path) -> None:
+    client = SpaceTrackClient(CREDENTIALS, cache=tmp_path)
     assert client.ledger == tmp_path / "spacetrack" / "requests.json"
-    assert spacetrack.PER_MINUTE == 20
-    assert spacetrack.PER_HOUR == 200

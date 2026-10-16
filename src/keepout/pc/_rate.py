@@ -340,7 +340,13 @@ class CollisionRate:
         return values
 
     def _checked_rate(self, t: float, gaussians: Gaussians) -> float:
-        """:meth:`_rate`, with a failure raised as :class:`PcConvergenceError`."""
+        """:meth:`_rate`, with a failure raised as :class:`PcConvergenceError`.
+
+        Raises
+        ------
+        PcConvergenceError
+            If the rate at ``t`` cannot be computed or is not finite.
+        """
         try:
             value = self._rate(*gaussians)
         except _RATE_ERRORS as error:
@@ -559,6 +565,11 @@ def check_fallbacks(fallbacks: Sequence[tuple[float, float]], found: RateScan) -
     gap is negligible never reach the iteration. Elsewhere, in the far tail,
     a failure is fatal only if the mean-centred rate exceeds
     :data:`FALLBACK_TOLERANCE` of the peak.
+
+    Raises
+    ------
+    PcConvergenceError
+        If a failure in ``fallbacks`` is fatal by these rules.
     """
     times, peak = found.times, found.peak
     zones = [

@@ -6,6 +6,8 @@ from hypothesis import given
 from hypothesis import strategies as st
 from spacetrack_builders import (
     CREDENTIALS,
+    HOUR,
+    Clock,
     FakeSpaceTrack,
     public_cdm,
     space_track_cdm_public,
@@ -23,9 +25,6 @@ from keepout.sources.spacetrack import (
     read_public_cdms,
 )
 
-START = 1_790_000_000.0
-"""A Unix time in September 2026."""
-HOUR = 3600.0
 ROW = public_cdm()
 ANSWER = space_track_cdm_public(ROW, public_cdm(CDM_ID="1000002", PC="0"))
 
@@ -89,12 +88,12 @@ def test_numbers_and_further_columns_are_accepted() -> None:
     row = {**ROW, "CDM_ID": 7, "MIN_RNG": 12.5, "PC": 0.001, "COMMENT": "new"}
     (cdm,) = read_public_cdms(json.dumps([row]).encode())
     assert (cdm.cdm_id, cdm.min_range, cdm.probability) == (7, 12.5, 0.001)
-    assert (
-        read_public_cdms(space_track_cdm_public(public_cdm(EMERGENCY_REPORTABLE="N")))[
-            0
-        ].emergency_reportable
-        is False
-    )
+
+
+def test_an_approach_not_emergency_reportable_reads_false() -> None:
+    row = public_cdm(EMERGENCY_REPORTABLE="N")
+    (cdm,) = read_public_cdms(space_track_cdm_public(row))
+    assert cdm.emergency_reportable is False
 
 
 @pytest.mark.parametrize(
@@ -164,12 +163,12 @@ def test_values_read_back_exactly(
 
 def test_the_client_fetches_and_caches_the_rows(tmp_path: Path) -> None:
     server = FakeSpaceTrack({PUBLIC_CDMS.url: ANSWER})
-    now = [START]
+    clock = Clock()
     with SpaceTrackClient(
-        CREDENTIALS, cache=tmp_path, transport=server, now=lambda: now[0]
+        CREDENTIALS, cache=tmp_path, transport=server, now=clock
     ) as client:
         first = client.fetch_public_cdms()
-        now[0] += 8 * HOUR - 1.0
+        clock.now += 8 * HOUR - 1.0
         again = client.fetch_public_cdms()
     assert server.calls == ["login", PUBLIC_CDMS.url, "logout"]
     assert first.cdms == again.cdms == read_public_cdms(ANSWER)
@@ -183,19 +182,16 @@ def test_the_client_fetches_and_caches_the_rows(tmp_path: Path) -> None:
 
 def test_fetch_public_cdms_waits_eight_hours(tmp_path: Path) -> None:
     server = FakeSpaceTrack({PUBLIC_CDMS.url: ANSWER})
-    now = [START]
+    clock = Clock()
     rows = fetch_public_cdms(
-        cache=tmp_path, credentials=CREDENTIALS, transport=server, now=lambda: now[0]
+        cache=tmp_path, credentials=CREDENTIALS, transport=server, now=clock
     )
     assert len(rows.cdms) == 2
     rows.retrieval.path.unlink()
-    now[0] += 8 * HOUR - 1.0
+    clock.now += 8 * HOUR - 1.0
     with pytest.raises(RateLimited, match="one cdm_public query per 8 h"):
         fetch_public_cdms(
-            cache=tmp_path,
-            credentials=CREDENTIALS,
-            transport=server,
-            now=lambda: now[0],
+            cache=tmp_path, credentials=CREDENTIALS, transport=server, now=clock
         )
     assert server.calls == ["login", PUBLIC_CDMS.url, "logout"]
 
@@ -204,6 +200,6 @@ def test_an_unreadable_answer_is_not_cached(tmp_path: Path) -> None:
     server = FakeSpaceTrack({PUBLIC_CDMS.url: b'{"error": "no"}'})
     with pytest.raises(SourceFormatError, match="not send an array"):
         fetch_public_cdms(
-            cache=tmp_path, credentials=CREDENTIALS, transport=server, now=lambda: START
+            cache=tmp_path, credentials=CREDENTIALS, transport=server, now=Clock()
         )
     assert not (tmp_path / "spacetrack/cdm_public/upcoming.json").exists()

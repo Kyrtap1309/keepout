@@ -8,8 +8,10 @@ __all__ = [
     "CdmWriteError",
     "ChecksumMismatch",
     "CovarianceError",
+    "EventError",
     "FleetError",
     "GeometryError",
+    "HardBodyRadiusError",
     "HttpStatusError",
     "KeepoutError",
     "KelvinsFormatError",
@@ -173,6 +175,25 @@ class PcConvergenceError(KeepoutError):
 class FleetError(KeepoutError):
     """A synthetic operator's fleet file is invalid, or a fleet satellite has
     no element set in the catalog."""
+
+
+class EventError(KeepoutError, ValueError):
+    """CDMs do not make one conjunction event: a ``MESSAGE_ID`` repeats, they
+    are about different objects, their TCAs spread too far, or they give
+    different ``CONJUNCTION_ID`` values.
+
+    It is also a :class:`ValueError`, as raised for any other invalid
+    argument of :class:`~keepout.risk.ConjunctionEvent`.
+    """
+
+
+class HardBodyRadiusError(KeepoutError, ValueError):
+    """No combined hard-body radius: an object has none (no ``HBR`` in its
+    CDM) and none was given.
+
+    It is also a :class:`ValueError`, as raised for any other invalid
+    argument.
+    """
 
 
 class GeometryError(KeepoutError):

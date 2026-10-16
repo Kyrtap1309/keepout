@@ -234,32 +234,70 @@ def test_large_sigma_across_a_slow_track_does_not_warn() -> None:
     )
 
 
-def test_auto_keeps_the_2d_pc_for_covariances_known_only_in_position() -> None:
-    # A questionable 2-D Pc would take auto to Hall, but with a zero
-    # velocity block Hall would treat the velocity as exact.
-    moving = along_track_conjunction(1.5 * DURATION_LIMIT * LEO_PERIOD)
-    for item, roles, labels in [
-        (moving.secondary, ("primary",), "covariance of primary (TEST) is"),
+SLOW_ALONG_TRACK = along_track_conjunction(1.5 * DURATION_LIMIT * LEO_PERIOD)
+"""An encounter long enough for the 2-D assumptions to be questionable."""
+
+
+def position_only_conjunction(*, both: bool) -> Conjunction:
+    """:data:`SLOW_ALONG_TRACK` with the primary's covariance known only in
+    position, and with ``both`` the secondary's too."""
+    moving = SLOW_ALONG_TRACK
+    primary = object_state(LEO_R, LEO_V, known(moving.primary.covariance).position)
+    secondary = (
+        object_state(LEO_R + np.array([30.0, 0.0, 0.0]), -LEO_V, np.eye(3))
+        if both
+        else moving.secondary
+    )
+    return Conjunction(primary, secondary, 5.0)
+
+
+POSITION_ONLY_CASES = pytest.mark.parametrize(
+    ("both", "roles", "labels"),
+    [
+        (False, ("primary",), "covariance of primary (TEST) is"),
         (
-            object_state(LEO_R + np.array([30.0, 0.0, 0.0]), -LEO_V, np.eye(3)),
+            True,
             ("primary", "secondary"),
             "covariances of primary (TEST) and secondary (TEST) are",
         ),
-    ]:
-        primary = object_state(LEO_R, LEO_V, known(moving.primary.covariance).position)
-        conjunction = Conjunction(primary, item, 5.0)
-        assert conjunction.position_only_covariance == roles
-        result = compute_pc(conjunction)
-        assert result.method == "foster"
-        assert result.value == foster(conjunction.plane, 5.0).value
-        assert result.diagnostics[0].startswith("2-D Pc assumptions questionable")
-        assert result.diagnostics[1] == (
-            f"the {labels} known only in position (zero velocity block): the "
-            "3-D methods need the velocity uncertainty, so the 2-D Pc is used"
-        )
-        assert "pc_2d" not in result.details
-        # Hall can still be chosen explicitly.
-        assert compute_pc(conjunction, "hall3d").method == "hall3d"
+    ],
+)
+
+
+@POSITION_ONLY_CASES
+def test_auto_keeps_the_2d_pc_for_covariances_known_only_in_position(
+    both: bool, roles: tuple[str, ...], labels: str
+) -> None:
+    # A questionable 2-D Pc would take auto to Hall, but with a zero
+    # velocity block Hall would treat the velocity as exact.
+    conjunction = position_only_conjunction(both=both)
+    assert conjunction.position_only_covariance == roles
+    result = compute_pc(conjunction)
+    assert result.method == "foster"
+    assert result.value == foster(conjunction.plane, 5.0).value
+    assert result.diagnostics[0].startswith("2-D Pc assumptions questionable")
+    assert result.diagnostics[1] == (
+        f"the {labels} known only in position (zero velocity block): the "
+        "3-D methods need the velocity uncertainty, so the 2-D Pc is used"
+    )
+    assert "pc_2d" not in result.details
+
+
+@POSITION_ONLY_CASES
+def test_an_explicit_3d_method_notes_a_covariance_known_only_in_position(
+    both: bool, roles: tuple[str, ...], labels: str
+) -> None:
+    result = compute_pc(position_only_conjunction(both=both), "hall3d")
+    assert result.method == "hall3d"
+    assert (
+        f"the {labels} known only in position (zero velocity block): hall3d "
+        "takes its velocity as exact"
+    ) in result.diagnostics
+
+
+def test_a_2d_method_needs_no_velocity_note() -> None:
+    result = compute_pc(position_only_conjunction(both=True), "foster")
+    assert not any("velocity as exact" in note for note in result.diagnostics)
 
 
 def test_a_sound_2d_pc_needs_no_velocity_block() -> None:
@@ -478,7 +516,11 @@ def test_auto_uses_hall_at_zero_relative_velocity(
     secondary = object_state(LEO_R + offset, LEO_V, 25.0 * np.eye(3))
     result = compute_pc(Conjunction(primary, secondary, 5.0))
     assert result.method == "hall3d"
-    assert result.diagnostics == ("relative velocity is zero: 2-D Pc is undefined",)
+    assert result.diagnostics == (
+        "relative velocity is zero: 2-D Pc is undefined",
+        "the covariances of primary (TEST) and secondary (TEST) are known only "
+        "in position (zero velocity block): hall3d takes its velocity as exact",
+    )
     assert "encounter_duration_s" not in result.details
 
 

@@ -99,5 +99,5 @@ def test_fetch_screen_assess_from_space_track(
     texts = screen_and_assess(tmp_path, "spacetrack")
     assert server.calls == ["login", spacetrack.CATALOG.url, "logout"]
     FakeWeb(monkeypatch, celestrak_pages())
-    keepout("fetch", "catalog", "--cache-dir", cache)
+    assert keepout("fetch", "catalog", "--cache-dir", cache).exit_code == ExitCode.OK
     assert screen_and_assess(tmp_path, "celestrak") == texts

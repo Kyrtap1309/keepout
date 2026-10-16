@@ -147,7 +147,8 @@ errors, computes the Pc from each CDM and assesses each event.
   run writes the same files again, and a run on another day adds new files
   beside them rather than overwriting them: `assess` then takes the CDMs of
   one approach from several runs as successive CDMs of one event.
-- **Workers.** `--workers N` processes (default: one per CPU).
+- **Workers.** `--workers N` processes (default: one per CPU, at most 4;
+  each runs its numerical libraries on one thread).
 
 `screen` exits with status 0 whatever the decisions: it reports, `assess`
 decides.
@@ -206,8 +207,8 @@ errors still go to standard error with the same exit status. `screen` and
 (their `MESSAGE_ID`s), `pc`, `level` (`green`, `yellow`, `red` or `null`),
 `trend`, `action` (`ignore`, `monitor`, `prepare_manoeuvre` or
 `manoeuvre`), `reasons`, `notes` and `observations` (each CDM's
-`message_id`, `time_to_tca` [s], `pc`, `method`, `error`, `reported_pc`
-and `diagnostics`) and `assumed_covariances` (true when a CDM of the event
+`message_id`, `time_to_tca` [s], `pc`, `method`, `error`, `reported_pc`,
+`diagnostics` and `assumed_covariance`) and `assumed_covariances` (true when a CDM of the event
 has an object with `COVARIANCE_METHOD = DEFAULT`). Both commands also give
 `assumed_covariances` at the top: the number of such events, every event
 for `screen`. `screen` adds each approach's `relative_speed` [m/s] and

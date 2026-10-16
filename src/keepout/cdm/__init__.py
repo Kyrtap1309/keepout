@@ -10,14 +10,13 @@ from pathlib import Path
 from keepout.cdm import kvn, xml
 from keepout.cdm._io import load_file
 from keepout.cdm.builder import (
-    CovarianceMethod,
     Maneuverable,
     ObjectMetadata,
     ObjectType,
     make_cdm,
     make_message_id,
 )
-from keepout.cdm.model import Cdm, CdmObject, Field, Section
+from keepout.cdm.model import Cdm, CdmObject, CovarianceMethod, Field, Section
 
 __all__ = [
     "Cdm",

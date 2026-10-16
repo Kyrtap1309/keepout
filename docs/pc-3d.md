@@ -203,6 +203,10 @@ covariance (operators send zeros when they have none).
    keepout's [synthetic covariances](assumptions.md#what-the-model-is-for)):
    the 3-D methods would take that object's velocity as exact.
 
+However chosen (by `auto` at zero relative velocity, or by name), `hall3d`
+and `montecarlo` add a diagnostic when a covariance is known only in
+position: they take that object's velocity as exact.
+
 If `hall3d` raises `PcConvergenceError` after its encounter scan (the
 peak-overlap iteration failed where the rate matters, the rate cannot be
 computed at a quadrature node, or `Nc` is not finite), `auto` falls back to

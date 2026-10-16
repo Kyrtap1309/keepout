@@ -34,6 +34,10 @@ PASSWORD: Final = "s3cret P@ss&w0rd%"  # noqa: S105
 
 CREDENTIALS: Final = Credentials(IDENTITY, PASSWORD)
 
+START: Final = 1_790_000_000.0
+"""A Unix time in September 2026."""
+HOUR: Final = 3600.0
+
 Answer: TypeAlias = bytes | Response | Exception
 """A fake server's answer to a query: a body (HTTP 200), a response, or a
 failure to raise."""
@@ -45,6 +49,17 @@ LOGIN_FAILED: Final = b'{"Login":"Failed"}'
 RATE_LIMITED: Final = Response(
     500, b"<html>You've violated your query rate limit.</html>"
 )
+
+
+class Clock:
+    """A settable Unix time, starting at :data:`START`; pass it as a
+    client's ``now``."""
+
+    def __init__(self, now: float = START) -> None:
+        self.now = now
+
+    def __call__(self) -> float:
+        return self.now
 
 
 def space_track_gp(omms: Iterable[Omm] = SAMPLE) -> bytes:
@@ -103,7 +118,9 @@ class FakeSpaceTrack:
     session, a query without one gets :data:`LOGGED_OUT`, a logout ends it.
 
     ``answers`` maps each query URL to one answer, or a list of answers
-    given in turn. Every request is recorded.
+    given in turn. ``login`` replaces the answer to every login, which then
+    opens a session only if ``login_opens_session``. Every request is
+    recorded.
     """
 
     def __init__(
@@ -112,12 +129,14 @@ class FakeSpaceTrack:
         *,
         login: Response | None = None,
         logout: Answer | None = None,
+        login_opens_session: bool = False,
     ) -> None:
         self.answers = {
             url: list(answer) if isinstance(answer, list) else [answer]
             for url, answer in (answers or {}).items()
         }
         self.login = login
+        self.login_opens_session = login_opens_session
         self.logout = logout
         self.requests: list[Request] = []
         self.session = False
@@ -145,6 +164,7 @@ class FakeSpaceTrack:
         assert request.form is not None
         form = urllib.parse.parse_qs(request.form.decode(), strict_parsing=True)
         if self.login is not None:
+            self.session = self.login_opens_session
             return self.login
         if form == {"identity": [IDENTITY], "password": [PASSWORD]}:
             self.session = True

@@ -1,11 +1,11 @@
 import dataclasses
 import json
-import os
 from pathlib import Path
 
 import pytest
 from builders import case_with_reference
 from cli_builders import keepout
+from inline_snapshot import snapshot
 
 from keepout.cli import validate
 from keepout.cli.output import ExitCode
@@ -50,16 +50,16 @@ def test_validate_prints_the_summary_and_passes(
     result = keepout("validate", "--workers", "1")
     assert result.exit_code == ExitCode.OK
     assert result.stderr == ""
-    lines = result.stdout.splitlines()
-    assert lines[0] == "Validation against NASA CARA"
-    rows = [line.split("│")[1:-1] for line in lines if line.startswith("│")]
-    assert [[cell.strip() for cell in row] for row in rows] == [
-        ["test", "foster", "1 / 1", "-"],
-        ["test", "elrod", "1 / 1", "-"],
-        ["other", "foster", "1 / 1", "1.0e+00"],
-        ["other", "elrod", "1 / 1", "1.0e+00"],
-    ]
-    assert lines[-1] == f"4 of 4 comparisons passed (CARA commit {CARA_COMMIT[:12]})."
+    assert result.stdout.replace(CARA_COMMIT[:12], "<commit>") == snapshot("""\
+Validation against NASA CARA
+Suite  Method  Cases passed  Worst relative error
+─────────────────────────────────────────────────
+test   foster  1 / 1                            -
+test   elrod   1 / 1                            -
+other  foster  1 / 1                      1.0e+00
+other  elrod   1 / 1                      1.0e+00
+4 of 4 comparisons passed (CARA commit <commit>).
+""")
 
 
 def test_validate_fails_with_status_1_and_names_the_failures(
@@ -140,19 +140,17 @@ def test_validate_reports_the_interval_of_monte_carlo_results(
     assert data["outcomes"][0]["ci"] == [5e-4, 2e-3]
 
 
-@pytest.mark.parametrize(
-    ("args", "workers"), [((), os.cpu_count() or 1), (("--workers", "3"), 3)]
-)
+@pytest.mark.parametrize(("args", "workers"), [((), None), (("--workers", "3"), 3)])
 def test_validate_workers_and_cache(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     args: tuple[str, ...],
-    workers: int,
+    workers: int | None,
 ) -> None:
     loader = use(monkeypatch)
-    seen: list[int] = []
+    seen: list[int | None] = []
 
-    def evaluate(cases: list[ValidationCase], *, workers: int) -> list[Outcome]:
+    def evaluate(cases: list[ValidationCase], *, workers: int | None) -> list[Outcome]:
         seen.append(workers)
         return []
 
@@ -164,4 +162,6 @@ def test_validate_workers_and_cache(
 
 
 def test_validate_needs_a_worker() -> None:
-    assert keepout("validate", "--workers", "0").exit_code == ExitCode.USAGE
+    result = keepout("validate", "--workers", "0")
+    assert result.exit_code == ExitCode.USAGE
+    assert "0 is not in the range x>=1" in result.stderr

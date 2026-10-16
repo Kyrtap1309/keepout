@@ -26,7 +26,9 @@ __all__ = [
     "ExitCode",
     "JsonValue",
     "fail",
+    "isot",
     "minute",
+    "pc_text",
     "plural",
     "reported",
     "show",
@@ -96,14 +98,25 @@ def fail(message: str, status: ExitCode = ExitCode.ERROR) -> NoReturn:
     raise typer.Exit(status)
 
 
+def isot(time: Time) -> str:
+    """``time`` in UTC, ISO 8601 to the millisecond, for JSON:
+    ``2026-10-06T19:36:42.123``."""
+    return str(time.utc.isot)
+
+
 def utc(time: Time) -> str:
     """``time`` in UTC to the second, ISO 8601: ``2026-10-06T19:36:42``."""
-    return str(time.utc.isot)[:19]
+    return isot(time)[:19]
 
 
 def minute(time: Time) -> str:
     """``time`` in UTC to the minute, for tables: ``2026-10-06 19:36``."""
     return utc(time)[:16].replace("T", " ")
+
+
+def pc_text(pc: float | None) -> str:
+    """A Pc for tables, ``1.23e-05``, or ``-`` if there is none."""
+    return "-" if pc is None else f"{pc:.2e}"
 
 
 def plural(count: int, noun: str, nouns: str | None = None) -> str:

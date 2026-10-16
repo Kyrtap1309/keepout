@@ -28,6 +28,8 @@ def main() -> None:
     SystemExit
         Always: with :data:`INSTALL_HINT` if the extra is missing, else with
         the command's exit status (:class:`keepout.cli.output.ExitCode`).
+    ModuleNotFoundError
+        If a module outside the ``cli`` extra is missing (re-raised).
     """
     try:
         from keepout.cli.app import run

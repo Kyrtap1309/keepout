@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import dataclasses
+from collections.abc import Mapping
 from pathlib import Path
+from types import MappingProxyType
 from typing import Annotated, Final, TypeAlias
 
 import typer
 
 from keepout.cli.options import CacheDir, CatalogSource, JsonFlag
-from keepout.cli.output import JsonValue, minute, show, table, utc
+from keepout.cli.output import JsonValue, isot, minute, pc_text, show, table, utc
 from keepout.sources import cara, celestrak, kelvins, spacetrack
 from keepout.sources.celestrak import Catalog, GpGroup, Retrieval
 from keepout.sources.spacetrack import PublicCdm, PublicCdmObject
@@ -22,10 +25,12 @@ __all__ = [
     "load_catalog",
 ]
 
-SOURCE_NAMES: Final = {
-    CatalogSource.CELESTRAK: "CelesTrak public GP groups",
-    CatalogSource.SPACETRACK: "Space-Track full GP catalog",
-}
+SOURCE_NAMES: Final[Mapping[CatalogSource, str]] = MappingProxyType(
+    {
+        CatalogSource.CELESTRAK: "CelesTrak public GP groups",
+        CatalogSource.SPACETRACK: "Space-Track full GP catalog",
+    }
+)
 """Each catalog source as the commands name it."""
 
 SourceOption: TypeAlias = Annotated[
@@ -163,7 +168,7 @@ def fetch_cdm(*, cache_dir: CacheDir = None, as_json: JsonFlag = False) -> None:
             minute(cdm.tca),
             f"{cdm.object1.catalog_number} / {cdm.object2.catalog_number}",
             f"{cdm.min_range:.0f}",
-            "-" if cdm.probability is None else f"{cdm.probability:.2e}",
+            pc_text(cdm.probability),
             "yes" if cdm.emergency_reportable else "no",
         )
     show(
@@ -179,8 +184,8 @@ def _retrieval_json(retrieval: Retrieval) -> dict[str, JsonValue]:
     return {
         "url": retrieval.url,
         "path": str(retrieval.path),
-        "retrieved": retrieval.retrieved.utc.isot,
-        "checked": retrieval.checked.utc.isot,
+        "retrieved": isot(retrieval.retrieved),
+        "checked": isot(retrieval.checked),
     }
 
 
@@ -193,20 +198,14 @@ def _group_json(group: GpGroup) -> dict[str, JsonValue]:
 
 
 def _public_object_json(cdm_object: PublicCdmObject) -> dict[str, JsonValue]:
-    return {
-        "catalog_number": cdm_object.catalog_number,
-        "name": cdm_object.name,
-        "object_type": cdm_object.object_type,
-        "rcs_size": cdm_object.rcs_size,
-        "exclusion_volume": cdm_object.exclusion_volume,
-    }
+    return dataclasses.asdict(cdm_object)
 
 
 def _public_cdm_json(cdm: PublicCdm) -> dict[str, JsonValue]:
     return {
         "cdm_id": cdm.cdm_id,
-        "created": cdm.created.utc.isot,
-        "tca": cdm.tca.utc.isot,
+        "created": isot(cdm.created),
+        "tca": isot(cdm.tca),
         "emergency_reportable": cdm.emergency_reportable,
         "min_range": cdm.min_range,
         "pc": cdm.probability,

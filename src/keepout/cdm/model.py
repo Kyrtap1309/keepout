@@ -8,6 +8,7 @@ their raw text and unit.
 
 from __future__ import annotations
 
+import enum
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -28,6 +29,7 @@ from keepout.cdm.keywords import (
 )
 from keepout.conjunction import Conjunction, combined_hard_body_radius
 from keepout.covariance import Covariance, Policy, make_covariance
+from keepout.errors import CdmParseError
 from keepout.objects import ObjectState, ReportedObject, gcrf_object_states
 from keepout.state import StateVector, as_ref_frame
 
@@ -37,6 +39,7 @@ __all__ = [
     "USER_DEFINED_PREFIX",
     "Cdm",
     "CdmObject",
+    "CovarianceMethod",
     "DuplicateKeyword",
     "Field",
     "Section",
@@ -54,6 +57,15 @@ KEYWORD_PATTERN: Final = re.compile(r"[A-Z][A-Z0-9_]*")
 _COVARIANCE_NAMES: Final[Mapping[int, frozenset[str]]] = {
     size: frozenset(covariance_names(size)) for size in range(6, 10)
 }
+
+
+class CovarianceMethod(enum.StrEnum):
+    """``COVARIANCE_METHOD`` values of CCSDS 508.0-B-1."""
+
+    CALCULATED = "CALCULATED"
+    """Computed in the orbit determination."""
+    DEFAULT = "DEFAULT"
+    """Assumed (a default or a model), not from an orbit determination."""
 
 
 class DuplicateKeyword(ValueError):
@@ -329,6 +341,30 @@ class CdmObject:
         return _optional_number(self.section, "HBR")
 
     @property
+    def covariance_method(self) -> CovarianceMethod:
+        """``COVARIANCE_METHOD``.
+
+        Raises
+        ------
+        CdmParseError
+            If it is neither ``CALCULATED`` nor ``DEFAULT``.
+        """
+        value = _text(self.section, "COVARIANCE_METHOD")
+        try:
+            return CovarianceMethod(value)
+        except ValueError:
+            raise CdmParseError(
+                f"COVARIANCE_METHOD must be CALCULATED or DEFAULT, got {value!r}",
+                keyword="COVARIANCE_METHOD",
+            ) from None
+
+    @property
+    def assumed_covariance(self) -> bool:
+        """Whether the covariance is assumed (``COVARIANCE_METHOD = DEFAULT``),
+        not from orbit determination."""
+        return self.covariance_method is CovarianceMethod.DEFAULT
+
+    @property
     def user_defined(self) -> dict[str, str]:
         """``USER_DEFINED_*`` keywords, as text."""
         return {
@@ -534,6 +570,19 @@ class Cdm:
     def object2(self) -> CdmObject:
         """Typed view of ``OBJECT2``."""
         return CdmObject(self.segments[1], self.tca)
+
+    @property
+    def assumed_covariance(self) -> bool:
+        """Whether an object's covariance is assumed
+        (:attr:`CdmObject.assumed_covariance`): a Pc from it rests on a model.
+
+        Raises
+        ------
+        CdmParseError
+            If a ``COVARIANCE_METHOD`` is neither ``CALCULATED`` nor
+            ``DEFAULT``.
+        """
+        return self.object1.assumed_covariance or self.object2.assumed_covariance
 
     def object_states(
         self, *, policy: Policy = "repair"

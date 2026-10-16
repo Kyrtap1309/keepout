@@ -82,7 +82,7 @@ from datetime import UTC, datetime
 from http import HTTPStatus
 from pathlib import Path
 from types import MappingProxyType, TracebackType
-from typing import Final, Literal, Protocol, Self, TypeVar
+from typing import Final, Literal, Protocol, Self, TypeAlias, TypeVar
 
 from astropy.time import Time
 
@@ -98,9 +98,10 @@ from keepout.omm.celestrak import loads_json
 from keepout.omm.model import Omm, deduplicate
 from keepout.sources.cache import (
     DOWNLOAD_TIMEOUT,
-    USER_AGENT,
     CopyMeta,
     cache_dir,
+    http_request,
+    network_errors,
     read_copy,
     store_bytes,
     write_meta,
@@ -128,6 +129,7 @@ __all__ = [
     "PublicCdms",
     "Query",
     "Request",
+    "RequestClass",
     "Response",
     "SpaceTrackClient",
     "Throttle",
@@ -164,7 +166,10 @@ PER_MINUTE: Final = 20
 PER_HOUR: Final = 200
 """Most requests sent in any hour; Space-Track allows fewer than 300."""
 
-CLASS_INTERVALS: Final[Mapping[str, float]] = MappingProxyType(
+RequestClass: TypeAlias = Literal["gp", "cdm_public"]
+"""A Space-Track request class keepout queries (:data:`CLASS_INTERVALS`)."""
+
+CLASS_INTERVALS: Final[Mapping[RequestClass, float]] = MappingProxyType(
     {"gp": 3600.0, "cdm_public": 8 * 3600.0}
 )
 """Least seconds between two queries of each request class, as Space-Track
@@ -180,10 +185,6 @@ HIDDEN: Final = "<hidden>"
 
 _RATE_LIMIT_TEXT: Final = b"violated your query rate limit"
 """What Space-Track's answer says when a query broke the per-minute limit."""
-
-_MIN_RANGE_UNIT: Final = 1.0
-"""Metres in a unit of ``cdm_public``'s ``MIN_RNG`` (checked against keepout's
-screening of the same pairs)."""
 
 _YES_NO: Final[Mapping[str, bool]] = MappingProxyType({"Y": True, "N": False})
 """``EMERGENCY_REPORTABLE``'s values."""
@@ -233,7 +234,7 @@ class Credentials:
         return f"Credentials({HIDDEN})"
 
     @classmethod
-    def from_env(cls, environ: Mapping[str, str] | None = None) -> Credentials:
+    def from_env(cls, environ: Mapping[str, str] | None = None) -> Self:
         """The credentials in :data:`IDENTITY_VARIABLE` and
         :data:`PASSWORD_VARIABLE`.
 
@@ -292,7 +293,7 @@ class Query:
         empty, starts or ends with ``/``, or holds ``?``, ``#`` or ``..``.
     """
 
-    request_class: str
+    request_class: RequestClass
     path: str
     name: str
 
@@ -442,22 +443,22 @@ class UrllibTransport:
         SourceUnavailable
             If no answer comes (network or protocol error, timeout).
         """
-        if urllib.parse.urlsplit(request.url).scheme != "https":
-            raise ValueError(f"not an HTTPS URL: {request.url!r}")
-        headers = {"User-Agent": USER_AGENT}
-        if request.form is not None:
-            headers["Content-Type"] = "application/x-www-form-urlencoded"
-        # The scheme is checked above, so urllib cannot open a local file.
-        prepared = urllib.request.Request(  # noqa: S310
-            request.url, data=request.form, headers=headers, method=request.method
+        form = request.form is not None
+        prepared = http_request(
+            request.url,
+            schemes=("https",),
+            data=request.form,
+            method=request.method,
+            headers=(
+                {"Content-Type": "application/x-www-form-urlencoded"} if form else None
+            ),
         )
-        try:
-            with self._opener.open(prepared, timeout=self.timeout) as answer:
-                return Response(answer.status, answer.read())
-        except urllib.error.HTTPError as exc:
-            return Response(exc.code, _error_body(exc))
-        except (OSError, http.client.HTTPException) as exc:
-            raise SourceUnavailable(f"cannot reach {request.url}: {exc}") from exc
+        with network_errors(f"cannot reach {request.url}"):
+            try:
+                with self._opener.open(prepared, timeout=self.timeout) as answer:
+                    return Response(answer.status, answer.read())
+            except urllib.error.HTTPError as exc:
+                return Response(exc.code, _error_body(exc))
 
 
 class Throttle:
@@ -716,7 +717,14 @@ class SpaceTrackClient:
         self, query: Query, ledger: Mapping[str, float], now: float
     ) -> None:
         """Raise :class:`~keepout.errors.RateLimited` if ``query``'s class was
-        asked for less than its interval before ``now``, by ``ledger``."""
+        asked for less than its interval before ``now``, by ``ledger``.
+
+        Raises
+        ------
+        RateLimited
+            If ``ledger`` records a query of the class less than its
+            interval before ``now`` (or after it).
+        """
         interval = query.interval
         last = ledger.get(query.request_class)
         # A last query "in the future" (the clock was set back) also waits.
@@ -771,7 +779,15 @@ class SpaceTrackClient:
 
     def _query(self, url: str) -> bytes:
         """The body of Space-Track's answer to ``url``; logs in again once
-        after HTTP 401."""
+        after HTTP 401.
+
+        Raises
+        ------
+        AuthError
+            If Space-Track answers HTTP 401 again right after the new login.
+        HttpStatusError
+            If the answer has an HTTP status other than 200.
+        """
         response = self._send(Request("GET", url))
         if response.status == HTTPStatus.UNAUTHORIZED:
             self._logged_in = False
@@ -970,7 +986,14 @@ def read_public_cdms(data: bytes) -> tuple[PublicCdm, ...]:
 
 
 def _public_cdm(record: object) -> PublicCdm:
-    """A ``cdm_public`` row; ``ValueError`` if it cannot be read."""
+    """A ``cdm_public`` row; ``ValueError`` if it cannot be read.
+
+    Raises
+    ------
+    ValueError
+        If ``record`` is not a JSON object, lacks a column, or has a
+        missing, malformed or out-of-range value.
+    """
     if not isinstance(record, dict):
         raise ValueError(f"not a JSON object: {record!r}")
     missing = [column for column in PUBLIC_CDM_COLUMNS if column not in record]
@@ -1007,7 +1030,7 @@ def _public_cdm(record: object) -> PublicCdm:
         created=_time(required("CREATED"), "CREATED"),
         emergency_reportable=_YES_NO[reportable],
         tca=_time(required("TCA"), "TCA"),
-        min_range=number("MIN_RNG") * _MIN_RANGE_UNIT,
+        min_range=number("MIN_RNG"),
         probability=probability,
         object1=PublicCdmObject(
             catalog_number=catalog_number("SAT_1_ID"),
@@ -1027,7 +1050,13 @@ def _public_cdm(record: object) -> PublicCdm:
 
 
 def _cell(value: object, column: str) -> str | None:
-    """A JSON value as text, without surrounding blanks; ``None`` if missing."""
+    """A JSON value as text, without surrounding blanks; ``None`` if missing.
+
+    Raises
+    ------
+    ValueError
+        If ``value`` is neither text nor a number.
+    """
     if value is None:
         return None
     if isinstance(value, bool) or not isinstance(value, str | int | float):
@@ -1037,7 +1066,13 @@ def _cell(value: object, column: str) -> str | None:
 
 
 def _time(text: str, column: str) -> Time:
-    """A UTC time in ISO 8601 (``T`` or a space between date and time)."""
+    """A UTC time in ISO 8601 (``T`` or a space between date and time).
+
+    Raises
+    ------
+    ValueError
+        If ``text`` is not an ISO 8601 time.
+    """
     try:
         return Time(text.replace(" ", "T", 1), format="isot", scale="utc")
     except ValueError as exc:

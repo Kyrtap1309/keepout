@@ -70,7 +70,7 @@ from generated import replace_block, table, write_or_check
 from screening_timing import TimingOutput, select, timed
 
 from keepout._units import DAY
-from keepout.omm import Omm, load
+from keepout.omm import Omm
 from keepout.omm.celestrak import dumps_csv
 from keepout.screening import (
     DEFAULT_VOLUME,
@@ -230,8 +230,10 @@ def read_spacetrack(data: Path) -> tuple[tuple[Omm, ...], str]:
     """The frozen Space-Track catalog's element sets and the day it was
     retrieved (UTC, ISO)."""
     manifest = spacetrack_snapshot.read_manifest(data)
-    catalog = load(data / spacetrack_snapshot.SNAPSHOT)
-    return catalog, manifest["download"]["retrieved"][:10]
+    return (
+        spacetrack_snapshot.read_snapshot(data),
+        spacetrack_snapshot.retrieval_day(manifest),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -366,7 +368,13 @@ def read_timings(path: Path) -> Timings | None:
 
 
 def positive(text: str) -> int:
-    """A command-line count: an integer of at least 1."""
+    """A command-line count: an integer of at least 1.
+
+    Raises
+    ------
+    argparse.ArgumentTypeError
+        If the integer in ``text`` is less than 1.
+    """
     value = int(text)
     if value < 1:
         raise argparse.ArgumentTypeError(f"must be at least 1, got {value}")

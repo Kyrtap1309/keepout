@@ -259,7 +259,7 @@ def test_store_bytes_creates_the_parents(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("url", ["file:///etc/passwd", "ftp://example.invalid/x"])
 def test_only_http_urls_are_opened(url: str) -> None:
-    with pytest.raises(ValueError, match="not an HTTP URL"):
+    with pytest.raises(ValueError, match="not an HTTP or HTTPS URL"):
         cache.http_stream(url, io.BytesIO())
 
 
@@ -277,3 +277,47 @@ def test_a_cached_copy_is_found_with_its_metadata(tmp_path: Path) -> None:
     assert cache.read_copy(target, "https://example.org/other") is None
     target.write_bytes(b"changed")
     assert cache.read_copy(target, meta.url) is None
+
+
+def test_a_request_names_keepout_and_adds_the_headers_given() -> None:
+    request = cache.http_request(
+        "https://example.org/x",
+        data=b"a=1",
+        method="POST",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    assert request.get_method() == "POST"
+    assert request.data == b"a=1"
+    assert dict(request.header_items()) == {
+        "User-agent": cache.USER_AGENT,
+        "Content-type": "application/x-www-form-urlencoded",
+    }
+
+
+@pytest.mark.parametrize(
+    ("url", "schemes", "message"),
+    [
+        ("file:///etc/passwd", ("http", "https"), "not an HTTP or HTTPS URL"),
+        ("http://example.org/", ("https",), "not an HTTPS URL"),
+    ],
+)
+def test_a_request_refuses_other_schemes(
+    url: str, schemes: tuple[str, ...], message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        cache.http_request(url, schemes=schemes)
+
+
+@pytest.mark.parametrize("error", [OSError("refused"), http.client.IncompleteRead(b"")])
+def test_network_errors_become_source_unavailable(error: Exception) -> None:
+    with (
+        pytest.raises(SourceUnavailable, match=r"^cannot reach x: ") as raised,
+        cache.network_errors("cannot reach x"),
+    ):
+        raise error
+    assert raised.value.__cause__ is error
+
+
+def test_other_errors_pass_through_network_errors() -> None:
+    with pytest.raises(KeyError), cache.network_errors("cannot reach x"):
+        raise KeyError("bug")

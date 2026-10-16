@@ -92,6 +92,11 @@ def covariance_entries(dimension: int) -> tuple[tuple[str, int, int], ...]:
     ----------
     dimension
         Block size, 1 to 9 (6 = position-velocity, 9 = with drag/SRP/thrust).
+
+    Raises
+    ------
+    ValueError
+        If ``dimension`` is not between 1 and 9.
     """
     if not 1 <= dimension <= len(COVARIANCE_AXES):
         raise ValueError(f"covariance dimension must be 1..9, got {dimension}")

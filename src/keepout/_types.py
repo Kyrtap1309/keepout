@@ -94,12 +94,24 @@ def as_vector(value: npt.ArrayLike, name: str) -> FloatArray:
 
 
 def require_positive(value: float, name: str) -> None:
-    """Raise ``ValueError`` unless ``value`` is finite and positive."""
+    """Raise ``ValueError`` unless ``value`` is finite and positive.
+
+    Raises
+    ------
+    ValueError
+        If ``value`` is not finite or not greater than zero.
+    """
     if not (math.isfinite(value) and value > 0.0):
         raise ValueError(f"{name} must be finite and > 0, got {value}")
 
 
 def require_non_negative(value: float, name: str) -> None:
-    """Raise ``ValueError`` unless ``value`` is finite and non-negative."""
+    """Raise ``ValueError`` unless ``value`` is finite and non-negative.
+
+    Raises
+    ------
+    ValueError
+        If ``value`` is not finite or is negative.
+    """
     if not (math.isfinite(value) and value >= 0.0):
         raise ValueError(f"{name} must be finite and >= 0, got {value}")

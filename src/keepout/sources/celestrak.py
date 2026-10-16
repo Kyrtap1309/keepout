@@ -439,7 +439,17 @@ def _fetch(
     download: Downloader,
     clock: Callable[[], float],
 ) -> tuple[_T, Retrieval]:
-    """``url`` read from the cache at ``target`` or downloaded, by the policy."""
+    """``url`` read from the cache at ``target`` or downloaded, by the policy.
+
+    Raises
+    ------
+    ValueError
+        If ``max_age`` is shorter than CelesTrak's update interval.
+    HttpStatusError
+        If the download fails with an HTTP status other than 403 (re-raised).
+    SourceUnavailable
+        If CelesTrak answers HTTP 403 and there is no usable cached copy.
+    """
     _check_max_age(max_age)
     cached = read_copy(target, url)
     now = clock()

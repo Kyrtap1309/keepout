@@ -61,14 +61,12 @@ from __future__ import annotations
 
 import argparse
 import gzip
-import hashlib
 import json
 import math
 import sys
 import tempfile
 import textwrap
 import time
-import zlib
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -84,8 +82,10 @@ from typing import (
 )
 from urllib.parse import parse_qs, urlsplit
 
+import snapshot_files
 from astropy.time import Time
 from generated import write_or_check
+from snapshot_files import FileDigest, file_digests, write_json
 
 from keepout._units import DAY
 from keepout.equinoctial import semi_major_axis
@@ -276,7 +276,13 @@ class RawBodies:
         }
 
     def __call__(self, url: str) -> bytes:
-        """The body of ``url``: the saved one, or downloaded and saved."""
+        """The body of ``url``: the saved one, or downloaded and saved.
+
+        Raises
+        ------
+        SourceUnavailable
+            If ``url`` is not saved and there is no downloader.
+        """
         saved = self.bodies.get(url)
         if saved is not None:
             return read_body(self.raw, saved)
@@ -318,7 +324,7 @@ def write_index(path: Path, bodies: Sequence[Body]) -> None:
         "format": RAW_FORMAT,
         "bodies": [body.record() for body in bodies],
     }
-    store_bytes(path, (json.dumps(record, indent=2) + "\n").encode())
+    write_json(path, record)
 
 
 def read_body(raw: Path, body: Body) -> bytes:
@@ -329,10 +335,7 @@ def read_body(raw: Path, body: Body) -> bytes:
     ValueError
         If the file's digest is not the one listed.
     """
-    data = (raw / body.file).read_bytes()
-    if hashlib.sha256(data).hexdigest() != body.sha256:
-        raise ValueError(f"{raw / body.file} does not match its digest in {RAW_INDEX}")
-    return data
+    return snapshot_files.read_body(raw, body, RAW_INDEX)
 
 
 def fetch(raw: Path, download: Downloader | None) -> tuple[Catalog, SocratesReport]:
@@ -521,13 +524,6 @@ class FixtureSummary(TypedDict):
 
     objects: int
     regimes: dict[Regime, int]
-
-
-class FileDigest(TypedDict):
-    """Length and SHA-256 hex digest of a committed file as stored."""
-
-    bytes: int
-    sha256: str
 
 
 class Manifest(TypedDict):
@@ -733,10 +729,7 @@ def render_manifest(inputs: Inputs, files: Mapping[str, bytes]) -> str:
                 name: sum(regime(omm) == name for omm in fixture) for name in REGIMES
             },
         },
-        "files": {
-            name: {"bytes": len(stored), "sha256": hashlib.sha256(stored).hexdigest()}
-            for name, stored in files.items()
-        },
+        "files": file_digests(files),
     }
     return json.dumps(manifest, indent=2) + "\n"
 
@@ -747,29 +740,11 @@ def contents_of(name: str, stored: bytes) -> bytes:
 
 
 def stored_files(data: Path, inputs: Inputs) -> dict[str, bytes]:
-    """The bytes every committed file should hold, the manifest last.
-
-    A gzipped file already in ``data`` with the right contents is kept as it
-    is, so a different zlib build does not change a file whose data did not.
-    """
-    files: dict[str, bytes] = {}
-    for name, content in contents(inputs).items():
-        path = data / name
-        if name not in GZIPPED:
-            files[name] = content
-        elif path.exists() and _gunzip(path.read_bytes()) == content:
-            files[name] = path.read_bytes()
-        else:
-            files[name] = gzip.compress(content, compresslevel=9, mtime=0)
+    """The bytes every committed file should hold, the manifest last
+    (:func:`snapshot_files.stored_files`)."""
+    files = snapshot_files.stored_files(data, contents(inputs), GZIPPED)
     files[MANIFEST] = render_manifest(inputs, files).encode()
     return files
-
-
-def _gunzip(data: bytes) -> bytes | None:
-    try:
-        return gzip.decompress(data)
-    except (OSError, EOFError, zlib.error):
-        return None
 
 
 def main(argv: Sequence[str] | None = None) -> int:

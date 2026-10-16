@@ -37,20 +37,24 @@ CacheDir: TypeAlias = Annotated[
     Path | None,
     typer.Option(
         "--cache-dir",
+        envvar="KEEPOUT_CACHE_DIR",
         file_okay=False,
-        help=(
-            "Cache root for downloaded data (default: $KEEPOUT_CACHE_DIR, "
-            "else the user cache directory)."
-        ),
+        help="Cache root for downloaded data (default: the user cache directory).",
     ),
 ]
-"""``--cache-dir``: the cache root (:func:`keepout.sources.cache.cache_dir`)."""
+"""``--cache-dir``: the cache root (:func:`keepout.sources.cache.cache_dir`),
+also read from ``$KEEPOUT_CACHE_DIR``, which ``--help`` shows."""
 
 Workers: TypeAlias = Annotated[
     int | None,
-    typer.Option("--workers", min=1, help="Processes to use (default: one per CPU)."),
+    typer.Option(
+        "--workers",
+        min=1,
+        help="Processes to use (default: one per CPU, at most 4).",
+    ),
 ]
-"""``--workers``: processes to compute in (``None``: one per CPU)."""
+"""``--workers``: processes to compute in (``None``: the library's default,
+one per CPU, at most 4)."""
 
 
 def positive(value: float | None) -> float | None:

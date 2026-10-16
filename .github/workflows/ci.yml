@@ -20,6 +20,7 @@ jobs:
       - run: uv run mypy
       - run: uv run lint-imports
       - run: uv run codespell
+      - run: uv run deptry src
 
   test:
     runs-on: ubuntu-latest
