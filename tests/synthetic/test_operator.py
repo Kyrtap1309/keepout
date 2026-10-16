@@ -73,7 +73,7 @@ def test_the_cdm_names_both_objects_and_its_assumptions() -> None:
     assert cdm.version == "2.0"
     assert cdm.originator == "KEEPOUT"
     assert cdm.message_for == "INTELSAT 39 (IS-39)"
-    assert cdm.message_id == make_message_id("44476", "55841", tca)
+    assert cdm.message_id == make_message_id("44476", "55841", tca, START)
     assert cdm.creation_date == START
     assert cdm.header.comments == HEADER_COMMENTS
     assert abs((cdm.tca - tca).to_value("s")) < 1e-6

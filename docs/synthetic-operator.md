@@ -81,7 +81,7 @@ COMMENT Covariances are assumed (a model, not orbit determination)
 CREATION_DATE                  = 2026-10-06T00:00:00.000
 ORIGINATOR                     = KEEPOUT
 MESSAGE_FOR                    = METOP-B
-MESSAGE_ID                     = 38771_35196_20261012T112828.710Z
+MESSAGE_ID                     = 38771_35196_20261012T112828.710Z_20261006T000000.000Z
 COMMENT SCREEN_VOLUME_X, _Y and _Z are the semi-axes of the RTN ellipsoid
 TCA                            = 2026-10-12T11:28:28.709977
 MISS_DISTANCE                  = 212.3720069 [m]

@@ -14,7 +14,9 @@ from keepout.synthetic import read_fleet
 from keepout.synthetic.operator import run
 
 
-def screen_fixture(folder: Path, *args: str, fleet: str | None = None) -> list[str]:
+def screen_fixture(
+    folder: Path, *args: str, fleet: str | None = None, start: str = START
+) -> list[str]:
     path = write_fleet(folder) if fleet is None else write_fleet(folder, fleet)
     return [
         "screen",
@@ -23,7 +25,7 @@ def screen_fixture(folder: Path, *args: str, fleet: str | None = None) -> list[s
         "--catalog",
         str(FIXTURE_CSV),
         "--start",
-        START,
+        start,
         "--days",
         DAYS,
         "--workers",
@@ -135,6 +137,29 @@ def test_screen_prints_json(tmp_path: Path) -> None:
     assert observation["error"] is None
     assert second["action"] == "monitor"
     assert second["level"] == "yellow"
+
+
+def test_screens_on_two_days_issue_successive_cdms_of_each_event(
+    tmp_path: Path,
+) -> None:
+    # The same element sets screened from two starts: the same approaches,
+    # issued at two creation times, so each event has two CDMs.
+    files: list[str] = []
+    for start in (START, "2026-10-06T12:00:00"):
+        folder = tmp_path / start.replace(":", "")
+        folder.mkdir()
+        cdms = folder / "cdms"
+        result = keepout(*screen_fixture(folder, "--cdm-dir", str(cdms), start=start))
+        assert result.exit_code == ExitCode.OK
+        files += sorted(str(path) for path in cdms.iterdir())
+    assert len(files) == len({Path(file).name for file in files}) == 4
+    assessed = keepout("assess", *files, "--json")
+    assert assessed.exit_code == ExitCode.OK
+    events = json.loads(assessed.stdout)["events"]
+    assert [len(event["cdms"]) for event in events] == [2, 2]
+    for event in events:
+        older, newer = event["observations"]
+        assert older["time_to_tca"] == pytest.approx(newer["time_to_tca"] + 43200.0)
 
 
 def test_screen_starts_now_by_default(

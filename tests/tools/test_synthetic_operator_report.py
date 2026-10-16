@@ -103,7 +103,7 @@ def test_main_writes_then_checks(generated: Path) -> None:
         "monitor, prepare manoeuvre": 0,
         "manoeuvre": 0,
     }
-    assert summary["example"] == "52939_47826_20261006T193642.717Z"
+    assert summary["example"] == "52939_47826_20261006T193642.717Z_20261006T000000.000Z"
 
 
 def test_each_event_has_its_pc_the_bound_and_the_decision(generated: Path) -> None:
@@ -150,7 +150,10 @@ def test_the_page_states_the_assumption_and_shows_the_closest_cdm(
         "The CDM of the closest approach (FLEET ONE (52939) and "
         "STARLINK-2411 (47826), 1029 m)"
     ) in text
-    assert "MESSAGE_ID                     = 52939_47826_20261006T193642.717Z" in text
+    assert (
+        "MESSAGE_ID                     = "
+        "52939_47826_20261006T193642.717Z_20261006T000000.000Z\n"
+    ) in text
     assert "COVARIANCE_METHOD              = DEFAULT" in text
     assert "CT_R                           = 0.0 [m**2]" in text
     assert text.endswith("```\n")
@@ -219,7 +222,7 @@ def test_a_rounded_cdm_still_reads(generated: Path) -> None:
     text = page(generated)
     cdm = text.split("```text\n", 1)[1].split("```", 1)[0]
     message = kvn.loads(cdm)
-    assert message.message_id == "52939_47826_20261006T193642.717Z"
+    assert message.message_id == "52939_47826_20261006T193642.717Z_20261006T000000.000Z"
     assert message.miss_distance == pytest.approx(1029.0, abs=1.0)
 
 

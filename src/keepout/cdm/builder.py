@@ -55,7 +55,7 @@ TCA_PRECISION: Final = 6
 are at TCA well within :data:`keepout.objects.EPOCH_TOLERANCE_S`)."""
 
 MESSAGE_ID_PRECISION: Final = 3
-"""Fractional digits of the seconds of the TCA in a message id."""
+"""Fractional digits of the seconds of the times in a message id."""
 
 SCREEN_VOLUME_COMMENT: Final = (
     "SCREEN_VOLUME_X, _Y and _Z are the semi-axes of the RTN ellipsoid"
@@ -196,13 +196,24 @@ def _with_precision(time: Time, precision: int) -> Time:
     return copy
 
 
-def make_message_id(primary_id: str, secondary_id: str, tca: Time) -> str:
-    """The deterministic ``MESSAGE_ID`` of a conjunction.
+def _stamp(time: Time) -> str:
+    """``time`` in UTC to the millisecond, e.g. ``20261008T123456.789Z``."""
+    text = str(_with_precision(time, MESSAGE_ID_PRECISION).isot)
+    return text.replace("-", "").replace(":", "") + "Z"
 
-    Both identifiers and the TCA to the millisecond, e.g.
-    ``25544_49863_20261008T123456.789Z``: the same approach always gets
-    the same id, and the id is also a portable file name for identifiers
-    of letters, digits, ``-`` and ``.``.
+
+def make_message_id(
+    primary_id: str, secondary_id: str, tca: Time, created: Time
+) -> str:
+    """The deterministic ``MESSAGE_ID`` of a message about a conjunction.
+
+    Both identifiers, the TCA and the creation time, each time in UTC to
+    the millisecond, e.g.
+    ``25544_49863_20261008T123456.789Z_20261006T000000.000Z``. The same
+    message built again gets the same id, and the messages about one
+    approach issued at different times (successive CDMs of one event)
+    get different ids. The id is also a portable file name for
+    identifiers of letters, digits, ``-`` and ``.``.
 
     Parameters
     ----------
@@ -210,10 +221,10 @@ def make_message_id(primary_id: str, secondary_id: str, tca: Time) -> str:
         Identifiers of the two objects (e.g. catalog numbers).
     tca
         Time of closest approach.
+    created
+        Creation time of the message (its ``CREATION_DATE``).
     """
-    stamp = _with_precision(tca, MESSAGE_ID_PRECISION).isot
-    compact = str(stamp).replace("-", "").replace(":", "")
-    return f"{primary_id}_{secondary_id}_{compact}Z"
+    return f"{primary_id}_{secondary_id}_{_stamp(tca)}_{_stamp(created)}"
 
 
 def _radii(conjunction: Conjunction) -> tuple[float, float] | None:
@@ -365,7 +376,7 @@ def make_cdm(
         ``ORIGINATOR``.
     message_id
         ``MESSAGE_ID``; by default :func:`make_message_id` of the objects'
-        ids and the TCA.
+        ids, the TCA and ``created``.
     message_for
         ``MESSAGE_FOR`` (the spacecraft operator the message is for), if any.
     screening_period
@@ -395,7 +406,10 @@ def make_cdm(
     tca = _with_precision(conjunction.tca, TCA_PRECISION)
     if message_id is None:
         message_id = make_message_id(
-            conjunction.primary.object_id, conjunction.secondary.object_id, tca
+            conjunction.primary.object_id,
+            conjunction.secondary.object_id,
+            tca,
+            created,
         )
     header = [
         Field("CCSDS_CDM_VERS", "1.0" if radii is None else "2.0"),

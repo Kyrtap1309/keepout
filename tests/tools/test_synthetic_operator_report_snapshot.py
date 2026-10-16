@@ -65,6 +65,6 @@ def test_the_two_yellow_events_are_the_diluted_ones(summary: report.Summary) -> 
 
 
 def test_the_example_is_metop_b_and_a_fengyun_fragment(summary: report.Summary) -> None:
-    assert summary["example"] == "38771_35196_20261012T112828.710Z"
+    assert summary["example"] == "38771_35196_20261012T112828.710Z_20261006T000000.000Z"
     sigmas = [s for e in summary["events"] for s in e["transverse_sigmas"]]
     assert max(sigmas) == pytest.approx(20.4e3, abs=0.1e3)

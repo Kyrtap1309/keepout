@@ -32,6 +32,7 @@ from keepout.conjunction import Conjunction
 from keepout.covariance import Covariance
 from keepout.frames import relative_position_rtn
 from keepout.objects import ObjectState
+from keepout.risk import ConjunctionEvent
 from keepout.screening import ScreeningVolume
 from keepout.state import StateVector
 from keepout.synthetic import SyntheticCovarianceModel
@@ -129,7 +130,7 @@ def test_header() -> None:
     assert cdm.version == "2.0"
     assert cdm.originator == ORIGINATOR == "KEEPOUT"
     assert cdm.creation_date is CREATED
-    assert cdm.message_id == "25544_49863_20261008T123456.789Z"
+    assert cdm.message_id == "25544_49863_20261008T123456.789Z_20261006T000000.000Z"
     assert cdm.message_for is None
     assert cdm.header.comments == ()
     assert [f.keyword for f in cdm.header.fields] == [
@@ -238,14 +239,27 @@ def test_the_screening_period_must_end_after_it_starts() -> None:
 def test_message_id_is_deterministic_and_rounded_to_the_millisecond() -> None:
     assert example().message_id == example().message_id
     assert kvn.dumps(example()) == kvn.dumps(example())
-    # The TCA is written in UTC whatever its scale (TT - UTC = 69.184 s).
+    # The times are written in UTC whatever their scale (TT - UTC = 69.184 s).
     tt = Time("2026-10-08T12:36:05.973", scale="tt")
-    assert make_message_id("1", "2", tt) == "1_2_20261008T123456.789Z"
+    created = Time("2026-10-06T00:01:09.1844", scale="tt")
+    assert make_message_id("1", "2", tt, created) == (
+        "1_2_20261008T123456.789Z_20261006T000000.000Z"
+    )
 
 
 def test_message_id_rounds_up_into_the_next_second() -> None:
     tca = Time("2026-10-08T12:34:59.9996", scale="utc")
-    assert make_message_id("25544", "49863", tca) == "25544_49863_20261008T123500.000Z"
+    assert make_message_id("25544", "49863", tca, CREATED) == (
+        "25544_49863_20261008T123500.000Z_20261006T000000.000Z"
+    )
+
+
+def test_messages_issued_at_different_times_are_successive_cdms_of_an_event() -> None:
+    first = example()
+    later = example(created=CREATED + 1 * u.hour)
+    assert later.message_id == "25544_49863_20261008T123456.789Z_20261006T010000.000Z"
+    event = ConjunctionEvent.from_cdms([later, first])
+    assert event.cdms == (first, later)
 
 
 def test_the_tca_of_the_conjunction_is_not_changed() -> None:
