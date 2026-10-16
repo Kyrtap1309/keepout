@@ -38,6 +38,7 @@ class Satrec:
     method: str
     error: int
     a: float
+    alta: float
     altp: float
     j2: float
     j3oj2: float

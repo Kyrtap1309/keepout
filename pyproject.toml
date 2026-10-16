@@ -151,7 +151,7 @@ name = "Layers: data sources and formats above the geometry they build"
 type = "layers"
 layers = [
     "keepout.validation",
-    "keepout.sources",
+    "keepout.sources | keepout.synthetic",
     "keepout.risk | keepout.screening",
     "keepout.pc | keepout.cdm | keepout.propagation",
     "keepout.omm | keepout.conjunction",

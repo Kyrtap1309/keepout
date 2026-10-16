@@ -1,0 +1,381 @@
+"""A synthetic covariance for GP (TLE/OMM) element sets, from their age.
+
+GP element sets, propagated with SGP4, come without a covariance, and NASA's
+CA handbook advises against risk decisions on them alone (Rev. 2, Vol. 2,
+App. E). To compute a Pc for a synthetic operator anyway, keepout assumes a
+covariance: a diagonal **position** covariance in the object's RTN frame
+whose radial and normal sigmas are constant and whose transverse
+(along-track) sigma grows linearly with the age of the element set::
+
+    sigma_R = f sigma_R0
+    sigma_T = f (sigma_T0 + k |t - epoch|)
+    sigma_N = f sigma_N0
+
+``sigma_R0``, ``sigma_T0`` and ``sigma_N0`` are the epoch sigmas of the
+object's orbit regime (:class:`OrbitRegime`, Flohrer et al. 2009), ``k``
+the along-track growth (Levit and Marshall 2011) and ``f`` a safety factor
+(default 2: Flohrer et al. found the true errors about twice their
+estimates). The velocity block is zero: the velocity uncertainty is
+unknown, and a 2-D Pc uses position only. The model is meant for the 2-D
+methods: :func:`~keepout.pc.compute_pc` with ``"auto"`` keeps the 2-D Pc
+for it, with a note, also where a 2-D assumption is questionable, since the
+3-D methods would take the velocities as exact (and on slow encounters they
+depend strongly on the velocity uncertainty).
+
+This is an **assumption**, not a calibrated product: GP errors have biases,
+differ forward and backward in time and between objects in similar orbits
+(Kelso 2007; Geul et al. 2017), none of which a zero-mean covariance
+holds. The age is taken as ``|t - epoch|`` so element sets newer than ``t``
+are covered too.
+
+References
+----------
+T. Flohrer, H. Krag, H. Klinkrad, B. Bastida Virgili, C. Frueh, "Improving
+ESA's collision risk estimates by an assessment of the TLE orbit errors of
+the US SSN catalogue", Proc. 5th European Conference on Space Debris, ESA
+SP-672, 2009, Table 1 and section 3.2.
+
+C. Levit, W. Marshall, "Improved orbit predictions using two-line
+elements", Advances in Space Research 47, 2011 (arXiv:1002.2277), pp. 5-6
+and Table 2.
+
+NASA Spacecraft Conjunction Assessment and Collision Avoidance Best
+Practices Handbook, NASA/SP-20205011318 Rev. 2, Vol. 2, 2026, Appendix E.
+"""
+
+from __future__ import annotations
+
+import enum
+from collections.abc import Mapping
+from dataclasses import dataclass
+from types import MappingProxyType
+from typing import Final, NamedTuple
+
+import numpy as np
+from astropy.time import Time
+
+from keepout._types import require_non_negative, require_positive
+from keepout._units import DAY, KM, seconds_between
+from keepout.covariance import Covariance
+from keepout.omm import Omm
+
+__all__ = [
+    "FLOHRER_SIGMAS",
+    "GEO_HIGHEST_APOGEE",
+    "GEO_LOWEST_PERIGEE",
+    "LEO_HIGHEST_APOGEE",
+    "LEVIT_MARSHALL_RATE",
+    "PUBLISHED_PARAMETERS",
+    "SAFETY_FACTOR",
+    "OrbitRegime",
+    "RegimeParameters",
+    "RtnSigmas",
+    "SyntheticCovarianceModel",
+    "orbit_regime",
+]
+
+
+class OrbitRegime(enum.StrEnum):
+    """Orbit regimes of Flohrer et al. (2009), by perigee and apogee altitude.
+
+    The bounds are the paper's (p. 3), with its strict inequalities; see
+    :func:`orbit_regime`.
+    """
+
+    LEO = "LEO"
+    """Apogee altitude below 2000 km."""
+    MEO = "MEO"
+    """Perigee altitude above 2000 km and apogee altitude below 33 786 km."""
+    GTO = "GTO"
+    """Perigee altitude below 2000 km and apogee altitude above 33 786 km
+    (geostationary transfer and Molniya-like orbits)."""
+    HEO = "HEO"
+    """None of the others: e.g. a perigee above 2000 km with an apogee
+    above 37 786 km."""
+    GEO = "GEO"
+    """Perigee altitude above 33 786 km and apogee altitude below 37 786 km."""
+
+
+LEO_HIGHEST_APOGEE: Final = 2000e3
+"""Apogee altitude [m] below which an orbit is LEO; also the perigee
+altitude that separates MEO (above) from GTO (below)."""
+
+GEO_LOWEST_PERIGEE: Final = 33_786e3
+"""Perigee altitude [m] above which an orbit can be GEO; also the apogee
+altitude below which an orbit can be MEO and above which it can be GTO."""
+
+GEO_HIGHEST_APOGEE: Final = 37_786e3
+"""Apogee altitude [m] below which an orbit can be GEO."""
+
+
+def orbit_regime(omm: Omm) -> OrbitRegime:
+    """The regime of Flohrer et al. (2009) an element set belongs to.
+
+    Perigee and apogee altitudes are those SGP4 itself derives from the
+    elements (its un-Kozai'd semi-major axis and the WGS 72 Earth radius:
+    ``Satrec.altp``, ``Satrec.alta``), as in
+    :func:`keepout.screening.sfs_regime`. In order: LEO if the apogee is
+    below 2000 km; GEO if the perigee is above 33 786 km and the apogee
+    below 37 786 km; MEO if the perigee is above 2000 km and the apogee
+    below 33 786 km; GTO if the perigee is below 2000 km and the apogee
+    above 33 786 km; HEO otherwise (also an altitude exactly on a bound).
+
+    Parameters
+    ----------
+    omm
+        Element set of the object.
+
+    Raises
+    ------
+    UnsupportedElements
+        If SGP4 cannot be initialised from ``omm``
+        (:meth:`keepout.omm.Omm.satrec`).
+    """
+    satrec = omm.satrec()
+    radius = satrec.radiusearthkm * KM
+    perigee, apogee = satrec.altp * radius, satrec.alta * radius
+    if apogee < LEO_HIGHEST_APOGEE:
+        return OrbitRegime.LEO
+    if perigee > GEO_LOWEST_PERIGEE and apogee < GEO_HIGHEST_APOGEE:
+        return OrbitRegime.GEO
+    if perigee > LEO_HIGHEST_APOGEE and apogee < GEO_LOWEST_PERIGEE:
+        return OrbitRegime.MEO
+    if perigee < LEO_HIGHEST_APOGEE and apogee > GEO_LOWEST_PERIGEE:
+        return OrbitRegime.GTO
+    return OrbitRegime.HEO
+
+
+@dataclass(frozen=True, slots=True)
+class RegimeParameters:
+    """The covariance model's parameters for one orbit regime, before the
+    safety factor.
+
+    Parameters
+    ----------
+    radial
+        Radial sigma ``sigma_R0`` [m].
+    transverse
+        Transverse (along-track) sigma at the element epoch ``sigma_T0`` [m].
+    normal
+        Normal (cross-track) sigma ``sigma_N0`` [m].
+    transverse_rate
+        Growth ``k`` of the transverse sigma with the element set's age
+        [m/s]; 0 keeps it constant.
+
+    Raises
+    ------
+    ValueError
+        If a sigma is not finite and positive, or the rate is not finite
+        and non-negative.
+    """
+
+    radial: float
+    transverse: float
+    normal: float
+    transverse_rate: float
+
+    def __post_init__(self) -> None:
+        for name in ("radial", "transverse", "normal"):
+            value = float(getattr(self, name))
+            require_positive(value, name)
+            object.__setattr__(self, name, value)
+        rate = float(self.transverse_rate)
+        require_non_negative(rate, "transverse_rate")
+        object.__setattr__(self, "transverse_rate", rate)
+
+
+FLOHRER_SIGMAS: Final[Mapping[OrbitRegime, tuple[float, float, float]]] = (
+    MappingProxyType(
+        {
+            OrbitRegime.LEO: (102.0, 471.0, 126.0),
+            OrbitRegime.MEO: (73.0, 131.0, 54.0),
+            OrbitRegime.GTO: (1960.0, 3897.0, 1808.0),
+            OrbitRegime.HEO: (824.0, 1367.0, 1059.0),
+            OrbitRegime.GEO: (359.0, 432.0, 86.0),
+        }
+    )
+)
+"""Radial, along-track and cross-track 1-sigma position errors [m] of GP
+element sets near their epoch, per regime: Table 1 of Flohrer et al.
+(2009), the US SSN catalogue of 2008-01-01 (11 286 objects), each against a
+numerical orbit fitted to its own SGP4 states over 24 h centred on the
+epoch. In LEO the along-track sigma reaches about 600 m at high
+inclination; in the paper's own validation on radar-tracked objects the
+true errors were about twice these values (section 3.2)."""
+
+LEVIT_MARSHALL_RATE: Final = 1500.0 / DAY
+"""Growth of the along-track error of GP element sets with age [m/s]: the
+"typical growth of 1,500 m/day" Levit and Marshall (2011, pp. 5-6) measure
+with SGP4 against ILRS precision orbits of Stella, Starlette, Ajisai (LEO)
+and Etalon-2 (MEO). Their Table 2 gives 100-3000 m/day for TLEs with SGP4;
+NASA's CA handbook (Rev. 2, Vol. 2, App. E, p. 8, after Hejduk et al.)
+reports errors of 600 m to 3 km in the first 72 h in LEO. keepout applies
+the rate to every regime: no growth was measured for GTO, HEO or GEO."""
+
+SAFETY_FACTOR: Final = 2.0
+"""Factor on every sigma and rate: in Flohrer et al.'s validation
+(2009, section 3.2) the true errors were about twice their estimates, and
+the GEO estimates "might be too optimistic"."""
+
+PUBLISHED_PARAMETERS: Final[Mapping[OrbitRegime, RegimeParameters]] = MappingProxyType(
+    {
+        regime: RegimeParameters(*sigmas, LEVIT_MARSHALL_RATE)
+        for regime, sigmas in FLOHRER_SIGMAS.items()
+    }
+)
+"""The default parameters of each regime: the sigmas of
+:data:`FLOHRER_SIGMAS` and the rate :data:`LEVIT_MARSHALL_RATE`, before
+the safety factor."""
+
+
+class RtnSigmas(NamedTuple):
+    """Position standard deviations along an object's RTN axes [m]."""
+
+    radial: float
+    """Along R, the radial direction."""
+    transverse: float
+    """Along T, the transverse (along-track) direction."""
+    normal: float
+    """Along N, the orbit normal (cross-track)."""
+
+
+def _require_scalar(time: Time) -> None:
+    if not time.isscalar:
+        raise ValueError(f"time must be a single time, got shape {time.shape}")
+
+
+@dataclass(frozen=True, slots=True)
+class SyntheticCovarianceModel:
+    """The age-dependent RTN position covariance of a GP element set.
+
+    See the module's description for the model and its sources. Every
+    parameter can be overridden, e.g. ``dataclasses.replace(model,
+    leo=RegimeParameters(100.0, 500.0, 100.0, 0.02))`` or
+    ``SyntheticCovarianceModel(safety_factor=1.0)``.
+
+    Parameters
+    ----------
+    leo, meo, gto, heo, geo
+        Parameters of each :class:`OrbitRegime`, before the safety factor;
+        default :data:`PUBLISHED_PARAMETERS`.
+    safety_factor
+        Factor ``f`` on every sigma (and so on the rate) [-]; default
+        :data:`SAFETY_FACTOR`.
+
+    Raises
+    ------
+    ValueError
+        If ``safety_factor`` is not finite and positive.
+    """
+
+    leo: RegimeParameters = PUBLISHED_PARAMETERS[OrbitRegime.LEO]
+    meo: RegimeParameters = PUBLISHED_PARAMETERS[OrbitRegime.MEO]
+    gto: RegimeParameters = PUBLISHED_PARAMETERS[OrbitRegime.GTO]
+    heo: RegimeParameters = PUBLISHED_PARAMETERS[OrbitRegime.HEO]
+    geo: RegimeParameters = PUBLISHED_PARAMETERS[OrbitRegime.GEO]
+    safety_factor: float = SAFETY_FACTOR
+
+    def __post_init__(self) -> None:
+        factor = float(self.safety_factor)
+        require_positive(factor, "safety_factor")
+        object.__setattr__(self, "safety_factor", factor)
+
+    def parameters(self, regime: OrbitRegime) -> RegimeParameters:
+        """The parameters of ``regime``, before the safety factor."""
+        found: RegimeParameters = getattr(self, regime.name.lower())
+        return found
+
+    def sigmas(self, omm: Omm, time: Time) -> RtnSigmas:
+        """The model's position sigmas of an element set at a time.
+
+        Parameters
+        ----------
+        omm
+            Element set of the object.
+        time
+            When the covariance is wanted (e.g. a TCA); one time, before or
+            after the element epoch.
+
+        Raises
+        ------
+        UnsupportedElements
+            If SGP4 cannot be initialised from ``omm`` (:func:`orbit_regime`).
+        ValueError
+            If ``time`` is not a single time.
+        """
+        _require_scalar(time)
+        parameters = self.parameters(orbit_regime(omm))
+        age = abs(seconds_between(omm.epoch, time.utc))
+        transverse = parameters.transverse + parameters.transverse_rate * age
+        factor = self.safety_factor
+        return RtnSigmas(
+            factor * parameters.radial,
+            factor * transverse,
+            factor * parameters.normal,
+        )
+
+    def covariance(self, omm: Omm, time: Time) -> Covariance:
+        """The model's covariance of an element set at a time.
+
+        Parameters
+        ----------
+        omm
+            Element set of the object.
+        time
+            When the covariance is wanted (e.g. a TCA); one time.
+
+        Returns
+        -------
+        Covariance
+            ``diag(sigma_R^2, sigma_T^2, sigma_N^2)`` [m^2] in the object's
+            RTN frame at ``time``, with a zero velocity block
+            (:meth:`~keepout.covariance.Covariance.from_position`).
+
+        Raises
+        ------
+        UnsupportedElements
+            If SGP4 cannot be initialised from ``omm`` (:func:`orbit_regime`).
+        ValueError
+            If ``time`` is not a single time.
+        """
+        sigmas = np.array(self.sigmas(omm, time))
+        return Covariance.from_position(np.diag(sigmas * sigmas), "RTN", time)
+
+    def comments(self, omm: Omm, time: Time) -> tuple[str, ...]:
+        """Lines describing the model's covariance of an element set at a time.
+
+        For a CDM's ``COMMENT`` lines: the model, the regime's parameters,
+        the element set's epoch and age, and the resulting sigmas (ASCII,
+        under 80 characters each).
+
+        Parameters
+        ----------
+        omm
+            Element set of the object.
+        time
+            When the covariance is wanted (e.g. a TCA); one time.
+
+        Raises
+        ------
+        UnsupportedElements
+            If SGP4 cannot be initialised from ``omm`` (:func:`orbit_regime`).
+        ValueError
+            If ``time`` is not a single time.
+        """
+        sigmas = self.sigmas(omm, time)
+        regime = orbit_regime(omm)
+        parameters = self.parameters(regime)
+        age = seconds_between(omm.epoch, time.utc) / DAY
+        epoch = omm.epoch.utc.isot
+        return (
+            "Synthetic covariance: keepout GP element-set age model, an assumption",
+            "sigma_T = f (sigma_T0 + k |t - epoch|); sigma_R, sigma_N constant",
+            f"Regime {regime.value}: sigma_R0 {parameters.radial / KM:.3f} km, "
+            f"sigma_T0 {parameters.transverse / KM:.3f} km, "
+            f"sigma_N0 {parameters.normal / KM:.3f} km",
+            f"k {parameters.transverse_rate * DAY / KM:.3f} km/day, "
+            f"safety factor f {self.safety_factor:g}",
+            f"Element set epoch {epoch} UTC, age {age:+.3f} days",
+            f"Sigmas: R {sigmas.radial / KM:.3f} km, "
+            f"T {sigmas.transverse / KM:.3f} km, N {sigmas.normal / KM:.3f} km",
+        )
