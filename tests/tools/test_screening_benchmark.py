@@ -13,10 +13,12 @@ from typing import Any
 import pytest
 import screening_benchmark as benchmark
 import screening_snapshot as snapshot
+import spacetrack_snapshot
 from astropy.time import Time
 from screening_timing import Timing, timed
 
 from keepout.omm import Omm, load
+from keepout.omm.celestrak import dumps_csv
 from keepout.screening import DEFAULT_VOLUME, ScreeningResult
 
 FIXTURE = load(snapshot.DATA / snapshot.FIXTURE)
@@ -30,6 +32,17 @@ def data_dir(tmp_path: Path) -> Path:
     data.mkdir()
     shutil.copy(snapshot.DATA / snapshot.FIXTURE, data / snapshot.SNAPSHOT)
     shutil.copy(snapshot.DATA / snapshot.MANIFEST, data / snapshot.MANIFEST)
+    return data
+
+
+def spacetrack_data(tmp_path: Path) -> Path:
+    """A Space-Track data directory whose catalog is the test fixture."""
+    data = tmp_path / "spacetrack-data"
+    data.mkdir()
+    csv_text = dumps_csv(FIXTURE).encode("utf-8")
+    (data / spacetrack_snapshot.SNAPSHOT).write_bytes(gzip.compress(csv_text))
+    manifest = {"download": {"retrieved": "2026-10-15T16:28:59.977Z"}}
+    (data / spacetrack_snapshot.MANIFEST).write_text(json.dumps(manifest))
     return data
 
 
@@ -107,6 +120,7 @@ def test_main_writes_then_checks_the_data_not_the_timings(
     assert calls == [(*screened, {"workers": 1, "repeat": 1})] * 3
     summary = written(tmp_path)
     assert summary["settings"] == {
+        "source": "celestrak",
         "primaries": [63216, 58509, 44476],
         "objects": 222,
         "retrieved": "2026-10-06",
@@ -202,6 +216,7 @@ def test_benchmark_takes_the_median_of_the_runs(
 def test_render_without_timings() -> None:
     summary: benchmark.Summary = {
         "settings": {
+            "source": "celestrak",
             "primaries": [1, 2],
             "objects": 10,
             "retrieved": "2026-10-06",
@@ -220,6 +235,98 @@ def test_render_without_timings() -> None:
     )
     assert "| v | 10 | - | 3 | - | - |" in text
     assert text.endswith("Not measured yet.")
+
+
+def test_main_benchmarks_the_spacetrack_catalog_in_its_own_block(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    benchmarked: tuple[list[benchmark.Found], list[benchmark.Measured]],
+) -> None:
+    calls: list[tuple[int, str]] = []
+
+    def fake(
+        primaries: Sequence[Omm], catalog: Sequence[Omm], start: Time, **kwargs: Any
+    ) -> tuple[list[benchmark.Found], list[benchmark.Measured]]:
+        calls.append((len(catalog), start.isot))
+        return copy.deepcopy(benchmarked)
+
+    monkeypatch.setattr(benchmark, "benchmark", fake)
+    readme = tmp_path / "README.md"
+    public = f"{benchmark.START}\nthe public catalog's block\n{benchmark.END}"
+    readme.write_text(
+        f"intro\n{public}\n{benchmark.SPACETRACK_START}\n{benchmark.SPACETRACK_END}\n",
+        encoding="utf-8",
+    )
+    results = tmp_path / "docs" / "screening-benchmark-spacetrack.json"
+    args = [
+        "--source",
+        "spacetrack",
+        "--data",
+        str(spacetrack_data(tmp_path)),
+        "--results",
+        str(results),
+        "--readme",
+        str(readme),
+        "--primaries",
+        *PRIMARIES,
+        "--workers",
+        "1",
+        "--repeat",
+        "1",
+    ]
+    assert benchmark.main(args) == 0
+    assert benchmark.main(["--check", *args]) == 0
+    assert calls == [(222, "2026-10-15T00:00:00.000")] * 2
+    summary: benchmark.Summary = json.loads(results.read_text(encoding="utf-8"))
+    assert summary["settings"] == {
+        "source": "spacetrack",
+        "primaries": [63216, 58509, 44476],
+        "objects": 222,
+        "retrieved": "2026-10-15",
+        "start": "2026-10-15 00:00",
+        "days": 7.0,
+        "workers": 1,
+    }
+    text = readme.read_text(encoding="utf-8")
+    assert public in text
+    assert (
+        "Screening 3 LEO primaries against the 222 element sets of the frozen "
+        "full catalog (Space-Track, retrieved 2026-10-15) for 7 days from "
+        "2026-10-15 00:00 UTC, in one process (`tools/screening_benchmark.py "
+        "--source spacetrack`):"
+    ) in text
+
+
+def test_the_sources_read_their_committed_data_by_default() -> None:
+    celestrak = benchmark.SOURCES["celestrak"]
+    spacetrack = benchmark.SOURCES["spacetrack"]
+    assert (celestrak.data, celestrak.results) == (snapshot.DATA, benchmark.RESULTS)
+    assert (spacetrack.data, spacetrack.results) == (
+        spacetrack_snapshot.DATA,
+        benchmark.SPACETRACK_RESULTS,
+    )
+    assert (celestrak.start, celestrak.end) == (benchmark.START, benchmark.END)
+    assert (spacetrack.start, spacetrack.end) == (
+        benchmark.SPACETRACK_START,
+        benchmark.SPACETRACK_END,
+    )
+
+
+def test_read_spacetrack_gives_the_catalog_and_its_retrieval_day(
+    tmp_path: Path,
+) -> None:
+    catalog, retrieved = benchmark.read_spacetrack(spacetrack_data(tmp_path))
+    assert catalog == FIXTURE
+    assert retrieved == "2026-10-15"
+
+
+def test_an_unknown_source_is_a_usage_error(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as raised:
+        benchmark.main(["--source", "elsewhere"])
+    assert raised.value.code == 2
+    assert "argument --source: invalid choice: 'elsewhere'" in capsys.readouterr().err
 
 
 def test_cpu_model_reads_the_systems_name(tmp_path: Path) -> None:
@@ -248,8 +355,16 @@ def test_counts_must_be_positive(
     assert "must be at least 1" in capsys.readouterr().err
 
 
-def test_the_primaries_are_in_the_frozen_catalog() -> None:
-    text = gzip.decompress((snapshot.DATA / snapshot.SNAPSHOT).read_bytes()).decode()
+@pytest.mark.parametrize(
+    "path",
+    [
+        snapshot.DATA / snapshot.SNAPSHOT,
+        spacetrack_snapshot.DATA / spacetrack_snapshot.SNAPSHOT,
+    ],
+    ids=["celestrak", "spacetrack"],
+)
+def test_the_primaries_are_in_the_frozen_catalogs(path: Path) -> None:
+    text = gzip.decompress(path.read_bytes()).decode()
     numbers = {int(row["NORAD_CAT_ID"]) for row in csv.DictReader(io.StringIO(text))}
     assert len(set(benchmark.PRIMARIES)) == 20
     assert set(benchmark.PRIMARIES) <= numbers
@@ -372,6 +487,20 @@ def test_compare_main_against_a_faster_base_fails(
     )
     assert "slower than allowed" in out
     assert step_summary.read_text(encoding="utf-8") == out
+
+
+def test_compare_main_screens_the_chosen_source(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+    args = compare_arguments(tmp_path, str(tmp_path / "missing" / "python"))
+    args[args.index("--data") + 1] = str(spacetrack_data(tmp_path))
+    assert benchmark.main(["--source", "spacetrack", *args]) == 0
+    assert capsys.readouterr().out.startswith(
+        "Screening benchmark: 3 primaries x 222 objects x 1 day,"
+    )
 
 
 def test_compare_main_skips_a_base_that_cannot_run(

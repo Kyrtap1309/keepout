@@ -142,13 +142,15 @@ comparison with SOCRATES is under [Validation](#validation).
 
 GP data: USSPACECOM/18 SDS via Space-Track.org, retrieved from CelesTrak
 (celestrak.org); the frozen copy in `tests/screening/data/` was retrieved
-on 2026-10-06 and is not covered by keepout's MIT licence (see its `NOTICE`).
+on 2026-10-06, the frozen full catalog in `tests/screening/spacetrack-data/`
+from Space-Track.org on 2026-10-15; neither is covered by keepout's MIT
+licence (see their `NOTICE` files).
 
 ### Performance
 
-The target: 20 primaries against the public catalog for a week in under 60 s
-with 4 worker processes. CI also times each change against its merge base and
-fails on a slowdown of more than 20 %.
+The target: 20 primaries against the public catalog, and against the full
+catalog, for a week in under 60 s with 4 worker processes. CI also times each
+change against its merge base and fails on a slowdown of more than 20 %.
 
 <!-- screening-benchmark-summary:start -->
 Screening 20 LEO primaries against the 19914 element sets of the frozen public catalog (CelesTrak, retrieved 2026-10-06) for 7 days from 2026-10-06 00:00 UTC, with 4 worker processes (`tools/screening_benchmark.py`):
@@ -162,6 +164,21 @@ Screening 20 LEO primaries against the 19914 element sets of the frozen public c
 Times: median of 3 runs on 2026-10-07, Intel(R) Core(TM) i5-14600K (20 logical CPUs), Python 3.13.7; `--check` checks the counts, not the times.
 <!-- screening-benchmark-summary:end -->
 
+On the full catalog, which adds most of the rocket bodies and debris the
+public catalog lacks (retrieved nine days later, so the week differs):
+
+<!-- screening-benchmark-spacetrack-summary:start -->
+Screening 20 LEO primaries against the 31930 element sets of the frozen full catalog (Space-Track, retrieved 2026-10-15) for 7 days from 2026-10-15 00:00 UTC, with 4 worker processes (`tools/screening_benchmark.py --source spacetrack`):
+
+| Volume | Screened | Left out | Approaches | Wall time | CPU time |
+|---|---|---|---|---|---|
+| 5 km sphere (default) | 31914 | 5 future epoch, 11 propagation failed | 866 | 13.1 s | 56.1 s |
+| 10 km sphere (NASA, GP data) | 31914 | 5 future epoch, 11 propagation failed | 2689 | 14.2 s | 59.3 s |
+| SFS Handbook Table 3 | 31914 | 5 future epoch, 11 propagation failed | 787 | 20.1 s | 83.9 s |
+
+Times: median of 3 runs on 2026-10-16, Intel(R) Core(TM) i5-14600K (20 logical CPUs), Python 3.13.7; `--check` checks the counts, not the times.
+<!-- screening-benchmark-spacetrack-summary:end -->
+
 ## Development
 
 ```bash
@@ -174,6 +191,7 @@ uv run python tools/validation_report.py --monte-carlo   # Monte Carlo (slow)
 uv run python tools/risk_report.py   # Kelvins risk report (downloads 221 MB once)
 uv run python tools/screening_report.py   # SOCRATES screening report (offline)
 uv run python tools/screening_benchmark.py   # screening benchmark (offline, minutes)
+uv run python tools/screening_benchmark.py --source spacetrack   # on the full catalog
 uv run python tools/synthetic_operator_report.py   # synthetic operator report (offline)
 uv run python tools/spacetrack_snapshot.py verify   # frozen Space-Track catalog (offline)
 uv run ruff check && uv run ruff format --check
