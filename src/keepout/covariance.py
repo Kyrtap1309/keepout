@@ -402,6 +402,12 @@ class Covariance:
         """The 3x3 position block [m^2]."""
         return self.matrix[:3, :3]
 
+    @property
+    def position_only(self) -> bool:
+        """Whether the covariance is known only in position: every velocity
+        term is zero, as from :meth:`from_position`."""
+        return not np.any(self.matrix[3:])
+
     def in_gcrf(self, state: StateVector) -> Covariance:
         """Return this covariance in GCRF.
 

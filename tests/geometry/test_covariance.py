@@ -228,6 +228,21 @@ def test_position_only_covariance_has_a_zero_velocity_block() -> None:
     covariance = Covariance.from_position(4.0 * np.eye(3), "GCRF", EPOCH)
     np.testing.assert_array_equal(covariance.position, 4.0 * np.eye(3))
     np.testing.assert_array_equal(covariance.matrix[3:, :], np.zeros((3, 6)))
+    assert covariance.position_only
+    # A rotation to RTN keeps the velocity block zero.
+    assert covariance.in_rtn(STATE).position_only
+
+
+@pytest.mark.parametrize(("row", "column"), [(3, 3), (5, 5), (4, 0), (0, 5)])
+def test_any_velocity_term_makes_a_covariance_more_than_position(
+    row: int, column: int
+) -> None:
+    matrix = np.zeros((6, 6))
+    matrix[:3, :3] = np.eye(3)
+    matrix[3:, 3:] = 1e-12 * np.eye(3)
+    matrix[row, column] = matrix[column, row] = 1e-9 if row != column else 1e-6
+    assert not Covariance(matrix, "GCRF", EPOCH).position_only
+    assert not Covariance(VALID, "GCRF", EPOCH).position_only
 
 
 def test_position_only_covariance_must_be_3x3() -> None:

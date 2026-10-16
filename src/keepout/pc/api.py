@@ -16,6 +16,7 @@ from typing import (
 import numpy as np
 
 from keepout.conjunction import Conjunction
+from keepout.encounter import Role
 from keepout.errors import GeometryError, PcConvergenceError
 from keepout.orbits import orbital_period
 from keepout.pc._duration import (
@@ -168,8 +169,24 @@ def _auto(conjunction: Conjunction) -> _Choice:
         return frisbee(conjunction.plane, conjunction.hard_body_radius), notes, details
     if not notes or not _bound(conjunction):
         return foster(conjunction.plane, conjunction.hard_body_radius), notes, details
+    position_only = conjunction.position_only_covariance
+    if position_only:
+        notes = (*notes, _position_only_note(conjunction, position_only))
+        return foster(conjunction.plane, conjunction.hard_body_radius), notes, details
     two_d = foster(conjunction.plane, conjunction.hard_body_radius).value
     return _three_d(conjunction, notes, {**details, "pc_2d": two_d})
+
+
+def _position_only_note(conjunction: Conjunction, roles: tuple[Role, ...]) -> str:
+    """Why ``auto`` keeps the 2-D Pc for covariances known only in position."""
+    labels = " and ".join(conjunction.label(role) for role in roles)
+    whose = "covariances of" if len(roles) == 2 else "covariance of"
+    verb = "are" if len(roles) == 2 else "is"
+    return (
+        f"the {whose} {labels} {verb} known only in position (zero velocity "
+        "block): the 3-D methods need the velocity uncertainty, so the 2-D Pc "
+        "is used"
+    )
 
 
 def _require_three_d(conjunction: Conjunction) -> None:
@@ -273,9 +290,14 @@ def compute_pc(
         2. ``"alfano"`` if both covariances are unknown, ``"frisbee"`` if one
            is (maximum Pc: upper bounds);
         3. ``"hall3d"`` if a 2-D assumption is questionable (see
-           :func:`applicability`) and both orbits are elliptic, with the 2-D
-           Pc kept in ``details["pc_2d"]``;
-        4. ``"foster"`` otherwise.
+           :func:`applicability`), both orbits are elliptic and both
+           covariances have a velocity block, with the 2-D Pc kept in
+           ``details["pc_2d"]``;
+        4. ``"foster"`` otherwise, with a note when a 2-D assumption is
+           questionable but a covariance is known only in position (zero
+           velocity block, e.g. a synthetic covariance; see
+           :attr:`~keepout.conjunction.Conjunction.position_only_covariance`):
+           the 3-D methods would take its velocity as exact.
 
         When ``"hall3d"`` raises :class:`PcConvergenceError` after its
         encounter scan (the peak-overlap iteration failed where the rate

@@ -150,13 +150,19 @@ def along_track_conjunction(duration: float) -> Conjunction:
     """Head-on LEO conjunction whose encounter lasts ``duration`` seconds.
 
     The relative velocity is along GCRF y, so the along-track sigma sets the
-    duration: ``2 (SIGMA_EXTENT sigma + R) / v``, with R = 5 m.
+    duration: ``2 (SIGMA_EXTENT sigma + R) / v``, with R = 5 m. Both objects
+    have a velocity block (1 mm/s), which ``auto``'s 3-D methods need.
     """
     radius, speed = 5.0, 2 * 7546.0
     sigma = (duration * speed / 2.0 - radius) / SIGMA_EXTENT
-    primary = object_state(LEO_R, LEO_V, np.diag([100.0, sigma**2, 100.0]))
+    primary = object_state(
+        LEO_R, LEO_V, np.diag([100.0, sigma**2, 100.0]), velocity_sigma=1e-3
+    )
     secondary = object_state(
-        LEO_R + np.array([30.0, 0.0, 0.0]), -LEO_V, np.zeros((3, 3))
+        LEO_R + np.array([30.0, 0.0, 0.0]),
+        -LEO_V,
+        np.zeros((3, 3)),
+        velocity_sigma=1e-3,
     )
     return Conjunction(primary, secondary, radius)
 
@@ -204,8 +210,10 @@ def test_auto_keeps_foster_for_a_questionable_unbound_encounter() -> None:
 
 def test_states_away_from_tca_are_reported() -> None:
     # Secondary 10 m along the relative velocity from closest approach.
-    primary = object_state(LEO_R, LEO_V, 100.0 * np.eye(3))
-    secondary = object_state(LEO_R + np.array([30.0, -10.0, 0.0]), -LEO_V, np.eye(3))
+    primary = object_state(LEO_R, LEO_V, 100.0 * np.eye(3), velocity_sigma=1e-3)
+    secondary = object_state(
+        LEO_R + np.array([30.0, -10.0, 0.0]), -LEO_V, np.eye(3), velocity_sigma=1e-3
+    )
     (message,) = compute_pc(Conjunction(primary, secondary, 5.0)).diagnostics
     assert message.startswith("states are 10 m from closest approach")
     assert message.endswith("; 2-D Pc uses the straight-line closest approach")
@@ -224,6 +232,41 @@ def test_large_sigma_across_a_slow_track_does_not_warn() -> None:
     assert result.details["encounter_duration_s"] == pytest.approx(
         2 * (SIGMA_EXTENT * math.sqrt(2.0) + 5.0) / 20.0, rel=1e-9
     )
+
+
+def test_auto_keeps_the_2d_pc_for_covariances_known_only_in_position() -> None:
+    # A questionable 2-D Pc would take auto to Hall, but with a zero
+    # velocity block Hall would treat the velocity as exact.
+    moving = along_track_conjunction(1.5 * DURATION_LIMIT * LEO_PERIOD)
+    for item, roles, labels in [
+        (moving.secondary, ("primary",), "covariance of primary (TEST) is"),
+        (
+            object_state(LEO_R + np.array([30.0, 0.0, 0.0]), -LEO_V, np.eye(3)),
+            ("primary", "secondary"),
+            "covariances of primary (TEST) and secondary (TEST) are",
+        ),
+    ]:
+        primary = object_state(LEO_R, LEO_V, known(moving.primary.covariance).position)
+        conjunction = Conjunction(primary, item, 5.0)
+        assert conjunction.position_only_covariance == roles
+        result = compute_pc(conjunction)
+        assert result.method == "foster"
+        assert result.value == foster(conjunction.plane, 5.0).value
+        assert result.diagnostics[0].startswith("2-D Pc assumptions questionable")
+        assert result.diagnostics[1] == (
+            f"the {labels} known only in position (zero velocity block): the "
+            "3-D methods need the velocity uncertainty, so the 2-D Pc is used"
+        )
+        assert "pc_2d" not in result.details
+        # Hall can still be chosen explicitly.
+        assert compute_pc(conjunction, "hall3d").method == "hall3d"
+
+
+def test_a_sound_2d_pc_needs_no_velocity_block() -> None:
+    assert TYPICAL_HEAD_ON.position_only_covariance == ("primary", "secondary")
+    result = compute_pc(TYPICAL_HEAD_ON)
+    assert result.method == "foster"
+    assert result.diagnostics == ()
 
 
 def test_auto_uses_frisbee_when_one_covariance_is_unknown() -> None:

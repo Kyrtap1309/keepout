@@ -147,6 +147,16 @@ class Conjunction:
         return tuple(role for role, item in self.objects if item.covariance is None)
 
     @property
+    def position_only_covariance(self) -> tuple[Role, ...]:
+        """Objects whose covariance is known only in position (a zero velocity
+        block, :attr:`~keepout.covariance.Covariance.position_only`)."""
+        return tuple(
+            role
+            for role, item in self.objects
+            if item.covariance is not None and item.covariance.position_only
+        )
+
+    @property
     def diagnostics(self) -> tuple[str, ...]:
         """Covariance repairs and unknown covariances, labelled with role and id.
 
