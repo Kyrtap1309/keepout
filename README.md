@@ -1,10 +1,11 @@
 # keepout
 
 Spacecraft conjunction assessment in Python: screening against the public
-catalog, CCSDS CDM ingest, probability of collision (Pc), risk trends and
+catalog, CCSDS CDM ingest and generation, probability of collision (Pc),
+risk trends, a synthetic operator on public data, a command line and
 collision-avoidance manoeuvre planning.
 
-> **Status:** pre-alpha (milestone M5 — screening).
+> **Status:** pre-alpha (milestone M6 — synthetic operator and command line).
 
 Pc algorithms are implemented from the published literature and validated
 against the public test cases of the
@@ -178,6 +179,32 @@ Screening 20 LEO primaries against the 31930 element sets of the frozen full cat
 
 Times: median of 3 runs on 2026-10-16, Intel(R) Core(TM) i5-14600K (20 logical CPUs), Python 3.13.7; `--check` checks the counts, not the times.
 <!-- screening-benchmark-spacetrack-summary:end -->
+
+## Synthetic operator and command line
+
+```bash
+pip install "keepout[cli]"
+keepout screen --fleet examples/synthetic-operator/fleet.toml \
+    --catalog tests/screening/data/celestrak-public.csv.gz \
+    --start 2026-10-06 --days 7 --cdm-dir cdms
+keepout assess cdms/*.kvn   # exit status 3 if an event needs a manoeuvre
+```
+
+`keepout screen` plays a conjunction assessment service for a fleet of real
+satellites (here, in a clone of the repository, the ISS, Metop-B and
+Intelsat 39 against the public catalog frozen on 2026-10-06): it screens
+them, issues a CCSDS CDM for every close approach, computes the Pc from each
+CDM and assesses each event (12 approaches that week, 2 to monitor;
+[report](docs/synthetic-operator.md)). GP data has no covariance, so the
+CDMs carry keepout's model of GP element-set errors, an explicit
+[assumption](docs/assumptions.md) from the literature, not orbit
+determination: the Pc values show what the model implies, not the
+satellites' real risk. `keepout fetch catalog` downloads the live catalog,
+from CelesTrak (no account) or Space-Track.org (the full catalog, with an
+account, within its published limits); `keepout fetch cdm` lists
+Space-Track's public CDM summaries; `keepout validate` checks keepout's Pc
+against CARA's cases. See [Synthetic operator](docs/synthetic.md), [Command
+line](docs/cli.md) and [Space-Track data](docs/spacetrack.md).
 
 ## Development
 

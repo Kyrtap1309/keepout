@@ -48,6 +48,10 @@ nav:
   - 3-D, Monte Carlo and maximum Pc: pc-3d.md
   - Risk assessment: risk.md
   - Screening: screening.md
+  - Synthetic operator: synthetic.md
+  - Assumptions: assumptions.md
+  - Command line: cli.md
+  - Space-Track data: spacetrack.md
   - Reports:
       - Validation report: validation.md
       - Monte Carlo validation report: validation-monte-carlo.md
@@ -58,6 +62,7 @@ nav:
       - Probability of collision: reference/pc.md
       - Risk: reference/risk.md
       - Screening: reference/screening.md
+      - Synthetic operator: reference/synthetic.md
       - Conjunction: reference/conjunction.md
       - CDM: reference/cdm.md
       - Element sets (OMM): reference/omm.md

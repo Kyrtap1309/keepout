@@ -1,11 +1,12 @@
 # keepout
 
 Spacecraft conjunction assessment in Python: screening against the public
-catalog, CCSDS CDM ingest, probability of collision (Pc), risk trends and
+catalog, CCSDS CDM ingest and generation, probability of collision (Pc),
+risk trends, a synthetic operator on public data, a command line and
 collision-avoidance manoeuvre planning.
 
 !!! warning "Pre-alpha"
-    Milestone M5 — screening. APIs will change.
+    Milestone M6 — synthetic operator and command line. APIs will change.
 
 ## Reading a CDM
 
@@ -77,6 +78,26 @@ See [Screening](screening.md) for the method, the screening volumes and the
 limits of GP data, and [Screening against SOCRATES](screening-socrates.md)
 for keepout's results next to CelesTrak's.
 
+## Synthetic operator and command line
+
+```bash
+pip install "keepout[cli]"
+keepout screen --fleet examples/synthetic-operator/fleet.toml \
+    --catalog tests/screening/data/celestrak-public.csv.gz \
+    --start 2026-10-06 --days 7 --cdm-dir cdms
+keepout assess cdms/*.kvn   # exit status 3 if an event needs a manoeuvre
+```
+
+In a clone of the repository, this screens three real satellites against
+the public catalog frozen on 2026-10-06, issues a CCSDS CDM for each of the
+12 close approaches of the week and assesses each. The CDMs' covariances are
+keepout's model of GP element-set errors, an assumption, not orbit
+determination. See [Synthetic operator](synthetic.md) for what a run does,
+[Assumptions](assumptions.md) for the model and its limits,
+[Command line](cli.md) for every command, [Space-Track data](spacetrack.md)
+for the full catalog, and the [report](synthetic-operator.md) for the
+week's approaches.
+
 ## Validation philosophy
 
 Every Pc algorithm in keepout is implemented from the published literature
@@ -98,5 +119,8 @@ uv run python tools/validation_report.py --monte-carlo   # Monte Carlo (slow)
 uv run python tools/risk_report.py   # Kelvins risk report (downloads 221 MB once)
 uv run python tools/screening_report.py   # SOCRATES screening report (offline)
 uv run python tools/screening_benchmark.py   # screening benchmark (offline, minutes)
+uv run python tools/screening_benchmark.py --source spacetrack   # on the full catalog
+uv run python tools/synthetic_operator_report.py   # synthetic operator report (offline)
+uv run python tools/spacetrack_snapshot.py verify   # frozen Space-Track catalog (offline)
 uv run mkdocs serve           # this documentation
 ```

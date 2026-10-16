@@ -373,7 +373,8 @@ def _introduction(summary: Summary) -> list[str]:
         f"default thresholds (green below {settings['green_below']:.0e}, red "
         f"from {settings['red_from']:.0e}, {settings['basis']} basis) and "
         f"decision point ({settings['decision_point_days']:g} days before "
-        "TCA). See [Screening](screening.md) and [Risk assessment](risk.md). "
+        "TCA). See [Synthetic operator](synthetic.md), [Screening](screening.md) "
+        "and [Risk assessment](risk.md). "
         "keepout is not these satellites' operator, and nothing here is advice "
         "about them.",
         "",
@@ -385,7 +386,8 @@ def _introduction(summary: Summary) -> list[str]:
         f"{settings['safety_factor']:g}. It is an assumption, not orbit "
         "determination: the Pc values show what the model implies, not the "
         "real risk of these satellites. The CDMs say so in their comments "
-        "and give `COVARIANCE_METHOD = DEFAULT`.",
+        "and give `COVARIANCE_METHOD = DEFAULT`. [Assumptions](assumptions.md) "
+        "gives the model's sources and limits.",
         "",
         "Data: USSPACECOM/18 SDS via Space-Track.org, retrieved from CelesTrak "
         f"(celestrak.org) on {catalog['retrieved']} (see "

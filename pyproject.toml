@@ -1,7 +1,7 @@
 [project]
 name = "keepout"
 version = "0.1.0.dev0"
-description = "Spacecraft conjunction assessment: screening, CDM ingest, probability of collision, risk trends and avoidance manoeuvre planning."
+description = "Spacecraft conjunction assessment: screening, CDM ingest and generation, probability of collision, risk trends, a synthetic operator, a command line and avoidance manoeuvre planning."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -114,7 +114,7 @@ pythonpath = ["tools"]
 addopts = ["-ra", "--strict-markers", "-m", "not validation"]
 filterwarnings = ["error"]
 markers = [
-    "validation: slow checks against reference data (NASA CARA and ESA Kelvins data download on first run; screening uses the committed CelesTrak data)",
+    "validation: slow checks against reference data (NASA CARA and ESA Kelvins data download on first run; screening and the synthetic operator use the committed GP data; the Space-Track answers check needs KEEPOUT_SPACETRACK_RAW)",
 ]
 
 [tool.coverage.run]

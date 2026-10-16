@@ -378,7 +378,8 @@ def make_cdm(
         ``MESSAGE_ID``; by default :func:`make_message_id` of the objects'
         ids, the TCA and ``created``.
     message_for
-        ``MESSAGE_FOR`` (the spacecraft operator the message is for), if any.
+        ``MESSAGE_FOR`` (the name of the spacecraft the message is for), if
+        any.
     screening_period
         ``START_SCREEN_PERIOD`` and ``STOP_SCREEN_PERIOD``, if given.
     screening_volume

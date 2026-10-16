@@ -196,9 +196,12 @@ covariance (operators send zeros when they have none).
    not elliptic);
 2. both covariances unknown: `alfano`; one unknown: `frisbee`;
 3. a questionable 2-D assumption (encounter longer than 1% of an orbit, or
-   states off TCA), with elliptic orbits: `hall3d`, with the 2-D Pc kept in
-   `details["pc_2d"]`;
-4. otherwise `foster`.
+   states off TCA), with elliptic orbits and both covariances known in
+   velocity too: `hall3d`, with the 2-D Pc kept in `details["pc_2d"]`;
+4. otherwise `foster`, with a note when a 2-D assumption is questionable
+   but a covariance is known only in position (a zero velocity block, as
+   keepout's [synthetic covariances](assumptions.md#what-the-model-is-for)):
+   the 3-D methods would take that object's velocity as exact.
 
 If `hall3d` raises `PcConvergenceError` after its encounter scan (the
 peak-overlap iteration failed where the rate matters, the rate cannot be
