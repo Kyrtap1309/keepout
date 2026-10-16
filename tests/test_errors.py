@@ -4,12 +4,14 @@ import pytest
 
 from keepout import errors
 from keepout.errors import (
+    AuthError,
     CcsdsParseError,
     CdmParseError,
     GeometryError,
     HttpStatusError,
     KeepoutError,
     OmmParseError,
+    RateLimited,
     SourceUnavailable,
     UnsupportedElements,
     UnsupportedFrame,
@@ -97,3 +99,13 @@ def test_an_http_status_error_is_a_source_error_with_url_and_status() -> None:
     assert isinstance(error, SourceUnavailable)
     assert str(error) == "cannot download u: HTTP 503"
     assert (error.url, error.status) == ("u", 503)
+
+
+def test_account_and_limit_errors_are_source_errors() -> None:
+    # A caller that handles an unavailable source handles these too.
+    assert issubclass(AuthError, SourceUnavailable)
+    error = RateLimited("try again in 40 min", retry_after=2400.0)
+    assert isinstance(error, SourceUnavailable)
+    assert str(error) == "try again in 40 min"
+    assert error.retry_after == 2400.0
+    assert RateLimited("refused").retry_after is None

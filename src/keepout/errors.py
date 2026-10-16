@@ -1,6 +1,7 @@
 """Exception hierarchy for keepout."""
 
 __all__ = [
+    "AuthError",
     "CaraFormatError",
     "CcsdsParseError",
     "CdmParseError",
@@ -15,6 +16,7 @@ __all__ = [
     "OmmParseError",
     "OmmWriteError",
     "PcConvergenceError",
+    "RateLimited",
     "SourceFormatError",
     "SourceUnavailable",
     "UnsupportedElements",
@@ -47,6 +49,28 @@ class HttpStatusError(SourceUnavailable):
         super().__init__(message)
         self.url = url
         self.status = status
+
+
+class AuthError(SourceUnavailable):
+    """A data source that needs an account refused the login, or no
+    credentials were given (Space-Track)."""
+
+
+class RateLimited(SourceUnavailable):
+    """A request would exceed, or exceeded, a data source's published limits.
+
+    Parameters
+    ----------
+    message
+        What happened.
+    retry_after
+        Seconds until keepout allows the request again; ``None`` when the
+        server refused it, as it does not say when (Space-Track).
+    """
+
+    def __init__(self, message: str, *, retry_after: float | None = None) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
 
 
 class ChecksumMismatch(KeepoutError):

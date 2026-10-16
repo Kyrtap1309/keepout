@@ -70,6 +70,7 @@ nav:
       - CARA reference data: reference/cara.md
       - Kelvins data: reference/kelvins.md
       - CelesTrak data: reference/celestrak.md
+      - Space-Track data: reference/spacetrack.md
       - Data cache: reference/cache.md
       - Validation tooling: reference/validation.md
       - Errors: reference/errors.md

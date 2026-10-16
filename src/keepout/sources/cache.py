@@ -1,7 +1,7 @@
 """Downloaded reference data: cache location, verified atomic writes, HTTP.
 
-Shared by :mod:`keepout.sources.cara`, :mod:`keepout.sources.kelvins` and
-:mod:`keepout.sources.celestrak`.
+Shared by :mod:`keepout.sources.cara`, :mod:`keepout.sources.kelvins`,
+:mod:`keepout.sources.celestrak` and :mod:`keepout.sources.spacetrack`.
 Every cached file has a pinned SHA-256 digest; a file is written under a
 unique temporary name and renamed into place only once its digest matches,
 so the cache never uses a partial or unverified file (:func:`store`). Bytes
@@ -9,13 +9,20 @@ already in memory are written the same way, without a digest to match
 (:func:`store_bytes`). A hard kill (SIGKILL,
 power loss) mid-write can leave the temporary ``.part`` file behind; it is
 never read.
+
+A download kept for reuse (CelesTrak, Space-Track) has a ``.meta.json``
+file next to it recording its URL, digest and times (:class:`CopyMeta`);
+:func:`read_copy` gives the copy only if both files are intact.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import http.client
 import io
+import json
+import math
 import os
 import stat
 import tempfile
@@ -24,10 +31,11 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Callable
+from dataclasses import dataclass
 from http import HTTPStatus
 from importlib.metadata import version
 from pathlib import Path
-from typing import Final, Protocol, TypeAlias
+from typing import Final, NamedTuple, Protocol, TypeAlias, TypeGuard
 
 import platformdirs
 
@@ -38,13 +46,18 @@ __all__ = [
     "DOWNLOAD_TIMEOUT",
     "HOME_PAGE",
     "USER_AGENT",
+    "CachedCopy",
+    "CopyMeta",
     "Sink",
     "cache_dir",
     "has_digest",
     "http_download",
     "http_stream",
+    "meta_path",
+    "read_copy",
     "store",
     "store_bytes",
+    "write_meta",
 ]
 
 DOWNLOAD_TIMEOUT: Final = 60.0
@@ -293,3 +306,83 @@ def _write(
         raise
     _remember(target, actual, _signature(target))
     return actual
+
+
+_META_FORMAT: Final = 1
+"""Version of the ``.meta.json`` layout; another version is not read."""
+
+
+@dataclass(frozen=True, slots=True)
+class CopyMeta:
+    """What the ``.meta.json`` file of a cached download records.
+
+    Parameters
+    ----------
+    url
+        Where the copy was downloaded from.
+    sha256
+        SHA-256 hex digest of the copy.
+    retrieved
+        Unix time of the download [s].
+    checked
+        Unix time the source last confirmed the copy current [s]: the
+        download, or later (CelesTrak's HTTP 403 for unchanged data).
+    """
+
+    url: str
+    sha256: str
+    retrieved: float
+    checked: float
+
+
+class CachedCopy(NamedTuple):
+    """A cached download and its metadata, as :func:`read_copy` finds them."""
+
+    data: bytes
+    meta: CopyMeta
+
+
+def meta_path(target: Path) -> Path:
+    """The ``.meta.json`` file of the cached download at ``target``."""
+    return target.with_name(f"{target.name}.meta.json")
+
+
+def read_copy(target: Path, url: str) -> CachedCopy | None:
+    """The cached download of ``url`` at ``target``, if it is complete and intact.
+
+    ``None`` if either file is missing or unreadable, the metadata is not
+    of this layout or names another URL, or the digest does not match.
+    """
+    try:
+        record = json.loads(meta_path(target).read_bytes())
+        data = target.read_bytes()
+    except (OSError, ValueError):
+        return None
+    if not isinstance(record, dict) or record.get("format") != _META_FORMAT:
+        return None
+    url_, digest = record.get("url"), record.get("sha256")
+    retrieved, checked = record.get("retrieved"), record.get("checked")
+    if (
+        url_ != url
+        or not isinstance(digest, str)
+        or not _is_time(retrieved)
+        or not _is_time(checked)
+        or hashlib.sha256(data).hexdigest() != digest
+    ):
+        return None
+    meta = CopyMeta(url=url, sha256=digest, retrieved=retrieved, checked=checked)
+    return CachedCopy(data, meta)
+
+
+def _is_time(value: object) -> TypeGuard[float]:
+    """Whether ``value`` is a Unix time as :func:`write_meta` writes one."""
+    return isinstance(value, float) and math.isfinite(value)
+
+
+def write_meta(target: Path, meta: CopyMeta) -> None:
+    """Write the ``.meta.json`` file of the download at ``target`` atomically.
+
+    Times must be floats (``time.time()``); :func:`read_copy` refuses others.
+    """
+    record = {"format": _META_FORMAT, **dataclasses.asdict(meta)}
+    store_bytes(meta_path(target), (json.dumps(record, indent=2) + "\n").encode())

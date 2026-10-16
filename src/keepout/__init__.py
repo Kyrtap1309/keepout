@@ -14,6 +14,7 @@ from importlib.metadata import version
 from keepout.conjunction import Conjunction
 from keepout.covariance import Covariance, make_covariance
 from keepout.errors import (
+    AuthError,
     CaraFormatError,
     CcsdsParseError,
     CdmParseError,
@@ -28,6 +29,7 @@ from keepout.errors import (
     OmmParseError,
     OmmWriteError,
     PcConvergenceError,
+    RateLimited,
     SourceFormatError,
     SourceUnavailable,
     UnsupportedElements,
@@ -47,6 +49,7 @@ from keepout.state import RefFrame, StateVector
 __version__ = version("keepout")
 
 __all__ = [
+    "AuthError",
     "CaraFormatError",
     "CcsdsParseError",
     "CdmParseError",
@@ -70,6 +73,7 @@ __all__ = [
     "PcConvergenceError",
     "PcObservation",
     "PcResult",
+    "RateLimited",
     "RefFrame",
     "ScreeningResult",
     "ScreeningVolume",

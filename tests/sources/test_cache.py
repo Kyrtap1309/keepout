@@ -261,3 +261,19 @@ def test_store_bytes_creates_the_parents(tmp_path: Path) -> None:
 def test_only_http_urls_are_opened(url: str) -> None:
     with pytest.raises(ValueError, match="not an HTTP URL"):
         cache.http_stream(url, io.BytesIO())
+
+
+def test_a_cached_copy_is_found_with_its_metadata(tmp_path: Path) -> None:
+    target = tmp_path / "source" / "data.json"
+    meta = cache.CopyMeta(
+        url="https://example.org/data",
+        sha256=cache.store_bytes(target, PAYLOAD),
+        retrieved=1_790_000_000.0,
+        checked=1_790_000_060.0,
+    )
+    cache.write_meta(target, meta)
+    assert cache.meta_path(target) == tmp_path / "source" / "data.json.meta.json"
+    assert cache.read_copy(target, meta.url) == cache.CachedCopy(PAYLOAD, meta)
+    assert cache.read_copy(target, "https://example.org/other") is None
+    target.write_bytes(b"changed")
+    assert cache.read_copy(target, meta.url) is None
