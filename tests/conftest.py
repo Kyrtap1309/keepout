@@ -79,6 +79,9 @@ def no_network(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) 
 
 
 @pytest.fixture(autouse=True)
-def _forget_verified(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Start every test without the process-wide memo of verified files."""
-    monkeypatch.setattr(cache, "_verified", {})
+def _forget_verified() -> Iterator[None]:
+    """Start and end every test without the process-wide memo of verified
+    files."""
+    cache.forget_verified()
+    yield
+    cache.forget_verified()

@@ -15,6 +15,28 @@ from keepout.encounter import EncounterPlane
 
 _BASE_PLANE = head_on(1.0, 1.0, 1.0, 1.0).plane
 
+SIDE_BY_SIDE_OFFSET = np.array([0.0, 0.0, 10.0])
+"""Secondary minus primary position of :func:`side_by_side` [m]."""
+
+SIDE_BY_SIDE_VARIANCE = 25.0
+"""Position variance of each object of :func:`side_by_side`, on every axis [m^2]."""
+
+
+def side_by_side(velocity: FloatArray = LEO_V) -> Conjunction:
+    """Two objects 10 m apart across track with the same ``velocity``: zero
+    relative velocity, so there is no encounter plane.
+
+    Both have 5 m position sigmas and an exact velocity (no velocity block);
+    the hard-body radius is 5 m. With the default circular LEO velocity Hall's
+    3D-Nc is defined (see :data:`reference_pc.SIDE_BY_SIDE_NC`).
+    """
+    covariance = SIDE_BY_SIDE_VARIANCE * np.eye(3)
+    primary = object_state(LEO_R, velocity, covariance, object_id="PRI")
+    secondary = object_state(
+        LEO_R + SIDE_BY_SIDE_OFFSET, velocity, covariance, object_id="SEC"
+    )
+    return Conjunction(primary, secondary, 5.0)
+
 
 @st.composite
 def unit_vectors(draw: st.DrawFn) -> FloatArray:

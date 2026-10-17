@@ -24,6 +24,14 @@ def pc_with(plane: EncounterPlane, covariance: FloatArray, radius: float) -> flo
     ).value
 
 
+def added_along_miss(plane: EncounterPlane, variance: float) -> FloatArray:
+    """The plane covariance with ``variance`` added along the miss direction."""
+    if variance == 0.0:
+        return plane.covariance
+    unit = plane.miss_vector / plane.miss_distance
+    return plane.covariance + variance * np.outer(unit, unit)
+
+
 @pytest.mark.parametrize("case", ANISOTROPIC[:4])
 def test_frisbee_is_the_maximum_over_added_covariances(case: PlaneCase) -> None:
     plane = with_unknown(case, "secondary")
@@ -38,6 +46,9 @@ def test_frisbee_is_the_maximum_over_added_covariances(case: PlaneCase) -> None:
         assert pc_with(plane, plane.covariance + added, case.radius) <= result.value * (
             1.0 + 1e-9
         )
+    # ... and is reached, by the variance it reports along the miss.
+    along = added_along_miss(plane, result.details["added_variance_m2"])
+    assert result.value == pytest.approx(pc_with(plane, along, case.radius), rel=1e-12)
 
 
 def test_frisbee_adds_the_small_body_optimum_along_the_miss() -> None:
@@ -62,11 +73,21 @@ def test_frisbee_with_a_miss_inside_one_sigma_adds_nothing() -> None:
     assert "zero added covariance" in result.diagnostics[-1]
 
 
+ALONG_MISS_RTOL = 1e-5
+"""How far below the true maximum :func:`along_miss_grid_max` can fall.
+
+Its nearest node is at most half a step (0.0015 decades) from the optimum,
+where ``ln Pc`` curves by about 1/2 per ``(ln s)^2`` (small-body limit:
+``-ln(w) / 2 - d^2 / (2 w)``, ``w`` the variance along the miss): the
+node's Pc is lower by ~``0.5 * 0.5 * (0.0015 ln 10)^2 = 3e-6``. Frisbee's own
+bounded search converges to 1e-9 decades and to within
+:data:`~keepout.pc.maxpc.SEARCH_GAIN_RTOL` (1e-8) of its maximum."""
+
+
 def along_miss_grid_max(plane: EncounterPlane, radius: float) -> float:
     """Independent dense sweep of the added variance along the miss."""
-    unit = plane.miss_vector / plane.miss_distance
     return max(
-        pc_with(plane, plane.covariance + s * np.outer(unit, unit), radius)
+        pc_with(plane, added_along_miss(plane, s), radius)
         for s in [0.0, *10.0 ** np.linspace(-4.0, 8.0, 4001)]
     )
 
@@ -82,7 +103,23 @@ def along_miss_grid_max(plane: EncounterPlane, radius: float) -> float:
 def test_frisbee_is_an_upper_bound_for_a_large_hard_body(case: PlaneCase) -> None:
     plane = with_unknown(case, "secondary")
     result = frisbee(plane, case.radius)
-    assert result.value >= along_miss_grid_max(plane, case.radius) * (1.0 - 1e-9)
+    grid_max = along_miss_grid_max(plane, case.radius)
+    assert grid_max * (1.0 - 1e-9) <= result.value
+    assert result.value == pytest.approx(grid_max, rel=ALONG_MISS_RTOL)
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        PlaneCase(15.0, 0.0, 1.0, 1.0, 0.0, 10.0),
+        PlaneCase(12.0, 0.0, 0.5, 0.5, 0.0, 10.0),
+        PlaneCase(10.5, 0.0, 0.1, 0.1, 0.0, 10.0),
+    ],
+)
+def test_frisbee_for_a_large_hard_body_beats_the_analytic_variance(
+    case: PlaneCase,
+) -> None:
+    result = frisbee(with_unknown(case, "secondary"), case.radius)
     assert result.value > result.details["pc_analytic"] * (1.0 + 1e-3)
 
 
@@ -100,24 +137,46 @@ def test_frisbee_needs_exactly_one_unknown_covariance(roles: tuple[Role, ...]) -
         frisbee(with_unknown(ANISOTROPIC[0], *roles), 5.0)
 
 
+SCALE_GRID_RTOL = 2e-3
+"""How far below the true maximum the scale-factor grid of
+``test_dilution_is_the_maximum_over_scale_factors`` can fall.
+
+Its nearest node is at most half a step (0.025 decades) from the optimum,
+where ``ln Pc`` curves by about 1 per ``(ln k)^2`` (small-body limit:
+``-ln k - K^2 / (2 k)`` at ``k = K^2 / 2``): the node's Pc is lower by
+~``0.5 * (0.025 ln 10)^2 = 1.7e-3``. Dilution's own bounded search converges
+to 1e-9 decades and to within :data:`~keepout.pc.maxpc.SEARCH_GAIN_RTOL`."""
+
+
 @pytest.mark.parametrize("case", ANISOTROPIC[:4])
 def test_dilution_is_the_maximum_over_scale_factors(case: PlaneCase) -> None:
     plane = case.plane()
     result = dilution(plane, case.radius)
     assert result.method == "dilution"
-    grid = [
+    grid_max = max(
         pc_with(plane, 10.0**k * plane.covariance, case.radius)
         for k in np.linspace(-6.0, 6.0, 241)
-    ]
-    assert result.value >= max(grid) * (1.0 - 1e-9)
-    assert result.details["pc_nominal"] == foster(plane, case.radius).value
+    )
+    assert grid_max * (1.0 - 1e-9) <= result.value
+    assert result.value == pytest.approx(grid_max, rel=SCALE_GRID_RTOL)
 
 
-def test_large_covariance_is_diluted_and_small_is_not() -> None:
+@pytest.mark.parametrize("case", ANISOTROPIC[:4])
+def test_dilution_reports_the_nominal_pc(case: PlaneCase) -> None:
+    plane = case.plane()
+    assert dilution(plane, case.radius).details["pc_nominal"] == (
+        foster(plane, case.radius).value
+    )
+
+
+def test_a_large_covariance_is_diluted() -> None:
     wide = dilution(PlaneCase(200.0, 0.0, 5000.0, 3000.0, 0.0, 10.0).plane(), 10.0)
     assert wide.details["diluted"] == 1.0
     assert wide.details["scale_factor"] < 1.0
     assert wide.value > wide.details["pc_nominal"]
+
+
+def test_a_small_covariance_is_not_diluted() -> None:
     tight = dilution(PlaneCase(200.0, 0.0, 20.0, 10.0, 0.0, 10.0).plane(), 10.0)
     assert tight.details["diluted"] == 0.0
     assert tight.details["scale_factor"] > 1.0

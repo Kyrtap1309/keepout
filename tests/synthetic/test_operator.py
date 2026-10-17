@@ -9,7 +9,7 @@ import astropy.units as u
 import numpy as np
 import pytest
 from astropy.time import Time
-from screening_data import load_fixture
+from screening_data import FIXTURE_START, fixture_by_number, load_fixture
 
 from keepout.cdm import kvn, make_message_id, xml
 from keepout.errors import FleetError
@@ -27,8 +27,8 @@ from keepout.synthetic.operator import DEFAULT_MODEL, HEADER_COMMENTS, UNKNOWN, 
 from keepout.units import DAY
 
 FIXTURE = load_fixture()
-BY_NUMBER = {omm.catalog_number: omm for omm in FIXTURE}
-START = Time("2026-10-06T00:00:00", scale="utc")
+BY_NUMBER = fixture_by_number()
+START = FIXTURE_START
 FLEET = Fleet(
     (
         FleetSatellite(52939, 5.0, maneuverable=True, name="FLEET ONE"),

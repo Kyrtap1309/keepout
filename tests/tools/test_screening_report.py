@@ -12,14 +12,13 @@ import pytest
 import screening_report as report
 import screening_snapshot as snapshot
 import snapshot_files
-from astropy.time import Time
-from screening_data import socrates_text
+from screening_data import FIXTURE_START, fixture_by_number, socrates_text
 
-from keepout.omm import Omm, load
+from keepout.omm import Omm
 from keepout.omm.celestrak import dumps_csv
 from keepout.sources.socrates import COLUMNS, read_socrates
 
-FIXTURE = {omm.catalog_number: omm for omm in load(snapshot.DATA / snapshot.FIXTURE)}
+FIXTURE = fixture_by_number()
 EXCERPT = socrates_text()
 HEADER = snapshot.socrates_header(EXCERPT)
 
@@ -33,7 +32,7 @@ PAIRS = {
 """Pairs of the excerpt whose objects are in the test fixture."""
 
 ROWS = [a for a in read_socrates(EXCERPT) if (a.primary, a.secondary) in PAIRS]
-START = Time("2026-10-06T00:00:00", scale="utc")
+START = FIXTURE_START
 
 
 def objects() -> list[Omm]:

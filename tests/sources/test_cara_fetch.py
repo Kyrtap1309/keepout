@@ -4,26 +4,14 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from web_builders import FakeDownloader, digest
 
 from keepout.errors import ChecksumMismatch
 from keepout.sources import cara
 from keepout.sources.cara import CaraFile, fetch
 
 PAYLOAD = b"cara reference bytes"
-FILE = CaraFile("Dir/Sub/data.mat", hashlib.sha256(PAYLOAD).hexdigest())
-
-
-class FakeDownloader:
-    """Serves ``data``, or each URL its own bytes from a mapping, and records
-    the URLs asked for; safe to call from several threads."""
-
-    def __init__(self, data: bytes | dict[str, bytes]) -> None:
-        self.data = data
-        self.urls: list[str] = []
-
-    def __call__(self, url: str) -> bytes:
-        self.urls.append(url)
-        return self.data if isinstance(self.data, bytes) else self.data[url]
+FILE = CaraFile("Dir/Sub/data.mat", digest(PAYLOAD))
 
 
 def cached_path(root: Path, file: CaraFile) -> Path:
@@ -81,11 +69,11 @@ class DigestCounter:
 
     def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self.calls = 0
-        digest = hashlib.file_digest
+        file_digest = hashlib.file_digest
 
         def counting(stream: Any, name: str) -> Any:
             self.calls += 1
-            return digest(stream, name)
+            return file_digest(stream, name)
 
         monkeypatch.setattr(hashlib, "file_digest", counting)
 
@@ -145,10 +133,7 @@ def test_failed_write_leaves_no_partial_file(
 
 def test_prefetch_caches_every_file(tmp_path: Path) -> None:
     payloads = [b"first", b"second", b"third"]
-    files = [
-        CaraFile(f"Dir/{i}.csv", hashlib.sha256(data).hexdigest())
-        for i, data in enumerate(payloads)
-    ]
+    files = [CaraFile(f"Dir/{i}.csv", digest(data)) for i, data in enumerate(payloads)]
     by_url = {file.url: data for file, data in zip(files, payloads, strict=True)}
     download = FakeDownloader(by_url)
     cara.prefetch(files, cache=tmp_path, download=download)

@@ -1,5 +1,4 @@
 import dataclasses
-import hashlib
 import io
 import json
 import math
@@ -9,7 +8,8 @@ from pathlib import Path
 
 import astropy.units as u
 import pytest
-from celestrak_builders import SAMPLE, FakeCelesTrak
+from celestrak_builders import SAMPLE
+from web_builders import START, Clock, FakeDownloader, FakeResponse, digest
 
 from keepout.errors import HttpStatusError, SourceFormatError, SourceUnavailable
 from keepout.omm import Omm
@@ -34,18 +34,6 @@ SOCRATES_CSV = (
     "25544,ISS (ZARYA),0.123,900,CALSPHERE 1,0.456,"
     "2026-10-07 12:00:00.000,1.234,14.567,1.0E-05,0.010\n"
 )
-START = 1_790_000_000.0
-"""A Unix time in September 2026."""
-
-
-class Clock:
-    """A settable Unix time."""
-
-    def __init__(self) -> None:
-        self.now = START
-
-    def __call__(self) -> float:
-        return self.now
 
 
 @pytest.fixture
@@ -73,7 +61,7 @@ def test_a_group_name_is_checked(name: str, tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="not a CelesTrak group name"):
         group_url(name)
     with pytest.raises(ValueError, match="not a CelesTrak group name"):
-        fetch_group(name, cache=tmp_path, download=FakeCelesTrak({}))
+        fetch_group(name, cache=tmp_path, download=FakeDownloader({}))
 
 
 def test_the_public_groups() -> None:
@@ -90,7 +78,7 @@ def test_the_public_groups() -> None:
 
 
 def test_a_group_is_downloaded_read_and_cached(tmp_path: Path, clock: Clock) -> None:
-    server = FakeCelesTrak({ACTIVE: ACTIVE_CSV})
+    server = FakeDownloader({ACTIVE: ACTIVE_CSV})
     group = fetch_group("active", cache=tmp_path, download=server, now=clock)
     assert server.urls == [ACTIVE]
     assert group.name == "active"
@@ -109,7 +97,7 @@ def test_a_group_is_downloaded_read_and_cached(tmp_path: Path, clock: Clock) -> 
     assert json.loads(meta_path(tmp_path, "active").read_text()) == {
         "format": 1,
         "url": ACTIVE,
-        "sha256": hashlib.sha256(ACTIVE_CSV).hexdigest(),
+        "sha256": digest(ACTIVE_CSV),
         "retrieved": START,
         "checked": START,
     }
@@ -121,11 +109,11 @@ def test_a_copy_younger_than_the_ttl_is_used_without_asking(
     fetch_group(
         "active",
         cache=tmp_path,
-        download=FakeCelesTrak({ACTIVE: ACTIVE_CSV}),
+        download=FakeDownloader({ACTIVE: ACTIVE_CSV}),
         now=clock,
     )
     clock.now = START + TTL - 1.0
-    server = FakeCelesTrak({})
+    server = FakeDownloader({})
     group = fetch_group("ACTIVE", cache=tmp_path, download=server, now=clock)
     assert server.urls == []
     assert group.omms == SAMPLE[:4]
@@ -136,12 +124,12 @@ def test_an_expired_copy_is_downloaded_again(tmp_path: Path, clock: Clock) -> No
     fetch_group(
         "active",
         cache=tmp_path,
-        download=FakeCelesTrak({ACTIVE: ACTIVE_CSV}),
+        download=FakeDownloader({ACTIVE: ACTIVE_CSV}),
         now=clock,
     )
     clock.now = START + TTL
     newer = dumps_csv(SAMPLE[4:]).encode()
-    server = FakeCelesTrak({ACTIVE: newer})
+    server = FakeDownloader({ACTIVE: newer})
     group = fetch_group("active", cache=tmp_path, download=server, now=clock)
     assert server.urls == [ACTIVE]
     assert group.omms == SAMPLE[4:]
@@ -153,18 +141,18 @@ def test_a_longer_max_age_keeps_a_copy_longer(tmp_path: Path, clock: Clock) -> N
     fetch_group(
         "active",
         cache=tmp_path,
-        download=FakeCelesTrak({ACTIVE: ACTIVE_CSV}),
+        download=FakeDownloader({ACTIVE: ACTIVE_CSV}),
         now=clock,
     )
     clock.now = START + 10 * TTL
-    server = FakeCelesTrak({})
+    server = FakeDownloader({})
     fetch_group("active", cache=tmp_path, max_age=math.inf, download=server, now=clock)
     assert server.urls == []
 
 
 @pytest.mark.parametrize("max_age", [TTL - 1.0, 0.0, -1.0, math.nan])
 def test_a_max_age_below_the_ttl_is_refused(max_age: float, tmp_path: Path) -> None:
-    server = FakeCelesTrak({})
+    server = FakeDownloader({})
     with pytest.raises(ValueError, match="max_age must be at least 7200 s"):
         fetch_group("active", cache=tmp_path, max_age=max_age, download=server)
     with pytest.raises(ValueError, match="max_age must be at least 7200 s"):
@@ -180,11 +168,11 @@ def test_a_copy_checked_in_the_future_is_not_trusted(
     fetch_group(
         "active",
         cache=tmp_path,
-        download=FakeCelesTrak({ACTIVE: ACTIVE_CSV}),
+        download=FakeDownloader({ACTIVE: ACTIVE_CSV}),
         now=clock,
     )
     clock.now = START - 1.0
-    server = FakeCelesTrak({ACTIVE: ACTIVE_CSV})
+    server = FakeDownloader({ACTIVE: ACTIVE_CSV})
     fetch_group("active", cache=tmp_path, download=server, now=clock)
     assert server.urls == [ACTIVE]
 
@@ -195,11 +183,11 @@ def test_403_means_unchanged_and_returns_the_cached_copy(
     fetch_group(
         "active",
         cache=tmp_path,
-        download=FakeCelesTrak({ACTIVE: ACTIVE_CSV}),
+        download=FakeDownloader({ACTIVE: ACTIVE_CSV}),
         now=clock,
     )
     clock.now = START + 3 * TTL
-    server = FakeCelesTrak({ACTIVE: 403})
+    server = FakeDownloader({ACTIVE: 403})
     group = fetch_group("active", cache=tmp_path, download=server, now=clock)
     assert server.urls == [ACTIVE]
     assert group.omms == SAMPLE[:4]
@@ -214,7 +202,7 @@ def test_403_means_unchanged_and_returns_the_cached_copy(
 def test_403_without_a_cached_copy_explains_itself(
     tmp_path: Path, clock: Clock
 ) -> None:
-    server = FakeCelesTrak({ACTIVE: 403})
+    server = FakeDownloader({ACTIVE: 403})
     with pytest.raises(SourceUnavailable, match=r"403.*not changed.*no usable copy"):
         fetch_group("active", cache=tmp_path, download=server, now=clock)
     assert server.urls == [ACTIVE]
@@ -228,12 +216,12 @@ def test_any_other_status_raises_once_and_keeps_the_cache(
     fetch_group(
         "active",
         cache=tmp_path,
-        download=FakeCelesTrak({ACTIVE: ACTIVE_CSV}),
+        download=FakeDownloader({ACTIVE: ACTIVE_CSV}),
         now=clock,
     )
     meta = meta_path(tmp_path, "active").read_bytes()
     clock.now = START + TTL
-    server = FakeCelesTrak({ACTIVE: status})
+    server = FakeDownloader({ACTIVE: status})
     with pytest.raises(HttpStatusError) as caught:
         fetch_group("active", cache=tmp_path, download=server, now=clock)
     assert caught.value.status == status
@@ -242,7 +230,7 @@ def test_any_other_status_raises_once_and_keeps_the_cache(
 
 
 def test_a_network_failure_raises_once(tmp_path: Path, clock: Clock) -> None:
-    server = FakeCelesTrak({ACTIVE: SourceUnavailable("offline")})
+    server = FakeDownloader({ACTIVE: SourceUnavailable("offline")})
     with pytest.raises(SourceUnavailable, match="offline"):
         fetch_group("active", cache=tmp_path, download=server, now=clock)
     assert server.urls == [ACTIVE]
@@ -254,7 +242,7 @@ def test_a_network_failure_raises_once(tmp_path: Path, clock: Clock) -> None:
 def test_a_body_that_is_not_omm_csv_is_refused_and_not_cached(
     body: bytes, tmp_path: Path, clock: Clock
 ) -> None:
-    server = FakeCelesTrak({ACTIVE: body})
+    server = FakeDownloader({ACTIVE: body})
     with pytest.raises(SourceFormatError, match="did not send CelesTrak OMM CSV"):
         fetch_group("active", cache=tmp_path, download=server, now=clock)
     assert not (tmp_path / "celestrak").exists()
@@ -312,11 +300,11 @@ def test_a_corrupt_cached_copy_is_downloaded_again(
     fetch_group(
         "active",
         cache=tmp_path,
-        download=FakeCelesTrak({ACTIVE: ACTIVE_CSV}),
+        download=FakeDownloader({ACTIVE: ACTIVE_CSV}),
         now=clock,
     )
     corrupt(tmp_path)
-    server = FakeCelesTrak({ACTIVE: ACTIVE_CSV})
+    server = FakeDownloader({ACTIVE: ACTIVE_CSV})
     group = fetch_group("active", cache=tmp_path, download=server, now=clock)
     assert server.urls == [ACTIVE]
     assert group.omms == SAMPLE[:4]
@@ -334,13 +322,13 @@ def test_403_with_a_corrupt_cached_copy_raises(
     fetch_group(
         "active",
         cache=tmp_path,
-        download=FakeCelesTrak({ACTIVE: ACTIVE_CSV}),
+        download=FakeDownloader({ACTIVE: ACTIVE_CSV}),
         now=clock,
     )
     corrupt(tmp_path)
     with pytest.raises(SourceUnavailable, match="no usable copy"):
         fetch_group(
-            "active", cache=tmp_path, download=FakeCelesTrak({ACTIVE: 403}), now=clock
+            "active", cache=tmp_path, download=FakeDownloader({ACTIVE: 403}), now=clock
         )
 
 
@@ -350,14 +338,14 @@ def test_a_cached_copy_keepout_can_no_longer_read_is_not_used(
     fetch_group(
         "active",
         cache=tmp_path,
-        download=FakeCelesTrak({ACTIVE: ACTIVE_CSV}),
+        download=FakeDownloader({ACTIVE: ACTIVE_CSV}),
         now=clock,
     )
     path = tmp_path / "celestrak" / "gp" / "active.csv"
     garbage = b"garbage"
     path.write_bytes(garbage)
-    _edit_meta(sha256=hashlib.sha256(garbage).hexdigest())(tmp_path)
-    server = FakeCelesTrak({ACTIVE: 403})
+    _edit_meta(sha256=digest(garbage))(tmp_path)
+    server = FakeDownloader({ACTIVE: 403})
     with pytest.raises(SourceUnavailable, match="no usable copy"):
         fetch_group("active", cache=tmp_path, download=server, now=clock)
     server.answers[ACTIVE] = ACTIVE_CSV
@@ -374,7 +362,7 @@ def test_the_catalog_keeps_the_newest_set_of_each_object(
     calsphere, iss, goes, themis = SAMPLE[:4]
     newer_iss = later(iss, 0.25)
     debris = dumps_csv([SAMPLE[4]]).encode()
-    server = FakeCelesTrak(
+    server = FakeDownloader(
         {
             ACTIVE: ACTIVE_CSV,
             group_url("last-30-days"): dumps_csv(
@@ -397,7 +385,7 @@ def test_the_catalog_keeps_the_newest_set_of_each_object(
 def test_a_catalog_fetch_stops_at_the_first_failure(
     tmp_path: Path, clock: Clock
 ) -> None:
-    server = FakeCelesTrak({ACTIVE: ACTIVE_CSV, STATIONS: 500})
+    server = FakeDownloader({ACTIVE: ACTIVE_CSV, STATIONS: 500})
     with pytest.raises(HttpStatusError) as raised:
         fetch_catalog(
             ["active", "stations", "analyst"],
@@ -416,7 +404,7 @@ def test_a_catalog_fetch_stops_at_the_first_failure(
 
 
 def test_a_group_named_twice_is_fetched_once(tmp_path: Path, clock: Clock) -> None:
-    server = FakeCelesTrak({ACTIVE: ACTIVE_CSV})
+    server = FakeDownloader({ACTIVE: ACTIVE_CSV})
     catalog = fetch_catalog(
         ["active", "ACTIVE"], cache=tmp_path, download=server, now=clock
     )
@@ -426,7 +414,7 @@ def test_a_group_named_twice_is_fetched_once(tmp_path: Path, clock: Clock) -> No
 
 
 def test_the_catalog_needs_a_collection_of_groups(tmp_path: Path) -> None:
-    server = FakeCelesTrak({})
+    server = FakeDownloader({})
     with pytest.raises(TypeError, match="not a string"):
         fetch_catalog("active", cache=tmp_path, download=server)
     with pytest.raises(ValueError, match="no groups"):
@@ -437,7 +425,7 @@ def test_the_catalog_needs_a_collection_of_groups(tmp_path: Path) -> None:
 def test_socrates_is_downloaded_cached_and_given_as_text(
     tmp_path: Path, clock: Clock
 ) -> None:
-    server = FakeCelesTrak({SOCRATES_URL: SOCRATES_CSV.encode()})
+    server = FakeDownloader({SOCRATES_URL: SOCRATES_CSV.encode()})
     report = fetch_socrates(cache=tmp_path, download=server, now=clock)
     assert report.text == SOCRATES_CSV
     path = tmp_path / "celestrak" / "socrates" / "sort-minRange.csv"
@@ -455,7 +443,7 @@ def test_socrates_reads_a_header_with_a_byte_order_mark(
     tmp_path: Path, clock: Clock
 ) -> None:
     text = "\ufeff" + SOCRATES_CSV.replace("\n", "\r\n")
-    server = FakeCelesTrak({SOCRATES_URL: text.encode()})
+    server = FakeDownloader({SOCRATES_URL: text.encode()})
     assert fetch_socrates(cache=tmp_path, download=server, now=clock).text == text
 
 
@@ -465,7 +453,7 @@ def test_socrates_reads_a_header_with_a_byte_order_mark(
 def test_a_body_that_is_not_a_socrates_report_is_refused(
     body: bytes, tmp_path: Path, clock: Clock
 ) -> None:
-    server = FakeCelesTrak({SOCRATES_URL: body})
+    server = FakeDownloader({SOCRATES_URL: body})
     with pytest.raises(SourceFormatError, match="did not send"):
         fetch_socrates(cache=tmp_path, download=server, now=clock)
     assert not (tmp_path / "celestrak").exists()
@@ -476,7 +464,7 @@ def test_the_default_cache_is_keepouts(
 ) -> None:
     monkeypatch.setenv("KEEPOUT_CACHE_DIR", str(tmp_path))
     group = fetch_group(
-        "active", download=FakeCelesTrak({ACTIVE: ACTIVE_CSV}), now=clock
+        "active", download=FakeDownloader({ACTIVE: ACTIVE_CSV}), now=clock
     )
     assert group.retrieval.path == tmp_path / "celestrak" / "gp" / "active.csv"
 
@@ -486,13 +474,9 @@ def test_requests_name_keepout_in_the_user_agent(
 ) -> None:
     requests: list[urllib.request.Request] = []
 
-    class Response(io.BytesIO):
-        status = 200
-        reason = "OK"
-
     def fake_urlopen(request: urllib.request.Request, timeout: float) -> io.BytesIO:
         requests.append(request)
-        return Response(ACTIVE_CSV)
+        return FakeResponse(ACTIVE_CSV)
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
     assert fetch_group("active", cache=tmp_path, now=clock).omms == SAMPLE[:4]

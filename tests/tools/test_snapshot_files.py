@@ -1,6 +1,5 @@
 import argparse
 import gzip
-import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -10,6 +9,7 @@ from typing import Literal, TypedDict
 import pytest
 import snapshot_files
 from celestrak_builders import SAMPLE
+from web_builders import digest
 
 from keepout.omm import Omm
 
@@ -33,13 +33,13 @@ ANSWERS = (Answer("https://a", 1, False), Answer("https://b", 22, True))
 
 def test_a_saved_body_is_read_when_its_digest_matches(tmp_path: Path) -> None:
     (tmp_path / "a.bin").write_bytes(b"answer")
-    listed = Listed("a.bin", hashlib.sha256(b"answer").hexdigest())
+    listed = Listed("a.bin", digest(b"answer"))
     assert snapshot_files.read_body(tmp_path, listed) == b"answer"
 
 
 def test_a_changed_body_is_refused(tmp_path: Path) -> None:
     (tmp_path / "a.bin").write_bytes(b"changed")
-    listed = Listed("a.bin", hashlib.sha256(b"answer").hexdigest())
+    listed = Listed("a.bin", digest(b"answer"))
     with pytest.raises(ValueError, match=r"does not match its digest in raw\.json"):
         snapshot_files.read_body(tmp_path, listed)
 
@@ -146,7 +146,7 @@ def test_catalog_counts_give_objects_regimes_and_epochs() -> None:
 
 def test_digests_give_each_file_its_length_and_sha256() -> None:
     assert snapshot_files.file_digests({"a": b"xyz"}) == {
-        "a": {"bytes": 3, "sha256": hashlib.sha256(b"xyz").hexdigest()}
+        "a": {"bytes": 3, "sha256": digest(b"xyz")}
     }
 
 

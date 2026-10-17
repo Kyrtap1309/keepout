@@ -1,10 +1,7 @@
 import gzip
-import hashlib
-import io
 import json
 import os
 import sys
-import zipfile
 from pathlib import Path
 from typing import Final
 
@@ -26,6 +23,7 @@ from spacetrack_builders import (
     space_track_cdm_public,
     space_track_gp,
 )
+from web_builders import digest, pin_kelvins, zipped
 
 from keepout import cli
 from keepout.cli import fetch
@@ -38,10 +36,7 @@ FILES = {
     "DataFiles/one.csv": b"a,b\n1,2\n",
     "DistributedMatlab/two.m": b"% two\n",
 }
-MANIFEST = tuple(
-    cara.CaraFile(path, hashlib.sha256(data).hexdigest())
-    for path, data in FILES.items()
-)
+MANIFEST = tuple(cara.CaraFile(path, digest(data)) for path, data in FILES.items())
 CARA_PAGES = {file.url: FILES[file.path] for file in MANIFEST}
 
 
@@ -119,19 +114,11 @@ def test_fetch_refuses_a_file_as_the_cache(tmp_path: Path) -> None:
 TABLE = gzip.compress(b"event_id,time_to_tca\n")
 
 
-def zipped(member: str, data: bytes) -> bytes:
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w") as bundle:
-        bundle.writestr(member, data)
-    return buffer.getvalue()
-
-
 def test_fetch_kelvins_keeps_the_raw_table(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    archive = zipped(kelvins.RAW_MEMBER, TABLE)
-    monkeypatch.setattr(kelvins, "ARCHIVE_SHA256", hashlib.sha256(archive).hexdigest())
-    monkeypatch.setattr(kelvins, "RAW_SHA256", hashlib.sha256(TABLE).hexdigest())
+    archive = zipped({kelvins.RAW_MEMBER: TABLE})
+    pin_kelvins(monkeypatch, archive, TABLE)
     web = FakeWeb(monkeypatch, {kelvins.ARCHIVE_URL: archive})
     result = keepout("fetch", "kelvins", "--cache-dir", str(tmp_path), "--json")
     assert result.exit_code == ExitCode.OK
@@ -152,8 +139,8 @@ def test_fetch_kelvins_keeps_the_raw_table(
 def test_fetch_kelvins_reports_a_bad_archive(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    archive = zipped("other.csv", TABLE)
-    monkeypatch.setattr(kelvins, "ARCHIVE_SHA256", hashlib.sha256(archive).hexdigest())
+    archive = zipped({"other.csv": TABLE})
+    pin_kelvins(monkeypatch, archive, TABLE)
     FakeWeb(monkeypatch, {kelvins.ARCHIVE_URL: archive})
     result = keepout("fetch", "kelvins", "--cache-dir", str(tmp_path))
     assert result.exit_code == ExitCode.ERROR

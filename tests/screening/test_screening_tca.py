@@ -16,7 +16,13 @@ import pytest
 from astropy.time import Time
 from hypothesis import given, settings, target
 from hypothesis import strategies as st
-from screening_data import FAST_SPEED, load_fixture, socrates_approaches
+from screening_data import (
+    FAST_SPEED,
+    FIXTURE_START,
+    fixture_by_number,
+    load_fixture,
+    socrates_approaches,
+)
 from screening_oracle import brute_force, positions, refine, states
 
 from keepout.orbits import EARTH_MU
@@ -45,11 +51,11 @@ from keepout.state import RefFrame
 from keepout.units import KM
 
 HOUR = 3600.0
-REFERENCE = Time("2026-10-06T00:00:00", scale="utc")
+REFERENCE = FIXTURE_START
 """Time zero of the straight-line objects."""
 
 FIXTURE = load_fixture()
-BY_NUMBER = {omm.catalog_number: omm for omm in FIXTURE}
+BY_NUMBER = fixture_by_number()
 COLUMN = {omm.catalog_number: index for index, omm in enumerate(FIXTURE)}
 PRIMARIES = FIXTURE[::9]
 """25 primaries spread over the fixture (LEO, MEO, GEO, HEO)."""
@@ -66,7 +72,7 @@ CLOSE = sorted(
 )
 """Primaries for the oracle tests: PRIMARIES and the objects of SOCRATES's
 approaches, which have many minima."""
-WEEK_START = Time("2026-10-06T00:00:00", scale="utc")
+WEEK_START = FIXTURE_START
 
 
 @dataclass(frozen=True)

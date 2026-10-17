@@ -51,8 +51,11 @@ def test_cdm_parse_error_reports_xml_path() -> None:
     assert str(error) == "bad unit (at cdm/body/segment[1]/data/stateVector/X)"
 
 
-def test_cdm_parse_error_without_context() -> None:
-    assert str(CdmParseError("empty message")) == "empty message"
+@pytest.mark.parametrize("error", [CdmParseError, OmmParseError])
+def test_a_parse_error_without_context_is_its_message(
+    error: type[CcsdsParseError],
+) -> None:
+    assert str(error("empty message")) == "empty message"
 
 
 def test_omm_parse_error_reports_record_line_path_and_keyword() -> None:
@@ -68,7 +71,6 @@ def test_omm_parse_error_reports_record_line_path_and_keyword() -> None:
         "omm/body/segment[3]",
         "BSTAR",
     )
-    assert str(OmmParseError("empty message")) == "empty message"
 
 
 @pytest.mark.parametrize("error", [CdmParseError, OmmParseError])

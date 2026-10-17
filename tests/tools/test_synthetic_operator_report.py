@@ -11,7 +11,7 @@ import snapshot_files
 import synthetic_operator_report as report
 from astropy.time import Time
 from cli_builders import FLEET_TOML
-from screening_data import load_fixture
+from screening_data import FIXTURE_START, load_fixture
 
 from keepout.cdm import kvn
 from keepout.omm.celestrak import dumps_csv
@@ -253,7 +253,7 @@ def test_an_event_without_a_pc_shows_its_error(generated: Path) -> None:
 def test_an_observation_without_a_pc_is_summarised_with_its_error() -> None:
     fixture = load_fixture()
     fleet = Fleet((FleetSatellite(44476, 20.0, maneuverable=False),), 1.0)
-    result = run(fleet, fixture, Time("2026-10-06T00:00:00", scale="utc"), 3 * DAY)
+    result = run(fleet, fixture, FIXTURE_START, 3 * DAY)
     (event,) = result.events
     observation = dataclasses.replace(
         event.observation, pc=None, result=None, error="no covariance", diagnostics=()

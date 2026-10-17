@@ -11,7 +11,7 @@ import pytest
 from astropy.time import Time
 from hypothesis import given
 from hypothesis import strategies as st
-from screening_data import DATA, SNAPSHOT, load_fixture
+from screening_data import DATA, FIXTURE_START, SNAPSHOT, load_fixture
 from sgp4 import propagation as python_sgp4
 from sgp4.api import WGS72, Satrec
 from sgp4.model import Satrec as PythonSatrec
@@ -26,7 +26,6 @@ OMMS = load_fixture()
 """222 objects of the frozen public catalog, LEO to HEO; three fail SGP4
 within the week below."""
 PROPAGATOR = Sgp4Propagator(OMMS)
-START = Time("2026-10-06T00:00:00", scale="utc")
 """The day the catalog was downloaded."""
 WEEK = 7 * DAY
 
@@ -134,7 +133,7 @@ def test_the_lunisolar_terms_stay_within_their_bound(
     duration=st.floats(min_value=0.0, max_value=10.0),
 )
 def test_the_bounds_hold_the_propagated_radius(start: float, duration: float) -> None:
-    begin = START + start * u.day
+    begin = FIXTURE_START + start * u.day
     bounds = PROPAGATOR.radius_bounds(begin, duration * 86400.0)
     assert len(bounds) == len(OMMS)
     offsets = np.linspace(0.0, duration * 86400.0, 97)
@@ -142,8 +141,8 @@ def test_the_bounds_hold_the_propagated_radius(start: float, duration: float) ->
 
 
 def test_the_bounds_are_close_over_the_week() -> None:
-    bounds = PROPAGATOR.radius_bounds(START, WEEK)
-    radius = radii(PROPAGATOR, START, np.arange(0.0, WEEK + 1.0, 60.0))
+    bounds = PROPAGATOR.radius_bounds(FIXTURE_START, WEEK)
+    radius = radii(PROPAGATOR, FIXTURE_START, np.arange(0.0, WEEK + 1.0, 60.0))
     assert_within(bounds, radius)
     near = np.array([omm.satrec().method == "n" for omm in OMMS])
     chosen = near & ~np.any(np.isnan(radius), axis=1)
@@ -156,8 +155,8 @@ def test_the_bounds_are_close_over_the_week() -> None:
 
 def test_the_bounds_hold_an_orbit_raising_starlink() -> None:
     propagator = Sgp4Propagator(loads(ORBIT_RAISING))
-    bounds = propagator.radius_bounds(START, WEEK)
-    radius = radii(propagator, START, np.arange(0.0, WEEK + 1.0, 60.0))
+    bounds = propagator.radius_bounds(FIXTURE_START, WEEK)
+    radius = radii(propagator, FIXTURE_START, np.arange(0.0, WEEK + 1.0, 60.0))
     assert_within(bounds, radius)
     # Not merely the radius at both ends: it rises 45 km above both.
     ends = radius[0, [0, -1]].max()
@@ -168,10 +167,10 @@ def test_the_bounds_hold_an_orbit_raising_starlink() -> None:
 def test_the_bounds_hold_the_public_catalog_over_the_week() -> None:
     # The whole frozen catalog, every minute for a week: about a minute.
     catalog = Sgp4Propagator(load(DATA / SNAPSHOT))
-    bounds = catalog.radius_bounds(START, WEEK)
+    bounds = catalog.radius_bounds(FIXTURE_START, WEEK)
     assert np.all(np.isfinite(bounds.highest))
     for (ephemeris,) in propagate_in_chunks(
-        [catalog], START, np.arange(0.0, WEEK + 1.0, 60.0)
+        [catalog], FIXTURE_START, np.arange(0.0, WEEK + 1.0, 60.0)
     ):
         radius = np.linalg.norm(ephemeris.r, axis=-1)
         assert_within(bounds, np.where(ephemeris.valid, radius, np.nan))
@@ -190,19 +189,19 @@ def changed(number: int, **changes: Any) -> Omm:
     ],
 )
 def test_an_object_sgp4_cannot_bound_has_no_bounds(omm: Omm) -> None:
-    bounds = Sgp4Propagator([omm]).radius_bounds(START, WEEK)
+    bounds = Sgp4Propagator([omm]).radius_bounds(FIXTURE_START, WEEK)
     assert (bounds.lowest[0], bounds.highest[0]) == (0.0, np.inf)
 
 
 def test_no_objects_no_bounds() -> None:
-    assert len(Sgp4Propagator([]).radius_bounds(START, WEEK)) == 0
+    assert len(Sgp4Propagator([]).radius_bounds(FIXTURE_START, WEEK)) == 0
 
 
 def test_bounds_leave_the_states_unchanged() -> None:
     offsets = np.linspace(-86400.0, WEEK, 50)
-    before = PROPAGATOR.propagate(START, offsets)
-    PROPAGATOR.radius_bounds(START - 3 * u.day, WEEK)
-    after = PROPAGATOR.propagate(START, offsets)
+    before = PROPAGATOR.propagate(FIXTURE_START, offsets)
+    PROPAGATOR.radius_bounds(FIXTURE_START - 3 * u.day, WEEK)
+    after = PROPAGATOR.propagate(FIXTURE_START, offsets)
     np.testing.assert_array_equal(before.r, after.r)
     np.testing.assert_array_equal(before.v, after.v)
     np.testing.assert_array_equal(before.errors, after.errors)
@@ -211,9 +210,13 @@ def test_bounds_leave_the_states_unchanged() -> None:
 @pytest.mark.parametrize(
     ("start", "duration", "message"),
     [
-        (START, -1.0, "duration must be finite and >= 0, got -1.0"),
-        (START, np.inf, "duration must be finite and >= 0, got inf"),
-        (START + np.array([0.0, 1.0]) * u.s, 1.0, "epoch must be a single time"),
+        (FIXTURE_START, -1.0, "duration must be finite and >= 0, got -1.0"),
+        (FIXTURE_START, np.inf, "duration must be finite and >= 0, got inf"),
+        (
+            FIXTURE_START + np.array([0.0, 1.0]) * u.s,
+            1.0,
+            "epoch must be a single time",
+        ),
     ],
 )
 def test_the_span_is_checked(start: Time, duration: float, message: str) -> None:

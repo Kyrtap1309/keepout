@@ -8,11 +8,11 @@ from hypothesis import strategies as st
 from spacetrack_builders import (
     CREDENTIALS,
     HOUR,
-    Clock,
     FakeSpaceTrack,
     public_cdm,
     space_track_cdm_public,
 )
+from web_builders import Clock
 
 from keepout.errors import RateLimited, SourceFormatError
 from keepout.sources.cache import read_copy

@@ -1,13 +1,11 @@
 import gzip
-import hashlib
-import io
 import math
-import zipfile
 from pathlib import Path
 
 import numpy as np
 import pytest
 from builders import KELVINS_EXCERPT as EXCERPT
+from web_builders import pin_kelvins, zipped
 
 from keepout.errors import ChecksumMismatch, KelvinsFormatError
 from keepout.risk import DAY, Action, assess
@@ -145,14 +143,6 @@ def test_invalid_events_are_refused(
 TABLE = b"raw table bytes"
 
 
-def archive(members: dict[str, bytes]) -> bytes:
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w") as bundle:
-        for name, data in members.items():
-            bundle.writestr(name, data)
-    return buffer.getvalue()
-
-
 class FakeZenodo:
     """Serves ``body`` for the archive URL and counts the downloads."""
 
@@ -167,8 +157,7 @@ class FakeZenodo:
 
 
 def pin(monkeypatch: pytest.MonkeyPatch, body: bytes) -> None:
-    monkeypatch.setattr(kelvins, "ARCHIVE_SHA256", hashlib.sha256(body).hexdigest())
-    monkeypatch.setattr(kelvins, "RAW_SHA256", hashlib.sha256(TABLE).hexdigest())
+    pin_kelvins(monkeypatch, body, TABLE)
 
 
 def folder(root: Path) -> Path:
@@ -178,7 +167,7 @@ def folder(root: Path) -> Path:
 def test_fetch_raw_extracts_the_table_and_drops_the_archive(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    body = archive({kelvins.RAW_MEMBER: TABLE, "other.csv": b"x"})
+    body = zipped({kelvins.RAW_MEMBER: TABLE, "other.csv": b"x"})
     pin(monkeypatch, body)
     zenodo = FakeZenodo(body)
     path = kelvins.fetch_raw(cache=tmp_path, download=zenodo)
@@ -192,7 +181,7 @@ def test_fetch_raw_extracts_the_table_and_drops_the_archive(
 def test_fetch_raw_reuses_a_verified_archive(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    body = archive({kelvins.RAW_MEMBER: TABLE})
+    body = zipped({kelvins.RAW_MEMBER: TABLE})
     pin(monkeypatch, body)
     folder(tmp_path).mkdir(parents=True)
     (folder(tmp_path) / "dataset.zip").write_bytes(body)
@@ -204,7 +193,7 @@ def test_fetch_raw_reuses_a_verified_archive(
 def test_fetch_raw_drops_an_archive_left_beside_a_verified_table(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    body = archive({kelvins.RAW_MEMBER: TABLE})
+    body = zipped({kelvins.RAW_MEMBER: TABLE})
     pin(monkeypatch, body)
     folder(tmp_path).mkdir(parents=True)
     table = folder(tmp_path) / "raw_data_2015-2019.gz"
@@ -219,7 +208,7 @@ def test_fetch_raw_drops_an_archive_left_beside_a_verified_table(
 def test_fetch_raw_refuses_a_tampered_archive(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    pin(monkeypatch, archive({kelvins.RAW_MEMBER: TABLE}))
+    pin(monkeypatch, zipped({kelvins.RAW_MEMBER: TABLE}))
     with pytest.raises(ChecksumMismatch, match="expected sha256"):
         kelvins.fetch_raw(cache=tmp_path, download=FakeZenodo(b"tampered"))
     assert list(folder(tmp_path).iterdir()) == []
@@ -228,7 +217,7 @@ def test_fetch_raw_refuses_a_tampered_archive(
 def test_fetch_raw_refuses_a_tampered_table(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    body = archive({kelvins.RAW_MEMBER: b"other table"})
+    body = zipped({kelvins.RAW_MEMBER: b"other table"})
     pin(monkeypatch, body)
     with pytest.raises(ChecksumMismatch, match=r"raw_data_2015-2019\.gz: expected"):
         kelvins.fetch_raw(cache=tmp_path, download=FakeZenodo(body))
@@ -236,7 +225,7 @@ def test_fetch_raw_refuses_a_tampered_table(
 
 
 @pytest.mark.parametrize(
-    "body", [archive({"elsewhere.gz": TABLE}), b"not a zip file"], ids=["member", "zip"]
+    "body", [zipped({"elsewhere.gz": TABLE}), b"not a zip file"], ids=["member", "zip"]
 )
 def test_fetch_raw_refuses_an_archive_without_the_table(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, body: bytes
@@ -249,7 +238,7 @@ def test_fetch_raw_refuses_an_archive_without_the_table(
 def test_fetch_raw_uses_the_cache_dir_by_default(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    body = archive({kelvins.RAW_MEMBER: TABLE})
+    body = zipped({kelvins.RAW_MEMBER: TABLE})
     pin(monkeypatch, body)
     monkeypatch.setenv("KEEPOUT_CACHE_DIR", str(tmp_path))
     path = kelvins.fetch_raw(download=FakeZenodo(body))

@@ -1,5 +1,3 @@
-import importlib
-
 import numpy as np
 import pytest
 from builders import (
@@ -10,20 +8,18 @@ from builders import (
     drifting,
     head_on,
     object_state,
+    without_covariance,
 )
-from faults import failing_where, not_converging
-from typing_extensions import override
+from faults import (
+    misleading_newton_search,
+    monte_carlo_batches,
+    not_converging,
+    overlap_failing_where,
+)
 
-from keepout._types import FloatArray, IndexArray
 from keepout.conjunction import Conjunction
 from keepout.errors import CovarianceError, PcConvergenceError
-from keepout.objects import ObjectState
-from keepout.pc import _rate as rate_module
 from keepout.pc import foster, hall3d, montecarlo
-from keepout.pc.montecarlo import _Trials
-
-# The package exports the function montecarlo under the module's name.
-montecarlo_module = importlib.import_module("keepout.pc.montecarlo")
 
 
 def test_fast_encounter_agrees_with_2d_pc() -> None:
@@ -51,18 +47,26 @@ def test_a_seed_makes_the_run_reproducible() -> None:
     conjunction = head_on(8.0, 10.0, 20.0, 5.0)
     first = montecarlo(conjunction, samples=5_000, seed=3)
     second = montecarlo(conjunction, samples=5_000, seed=3)
-    other = montecarlo(conjunction, samples=5_000, seed=4)
     assert first.value == second.value
     assert first.details == second.details
     assert first.diagnostics == second.diagnostics
-    assert other.details["hits"] != first.details["hits"]
+
+
+@pytest.mark.parametrize("seed", [3, 4])
+def test_each_seed_s_interval_holds_the_exact_pc(seed: int) -> None:
+    # A fast encounter, where the 2-D Pc is exact: any seed's 99% interval
+    # holds it (both seeds are fixed, so this cannot flake).
+    conjunction = head_on(8.0, 10.0, 20.0, 5.0)
+    result = montecarlo(conjunction, samples=5_000, seed=seed)
+    expected = foster(conjunction.plane, 5.0).value
+    assert result.details["ci_low"] <= expected <= result.details["ci_high"]
 
 
 def test_stops_when_the_interval_is_narrow_enough(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Small batches: the stopping rule is checked between several of them.
-    monkeypatch.setattr(montecarlo_module, "MC_BATCH", 2_000)
+    monte_carlo_batches(monkeypatch, 2_000)
     conjunction = head_on(8.0, 10.0, 20.0, 5.0)
     result = montecarlo(conjunction, rtol=0.2, max_samples=100_000, seed=5)
     half = 0.5 * (result.details["ci_high"] - result.details["ci_low"])
@@ -98,9 +102,7 @@ def test_trials_already_inside_at_the_window_start_do_not_count() -> None:
 
 def test_unknown_covariance_is_rejected() -> None:
     base = TYPICAL_HEAD_ON
-    conjunction = Conjunction(
-        ObjectState("P", base.primary.state, None), base.secondary, 5.0
-    )
+    conjunction = Conjunction(without_covariance(base.primary), base.secondary, 5.0)
     with pytest.raises(
         CovarianceError, match="montecarlo needs both covariances; unknown: primary"
     ):
@@ -136,39 +138,16 @@ def test_failed_iteration_inside_an_encounter_raises(
 ) -> None:
     # As in Hall: a fallback inside a segment could have narrowed the
     # segments searched, so the run stops instead.
-    failing = failing_where(lambda t: (t >= 4.2e-4) & (t <= 5.0e-4), not_converging)
-    monkeypatch.setattr(rate_module, "_iterate_overlap", failing)
+    overlap_failing_where(
+        monkeypatch, lambda t: (t >= 4.2e-4) & (t <= 5.0e-4), not_converging
+    )
     with pytest.raises(PcConvergenceError, match="inside an encounter segment"):
         montecarlo(TYPICAL_HEAD_ON, samples=1_000, seed=1)
 
 
-class _Line(_Trials):
-    """Relative motion ``r = (1, t - 0.1, 0)`` with a misleading acceleration.
-
-    The acceleration ``(0, 20, 0)`` makes Newton's slope wrong, so from the
-    interval's midpoint 0 (distance 1.005) it jumps to 2 and then creeps back
-    by ~1/20 of the way per step: after every step it is still far from the
-    closest approach at 0.1.
-    """
-
-    def __init__(self) -> None:
-        pass
-
-    @override
-    def relative(
-        self, t: float | FloatArray, rows: slice | IndexArray = slice(None)
-    ) -> tuple[FloatArray, FloatArray, FloatArray]:
-        t = np.asarray(t, dtype=np.float64)
-        one = np.ones_like(t)
-        r = np.stack([one, t - 0.1, 0.0 * t], axis=1)
-        v = np.stack([0.0 * t, one, 0.0 * t], axis=1)
-        a = np.stack([0.0 * t, 20.0 * one, 0.0 * t], axis=1)
-        return r, v, a
-
-
 def test_newton_keeps_a_hit_it_passed() -> None:
-    below = _Line().closest_below(np.array([0]), -4.0, 4.0, 1.2)
-    assert below.tolist() == [True]
+    closest_below = misleading_newton_search()
+    assert closest_below(np.array([0]), -4.0, 4.0, 1.2).tolist() == [True]
 
 
 def test_confidence_is_printed_with_its_digits() -> None:

@@ -165,6 +165,22 @@ def test_unknown_policy_is_rejected() -> None:
         make_covariance(VALID, "RTN", EPOCH, policy="ignore")  # type: ignore[arg-type]
 
 
+def test_a_correlation_overflowing_every_conditional_velocity_term_is_repaired() -> (
+    None
+):
+    # Correlations of 1e200 between x and all three velocities: conditioning
+    # on position overflows the whole velocity block, so its decomposition
+    # fails and the whole correlation matrix is clipped instead.
+    matrix = np.eye(6)
+    matrix[3:, 0] = matrix[0, 3:] = 1e200
+    with np.errstate(over="ignore", invalid="ignore"):
+        fixed, repairs = repair(matrix)
+    (note,) = repairs
+    assert note.startswith("made positive semi-definite")
+    assert problems(fixed) == ()
+    np.testing.assert_allclose(fixed[1:3, 1:3], np.eye(2), atol=1e-12)
+
+
 @pytest.mark.parametrize("entry", [(5, 0), (0, 1)])
 def test_repair_survives_variances_at_the_smallest_normal_float(
     entry: tuple[int, int],
@@ -218,6 +234,24 @@ def test_frame_round_trip() -> None:
     np.testing.assert_allclose(gcrf.in_rtn(STATE).matrix, matrix, atol=1e-9)
     assert gcrf.in_gcrf(STATE) is gcrf
     assert rtn.in_rtn(STATE) is rtn
+
+
+def test_frame_changes_keep_a_radial_variance_along_the_position_vector() -> None:
+    # Inclined state off the inertial axes: a transposed RTN rotation would
+    # put the radial variance elsewhere.
+    state = StateVector(
+        EPOCH, [4200e3, -3900e3, 4100e3], [5200.0, 4600.0, -1300.0], "GCRF"
+    )
+    radial = state.r / np.linalg.norm(state.r)
+    rtn = Covariance(np.diag([100.0, 0.0, 0.0, 0.0, 0.0, 0.0]), "RTN", EPOCH)
+    gcrf = rtn.in_gcrf(state)
+    np.testing.assert_allclose(
+        gcrf.position, 100.0 * np.outer(radial, radial), atol=1e-12
+    )
+    inertial = Covariance.from_position(np.outer(radial, radial), "GCRF", EPOCH)
+    np.testing.assert_allclose(
+        inertial.in_rtn(state).position, np.diag([1.0, 0.0, 0.0]), atol=1e-14
+    )
 
 
 def test_frame_change_needs_a_gcrf_state() -> None:

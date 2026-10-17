@@ -59,6 +59,7 @@ __all__ = [
     "CopyMeta",
     "Sink",
     "cache_dir",
+    "forget_verified",
     "gunzip",
     "has_digest",
     "http_download",
@@ -301,12 +302,23 @@ def _remember(path: Path, sha256: str, signature: _Signature | None) -> None:
             _verified[path] = (sha256, signature)
 
 
+def forget_verified() -> None:
+    """Forget which cached files this process has verified (or written).
+
+    The next :func:`has_digest` of each file hashes it again, even if its
+    inode, size and modification time are unchanged: for a file changed
+    in a way its signature does not show.
+    """
+    with _verified_lock:
+        _verified.clear()
+
+
 def has_digest(path: Path, sha256: str) -> bool:
     """Whether the file at ``path`` exists and has SHA-256 digest ``sha256``.
 
     A file already checked by this process (or written by :func:`store` or
     :func:`store_bytes`) is not hashed again while its inode, size and
-    modification time are unchanged.
+    modification time are unchanged, until :func:`forget_verified`.
     """
     signature = _signature(path)
     if signature is None:

@@ -4,8 +4,14 @@ SOCRATES's fast approaches to the precision the report prints."""
 import astropy.units as u
 import numpy as np
 import pytest
-from astropy.time import Time
-from screening_data import FAST_SPEED, load_fixture, socrates_approaches
+from screening_data import (
+    FAST_SPEED,
+    FIXTURE_START,
+    SGP4_FAILING,
+    fixture_by_number,
+    load_fixture,
+    socrates_approaches,
+)
 from screening_oracle import (
     ORACLE_STEP,
     brute_force,
@@ -18,10 +24,9 @@ from keepout.propagation import Sgp4Propagator
 from keepout.sources.socrates import SocratesApproach
 
 FIXTURE = load_fixture()
-BY_NUMBER = {omm.catalog_number: omm for omm in FIXTURE}
-START = Time("2026-10-06T00:00:00", scale="utc")
-FAILING = {45665, 45711, 270365}
-"""Fixture objects SGP4 fails on within a week of START."""
+BY_NUMBER = fixture_by_number()
+START = FIXTURE_START
+FAILING = set(SGP4_FAILING)
 
 FAST_APPROACHES = [
     approach

@@ -1,23 +1,41 @@
-"""Fault injection and spies at the seams of the 3D-Nc rate.
+"""Fault injection and spies at the seams of the Pc methods.
 
-The seams are :func:`keepout.pc._rate._iterate_overlap`, the batched
+Every patch of a private symbol of :mod:`keepout.pc` is made here, by a named
+seam taking pytest's ``monkeypatch``, so tests do not name private symbols and
+a rename in ``src`` is fixed in one place.
+
+The main seams are :func:`keepout.pc._rate._iterate_overlap`, the batched
 peak-overlap iteration (the code under test, ``_peak_overlap``, keeps its own
-error isolation and fallback logic), and the automatic window search
-:func:`keepout.pc._timeline.locate_auto` as :mod:`keepout.pc._rate` calls it.
+error isolation and fallback logic), the automatic window search
+:func:`keepout.pc._timeline.locate_auto` as :mod:`keepout.pc._rate` calls it,
+the rate of one time (``CollisionRate._rate``), the Clenshaw-Curtis orders of
+the time integral, the Monte Carlo batch size and the methods
+:func:`keepout.pc.compute_pc` falls back between.
 """
 
+import importlib
 from collections.abc import Callable
 from typing import NamedTuple
 
 import numpy as np
+import pytest
+from typing_extensions import override
 
-from keepout._types import BoolArray, FloatArray
+from keepout._types import BoolArray, FloatArray, IndexArray
 from keepout.errors import GeometryError
 from keepout.pc import _rate as rate_module
 from keepout.pc import _timeline as timeline_module
+from keepout.pc import api
 from keepout.pc._orbit import OrbitUncertainty
 from keepout.pc._rate import Gaussians
-from keepout.pc._timeline import Rate, RateScan, Screen
+from keepout.pc._timeline import Rate, RateIntegral, RateScan, Screen
+from keepout.pc.montecarlo import _Trials
+from keepout.pc.result import PcResult
+
+# The package exports the functions hall3d and montecarlo under their
+# modules' names.
+hall3d_module = importlib.import_module("keepout.pc.hall3d")
+montecarlo_module = importlib.import_module("keepout.pc.montecarlo")
 
 Arguments = tuple[OrbitUncertainty, OrbitUncertainty, FloatArray, float, Gaussians]
 """The arguments of ``_iterate_overlap``: primary, secondary, times, floor and
@@ -76,6 +94,52 @@ def failing_where(
     return patched
 
 
+def never_converging_overlap(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The peak-overlap iteration fails at every time."""
+    monkeypatch.setattr(rate_module, "_iterate_overlap", never_converges)
+
+
+def overlap_failing_where(
+    monkeypatch: pytest.MonkeyPatch,
+    when: Callable[[FloatArray], BoolArray],
+    failure: Failure,
+) -> None:
+    """The peak-overlap iteration fails through ``failure`` at the times ``when``."""
+    monkeypatch.setattr(rate_module, "_iterate_overlap", failing_where(when, failure))
+
+
+def overlap_failing_while_integrating(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The peak-overlap iteration fails at Hall's quadrature nodes only.
+
+    It converges during the scan, and fails everywhere while
+    :func:`~keepout.pc._timeline.integrate_segments` integrates the rate.
+    """
+    real_integral = timeline_module.integrate_segments
+    real_iteration = rate_module._iterate_overlap
+    integrating = False
+
+    def integral(rate: Rate, found: RateScan, *, rtol: float) -> RateIntegral:
+        nonlocal integrating
+        integrating = True
+        try:
+            return real_integral(rate, found, rtol=rtol)
+        finally:
+            integrating = False
+
+    def iteration(
+        primary: OrbitUncertainty,
+        secondary: OrbitUncertainty,
+        times: FloatArray,
+        floor: float,
+        mean_centred: Gaussians,
+    ) -> tuple[Gaussians, BoolArray]:
+        run = never_converges if integrating else real_iteration
+        return run(primary, secondary, times, floor, mean_centred)
+
+    monkeypatch.setattr(hall3d_module, "integrate_segments", integral)
+    monkeypatch.setattr(rate_module, "_iterate_overlap", iteration)
+
+
 class WindowSearch(NamedTuple):
     """The scalar arguments of ``locate_auto``, all in s from TCA."""
 
@@ -110,3 +174,100 @@ def searching_with(change: Callable[[WindowSearch], WindowSearch]) -> LocateAuto
         return real(rate, search.half_width, search.limit, screen, search.centre)
 
     return patched
+
+
+def window_search(
+    monkeypatch: pytest.MonkeyPatch, change: Callable[[WindowSearch], WindowSearch]
+) -> None:
+    """The automatic window search runs with its arguments passed through
+    ``change`` (see :func:`searching_with`)."""
+    monkeypatch.setattr(rate_module, "locate_auto", searching_with(change))
+
+
+def straight_line_closest_at(monkeypatch: pytest.MonkeyPatch, time: float) -> None:
+    """The automatic window takes the straight-line closest approach at ``time``."""
+    monkeypatch.setattr(rate_module, "straight_line_closest_time", lambda _: time)
+
+
+def rate_returning(monkeypatch: pytest.MonkeyPatch, value: float) -> None:
+    """The collision rate is ``value`` wherever it is computed (not screened out)."""
+    monkeypatch.setattr(rate_module.CollisionRate, "_rate", lambda *_: value)
+
+
+def rate_raising(monkeypatch: pytest.MonkeyPatch, error: Exception) -> None:
+    """Computing the collision rate at any time raises ``error``."""
+
+    def broken(*_: object) -> float:
+        raise error
+
+    monkeypatch.setattr(rate_module.CollisionRate, "_rate", broken)
+
+
+def time_integral_orders(
+    monkeypatch: pytest.MonkeyPatch, *, start: int | None = None, largest: int
+) -> None:
+    """The time integral's Clenshaw-Curtis orders: the first is ``start``
+    (unchanged if ``None``) and the finest ``largest``."""
+    if start is not None:
+        monkeypatch.setattr(timeline_module, "CC_START_ORDER", start)
+    monkeypatch.setattr(timeline_module, "CC_MAX_ORDER", largest)
+
+
+def monte_carlo_batches(monkeypatch: pytest.MonkeyPatch, size: int) -> None:
+    """Monte Carlo runs its trials in batches of ``size``."""
+    monkeypatch.setattr(montecarlo_module, "MC_BATCH", size)
+
+
+Runner = Callable[..., PcResult]
+"""A fake for ``integrate`` or ``sample``: conjunction, encounters, options."""
+
+
+def auto_hall_integration(monkeypatch: pytest.MonkeyPatch, fake: Runner) -> None:
+    """``compute_pc`` integrates Hall's rate over its scan with ``fake``."""
+    monkeypatch.setattr(api, "integrate", fake)
+
+
+def auto_monte_carlo(monkeypatch: pytest.MonkeyPatch, fake: Runner) -> None:
+    """``compute_pc``'s Monte Carlo fallback samples Hall's scan with ``fake``."""
+    monkeypatch.setattr(api, "sample", fake)
+
+
+def auto_monte_carlo_budget(monkeypatch: pytest.MonkeyPatch, trials: int) -> None:
+    """``compute_pc``'s Monte Carlo fallback runs at most ``trials`` trials."""
+    monkeypatch.setattr(api, "AUTO_MC_SAMPLES", trials)
+
+
+class _MisleadingLine(_Trials):
+    """Relative motion ``r = (1, t - 0.1, 0)`` with a misleading acceleration.
+
+    The acceleration ``(0, 20, 0)`` makes Newton's slope wrong, so from the
+    interval's midpoint 0 (distance 1.005) it jumps to 2 and then creeps back
+    by ~1/20 of the way per step: after every step it is still far from the
+    closest approach at 0.1.
+    """
+
+    def __init__(self) -> None:
+        pass
+
+    @override
+    def relative(
+        self, t: float | FloatArray, rows: slice | IndexArray = slice(None)
+    ) -> tuple[FloatArray, FloatArray, FloatArray]:
+        t = np.asarray(t, dtype=np.float64)
+        one = np.ones_like(t)
+        r = np.stack([one, t - 0.1, 0.0 * t], axis=1)
+        v = np.stack([0.0 * t, one, 0.0 * t], axis=1)
+        a = np.stack([0.0 * t, 20.0 * one, 0.0 * t], axis=1)
+        return r, v, a
+
+
+ClosestBelow = Callable[[IndexArray, float, float, float], BoolArray]
+"""Whether each trial in ``rows`` gets within ``radius`` in ``[start, end]``."""
+
+
+def misleading_newton_search() -> ClosestBelow:
+    """Monte Carlo's closest-approach search for one trial whose relative
+    acceleration misleads Newton's method (see :class:`_MisleadingLine`):
+    it passes the closest approach at t = 0.1 (distance 1) but never settles
+    there."""
+    return _MisleadingLine().closest_below

@@ -1,7 +1,6 @@
 """Helpers of the command-line tests: run ``keepout`` in-process, fake the
 web and Space-Track, and a fleet with approaches in the screening fixture."""
 
-import io
 import time
 import urllib.request
 from collections.abc import Mapping
@@ -12,6 +11,7 @@ import pytest
 from screening_data import DATA, FIXTURE
 from spacetrack_builders import IDENTITY, PASSWORD, FakeSpaceTrack
 from typer.testing import CliRunner, Result
+from web_builders import FakeResponse
 
 from keepout.cli.app import app
 from keepout.omm.celestrak import dumps_csv
@@ -31,13 +31,6 @@ def keepout(*args: str, env: Mapping[str, str | None] | None = None) -> Result:
     return runner.invoke(app, list(args), env=environ, catch_exceptions=False)
 
 
-class _Response(io.BytesIO):
-    """What ``urlopen`` returns: a body with status 200."""
-
-    status = 200
-    reason = "OK"
-
-
 class FakeWeb:
     """Serves fixed bodies by URL in place of ``urllib.request.urlopen``.
 
@@ -53,12 +46,12 @@ class FakeWeb:
         monkeypatch.setattr(urllib.request, "urlopen", self._open)
         monkeypatch.setattr(time, "sleep", self.waits.append)
 
-    def _open(self, request: urllib.request.Request, timeout: float) -> _Response:
+    def _open(self, request: urllib.request.Request, timeout: float) -> FakeResponse:
         url = request.full_url
         self.urls.append(url)
         if url not in self.pages:
             raise OSError(f"cannot reach {url}")
-        return _Response(self.pages[url])
+        return FakeResponse(self.pages[url])
 
 
 def fake_space_track(

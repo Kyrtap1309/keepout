@@ -128,41 +128,67 @@ def test_writer_uses_ccsds_units() -> None:
     assert "COMMENT Covariance derived from the operator's OD" in lines
 
 
-def test_bad_unit() -> None:
-    text = mutate_b1("2570.097065 [km]", "2570.097065 [m]")
-    with pytest.raises(
-        CdmParseError, match=r"unit \[m\] does not match expected \[km\]"
-    ) as info:
+@pytest.mark.parametrize(
+    ("old", "new", "message", "keyword", "fragment"),
+    [
+        pytest.param(
+            "2570.097065 [km]",
+            "2570.097065 [m]",
+            r"unit \[m\] does not match expected \[km\]",
+            "X",
+            "2570.097065 [m]",
+            id="unit",
+        ),
+        pytest.param(
+            "= 715 [m]",
+            "= seven [m]",
+            "invalid number 'seven'",
+            "MISS_DISTANCE",
+            "seven",
+            id="number",
+        ),
+        pytest.param(
+            "2010-03-13T22:37:52.618",
+            "2010-13-40T22:37:52.618",
+            "invalid CCSDS epoch",
+            "TCA",
+            "2010-13-40",
+            id="epoch",
+        ),
+        pytest.param(
+            "MISS_DISTANCE ",
+            "MISS DISTANCE ",
+            "expected 'KEYWORD = value'",
+            None,
+            "MISS DISTANCE",
+            id="malformed-line",
+        ),
+        pytest.param(
+            "= 715 [m]\n",
+            "= 715 [m]\nMISS_DISTANCE = 716 [m]\n",
+            "duplicate keyword",
+            "MISS_DISTANCE",
+            "= 716 [m]",
+            id="duplicate-keyword",
+        ),
+        pytest.param(
+            "MESSAGE_ID ",
+            "1ABC = x\nMESSAGE_ID ",
+            "expected 'KEYWORD = value'",
+            None,
+            "1ABC",
+            id="keyword-not-starting-with-a-letter",
+        ),
+    ],
+)
+def test_a_bad_line_is_refused_with_its_keyword_and_line(
+    old: str, new: str, message: str, keyword: str | None, fragment: str
+) -> None:
+    text = mutate_b1(old, new)
+    with pytest.raises(CdmParseError, match=message) as info:
         kvn.loads(text)
-    assert info.value.keyword == "X"
-    assert info.value.line == line_of(text, "2570.097065 [m]")
-
-
-def test_bad_number() -> None:
-    with pytest.raises(CdmParseError, match="invalid number 'seven'") as info:
-        kvn.loads(mutate_b1("= 715 [m]", "= seven [m]"))
-    assert info.value.keyword == "MISS_DISTANCE"
-
-
-def test_bad_epoch() -> None:
-    with pytest.raises(CdmParseError, match="invalid CCSDS epoch") as info:
-        kvn.loads(mutate_b1("2010-03-13T22:37:52.618", "2010-13-40T22:37:52.618"))
-    assert info.value.keyword == "TCA"
-
-
-def test_malformed_line() -> None:
-    text = mutate_b1("MISS_DISTANCE ", "MISS DISTANCE ")
-    with pytest.raises(CdmParseError, match="expected 'KEYWORD = value'") as info:
-        kvn.loads(text)
-    assert info.value.line == line_of(text, "MISS DISTANCE")
-
-
-def test_duplicate_keyword() -> None:
-    text = mutate_b1("= 715 [m]\n", "= 715 [m]\nMISS_DISTANCE = 716 [m]\n")
-    with pytest.raises(CdmParseError, match="duplicate keyword") as info:
-        kvn.loads(text)
-    assert info.value.keyword == "MISS_DISTANCE"
-    assert info.value.line == line_of(text, "= 716 [m]")
+    assert info.value.keyword == keyword
+    assert info.value.line == line_of(text, fragment)
 
 
 def test_version_must_come_first() -> None:
@@ -272,10 +298,3 @@ def test_multi_line_value_cannot_be_written() -> None:
     header = Section("header", (*base.header.fields, Field("X_NOTE", "a\nb")))
     with pytest.raises(CdmWriteError, match="X_NOTE: KVN cannot hold a line break"):
         kvn.dumps(dataclasses.replace(base, header=header))
-
-
-def test_keyword_must_start_with_a_letter() -> None:
-    text = mutate_b1("MESSAGE_ID ", "1ABC = x\nMESSAGE_ID ")
-    with pytest.raises(CdmParseError, match="expected 'KEYWORD = value'") as info:
-        kvn.loads(text)
-    assert info.value.line == line_of(text, "1ABC")

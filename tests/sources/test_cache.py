@@ -2,6 +2,7 @@ import gzip
 import hashlib
 import http.client
 import io
+import os
 import sys
 import urllib.error
 import urllib.request
@@ -13,6 +14,7 @@ from pathlib import Path
 import platformdirs
 import pytest
 from typing_extensions import override
+from web_builders import FakeResponse, digest
 
 from keepout.errors import (
     AuthError,
@@ -23,7 +25,7 @@ from keepout.errors import (
 from keepout.sources import cache
 
 PAYLOAD = b"reference bytes"
-DIGEST = hashlib.sha256(PAYLOAD).hexdigest()
+DIGEST = digest(PAYLOAD)
 
 
 def test_cache_dir_env_override(
@@ -69,18 +71,9 @@ def test_the_user_agent_names_keepout_its_version_and_home_page() -> None:
     ) == cache.USER_AGENT
 
 
-class _Response(io.BytesIO):
-    """What ``urlopen`` returns: the body, with an HTTP status."""
-
-    def __init__(self, body: bytes = b"", status: int = 200) -> None:
-        super().__init__(body)
-        self.status = status
-        self.reason = "OK" if status == 200 else "No Content"
-
-
 def test_http_download_returns_body(monkeypatch: pytest.MonkeyPatch) -> None:
     def fake_urlopen(url: str, timeout: float) -> io.BytesIO:
-        return _Response(b"body")
+        return FakeResponse(b"body")
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
     assert cache.http_download("https://example.invalid/x") == b"body"
@@ -93,7 +86,7 @@ def test_every_request_names_keepout_in_the_user_agent(
 
     def fake_urlopen(request: urllib.request.Request, timeout: float) -> io.BytesIO:
         requests.append(request)
-        return _Response(b"body")
+        return FakeResponse(b"body")
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
     cache.http_download("https://example.invalid/x")
@@ -130,14 +123,14 @@ def test_http_download_refuses_a_success_other_than_200(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        urllib.request, "urlopen", lambda url, timeout: _Response(b"", status=204)
+        urllib.request, "urlopen", lambda url, timeout: FakeResponse(b"", status=204)
     )
     with pytest.raises(HttpStatusError, match="HTTP 204 No Content") as caught:
         cache.http_download("https://example.invalid/x")
     assert caught.value.status == 204
 
 
-class _BrokenBody(_Response):
+class _BrokenBody(FakeResponse):
     @override
     def read(self, size: int | None = -1) -> bytes:
         raise http.client.IncompleteRead(b"partial")
@@ -170,7 +163,9 @@ def test_http_stream_writes_the_body_in_chunks(
 ) -> None:
     body = bytes(range(256)) * 10
     monkeypatch.setattr(cache, "CHUNK_SIZE", 1000)
-    monkeypatch.setattr(urllib.request, "urlopen", lambda url, timeout: _Response(body))
+    monkeypatch.setattr(
+        urllib.request, "urlopen", lambda url, timeout: FakeResponse(body)
+    )
     chunks: list[bytes] = []
 
     class Collect:
@@ -215,16 +210,21 @@ def test_store_removes_the_partial_file_when_writing_fails(tmp_path: Path) -> No
     assert list(tmp_path.iterdir()) == []
 
 
-def test_a_stored_file_is_not_hashed_again(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    target = tmp_path / "file.bin"
-    cache.store(target, lambda sink: sink.write(PAYLOAD), DIGEST, "test")
+def refuse_hashing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fail the test if a file is hashed from disk."""
 
     def refuse(*args: object) -> object:
         raise AssertionError("hashed from disk")
 
     monkeypatch.setattr(hashlib, "file_digest", refuse)
+
+
+def test_a_stored_file_is_not_hashed_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "file.bin"
+    cache.store(target, lambda sink: sink.write(PAYLOAD), DIGEST, "test")
+    refuse_hashing(monkeypatch)
     assert cache.has_digest(target, DIGEST)
 
 
@@ -232,6 +232,19 @@ def test_a_changed_file_is_hashed_again(tmp_path: Path) -> None:
     target = tmp_path / "file.bin"
     cache.store(target, lambda sink: sink.write(PAYLOAD), DIGEST, "test")
     target.write_bytes(b"tampered!")
+    assert not cache.has_digest(target, DIGEST)
+
+
+def test_a_forgotten_file_is_hashed_again(tmp_path: Path) -> None:
+    target = tmp_path / "file.bin"
+    cache.store(target, lambda sink: sink.write(PAYLOAD), DIGEST, "test")
+    before = target.stat()
+    # Same inode, size and modification time: only hashing shows the change.
+    with target.open("r+b") as stream:
+        stream.write(b"X")
+    os.utime(target, ns=(before.st_atime_ns, before.st_mtime_ns))
+    assert cache.has_digest(target, DIGEST)
+    cache.forget_verified()
     assert not cache.has_digest(target, DIGEST)
 
 
@@ -252,11 +265,7 @@ def test_store_bytes_writes_the_file_and_gives_its_digest(
     assert cache.store_bytes(target, PAYLOAD) == DIGEST
     assert target.read_bytes() == PAYLOAD
     assert [p.name for p in target.parent.iterdir()] == ["file.bin"]
-
-    def refuse(*args: object) -> object:
-        raise AssertionError("hashed from disk")
-
-    monkeypatch.setattr(hashlib, "file_digest", refuse)
+    refuse_hashing(monkeypatch)
     assert cache.has_digest(target, DIGEST)
 
 
@@ -334,9 +343,9 @@ def test_other_errors_pass_through_network_errors() -> None:
 
 def test_store_json_writes_indented_text_with_a_final_newline(tmp_path: Path) -> None:
     path = tmp_path / "index.json"
-    digest = cache.store_json(path, {"format": 1})
+    written = cache.store_json(path, {"format": 1})
     assert path.read_text(encoding="utf-8") == '{\n  "format": 1\n}\n'
-    assert digest == hashlib.sha256(path.read_bytes()).hexdigest()
+    assert written == digest(path.read_bytes())
 
 
 def test_gunzip_decompresses_gzip_data() -> None:
@@ -355,7 +364,7 @@ def test_a_dropped_download_is_tried_again(monkeypatch: pytest.MonkeyPatch) -> N
         answer = answers.pop(0)
         if isinstance(answer, Exception):
             raise answer
-        return _Response(answer)
+        return FakeResponse(answer)
 
     monkeypatch.setattr(urllib.request, "urlopen", flaky)
     assert cache.http_download("https://example.invalid/x", retry_delays=(0.0,)) == (

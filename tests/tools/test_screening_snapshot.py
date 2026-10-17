@@ -1,6 +1,5 @@
 import dataclasses
 import gzip
-import hashlib
 import json
 from collections.abc import Mapping
 from pathlib import Path
@@ -9,9 +8,10 @@ import astropy.units as u
 import pytest
 import screening_snapshot as snapshot
 import snapshot_files
-from celestrak_builders import SAMPLE, SOCRATES_HEADER, FakeCelesTrak, socrates_row
+from celestrak_builders import SAMPLE, SOCRATES_HEADER, socrates_row
 from hypothesis import given
 from hypothesis import strategies as st
+from web_builders import FakeDownloader, digest
 
 from keepout.errors import SourceFormatError, SourceUnavailable
 from keepout.omm import Omm, load
@@ -55,14 +55,14 @@ URLS = [*(group_url(name) for name in PUBLIC_GROUPS), SOCRATES_URL]
 
 
 @pytest.fixture
-def celestrak(monkeypatch: pytest.MonkeyPatch) -> FakeCelesTrak:
-    fake = FakeCelesTrak(BODIES)
+def celestrak(monkeypatch: pytest.MonkeyPatch) -> FakeDownloader:
+    fake = FakeDownloader(BODIES)
     monkeypatch.setattr(snapshot, "http_download", fake)
     return fake
 
 
 @pytest.fixture
-def raw(tmp_path: Path, celestrak: FakeCelesTrak) -> Path:
+def raw(tmp_path: Path, celestrak: FakeDownloader) -> Path:
     directory = tmp_path / "raw"
     assert snapshot.main(["download", str(directory)]) == 0
     return directory
@@ -73,7 +73,7 @@ def build(raw: Path, data: Path, *options: str) -> int:
 
 
 def test_download_asks_for_each_url_once_and_keeps_the_bodies(
-    raw: Path, celestrak: FakeCelesTrak
+    raw: Path, celestrak: FakeDownloader
 ) -> None:
     assert celestrak.urls == URLS
     index = snapshot.INDEX.read(raw)
@@ -81,7 +81,7 @@ def test_download_asks_for_each_url_once_and_keeps_the_bodies(
     for body in index:
         data = (raw / body.file).read_bytes()
         assert data == BODIES[body.url]
-        assert body.sha256 == hashlib.sha256(data).hexdigest()
+        assert body.sha256 == digest(data)
         assert body.size == len(data)
         assert body.retrieved.endswith("Z")
     assert index[0].file == "gp-active.csv"
@@ -89,14 +89,14 @@ def test_download_asks_for_each_url_once_and_keeps_the_bodies(
 
 
 def test_download_does_not_ask_again_for_a_saved_url(
-    raw: Path, celestrak: FakeCelesTrak
+    raw: Path, celestrak: FakeDownloader
 ) -> None:
     assert snapshot.main(["download", str(raw)]) == 0
     assert celestrak.urls == URLS
 
 
 def test_download_stops_at_the_first_error_and_resumes_after_it(
-    tmp_path: Path, celestrak: FakeCelesTrak
+    tmp_path: Path, celestrak: FakeDownloader
 ) -> None:
     celestrak.answers[group_url("analyst")] = 403
     raw = tmp_path / "raw"
@@ -112,7 +112,7 @@ def test_download_stops_at_the_first_error_and_resumes_after_it(
 
 
 def test_download_keeps_a_body_keepout_cannot_read(
-    tmp_path: Path, celestrak: FakeCelesTrak
+    tmp_path: Path, celestrak: FakeDownloader
 ) -> None:
     celestrak.answers[group_url("active")] = b"No GP data found"
     raw = tmp_path / "raw"
@@ -218,7 +218,7 @@ def test_build_writes_the_data_then_checks_it(raw: Path, tmp_path: Path) -> None
         stored = (data / name).read_bytes()
         assert entry == {
             "bytes": len(stored),
-            "sha256": hashlib.sha256(stored).hexdigest(),
+            "sha256": digest(stored),
         }
 
 

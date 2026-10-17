@@ -1,8 +1,9 @@
 """Relative positions in an object's RTN frame, many at once."""
 
 import numpy as np
+import numpy.typing as npt
 import pytest
-from builders import LEO_R, LEO_V
+from builders import LEO_R, LEO_V, well_posed
 from hypothesis import assume, given
 from hypothesis import strategies as st
 from hypothesis.extra.numpy import arrays
@@ -14,13 +15,6 @@ from keepout.frames import relative_position_rtn, rtn_rotation
 positions = arrays(np.float64, (3,), elements=st.floats(min_value=-5e7, max_value=5e7))
 velocities = arrays(np.float64, (3,), elements=st.floats(min_value=-1e4, max_value=1e4))
 offsets = arrays(np.float64, (3,), elements=st.floats(min_value=-1e5, max_value=1e5))
-
-
-def well_posed(r: FloatArray, v: FloatArray) -> bool:
-    r_norm = float(np.linalg.norm(r))
-    v_norm = float(np.linalg.norm(v))
-    h_norm = float(np.linalg.norm(np.cross(r, v)))
-    return r_norm > 1.0 and v_norm > 1e-3 and h_norm > 1e-3 * r_norm * v_norm
 
 
 def test_offsets_along_the_axes_of_a_circular_equatorial_orbit() -> None:
@@ -85,10 +79,22 @@ def test_degenerate_states_are_refused(r: list[float], v: list[float]) -> None:
         relative_position_rtn(np.array([LEO_R, r]), np.array([LEO_V, v]), LEO_R)
 
 
-def test_shapes_are_checked() -> None:
-    with pytest.raises(ValueError, match="r must have 3 components"):
-        relative_position_rtn([1.0, 2.0], LEO_V, LEO_R)
-    with pytest.raises(ValueError, match="r_other must have 3 components"):
-        relative_position_rtn(LEO_R, LEO_V, 1.0)
-    with pytest.raises(ValueError, match=r"r \(2, 3\), v \(3, 3\) and r_other"):
-        relative_position_rtn(np.zeros((2, 3)), np.zeros((3, 3)), LEO_R)
+@pytest.mark.parametrize(
+    ("r", "v", "r_other", "message"),
+    [
+        pytest.param([1.0, 2.0], LEO_V, LEO_R, "r must have 3 components", id="r"),
+        pytest.param(LEO_R, LEO_V, 1.0, "r_other must have 3 components", id="other"),
+        pytest.param(
+            np.zeros((2, 3)),
+            np.zeros((3, 3)),
+            LEO_R,
+            r"r \(2, 3\), v \(3, 3\) and r_other",
+            id="broadcast",
+        ),
+    ],
+)
+def test_shapes_are_checked(
+    r: npt.ArrayLike, v: npt.ArrayLike, r_other: npt.ArrayLike, message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        relative_position_rtn(r, v, r_other)

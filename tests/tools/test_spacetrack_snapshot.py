@@ -1,6 +1,5 @@
 import dataclasses
 import gzip
-import hashlib
 import json
 import urllib.parse
 from pathlib import Path
@@ -21,6 +20,7 @@ from spacetrack_builders import (
     space_track_cdm_public,
     space_track_gp,
 )
+from web_builders import digest
 
 from keepout.errors import AuthError, HttpStatusError, SourceUnavailable
 from keepout.omm import load
@@ -114,7 +114,7 @@ def test_download_sends_each_request_once_and_keeps_the_answers(
     for saved, body in zip(index, bodies, strict=True):
         assert (raw / saved.file).read_bytes() == body
         assert saved.status == 200
-        assert saved.sha256 == hashlib.sha256(body).hexdigest()
+        assert saved.sha256 == digest(body)
         assert saved.size == len(body)
         assert saved.retrieved == "2026-10-03T04:00:00.000Z"
         assert saved.redacted is False
@@ -342,7 +342,7 @@ def test_build_writes_the_data_then_checks_it(raw: Path, tmp_path: Path) -> None
         stored = (data / name).read_bytes()
         assert entry == {
             "bytes": len(stored),
-            "sha256": hashlib.sha256(stored).hexdigest(),
+            "sha256": digest(stored),
         }
 
 

@@ -60,6 +60,15 @@ def approx(expected: float, rel: float) -> object:
     return pytest.approx(expected, rel=rel, abs=TINY)
 
 
+def well_posed(r: FloatArray, v: FloatArray) -> bool:
+    """Whether a state is far enough from degenerate for an RTN or orbital
+    frame: off the origin, moving, and not along its own radius."""
+    r_norm = float(np.linalg.norm(r))
+    v_norm = float(np.linalg.norm(v))
+    h_norm = float(np.linalg.norm(np.cross(r, v)))
+    return r_norm > 1.0 and v_norm > 1e-3 and h_norm > 1e-3 * r_norm * v_norm
+
+
 def known(covariance: Covariance | None) -> Covariance:
     """The covariance, which the test knows is given."""
     assert covariance is not None

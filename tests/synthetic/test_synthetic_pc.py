@@ -2,7 +2,7 @@
 its zero velocity block, and ``auto`` keeps the 2-D Pc."""
 
 import pytest
-from screening_data import load_fixture
+from screening_data import fixture_by_number
 
 from keepout.conjunction import Conjunction
 from keepout.pc import compute_pc
@@ -10,7 +10,7 @@ from keepout.screening import CloseApproach, screen
 from keepout.synthetic import SyntheticCovarianceModel
 from keepout.units import DAY
 
-BY_NUMBER = {omm.catalog_number: omm for omm in load_fixture()}
+BY_NUMBER = fixture_by_number()
 START = max(omm.epoch for omm in BY_NUMBER.values())
 MODEL = SyntheticCovarianceModel()
 

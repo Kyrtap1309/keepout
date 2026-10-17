@@ -34,8 +34,6 @@ PASSWORD: Final = "s3cret P@ss&w0rd%"  # noqa: S105
 
 CREDENTIALS: Final = Credentials(IDENTITY, PASSWORD)
 
-START: Final = 1_790_000_000.0
-"""A Unix time in September 2026."""
 HOUR: Final = 3600.0
 
 Answer: TypeAlias = bytes | Response | Exception
@@ -49,17 +47,6 @@ LOGIN_FAILED: Final = b'{"Login":"Failed"}'
 RATE_LIMITED: Final = Response(
     500, b"<html>You've violated your query rate limit.</html>"
 )
-
-
-class Clock:
-    """A settable Unix time, starting at :data:`START`; pass it as a
-    client's ``now``."""
-
-    def __init__(self, now: float = START) -> None:
-        self.now = now
-
-    def __call__(self) -> float:
-        return self.now
 
 
 def space_track_gp(omms: Iterable[Omm] = SAMPLE) -> bytes:

@@ -204,15 +204,23 @@ def test_invalid_kvn_is_refused_with_its_place(text: str, message: str) -> None:
         kvn.loads(text)
 
 
-@pytest.mark.parametrize("name", ["A\nB", "A\rB", "A\u2028B"])
-def test_a_line_break_cannot_be_written(name: str) -> None:
+LINE_BREAKS = ["A\nB", "A\rB", "A\u2028B"]
+
+
+@pytest.mark.parametrize("name", LINE_BREAKS)
+def test_an_object_name_with_a_line_break_cannot_be_written(name: str) -> None:
     (iss,) = kvn.loads(ISS_KVN)
     with pytest.raises(
         OmmWriteError, match="OBJECT_NAME: KVN cannot hold a line break"
     ):
         kvn.dumps([dataclasses.replace(iss, object_name=name)])
+
+
+@pytest.mark.parametrize("originator", LINE_BREAKS)
+def test_an_originator_with_a_line_break_cannot_be_written(originator: str) -> None:
+    (iss,) = kvn.loads(ISS_KVN)
     with pytest.raises(OmmWriteError, match="ORIGINATOR: KVN cannot hold a line break"):
-        kvn.dumps([iss], originator=name)
+        kvn.dumps([iss], originator=originator)
 
 
 def test_a_file_is_read(tmp_path: Path) -> None:

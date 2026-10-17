@@ -9,8 +9,13 @@ import astropy.units as u
 import numpy as np
 import numpy.typing as npt
 import pytest
-from astropy.time import Time
-from screening_data import FAST_SPEED, load_fixture, socrates_approaches
+from screening_data import (
+    FAST_SPEED,
+    FIXTURE_START,
+    fixture_by_number,
+    load_fixture,
+    socrates_approaches,
+)
 
 from keepout.errors import GeometryError, UnsupportedElements
 from keepout.frames import teme_to_gcrf
@@ -30,9 +35,9 @@ from keepout.screening.pipeline import DEFAULT_DURATION, MAX_AGE, MAX_LEAD
 from keepout.screening.tca import PERTURBATION
 from keepout.units import DAY
 
-START = Time("2026-10-06T00:00:00", scale="utc")
+START = FIXTURE_START
 FIXTURE = load_fixture()
-BY_NUMBER = {omm.catalog_number: omm for omm in FIXTURE}
+BY_NUMBER = fixture_by_number()
 FORMATION = [68377, 56156, 58199]
 """Formation flyers: many slow approaches."""
 SPREAD = [omm.catalog_number for omm in FIXTURE[::9][:5]]

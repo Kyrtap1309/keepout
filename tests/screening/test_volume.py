@@ -9,9 +9,8 @@ import pytest
 from builders import LEO_R, LEO_V
 from hypothesis import given
 from hypothesis import strategies as st
-from hypothesis.extra.numpy import arrays
 from scipy.optimize import brentq
-from screening_data import load_fixture
+from screening_data import fixture_by_number
 from sgp4.api import WGS72
 from sgp4.model import Satrec as PythonSatrec
 
@@ -36,12 +35,52 @@ from keepout.screening.volume import (
     SOCRATES_RADIUS,
 )
 
-BY_NUMBER = {omm.catalog_number: omm for omm in load_fixture()}
+BY_NUMBER = fixture_by_number()
 """The 222 objects of the frozen public catalog's fixture."""
 
 semi_axis = st.floats(min_value=1.0, max_value=1e5)
 volumes = st.builds(ScreeningVolume, semi_axis, semi_axis, semi_axis)
-offsets = arrays(np.float64, (3,), elements=st.floats(min_value=-2e5, max_value=2e5))
+spheres = st.builds(ScreeningVolume.sphere, semi_axis)
+
+
+@st.composite
+def directions(draw: st.DrawFn) -> FloatArray:
+    """Unit vectors in any direction (never the zero vector)."""
+    polar = draw(st.floats(min_value=0.0, max_value=math.pi))
+    azimuth = draw(st.floats(min_value=-math.pi, max_value=math.pi))
+    return np.array(
+        [
+            math.sin(polar) * math.cos(azimuth),
+            math.sin(polar) * math.sin(azimuth),
+            math.cos(polar),
+        ]
+    )
+
+
+@st.composite
+def volumes_and_offsets(
+    draw: st.DrawFn, volumes: st.SearchStrategy[ScreeningVolume] = volumes
+) -> tuple[ScreeningVolume, FloatArray]:
+    """A volume and a non-zero offset from well inside to well outside it.
+
+    The distance is 0.25 to 1.5 times a reach between the smallest and the
+    largest semi-axis, as often below the reach as above it, so that both
+    sides of the boundary are drawn for any shape.
+    """
+    volume = draw(volumes)
+    reach = draw(
+        st.floats(
+            min_value=min(volume.radial, volume.transverse, volume.normal),
+            max_value=volume.bounding_radius,
+        )
+    )
+    nearer = draw(st.booleans())
+    scale = draw(
+        st.floats(min_value=0.25, max_value=1.0)
+        if nearer
+        else st.floats(min_value=1.0, max_value=1.5)
+    )
+    return volume, scale * reach * draw(directions())
 
 
 def test_a_volume_holds_its_semi_axes_as_floats() -> None:
@@ -106,6 +145,9 @@ def test_the_handbook_table() -> None:
         assert volume.label.startswith("SFS Handbook v1.7 Table 3, ")
     assert "outside" in SFS_HANDBOOK_VOLUMES[SfsRegime.OUTSIDE].label
     assert list(SFS_LEO_PERIGEES.values()) == [500e3, 750e3, 1200e3, 2000e3]
+
+
+def test_the_handbook_table_is_read_only() -> None:
     with pytest.raises(TypeError, match="does not support item assignment"):
         SFS_HANDBOOK_VOLUMES[SfsRegime.LEO_1] = DEFAULT_VOLUME  # type: ignore[index]
 
@@ -135,28 +177,30 @@ def test_points_on_and_off_the_boundary() -> None:
     assert volume.contains([0.0, 0.0, 0.0]).shape == ()
 
 
-def test_offsets_need_three_components() -> None:
+@pytest.mark.parametrize("offsets", [[1.0, 2.0], 1.0])
+def test_offsets_need_three_components(offsets: list[float] | float) -> None:
     with pytest.raises(ValueError, match="offsets must have 3 components"):
-        DEFAULT_VOLUME.contains([1.0, 2.0])
-    with pytest.raises(ValueError, match="offsets must have 3 components"):
-        DEFAULT_VOLUME.contains(1.0)
+        DEFAULT_VOLUME.contains(offsets)
 
 
-@given(st.floats(min_value=1.0, max_value=1e5), offsets)
+@given(volumes_and_offsets(spheres))
 def test_a_sphere_holds_the_points_within_its_radius(
-    radius: float, offset: FloatArray
+    sphere_and_offset: tuple[ScreeningVolume, FloatArray],
 ) -> None:
+    sphere, offset = sphere_and_offset
+    radius = sphere.radial
     distance = float(np.linalg.norm(offset))
-    inside = bool(ScreeningVolume.sphere(radius).contains(offset))
+    inside = bool(sphere.contains(offset))
     # Away from the boundary by more than rounding, the test is the distance.
     if abs(distance - radius) > 1e-12 * radius:
         assert inside == (distance <= radius)
 
 
-@given(volumes, offsets)
+@given(volumes_and_offsets())
 def test_the_bounding_sphere_holds_the_volume(
-    volume: ScreeningVolume, offset: FloatArray
+    volume_and_offset: tuple[ScreeningVolume, FloatArray],
 ) -> None:
+    volume, offset = volume_and_offset
     if volume.contains(offset):
         assert float(np.linalg.norm(offset)) <= volume.bounding_radius * (1 + 1e-12)
     # A sphere of the smallest semi-axis lies inside the volume.
@@ -165,10 +209,11 @@ def test_the_bounding_sphere_holds_the_volume(
         assert volume.contains(offset)
 
 
-@given(volumes, offsets, st.floats(min_value=0.0, max_value=1.0))
+@given(volumes_and_offsets(), st.floats(min_value=0.0, max_value=1.0))
 def test_shrinking_an_inside_point_keeps_it_inside(
-    volume: ScreeningVolume, offset: FloatArray, factor: float
+    volume_and_offset: tuple[ScreeningVolume, FloatArray], factor: float
 ) -> None:
+    volume, offset = volume_and_offset
     if volume.contains(offset):
         assert volume.contains(factor * offset)
 
@@ -331,8 +376,11 @@ def test_volume_for_a_primary() -> None:
         pickle.loads(pickle.dumps(rule))(geo)
         is SFS_HANDBOOK_VOLUMES[SfsRegime.DEEP_SPACE]
     )
+
+
+def test_a_volume_rule_must_return_a_volume() -> None:
     with pytest.raises(TypeError, match="must return a ScreeningVolume, got float"):
-        volume_for(lambda omm: 5e3, leo)  # type: ignore[arg-type,return-value]
+        volume_for(lambda omm: 5e3, BY_NUMBER[31631])  # type: ignore[arg-type,return-value]
 
 
 def test_volumes_pickle() -> None:

@@ -1,10 +1,8 @@
-import importlib
 import inspect
 import math
 import re
 import typing
 from collections.abc import Callable
-from typing import Any
 
 import numpy as np
 import pytest
@@ -19,7 +17,13 @@ from builders import (
     shifted_back,
     without_covariance,
 )
-from faults import never_converges
+from faults import (
+    auto_hall_integration,
+    auto_monte_carlo,
+    auto_monte_carlo_budget,
+    overlap_failing_while_integrating,
+)
+from pc_builders import side_by_side
 
 from keepout.conjunction import Conjunction
 from keepout.covariance import make_covariance
@@ -29,7 +33,6 @@ from keepout.orbits import orbital_period
 from keepout.pc import (
     PcResult,
     alfano,
-    api,
     compute_pc,
     dilution,
     elrod,
@@ -37,7 +40,6 @@ from keepout.pc import (
     frisbee,
     hall3d,
 )
-from keepout.pc import _rate as rate_module
 from keepout.pc.api import (
     AUTO_MC_SAMPLES,
     AUTO_MC_SEED,
@@ -50,9 +52,6 @@ from keepout.pc.hall3d import Encounters
 from keepout.pc.montecarlo import MC_BATCH, montecarlo
 from keepout.pc.result import Method
 from keepout.state import StateVector
-
-# The package exports the function hall3d under the module's name.
-hall3d_module = importlib.import_module("keepout.pc.hall3d")
 
 _period = orbital_period(StateVector(EPOCH, LEO_R, LEO_V, "GCRF"))
 assert _period is not None
@@ -78,8 +77,12 @@ def test_options_reach_the_method() -> None:
     result = compute_pc(conjunction, "elrod", order=16)
     assert result.details["order"] == 16
     assert result.value == elrod(conjunction.plane, 5.0, order=16).value
-    loose = compute_pc(conjunction, "foster", rtol=1e-4)
-    assert loose.details["evaluations"] < compute_pc(conjunction).details["evaluations"]
+
+
+def test_a_looser_tolerance_reaches_foster() -> None:
+    loose = compute_pc(TYPICAL_HEAD_ON, "foster", rtol=1e-4)
+    default = compute_pc(TYPICAL_HEAD_ON)
+    assert loose.details["evaluations"] < default.details["evaluations"]
 
 
 def test_option_of_another_method_is_rejected() -> None:
@@ -115,11 +118,15 @@ def test_overloads_follow_the_methods_options() -> None:
     assert typed == {"auto": {}} | {
         name: _keyword_only(function) for name, function in functions.items()
     }
-    assert set(api._METHODS) == set(functions)
+    assert set(typing.get_args(Method)) == set(functions)
 
 
-def test_unknown_method_is_rejected() -> None:
-    with pytest.raises(ValueError, match="unknown Pc method 'coppola'"):
+def test_unknown_method_is_rejected_naming_every_method() -> None:
+    expected = (
+        "unknown Pc method 'coppola'; expected 'auto' or one of ('foster', "
+        "'elrod', 'frisbee', 'dilution', 'alfano', 'hall3d', 'montecarlo')"
+    )
+    with pytest.raises(ValueError, match=f"^{re.escape(expected)}$"):
         compute_pc(TYPICAL_HEAD_ON, "coppola")  # type: ignore[call-overload]
 
 
@@ -307,9 +314,27 @@ def test_a_sound_2d_pc_needs_no_velocity_block() -> None:
     assert result.diagnostics == ()
 
 
+FAR_HEAD_ON = head_on(300.0, 100.0, 200.0, 5.0)
+"""A head-on encounter 300 m off, with known covariances."""
+
+
+def secondary_unknown() -> Conjunction:
+    """:data:`FAR_HEAD_ON` with the secondary's covariance unknown."""
+    base = FAR_HEAD_ON
+    return Conjunction(base.primary, without_covariance(base.secondary), 5.0)
+
+
+def both_unknown(base: Conjunction) -> Conjunction:
+    """``base`` with both covariances unknown."""
+    return Conjunction(
+        without_covariance(base.primary),
+        without_covariance(base.secondary),
+        base.hard_body_radius,
+    )
+
+
 def test_auto_uses_frisbee_when_one_covariance_is_unknown() -> None:
-    base = head_on(300.0, 100.0, 200.0, 5.0)
-    conjunction = Conjunction(base.primary, without_covariance(base.secondary), 5.0)
+    conjunction = secondary_unknown()
     result = compute_pc(conjunction)
     assert result.method == "frisbee"
     assert result.diagnostics[0] == "secondary (SEC): covariance unknown"
@@ -317,10 +342,7 @@ def test_auto_uses_frisbee_when_one_covariance_is_unknown() -> None:
 
 
 def test_auto_uses_alfano_when_both_covariances_are_unknown() -> None:
-    base = head_on(300.0, 100.0, 200.0, 5.0)
-    conjunction = Conjunction(
-        without_covariance(base.primary), without_covariance(base.secondary), 5.0
-    )
+    conjunction = both_unknown(FAR_HEAD_ON)
     result = compute_pc(conjunction)
     assert result.method == "alfano"
     assert result.value == pytest.approx(
@@ -329,8 +351,7 @@ def test_auto_uses_alfano_when_both_covariances_are_unknown() -> None:
 
 
 def test_frisbee_can_be_chosen() -> None:
-    base = head_on(300.0, 100.0, 200.0, 5.0)
-    conjunction = Conjunction(base.primary, without_covariance(base.secondary), 5.0)
+    conjunction = secondary_unknown()
     result = compute_pc(conjunction, "frisbee")
     assert result.method == "frisbee"
     assert result.value == frisbee(conjunction.plane, 5.0).value
@@ -345,7 +366,7 @@ def test_frisbee_can_be_chosen() -> None:
 def test_maximum_pc_keeps_a_duration_warning(method: MethodChoice) -> None:
     # The duration from the known covariance alone is a lower bound: when it
     # already exceeds the limit, the warning holds.
-    slow = along_track_conjunction(1.5 * DURATION_LIMIT * LEO_PERIOD)
+    slow = SLOW_ALONG_TRACK
     conjunction = Conjunction(slow.primary, without_covariance(slow.secondary), 5.0)
     result = compute_pc(conjunction, method)
     assert result.method == "frisbee"
@@ -360,10 +381,7 @@ def test_maximum_pc_keeps_the_closest_approach_offset_note(
     method: MethodChoice,
 ) -> None:
     # The offset does not depend on the covariances.
-    base = shifted_back(head_on(300.0, 100.0, 200.0, 5.0), 1.0)
-    conjunction = Conjunction(
-        without_covariance(base.primary), without_covariance(base.secondary), 5.0
-    )
+    conjunction = both_unknown(shifted_back(FAR_HEAD_ON, 1.0))
     result = compute_pc(conjunction, method)
     assert result.method == "alfano"
     assert any(
@@ -373,10 +391,7 @@ def test_maximum_pc_keeps_the_closest_approach_offset_note(
 
 
 def test_alfano_can_be_chosen() -> None:
-    base = head_on(300.0, 100.0, 200.0, 5.0)
-    conjunction = Conjunction(
-        without_covariance(base.primary), without_covariance(base.secondary), 5.0
-    )
+    conjunction = both_unknown(FAR_HEAD_ON)
     result = compute_pc(conjunction, "alfano")
     assert result.method == "alfano"
     assert result.value == alfano(conjunction.plane, 5.0).value
@@ -397,14 +412,13 @@ def test_options_reach_a_three_d_method() -> None:
 def test_methods_needing_both_covariances_refuse_an_unknown_one(
     method: MethodChoice,
 ) -> None:
-    base = head_on(300.0, 100.0, 200.0, 5.0)
-    conjunction = Conjunction(base.primary, without_covariance(base.secondary), 5.0)
+    conjunction = secondary_unknown()
     with pytest.raises(CovarianceError, match="needs both covariances"):
         compute_pc(conjunction, method)
 
 
 def test_auto_uses_hall_for_a_slow_encounter_and_keeps_the_2d_pc() -> None:
-    conjunction = along_track_conjunction(1.5 * DURATION_LIMIT * LEO_PERIOD)
+    conjunction = SLOW_ALONG_TRACK
     result = compute_pc(conjunction)
     assert result.method == "hall3d"
     assert result.details["pc_2d"] == foster(conjunction.plane, 5.0).value
@@ -415,8 +429,7 @@ def test_auto_uses_hall_for_a_slow_encounter_and_keeps_the_2d_pc() -> None:
 def test_a_long_encounter_is_described_once(method: MethodChoice) -> None:
     # The duration is in the applicability warning; Hall only adds what it
     # means for Nc.
-    conjunction = along_track_conjunction(1.5 * DURATION_LIMIT * LEO_PERIOD)
-    diagnostics = compute_pc(conjunction, method).diagnostics
+    diagnostics = compute_pc(SLOW_ALONG_TRACK, method).diagnostics
     assert [d for d in diagnostics if "orbital period" in d] == [diagnostics[0]]
     assert (
         "long encounter: Nc counts repeated entries into the hard-body sphere, so "
@@ -454,9 +467,9 @@ def test_auto_falls_back_to_monte_carlo_on_hall_s_scan(
         return PcResult(0.25, "montecarlo", (), {})
 
     scans = _scan_spy(monkeypatch)
-    monkeypatch.setattr(api, "integrate", fail)
-    monkeypatch.setattr(api, "sample", run)
-    result = compute_pc(along_track_conjunction(1.5 * DURATION_LIMIT * LEO_PERIOD))
+    auto_hall_integration(monkeypatch, fail)
+    auto_monte_carlo(monkeypatch, run)
+    result = compute_pc(SLOW_ALONG_TRACK)
     assert result.method == "montecarlo"
     assert result.diagnostics[-1].endswith(
         "; Monte Carlo used instead (seed 0, at most 1,000,000 trials)"
@@ -473,22 +486,9 @@ def test_fallback_matches_an_explicit_monte_carlo(
     # The peak-overlap iteration fails at Hall's quadrature nodes only, after
     # the scan: Hall refuses the result, and Monte Carlo, which reuses the
     # scan, must still run as if alone (the failures it checks are the scan's).
-    integrating = False
-    real_integral = hall3d_module.integrate_segments
-    real_iteration = rate_module._iterate_overlap
-
-    def integral(*args: Any, **kwargs: Any) -> Any:
-        nonlocal integrating
-        integrating = True
-        return real_integral(*args, **kwargs)
-
-    def iteration(*args: Any) -> Any:
-        return never_converges(*args) if integrating else real_iteration(*args)
-
-    monkeypatch.setattr(hall3d_module, "integrate_segments", integral)
-    monkeypatch.setattr(rate_module, "_iterate_overlap", iteration)
-    monkeypatch.setattr(api, "AUTO_MC_SAMPLES", MC_BATCH)
-    conjunction = along_track_conjunction(1.5 * DURATION_LIMIT * LEO_PERIOD)
+    overlap_failing_while_integrating(monkeypatch)
+    auto_monte_carlo_budget(monkeypatch, MC_BATCH)
+    conjunction = SLOW_ALONG_TRACK
     result = compute_pc(conjunction)
     assert result.method == "montecarlo"
     assert any(
@@ -496,10 +496,14 @@ def test_fallback_matches_an_explicit_monte_carlo(
         and note.endswith("Monte Carlo used instead (seed 0, at most 50,000 trials)")
         for note in result.diagnostics
     )
-    integrating = False
     alone = montecarlo(conjunction, max_samples=MC_BATCH, seed=AUTO_MC_SEED)
     assert result.value == alone.value
-    assert result.details == {**result.details, **alone.details}
+    # compute_pc adds its own details to the method's.
+    assert result.details == {
+        **alone.details,
+        "encounter_duration_s": encounter_duration(conjunction),
+        "pc_2d": foster(conjunction.plane, 5.0).value,
+    }
 
 
 def test_auto_uses_hall_at_zero_relative_velocity(
@@ -510,55 +514,48 @@ def test_auto_uses_hall_at_zero_relative_velocity(
     def run(_: Conjunction, encounters: Encounters) -> PcResult:
         return PcResult(0.5, "hall3d", (), {})
 
-    monkeypatch.setattr(api, "integrate", run)
-    offset = np.array([0.0, 0.0, 10.0])
-    primary = object_state(LEO_R, LEO_V, 25.0 * np.eye(3))
-    secondary = object_state(LEO_R + offset, LEO_V, 25.0 * np.eye(3))
-    result = compute_pc(Conjunction(primary, secondary, 5.0))
+    auto_hall_integration(monkeypatch, run)
+    result = compute_pc(side_by_side())
     assert result.method == "hall3d"
     assert result.diagnostics == (
         "relative velocity is zero: 2-D Pc is undefined",
         (
-            "the covariances of primary (TEST) and secondary (TEST) are known only "
+            "the covariances of primary (PRI) and secondary (SEC) are known only "
             "in position (zero velocity block): hall3d takes its velocity as exact"
         ),
     )
     assert "encounter_duration_s" not in result.details
 
 
-def test_auto_refuses_zero_relative_velocity_with_an_unknown_covariance() -> None:
+@pytest.mark.parametrize(
+    ("unknown", "message"),
+    [
+        (("secondary",), r"the covariance of secondary \(SEC\) is unknown$"),
+        (
+            ("primary", "secondary"),
+            r"the covariances of primary \(PRI\) and secondary \(SEC\) are unknown$",
+        ),
+    ],
+)
+def test_auto_refuses_zero_relative_velocity_with_an_unknown_covariance(
+    unknown: tuple[str, ...], message: str
+) -> None:
     # Max-Pc needs the encounter plane and the 3-D methods both covariances.
-    primary = object_state(LEO_R, LEO_V, 25.0 * np.eye(3))
-    secondary = ObjectState(
-        "SEC",
-        StateVector(EPOCH, LEO_R + np.array([0.0, 0.0, 10.0]), LEO_V, "GCRF"),
-        None,
+    base = side_by_side()
+    primary, secondary = (
+        without_covariance(item) if role in unknown else item
+        for role, item in (("primary", base.primary), ("secondary", base.secondary))
     )
-    conjunction = Conjunction(primary, secondary, 5.0)
-    with pytest.raises(
-        GeometryError,
-        match=r"velocity is zero .* the covariance of secondary \(SEC\) is unknown$",
-    ):
+    conjunction = Conjunction(primary, secondary, base.hard_body_radius)
+    with pytest.raises(GeometryError, match=f"velocity is zero .* {message}"):
         compute_pc(conjunction)
-    both = Conjunction(
-        ObjectState("PRI", primary.state, None), secondary, conjunction.hard_body_radius
-    )
-    with pytest.raises(
-        GeometryError,
-        match=r"velocity is zero .* the covariances of primary \(PRI\) and "
-        r"secondary \(SEC\) are unknown$",
-    ):
-        compute_pc(both)
 
 
 def test_auto_refuses_zero_relative_velocity_with_an_unbound_orbit() -> None:
-    fast = 1.5 * np.asarray(LEO_V)
-    primary = object_state(LEO_R, fast, 25.0 * np.eye(3))
-    secondary = object_state(LEO_R + np.array([0.0, 0.0, 10.0]), fast, 25.0 * np.eye(3))
     with pytest.raises(
         GeometryError, match=r"relative velocity is zero .* not elliptic"
     ):
-        compute_pc(Conjunction(primary, secondary, 5.0))
+        compute_pc(side_by_side(1.5 * LEO_V))
 
 
 def test_options_need_an_explicit_method() -> None:

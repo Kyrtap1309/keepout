@@ -6,7 +6,7 @@ import pytest
 from astropy.time import Time
 from hypothesis import given
 from hypothesis import strategies as st
-from screening_data import load_fixture
+from screening_data import FIXTURE_START, SGP4_FAILING, load_fixture
 from screening_oracle import Oracle, brute_force
 
 from keepout.propagation import RadiusBounds, Sgp4Propagator
@@ -26,7 +26,7 @@ PRIMARIES = CATALOG[::9]
 """25 primaries spread over the fixture (LEO, MEO, GEO, HEO)."""
 WEEK = 7 * DAY
 WINDOWS = (
-    Time("2026-10-06T00:00:00", scale="utc"),  # after most element epochs
+    FIXTURE_START,  # after most element epochs
     Time("2026-09-29T00:00:00", scale="utc"),  # before most of them
 )
 LARGEST_REACH = 500 * KM
@@ -150,7 +150,7 @@ def bounds() -> tuple[RadiusBounds, ...]:
 
 def test_the_oracle_finds_pairs_to_screen(oracles: tuple[Oracle, ...]) -> None:
     for found in oracles:
-        assert found.failed <= {45665, 45711, 270365}
+        assert found.failed <= set(SGP4_FAILING)
         assert len(found.pairs) > 500
         assert len(found.within(5 * KM)) > 100
 

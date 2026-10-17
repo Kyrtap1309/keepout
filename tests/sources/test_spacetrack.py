@@ -23,13 +23,12 @@ from spacetrack_builders import (
     LOGIN_FAILED,
     PASSWORD,
     RATE_LIMITED,
-    START,
     Answer,
-    Clock,
     FakeSpaceTrack,
     space_track_gp,
 )
 from typing_extensions import override
+from web_builders import START, Clock
 
 from keepout.errors import (
     AuthError,

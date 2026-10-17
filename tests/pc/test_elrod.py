@@ -1,10 +1,8 @@
-import numpy as np
 import pytest
 from builders import TYPICAL_HEAD_ON, head_on
 from reference_pc import isotropic_pc, principal_axes_pc
 
-from keepout.pc._plane import plane_gaussian
-from keepout.pc.elrod import MAX_ORDER, START_ORDER, _refined, _terms, elrod
+from keepout.pc.elrod import MAX_ORDER, START_ORDER, elrod
 
 CARA_ORDER = 64
 
@@ -23,16 +21,15 @@ def test_adaptive_order_resolves_a_thin_covariance() -> None:
 
 
 def test_adaptive_orders_are_nested() -> None:
-    # Refining reuses the old terms as the even nodes of the next order, so it
-    # must give the terms evaluated from scratch, bit for bit: the angles
-    # 2j pi / (2n + 2) and j pi / (n + 1) differ only by powers of two.
+    # Refining reuses the old terms as the even nodes of the next order, so
+    # the adaptive value must be the fixed rule of its final order evaluated
+    # from scratch, bit for bit: the angles 2j pi / (2n + 2) and j pi / (n + 1)
+    # differ only by powers of two.
     plane = head_on(5.0, 100.0, 0.3, 15.0).plane
-    gaussian = plane_gaussian(plane.miss_vector, plane.covariance, 15.0)
-    coarse = _terms(gaussian, np.arange(1.0, START_ORDER + 1), START_ORDER)
-    fine = 2 * START_ORDER + 1
-    np.testing.assert_array_equal(
-        _refined(gaussian, coarse), _terms(gaussian, np.arange(1.0, fine + 1), fine)
-    )
+    adaptive = elrod(plane, 15.0)
+    order = int(adaptive.details["order"])
+    assert order > START_ORDER  # at least one refinement
+    assert adaptive.value == elrod(plane, 15.0, order=order).value
 
 
 def test_fixed_order_too_low_for_the_covariance_is_reported() -> None:

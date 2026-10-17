@@ -12,7 +12,7 @@ from astropy.time import Time
 from hypothesis import given
 from hypothesis import strategies as st
 from scipy.optimize import brentq
-from screening_data import load_fixture
+from screening_data import fixture_by_number
 
 from keepout.covariance import problems
 from keepout.errors import UnsupportedElements
@@ -34,7 +34,7 @@ from keepout.synthetic.covariance_model import (
     SAFETY_FACTOR,
 )
 
-BY_NUMBER = {omm.catalog_number: omm for omm in load_fixture()}
+BY_NUMBER = fixture_by_number()
 """The 222 objects of the frozen public catalog's fixture."""
 
 EXAMPLES = (900, 25933, 26113, 14129, 25924)

@@ -167,11 +167,16 @@ def test_ephemeris_rejects_mismatched_arrays(
         Ephemeris(EPOCH, offsets, np.zeros(r_shape), np.zeros(v_shape), errors, "TEME")
 
 
-def test_ephemeris_rejects_a_bad_grid_or_frame() -> None:
+def test_ephemeris_rejects_a_non_finite_offset() -> None:
     r = np.zeros((1, 1, 3))
     errors = np.zeros((1, 1), np.uint8)
     with pytest.raises(ValueError, match="offsets must be finite"):
         Ephemeris(EPOCH, np.array([math.nan]), r, r, errors, "TEME")
+
+
+def test_ephemeris_rejects_an_unsupported_frame() -> None:
+    r = np.zeros((1, 1, 3))
+    errors = np.zeros((1, 1), np.uint8)
     with pytest.raises(UnsupportedFrame, match="'TOD'"):
         Ephemeris(EPOCH, np.zeros(1), r, r, errors, "TOD")  # type: ignore[arg-type]
 
@@ -307,8 +312,11 @@ def test_the_default_chunk_bounds_memory() -> None:
     assert single[0].r.shape == (3, 1, 3)
 
 
-def test_chunk_arguments_are_checked_at_the_call() -> None:
+def test_chunk_size_is_checked_at_the_call() -> None:
     with pytest.raises(ValueError, match="max_states must be at least 1, got 0"):
         propagate_in_chunks([linear(1)], EPOCH, [0.0], max_states=0)
+
+
+def test_chunk_offsets_are_checked_at_the_call() -> None:
     with pytest.raises(ValueError, match="offsets must be finite"):
         propagate_in_chunks([linear(1)], EPOCH, [math.nan])

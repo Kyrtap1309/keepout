@@ -1,11 +1,8 @@
-"""CelesTrak test data: a fake server, a sample of element sets and
-SOCRATES report lines."""
+"""CelesTrak test data: a sample of element sets and SOCRATES report lines."""
 
-from collections.abc import Mapping
 from pathlib import Path
-from typing import Final, TypeAlias
+from typing import Final
 
-from keepout.errors import HttpStatusError
 from keepout.omm import Omm
 from keepout.omm.celestrak import load_csv
 
@@ -25,27 +22,6 @@ SOCRATES_HEADER: Final = (
 TCA: Final = "2026-10-07 00:20:47.861"
 """One day (to the millisecond) after the epoch of the ISS and Crew Dragon of
 :data:`SAMPLE`."""
-
-Answer: TypeAlias = bytes | int | Exception
-"""A fake server's answer: a body, an HTTP status, or a failure."""
-
-
-class FakeCelesTrak:
-    """Answers each URL as ``answers`` says (an int is an HTTP error status,
-    an exception is raised) and records the URLs asked for."""
-
-    def __init__(self, answers: Mapping[str, Answer]) -> None:
-        self.answers = dict(answers)
-        self.urls: list[str] = []
-
-    def __call__(self, url: str) -> bytes:
-        self.urls.append(url)
-        answer = self.answers[url]
-        if isinstance(answer, int):
-            raise HttpStatusError(f"HTTP {answer}", url=url, status=answer)
-        if isinstance(answer, Exception):
-            raise answer
-        return answer
 
 
 def socrates_row(

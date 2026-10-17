@@ -5,7 +5,7 @@ import erfa
 import numpy as np
 import pytest
 from astropy.time import Time
-from builders import EARTH_ROTATION_RATE, EPOCH, LEO_R, LEO_V
+from builders import EARTH_ROTATION_RATE, EPOCH, LEO_R, LEO_V, well_posed
 from hypothesis import assume, given
 from hypothesis import strategies as st
 from hypothesis.extra.numpy import arrays
@@ -30,13 +30,6 @@ vectors = arrays(np.float64, (3,), elements=st.floats(min_value=-1e7, max_value=
 square_roots = arrays(
     np.float64, (6, 6), elements=st.floats(min_value=-100.0, max_value=100.0)
 )
-
-
-def well_posed(r: FloatArray, v: FloatArray) -> bool:
-    r_norm = float(np.linalg.norm(r))
-    v_norm = float(np.linalg.norm(v))
-    h_norm = float(np.linalg.norm(np.cross(r, v)))
-    return r_norm > 1.0 and v_norm > 1e-3 and h_norm > 1e-3 * r_norm * v_norm
 
 
 def test_rtn_of_circular_equatorial_orbit_is_identity() -> None:
@@ -93,6 +86,72 @@ def test_covariance_rtn_round_trip(
     assert np.trace(rtn[:3, :3]) == pytest.approx(
         np.trace(covariance[:3, :3]), rel=1e-12, abs=1e-12 * scale
     )
+
+
+# An inclined, eccentric state far from the inertial axes, so that the RTN
+# rotation is not close to symmetric and transposing it moves every axis.
+TILTED_R = np.array([4200e3, -3900e3, 4100e3])
+TILTED_V = np.array([5200.0, 4600.0, -1300.0])
+
+
+def rtn_axes(r: FloatArray, v: FloatArray) -> dict[str, FloatArray]:
+    """The R, T, N unit vectors built from their definitions, not from the code."""
+    angular_momentum = np.cross(r, v)
+    in_track = np.cross(angular_momentum, r)
+    return {
+        "R": r / np.linalg.norm(r),
+        "T": in_track / np.linalg.norm(in_track),
+        "N": angular_momentum / np.linalg.norm(angular_momentum),
+    }
+
+
+AXES = rtn_axes(TILTED_R, TILTED_V)
+
+
+@pytest.mark.parametrize(("axis", "index"), [("R", 0), ("T", 1), ("N", 2)])
+def test_rtn_variance_along_one_axis_lies_along_that_axis_inertially(
+    axis: str, index: int
+) -> None:
+    rtn = np.zeros((6, 6))
+    rtn[index, index] = 100.0
+    rtn[3 + index, 3 + index] = 1e-2
+    inertial = rtn_to_inertial_covariance(rtn, TILTED_R, TILTED_V)
+    direction = AXES[axis]
+    np.testing.assert_allclose(
+        inertial[:3, :3], 100.0 * np.outer(direction, direction), atol=1e-12
+    )
+    np.testing.assert_allclose(
+        inertial[3:, 3:], 1e-2 * np.outer(direction, direction), atol=1e-16
+    )
+    np.testing.assert_allclose(inertial[:3, 3:], 0.0, atol=0.0)
+
+
+@pytest.mark.parametrize(("axis", "index"), [("R", 0), ("T", 1), ("N", 2)])
+def test_inertial_variance_along_an_rtn_axis_is_that_rtn_variance(
+    axis: str, index: int
+) -> None:
+    direction = AXES[axis]
+    inertial = np.zeros((6, 6))
+    inertial[:3, :3] = 100.0 * np.outer(direction, direction)
+    inertial[3:, 3:] = 1e-2 * np.outer(direction, direction)
+    rtn = inertial_to_rtn_covariance(inertial, TILTED_R, TILTED_V)
+    expected = np.zeros((6, 6))
+    expected[index, index] = 100.0
+    expected[3 + index, 3 + index] = 1e-2
+    np.testing.assert_allclose(rtn, expected, atol=1e-12)
+
+
+def test_positive_radial_in_track_correlation_stretches_along_r_plus_t() -> None:
+    # sigma_R = sigma_T = 10 m with correlation +0.5: 150 m^2 along R + T,
+    # 50 m^2 along R - T. A sign or orientation slip swaps the two.
+    rtn = np.zeros((6, 6))
+    rtn[:3, :3] = [[100.0, 50.0, 0.0], [50.0, 100.0, 0.0], [0.0, 0.0, 1.0]]
+    position = rtn_to_inertial_covariance(rtn, TILTED_R, TILTED_V)[:3, :3]
+    along = (AXES["R"] + AXES["T"]) / np.sqrt(2.0)
+    across = (AXES["R"] - AXES["T"]) / np.sqrt(2.0)
+    assert along @ position @ along == pytest.approx(150.0, rel=1e-12)
+    assert across @ position @ across == pytest.approx(50.0, rel=1e-12)
+    assert AXES["R"] @ position @ AXES["T"] == pytest.approx(50.0, rel=1e-12)
 
 
 def test_gcrf_state_is_returned_unchanged() -> None:
@@ -183,9 +242,12 @@ def test_arrays_in_any_frame_convert_as_their_state_vectors(frame: RefFrame) -> 
         np.testing.assert_array_equal(gcrf_v, expected[1])
 
 
-def test_array_conversion_needs_a_frame_and_matching_shapes() -> None:
+def test_array_conversion_needs_a_supported_frame() -> None:
     with pytest.raises(UnsupportedFrame, match="'ICRF'"):
         frame_to_gcrf("ICRF", EPOCH, LEO_R, LEO_V)  # type: ignore[arg-type]
+
+
+def test_array_conversion_needs_matching_shapes() -> None:
     with pytest.raises(ValueError, match="do not broadcast"):
         frame_to_gcrf("GCRF", Time([EPOCH] * 2), np.zeros((3, 3)), np.zeros((3, 3)))
 

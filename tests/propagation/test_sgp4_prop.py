@@ -11,7 +11,7 @@ import pytest
 from astropy.time import Time
 from hypothesis import given
 from hypothesis import strategies as st
-from screening_data import load_fixture
+from screening_data import FIXTURE_START, SGP4_FAILING, load_fixture
 
 from keepout.errors import UnsupportedElements
 from keepout.omm import Omm
@@ -30,10 +30,9 @@ OMMS = load_fixture()
 """222 objects of the frozen public catalog (LEO to HEO, 6-digit numbers, and
 three that fail SGP4 on the grid below)."""
 PROPAGATOR = Sgp4Propagator(OMMS)
-START = Time("2026-10-06T00:00:00", scale="utc")
 """The day the catalog was downloaded."""
 OFFSETS = np.concatenate([np.linspace(-86400.0, 7 * 86400.0, 97), [0.25, 1e-3]])
-WHOLE = PROPAGATOR.propagate(START, OFFSETS)
+WHOLE = PROPAGATOR.propagate(FIXTURE_START, OFFSETS)
 
 
 def satrec_states(
@@ -52,7 +51,7 @@ def test_states_are_sgp4s_for_each_object() -> None:
     # whole days apart), which SGP4 turns into at most ~2 um.
     assert WHOLE.frame == PROPAGATOR.frame == "TEME"
     assert WHOLE.r.shape == WHOLE.v.shape == (len(OMMS), len(OFFSETS), 3)
-    times = START + OFFSETS * u.s
+    times = FIXTURE_START + OFFSETS * u.s
     for i, omm in enumerate(OMMS):
         errors, r, v = satrec_states(omm, times)
         np.testing.assert_array_equal(WHOLE.errors[i], errors)
@@ -62,7 +61,7 @@ def test_states_are_sgp4s_for_each_object() -> None:
 
 def test_whitebox_states_are_bit_identical_to_satrec_at_keepouts_dates() -> None:
     # The same compiled SGP4 as Satrec.sgp4, given the same Julian dates.
-    jd, fraction = _utc_dates(START, OFFSETS)
+    jd, fraction = _utc_dates(FIXTURE_START, OFFSETS)
     for i, omm in enumerate(OMMS):
         errors, r, v = omm.satrec().sgp4_array(jd, fraction)
         np.testing.assert_array_equal(WHOLE.errors[i], errors)
@@ -73,7 +72,7 @@ def test_whitebox_states_are_bit_identical_to_satrec_at_keepouts_dates() -> None
 @pytest.mark.parametrize(
     "epoch",
     [
-        START,
+        FIXTURE_START,
         Time("2026-10-06T17:23:11.123456", scale="utc"),
         Time(61000.3, format="mjd"),
     ],
@@ -109,7 +108,7 @@ def test_offsets_count_the_leap_second() -> None:
 
 @pytest.mark.parametrize("scale", ["tt", "tai", "tdb"])
 def test_any_time_scale_gives_the_same_states(scale: str) -> None:
-    epoch = getattr(START, scale)
+    epoch = getattr(FIXTURE_START, scale)
     other = PROPAGATOR.propagate(epoch, OFFSETS)
     assert other.epoch is epoch
     np.testing.assert_array_equal(other.r, WHOLE.r)
@@ -121,8 +120,8 @@ def test_metres_and_metres_per_second() -> None:
     # position: they differ by 0.04 m/s (median) and up to ~12 m/s on
     # eccentric or decaying orbits. A km/m mix-up would be 1000 times off.
     step = 0.1
-    later = PROPAGATOR.propagate(START, OFFSETS + step)
-    earlier = PROPAGATOR.propagate(START, OFFSETS - step)
+    later = PROPAGATOR.propagate(FIXTURE_START, OFFSETS + step)
+    earlier = PROPAGATOR.propagate(FIXTURE_START, OFFSETS - step)
     rate = (later.r - earlier.r) / (2.0 * step)
     both = WHOLE.valid & later.valid & earlier.valid
     difference = np.linalg.norm(rate - WHOLE.v, axis=-1)[both]
@@ -136,7 +135,7 @@ def test_failed_states_have_codes_and_nan() -> None:
     # Two Starlinks of the fixture decay within the week (SGP4 error 1),
     # and so does one analyst object a day before the start.
     failed = np.flatnonzero(~WHOLE.valid.all(axis=1))
-    assert [OMMS[i].catalog_number for i in failed] == [45665, 45711, 270365]
+    assert [OMMS[i].catalog_number for i in failed] == list(SGP4_FAILING)
     assert {describe_error(code) for code in np.unique(WHOLE.errors)} == {
         "no error",
         "error 1: mean eccentricity outside the range 0 to 1",
@@ -156,13 +155,13 @@ def test_subsets_share_the_records(monkeypatch: pytest.MonkeyPatch) -> None:
     subset = PROPAGATOR.subset([5, 0, 5])
     assert len(subset) == 3
     assert subset.omms == (OMMS[5], OMMS[0], OMMS[5])
-    ephemeris = subset.propagate(START, OFFSETS)
+    ephemeris = subset.propagate(FIXTURE_START, OFFSETS)
     np.testing.assert_array_equal(ephemeris.r, WHOLE.r[[5, 0, 5]])
     np.testing.assert_array_equal(ephemeris.v, WHOLE.v[[5, 0, 5]])
     np.testing.assert_array_equal(ephemeris.errors, WHOLE.errors[[5, 0, 5]])
     nobody = PROPAGATOR.subset([])
     assert len(nobody) == 0
-    assert nobody.propagate(START, OFFSETS).r.shape == (0, len(OFFSETS), 3)
+    assert nobody.propagate(FIXTURE_START, OFFSETS).r.shape == (0, len(OFFSETS), 3)
 
 
 @pytest.mark.parametrize(
@@ -196,7 +195,7 @@ def test_chunks_and_subsets_give_the_same_numbers(
     subset = PROPAGATOR.subset(objects)
     bounds = [0, *sorted(cuts), len(OFFSETS)]
     for start, stop in itertools.pairwise(bounds):
-        part = subset.propagate(START, OFFSETS[start:stop])
+        part = subset.propagate(FIXTURE_START, OFFSETS[start:stop])
         np.testing.assert_array_equal(part.r, WHOLE.r[objects, start:stop])
         np.testing.assert_array_equal(part.v, WHOLE.v[objects, start:stop])
         np.testing.assert_array_equal(part.errors, WHOLE.errors[objects, start:stop])
@@ -205,9 +204,9 @@ def test_chunks_and_subsets_give_the_same_numbers(
 def test_one_object_at_one_time() -> None:
     # The call a TCA search makes many times: a pair at one offset.
     pair = PROPAGATOR.subset([3, 7])
-    ephemeris = pair.propagate(START, 1234.5)
+    ephemeris = pair.propagate(FIXTURE_START, 1234.5)
     assert ephemeris.r.shape == (2, 1, 3)
-    expected = PROPAGATOR.propagate(START, [1234.5])
+    expected = PROPAGATOR.propagate(FIXTURE_START, [1234.5])
     np.testing.assert_array_equal(ephemeris.r, expected.r[[3, 7]])
 
 
@@ -220,7 +219,7 @@ def test_the_propagator_pickles_and_follows_the_protocol() -> None:
     copy = pickle.loads(pickle.dumps(PROPAGATOR.subset(range(10))))
     assert isinstance(copy, Sgp4Propagator)
     assert copy.omms == OMMS[:10]
-    ephemeris = copy.propagate(START, OFFSETS)
+    ephemeris = copy.propagate(FIXTURE_START, OFFSETS)
     np.testing.assert_array_equal(ephemeris.r, WHOLE.r[:10])
     np.testing.assert_array_equal(ephemeris.v, WHOLE.v[:10])
 
@@ -229,7 +228,7 @@ def test_chunked_propagation_of_the_fixture() -> None:
     chunks = [
         chunk
         for (chunk,) in propagate_in_chunks(
-            [PROPAGATOR], START, OFFSETS, max_states=2000
+            [PROPAGATOR], FIXTURE_START, OFFSETS, max_states=2000
         )
     ]
     assert [len(chunk.offsets) for chunk in chunks] == [9] * 11
@@ -241,8 +240,8 @@ def test_chunked_propagation_of_the_fixture() -> None:
 def test_empty_propagators_and_grids() -> None:
     nobody = Sgp4Propagator([])
     assert len(nobody) == 0
-    assert nobody.propagate(START, OFFSETS).errors.shape == (0, len(OFFSETS))
-    never = PROPAGATOR.propagate(START, [])
+    assert nobody.propagate(FIXTURE_START, OFFSETS).errors.shape == (0, len(OFFSETS))
+    never = PROPAGATOR.propagate(FIXTURE_START, [])
     assert isinstance(never, Ephemeris)
     assert never.r.shape == (len(OMMS), 0, 3)
     assert never.errors.shape == (len(OMMS), 0)
@@ -270,7 +269,7 @@ def test_from_omms_sets_aside_the_elements_sgp4_cannot_hold() -> None:
         assert isinstance(error, UnsupportedElements)
         assert str(error).startswith("catalog number 400000 is above 339999")
     np.testing.assert_array_equal(
-        propagator.propagate(START, OFFSETS).r, WHOLE.r[[0, 2]]
+        propagator.propagate(FIXTURE_START, OFFSETS).r, WHOLE.r[[0, 2]]
     )
     nobody, none_kept, all_rejected = Sgp4Propagator.from_omms([too_large])
     assert (len(nobody), none_kept.tolist(), len(all_rejected)) == (0, [], 1)
@@ -279,9 +278,13 @@ def test_from_omms_sets_aside_the_elements_sgp4_cannot_hold() -> None:
 @pytest.mark.parametrize(
     ("epoch", "offsets", "message"),
     [
-        (START + np.array([0.0, 1.0]) * u.s, [0.0], "epoch must be a single time"),
-        (START, [[0.0]], "offsets must be one-dimensional"),
-        (START, [np.nan], "offsets must be finite"),
+        (
+            FIXTURE_START + np.array([0.0, 1.0]) * u.s,
+            [0.0],
+            "epoch must be a single time",
+        ),
+        (FIXTURE_START, [[0.0]], "offsets must be one-dimensional"),
+        (FIXTURE_START, [np.nan], "offsets must be finite"),
     ],
 )
 def test_propagate_rejects_bad_grids(

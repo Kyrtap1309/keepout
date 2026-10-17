@@ -80,3 +80,22 @@ def test_rate_where_the_screen_ruled_it_negligible_raises() -> None:
 
     with pytest.raises(PcConvergenceError, match="screen ruled it negligible"):
         locate(bump(10.0), WINDOW, screen)
+
+
+def test_candidates_outside_the_window_are_not_scanned() -> None:
+    # A screen may return a stretch beyond the window: only the part of the
+    # window it covers is scanned, and the scan stays inside the window.
+    def screen(window: tuple[float, float]) -> list[Candidate]:
+        start, end = window
+        return [
+            Candidate(start - 20.0, start - 10.0, CROSSING, TAU),
+            Candidate(start, end, CROSSING, TAU),
+            Candidate(end, end + 10.0, CROSSING, TAU),
+        ]
+
+    rate = bump(0.0)
+    found = locate(rate, (-50.0, 50.0), screen)
+    assert found.window == (-50.0, 50.0)
+    assert len(found.segments) == 1
+    nc = integrate_segments(rate, found, rtol=1e-6).nc
+    assert nc == pytest.approx(TAU * math.sqrt(2 * math.pi), rel=1e-9)
