@@ -22,7 +22,13 @@ from typing import Final
 
 import numpy as np
 
-from keepout._types import BoolArray, FloatArray, IndexArray, require_positive
+from keepout._types import (
+    BoolArray,
+    FloatArray,
+    IndexArray,
+    require_at_least,
+    require_positive,
+)
 from keepout.conjunction import Conjunction
 from keepout.equinoctial import Orbits
 from keepout.orbits import EARTH_MU
@@ -247,8 +253,8 @@ def montecarlo(
     ValueError
         If an argument is out of range.
     """
-    if samples is not None and samples < 1:
-        raise ValueError(f"samples must be >= 1, got {samples}")
+    if samples is not None:
+        require_at_least(samples, 1, "samples")
     require_positive(rtol, "rtol")
     if not (max_samples >= 1 and 0.0 < confidence < 1.0):
         raise ValueError("need max_samples >= 1 and 0 < confidence < 1")

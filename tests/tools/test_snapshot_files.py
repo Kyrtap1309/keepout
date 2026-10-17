@@ -56,14 +56,3 @@ def test_a_committed_gzip_with_other_data_is_replaced(tmp_path: Path) -> None:
         tmp_path, {"data.csv.gz": b"rows"}, {"data.csv.gz"}
     )
     assert gzip.decompress(files["data.csv.gz"]) == b"rows"
-
-
-@pytest.mark.parametrize("data", [b"not gzip", b"\x1f\x8b\x08truncated"])
-def test_gunzip_of_something_else_is_none(data: bytes) -> None:
-    assert snapshot_files.gunzip(data) is None
-
-
-def test_json_is_written_indented_with_a_final_newline(tmp_path: Path) -> None:
-    path = tmp_path / "index.json"
-    snapshot_files.write_json(path, {"format": 1})
-    assert path.read_text(encoding="utf-8") == '{\n  "format": 1\n}\n'

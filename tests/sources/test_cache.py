@@ -1,9 +1,11 @@
+import gzip
 import hashlib
 import http.client
 import io
 import sys
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from email.message import Message
 from importlib.metadata import version
 from pathlib import Path
@@ -12,7 +14,12 @@ import platformdirs
 import pytest
 from typing_extensions import override
 
-from keepout.errors import ChecksumMismatch, HttpStatusError, SourceUnavailable
+from keepout.errors import (
+    AuthError,
+    ChecksumMismatch,
+    HttpStatusError,
+    SourceUnavailable,
+)
 from keepout.sources import cache
 
 PAYLOAD = b"reference bytes"
@@ -105,7 +112,7 @@ def test_http_download_wraps_network_errors(monkeypatch: pytest.MonkeyPatch) -> 
 
     monkeypatch.setattr(urllib.request, "urlopen", offline)
     with pytest.raises(SourceUnavailable, match=r"example\.invalid.*offline"):
-        cache.http_download("https://example.invalid/x")
+        cache.http_download("https://example.invalid/x", retry_delays=())
 
 
 def test_http_download_wraps_http_404(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -144,7 +151,7 @@ def test_http_download_wraps_mid_read_failure(
 
     monkeypatch.setattr(urllib.request, "urlopen", dropped)
     with pytest.raises(SourceUnavailable, match=r"example\.invalid"):
-        cache.http_download("https://example.invalid/x")
+        cache.http_download("https://example.invalid/x", retry_delays=())
 
 
 def test_http_download_wraps_connection_reset(
@@ -155,7 +162,7 @@ def test_http_download_wraps_connection_reset(
 
     monkeypatch.setattr(urllib.request, "urlopen", reset)
     with pytest.raises(SourceUnavailable, match="reset by peer"):
-        cache.http_download("https://example.invalid/x")
+        cache.http_download("https://example.invalid/x", retry_delays=())
 
 
 def test_http_stream_writes_the_body_in_chunks(
@@ -323,3 +330,87 @@ def test_network_errors_become_source_unavailable(error: Exception) -> None:
 def test_other_errors_pass_through_network_errors() -> None:
     with pytest.raises(KeyError), cache.network_errors("cannot reach x"):
         raise KeyError("bug")
+
+
+def test_store_json_writes_indented_text_with_a_final_newline(tmp_path: Path) -> None:
+    path = tmp_path / "index.json"
+    digest = cache.store_json(path, {"format": 1})
+    assert path.read_text(encoding="utf-8") == '{\n  "format": 1\n}\n'
+    assert digest == hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def test_gunzip_decompresses_gzip_data() -> None:
+    assert cache.gunzip(gzip.compress(b"rows")) == b"rows"
+
+
+@pytest.mark.parametrize("data", [b"not gzip", b"\x1f\x8b\x08truncated"])
+def test_gunzip_of_something_else_is_none(data: bytes) -> None:
+    assert cache.gunzip(data) is None
+
+
+def test_a_dropped_download_is_tried_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    answers: list[Exception | bytes] = [ConnectionResetError("reset"), b"body"]
+
+    def flaky(url: str, timeout: float) -> io.BytesIO:
+        answer = answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return _Response(answer)
+
+    monkeypatch.setattr(urllib.request, "urlopen", flaky)
+    assert cache.http_download("https://example.invalid/x", retry_delays=(0.0,)) == (
+        b"body"
+    )
+    assert answers == []
+
+
+def _failing(*errors: Exception) -> Callable[[], str]:
+    remaining = list(errors)
+
+    def attempt() -> str:
+        if remaining:
+            raise remaining.pop(0)
+        return "done"
+
+    return attempt
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        SourceUnavailable("offline"),
+        HttpStatusError("busy", url="u", status=503),
+        HttpStatusError("slow down", url="u", status=429),
+    ],
+    ids=["network", "server error", "too many requests"],
+)
+def test_retrying_waits_and_tries_a_transient_failure_again(error: Exception) -> None:
+    waits: list[float] = []
+    assert cache.retrying(
+        _failing(error, error), delays=(1.0, 2.0), sleep=waits.append
+    ) == ("done")
+    assert waits == [1.0, 2.0]
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        HttpStatusError("gone", url="u", status=404),
+        HttpStatusError("unchanged", url="u", status=403),
+        AuthError("refused"),
+    ],
+    ids=["not found", "forbidden", "login refused"],
+)
+def test_retrying_raises_a_lasting_failure_at_once(error: Exception) -> None:
+    waits: list[float] = []
+    with pytest.raises(type(error)):
+        cache.retrying(_failing(error), delays=(1.0,), sleep=waits.append)
+    assert waits == []
+
+
+def test_retrying_raises_the_last_failure_when_attempts_run_out() -> None:
+    waits: list[float] = []
+    attempt = _failing(SourceUnavailable("first"), SourceUnavailable("second"))
+    with pytest.raises(SourceUnavailable, match="second"):
+        cache.retrying(attempt, delays=(1.0,), sleep=waits.append)
+    assert waits == [1.0]

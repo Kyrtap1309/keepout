@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Literal, Self, TypeAlias
 
-from keepout._types import override
+from keepout._types import override, require_probability
 
 __all__ = ["Method", "PcResult"]
 
@@ -49,8 +48,7 @@ class PcResult:
     details: Mapping[str, float] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if not (math.isfinite(self.value) and 0.0 <= self.value <= 1.0):
-            raise ValueError(f"Pc must be in [0, 1], got {self.value}")
+        require_probability(self.value, "Pc")
         object.__setattr__(self, "value", float(self.value))
         object.__setattr__(self, "diagnostics", tuple(self.diagnostics))
         object.__setattr__(self, "details", MappingProxyType(dict(self.details)))

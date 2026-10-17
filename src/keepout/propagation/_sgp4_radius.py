@@ -62,7 +62,7 @@ import numpy as np
 from sgp4.api import Satrec
 
 from keepout._types import BoolArray, FloatArray
-from keepout._units import KM
+from keepout.units import KM
 
 DEEP_SPACE_SAMPLING: Final = 360.0
 """Longest time [min] between the samples of a deep-space object's secular

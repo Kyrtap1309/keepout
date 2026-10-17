@@ -69,7 +69,6 @@ from astropy.time import Time
 from generated import replace_block, table, write_or_check
 from screening_timing import TimingOutput, select, timed
 
-from keepout._units import DAY
 from keepout.omm import Omm
 from keepout.omm.celestrak import dumps_csv
 from keepout.screening import (
@@ -81,6 +80,7 @@ from keepout.screening import (
 )
 from keepout.screening.pipeline import DEFAULT_DURATION
 from keepout.screening.volume import SOCRATES_RADIUS
+from keepout.units import DAY, KM
 
 REPO: Final = Path(__file__).resolve().parents[1]
 RESULTS: Final = REPO / "docs/screening-benchmark.json"
@@ -700,7 +700,7 @@ def compare_main(args: argparse.Namespace) -> int:
         )
     setting = (
         f"{len(args.primaries)} primaries x {len(reduced)} objects x "
-        f"{_days(args.days)}, {SOCRATES_RADIUS / 1e3:g} km sphere, 1 process, "
+        f"{_days(args.days)}, {SOCRATES_RADIUS / KM:g} km sphere, 1 process, "
         f"{args.repeat} {'run' if args.repeat == 1 else 'runs'} per tree"
     )
     text, regression = render_comparison(comparison, setting, args.threshold)

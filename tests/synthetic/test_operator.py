@@ -11,7 +11,6 @@ import pytest
 from astropy.time import Time
 from screening_data import load_fixture
 
-from keepout._units import DAY
 from keepout.cdm import kvn, make_message_id, xml
 from keepout.errors import FleetError
 from keepout.pc import compute_pc
@@ -25,6 +24,7 @@ from keepout.synthetic import (
     SyntheticCovarianceModel,
 )
 from keepout.synthetic.operator import DEFAULT_MODEL, HEADER_COMMENTS, UNKNOWN, run
+from keepout.units import DAY
 
 FIXTURE = load_fixture()
 BY_NUMBER = {omm.catalog_number: omm for omm in FIXTURE}

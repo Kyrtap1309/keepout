@@ -12,11 +12,11 @@ from astropy.time import Time
 from cli_builders import FLEET_TOML
 from screening_data import load_fixture
 
-from keepout._units import DAY
 from keepout.cdm import kvn
 from keepout.omm.celestrak import dumps_csv
 from keepout.synthetic import Fleet, FleetSatellite
 from keepout.synthetic.operator import run
+from keepout.units import DAY
 
 
 def arguments(tmp_path: Path) -> list[str]:

@@ -32,10 +32,13 @@ __all__ = [
     "OrderedEnum",
     "as_vector",
     "from_eigen",
+    "is_probability",
     "override",
     "read_only",
+    "require_at_least",
     "require_non_negative",
     "require_positive",
+    "require_probability",
     "symmetric_part",
 ]
 
@@ -148,3 +151,32 @@ def require_non_negative(value: float, name: str) -> None:
     """
     if not (math.isfinite(value) and value >= 0.0):
         raise ValueError(f"{name} must be finite and >= 0, got {value}")
+
+
+def is_probability(value: float) -> bool:
+    """Whether ``value`` is a probability: finite and in [0, 1]."""
+    return math.isfinite(value) and 0.0 <= value <= 1.0
+
+
+def require_probability(value: float, name: str) -> None:
+    """Raise ``ValueError`` unless ``value`` is a probability.
+
+    Raises
+    ------
+    ValueError
+        If ``value`` is not finite or not in [0, 1].
+    """
+    if not is_probability(value):
+        raise ValueError(f"{name} must be in [0, 1], got {value}")
+
+
+def require_at_least(value: int, minimum: int, name: str) -> None:
+    """Raise ``ValueError`` unless the count ``value`` is at least ``minimum``.
+
+    Raises
+    ------
+    ValueError
+        If ``value`` is below ``minimum``.
+    """
+    if value < minimum:
+        raise ValueError(f"{name} must be at least {minimum}, got {value}")

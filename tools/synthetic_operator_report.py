@@ -32,7 +32,6 @@ import screening_snapshot as snapshot
 from astropy.time import Time
 from generated import table, write_or_check
 
-from keepout._units import DAY, KM
 from keepout.cdm import kvn
 from keepout.encounter import encounter_plane
 from keepout.omm import Omm, deduplicate
@@ -50,6 +49,7 @@ from keepout.synthetic import (
     orbit_regime,
 )
 from keepout.synthetic.operator import UNKNOWN, run
+from keepout.units import DAY, KM
 
 REPO: Final = Path(__file__).resolve().parents[1]
 PAGE: Final = REPO / "docs/synthetic-operator.md"

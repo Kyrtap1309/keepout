@@ -108,6 +108,7 @@ from keepout._types import (
     IndexArray,
     as_vector,
     read_only,
+    require_at_least,
     require_non_negative,
     require_positive,
 )
@@ -685,8 +686,7 @@ class ApproachSearch:
         ValueError
             If ``max_states`` is below 1.
         """
-        if max_states < 1:
-            raise ValueError(f"max_states must be at least 1, got {max_states}")
+        require_at_least(max_states, 1, "max_states")
         rows = np.flatnonzero(self._pairs.any(axis=1))
         if len(self._offsets) < 2 or rows.size == 0:
             return SearchResult((), {}, {})

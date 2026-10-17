@@ -15,6 +15,8 @@ from concurrent.futures import ProcessPoolExecutor
 from types import MappingProxyType
 from typing import Final
 
+from keepout._types import require_at_least
+
 __all__ = ["DEFAULT_WORKERS", "ONE_THREAD", "process_pool", "resolve_workers"]
 
 DEFAULT_WORKERS: Final = 4
@@ -44,8 +46,7 @@ def resolve_workers(workers: int | None) -> int:
     """
     if workers is None:
         return min(DEFAULT_WORKERS, os.cpu_count() or 1)
-    if workers < 1:
-        raise ValueError(f"workers must be at least 1, got {workers}")
+    require_at_least(workers, 1, "workers")
     return workers
 
 

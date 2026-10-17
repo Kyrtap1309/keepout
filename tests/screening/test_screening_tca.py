@@ -42,8 +42,8 @@ from keepout.screening.tca import (
     time_grid,
 )
 from keepout.state import RefFrame
+from keepout.units import KM
 
-KM = 1e3
 HOUR = 3600.0
 REFERENCE = Time("2026-10-06T00:00:00", scale="utc")
 """Time zero of the straight-line objects."""

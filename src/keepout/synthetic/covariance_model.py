@@ -55,9 +55,9 @@ import numpy as np
 from astropy.time import Time
 
 from keepout._types import require_non_negative, require_positive
-from keepout._units import DAY, KM, seconds_between
 from keepout.covariance import Covariance
 from keepout.omm import Omm
+from keepout.units import DAY, KM, seconds_between
 
 __all__ = [
     "FLOHRER_SIGMAS",

@@ -17,14 +17,14 @@ from keepout.screening import (
     apogee_perigee_filter,
     volume_for,
 )
+from keepout.units import DAY, KM
 
-KM = 1e3
 CATALOG = load_fixture()
 """222 objects of the frozen public catalog, LEO to HEO."""
 COLUMN = {omm.catalog_number: index for index, omm in enumerate(CATALOG)}
 PRIMARIES = CATALOG[::9]
 """25 primaries spread over the fixture (LEO, MEO, GEO, HEO)."""
-WEEK = 7 * 86400.0
+WEEK = 7 * DAY
 WINDOWS = (
     Time("2026-10-06T00:00:00", scale="utc"),  # after most element epochs
     Time("2026-09-29T00:00:00", scale="utc"),  # before most of them

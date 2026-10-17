@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from collections import Counter
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
@@ -10,7 +9,7 @@ from typing import Final, TypeAlias
 
 from astropy.time import Time
 
-from keepout._types import require_non_negative
+from keepout._types import is_probability, require_non_negative
 from keepout.cdm.model import Cdm
 from keepout.conjunction import Conjunction
 from keepout.covariance import Policy
@@ -18,6 +17,7 @@ from keepout.errors import EventError, HardBodyRadiusError, KeepoutError
 from keepout.pc.api import MethodChoice, compute_pc
 from keepout.pc.result import PcResult
 from keepout.risk.observation import PcObservation
+from keepout.units import MINUTE
 
 __all__ = [
     "DEFAULT_TCA_TOLERANCE",
@@ -27,7 +27,7 @@ __all__ = [
     "time_to_tca",
 ]
 
-DEFAULT_TCA_TOLERANCE: Final = 600.0
+DEFAULT_TCA_TOLERANCE: Final = 10 * MINUTE
 """Largest spread [s] of the TCAs of one event's CDMs. Successive CDMs of an
 encounter move its TCA by milliseconds to seconds; two encounters of the same
 pair are at least a large fraction of an orbit apart."""
@@ -53,7 +53,7 @@ def _pair(cdm: Cdm) -> tuple[str, str]:
 def _reported(cdm: Cdm) -> tuple[float | None, tuple[str, ...]]:
     """The originator's Pc, if it is a probability; else a note saying why not."""
     reported = cdm.collision_probability
-    if reported is None or (math.isfinite(reported) and 0.0 <= reported <= 1.0):
+    if reported is None or is_probability(reported):
         return reported, ()
     return None, (f"reported COLLISION_PROBABILITY {reported} is not in [0, 1]",)
 

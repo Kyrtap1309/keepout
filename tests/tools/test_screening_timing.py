@@ -8,9 +8,9 @@ import screening_snapshot as snapshot
 import screening_timing as timing
 from astropy.time import Time
 
-from keepout._units import DAY
 from keepout.omm import load
 from keepout.screening import DEFAULT_VOLUME, screen
+from keepout.units import DAY
 
 CATALOG = snapshot.DATA / snapshot.FIXTURE
 START = "2026-10-06T00:00:00"

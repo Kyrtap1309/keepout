@@ -16,8 +16,8 @@ import math
 from collections.abc import Mapping
 from typing import Final
 
-from keepout._units import DAY
 from keepout.ccsds.keywords import Keyword
+from keepout.units import DAY
 
 __all__ = [
     "ATTRIBUTES",

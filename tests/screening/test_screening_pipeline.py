@@ -28,8 +28,8 @@ from keepout.screening import (
 )
 from keepout.screening.pipeline import DEFAULT_DURATION, MAX_AGE, MAX_LEAD
 from keepout.screening.tca import PERTURBATION
+from keepout.units import DAY
 
-DAY = 86400.0
 START = Time("2026-10-06T00:00:00", scale="utc")
 FIXTURE = load_fixture()
 BY_NUMBER = {omm.catalog_number: omm for omm in FIXTURE}

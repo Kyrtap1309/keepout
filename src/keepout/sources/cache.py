@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import gzip
 import hashlib
 import http.client
 import io
@@ -28,15 +29,17 @@ import os
 import stat
 import tempfile
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Callable, Collection, Generator, Mapping
+import zlib
+from collections.abc import Callable, Collection, Generator, Mapping, Sequence
 from dataclasses import dataclass
 from http import HTTPStatus
 from importlib.metadata import version
 from pathlib import Path
-from typing import TYPE_CHECKING, Final, NamedTuple, Protocol, TypeAlias
+from typing import TYPE_CHECKING, Final, NamedTuple, Protocol, TypeAlias, TypeVar
 
 import platformdirs
 
@@ -50,11 +53,13 @@ __all__ = [
     "CHUNK_SIZE",
     "DOWNLOAD_TIMEOUT",
     "HOME_PAGE",
+    "RETRY_DELAYS",
     "USER_AGENT",
     "CachedCopy",
     "CopyMeta",
     "Sink",
     "cache_dir",
+    "gunzip",
     "has_digest",
     "http_download",
     "http_request",
@@ -62,14 +67,22 @@ __all__ = [
     "meta_path",
     "network_errors",
     "read_copy",
+    "retrying",
     "save_copy",
     "store",
     "store_bytes",
+    "store_json",
     "write_meta",
 ]
 
 DOWNLOAD_TIMEOUT: Final = 60.0
 """Seconds :func:`http_download` and :func:`http_stream` wait for the server."""
+
+_T = TypeVar("_T")
+
+RETRY_DELAYS: Final = (5.0, 30.0)
+"""Seconds waited before each new attempt of a download that failed
+transiently (:func:`retrying`): two more attempts, over about half a minute."""
 
 CHUNK_SIZE: Final = 1 << 20
 """Bytes :func:`http_stream` reads at a time."""
@@ -105,13 +118,18 @@ def cache_dir(given: Path | None = None) -> Path:
     return platformdirs.user_cache_path("keepout")
 
 
-def http_download(url: str) -> bytes:
+def http_download(url: str, *, retry_delays: Sequence[float] = RETRY_DELAYS) -> bytes:
     """Download ``url`` and return the body, as :func:`http_stream` does.
+
+    A download that fails on the network or with a server error is tried
+    again (:func:`retrying`).
 
     Parameters
     ----------
     url
         What to download.
+    retry_delays
+        Seconds waited before each new attempt.
 
     Raises
     ------
@@ -120,9 +138,50 @@ def http_download(url: str) -> bytes:
     SourceUnavailable
         On any other network or HTTP error.
     """
-    buffer = io.BytesIO()
-    http_stream(url, buffer)
-    return buffer.getvalue()
+
+    def attempt() -> bytes:
+        buffer = io.BytesIO()
+        http_stream(url, buffer)
+        return buffer.getvalue()
+
+    return retrying(attempt, delays=retry_delays)
+
+
+def retrying(
+    attempt: Callable[[], _T],
+    *,
+    delays: Sequence[float] = RETRY_DELAYS,
+    sleep: Callable[[float], object] | None = None,
+) -> _T:
+    """``attempt()``, tried again after each of ``delays`` while it fails
+    transiently.
+
+    A failure is transient if it is a
+    :class:`~keepout.errors.SourceUnavailable` other than an HTTP status (a
+    network error), or an HTTP 429 or 5xx status. ``attempt`` must start
+    afresh each time: a stream already written to cannot be retried. The
+    waits are ``sleep``'s, :func:`time.sleep` if ``None``.
+
+    Raises
+    ------
+    SourceUnavailable
+        The first failure that is not transient, or the last one.
+    """
+    for delay in delays:
+        try:
+            return attempt()
+        except SourceUnavailable as exc:
+            if not _transient(exc):
+                raise
+        (time.sleep if sleep is None else sleep)(delay)
+    return attempt()
+
+
+def _transient(error: SourceUnavailable) -> bool:
+    """Whether a download that failed with ``error`` may succeed if tried again."""
+    if not isinstance(error, HttpStatusError):
+        return type(error) is SourceUnavailable
+    return error.status == HTTPStatus.TOO_MANY_REQUESTS or error.status >= 500
 
 
 def http_request(
@@ -325,6 +384,25 @@ def store_bytes(target: Path, data: bytes) -> str:
     return _write(target, lambda sink: sink.write(data))
 
 
+def store_json(target: Path, record: Mapping[str, object]) -> str:
+    """Write ``record`` to ``target`` as indented JSON text, atomically.
+
+    Returns
+    -------
+    str
+        The SHA-256 hex digest of the text written.
+    """
+    return store_bytes(target, (json.dumps(record, indent=2) + "\n").encode())
+
+
+def gunzip(data: bytes) -> bytes | None:
+    """``data`` decompressed, or ``None`` if it is not intact gzip data."""
+    try:
+        return gzip.decompress(data)
+    except (OSError, EOFError, zlib.error):
+        return None
+
+
 def _write(
     target: Path,
     write: Callable[[Sink], object],
@@ -458,4 +536,4 @@ def write_meta(target: Path, meta: CopyMeta) -> None:
     Times must be floats (``time.time()``); :func:`read_copy` refuses others.
     """
     record = {"format": _META_FORMAT, **dataclasses.asdict(meta)}
-    store_bytes(meta_path(target), (json.dumps(record, indent=2) + "\n").encode())
+    store_json(meta_path(target), record)

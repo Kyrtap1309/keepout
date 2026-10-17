@@ -22,7 +22,7 @@ import numpy as np
 import numpy.typing as npt
 from astropy.time import Time
 
-from keepout._types import BoolArray, FloatArray, read_only
+from keepout._types import BoolArray, FloatArray, read_only, require_at_least
 from keepout.state import RefFrame, as_ref_frame
 
 __all__ = [
@@ -357,8 +357,7 @@ def propagate_in_chunks(
         If ``max_states`` is below 1 or the time grid is invalid (checked at
         the call, before any chunk).
     """
-    if max_states < 1:
-        raise ValueError(f"max_states must be at least 1, got {max_states}")
+    require_at_least(max_states, 1, "max_states")
     seconds = time_offsets(epoch, offsets)
     objects = sum(len(propagator) for propagator in propagators)
     size = max(2 if overlap else 1, max_states // max(1, objects))

@@ -32,6 +32,7 @@ from keepout.cli import fetch
 from keepout.cli.output import ExitCode
 from keepout.omm import load
 from keepout.sources import cara, celestrak, kelvins, spacetrack
+from keepout.sources.cache import RETRY_DELAYS
 
 FILES = {
     "DataFiles/one.csv": b"a,b\n1,2\n",
@@ -89,11 +90,12 @@ def test_fetch_cara_uses_the_cache_of_the_environment(
 def test_fetch_cara_reports_a_failed_download(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    FakeWeb(monkeypatch, dict(list(CARA_PAGES.items())[:1]))
+    web = FakeWeb(monkeypatch, dict(list(CARA_PAGES.items())[:1]))
     result = keepout("fetch", "cara", "--cache-dir", str(tmp_path))
     assert result.exit_code == ExitCode.ERROR
     assert result.stdout == ""
     assert result.stderr.startswith("Error: cannot download https://")
+    assert web.waits == list(RETRY_DELAYS)
 
 
 @pytest.mark.usefixtures("pinned_cara")
@@ -213,11 +215,12 @@ def test_fetch_catalog_as_json_lists_each_group_and_its_copy(
 def test_fetch_catalog_reports_an_unreachable_celestrak(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    FakeWeb(monkeypatch, {})
+    web = FakeWeb(monkeypatch, {})
     result = keepout("fetch", "catalog", "--cache-dir", str(tmp_path))
     assert result.exit_code == ExitCode.ERROR
     assert result.stderr.startswith("Error: ")
     assert "celestrak.org" in result.stderr
+    assert web.waits == list(RETRY_DELAYS)
 
 
 def test_fetch_catalog_from_space_track(

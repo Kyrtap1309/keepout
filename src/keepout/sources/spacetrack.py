@@ -79,7 +79,6 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-import zlib
 from collections import deque
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
@@ -91,7 +90,13 @@ from typing import Final, Literal, Protocol, Self, TypeAlias, TypeVar
 
 from astropy.time import Time
 
-from keepout._types import JsonValue, override
+from keepout._types import (
+    JsonValue,
+    override,
+    require_at_least,
+    require_non_negative,
+    require_probability,
+)
 from keepout.errors import (
     AuthError,
     HttpStatusError,
@@ -105,13 +110,15 @@ from keepout.omm.model import Omm
 from keepout.sources.cache import (
     DOWNLOAD_TIMEOUT,
     cache_dir,
+    gunzip,
     http_request,
     network_errors,
     read_copy,
     save_copy,
-    store_bytes,
+    store_json,
 )
 from keepout.sources.catalog import Catalog, CatalogPart, Retrieval
+from keepout.units import HOUR, MINUTE
 
 __all__ = [
     "BASE_URL",
@@ -174,7 +181,7 @@ RequestClass: TypeAlias = Literal["gp", "cdm_public"]
 """A Space-Track request class keepout queries (:data:`CLASS_INTERVALS`)."""
 
 CLASS_INTERVALS: Final[Mapping[RequestClass, float]] = MappingProxyType(
-    {"gp": 3600.0, "cdm_public": 8 * 3600.0}
+    {"gp": HOUR, "cdm_public": 8 * HOUR}
 )
 """Least seconds between two queries of each request class, as Space-Track
 publishes them: ``gp`` once an hour, ``cdm_public`` (every public CDM) once
@@ -496,7 +503,7 @@ class Throttle:
             raise ValueError(
                 f"limits must be at least 1, got {per_minute}/min and {per_hour}/h"
             )
-        self._limits = ((60.0, per_minute), (3600.0, per_hour))
+        self._limits = ((MINUTE, per_minute), (HOUR, per_hour))
         self._clock = clock
         self._sleep = sleep
         self._sent: deque[float] = deque(maxlen=max(per_minute, per_hour))
@@ -643,7 +650,7 @@ class SpaceTrackClient:
         now = self._now()
         cached = read_copy(target, url)
         if cached is not None and 0.0 <= now - cached.meta.retrieved < max_age:
-            data = _gunzip(cached.data)
+            data = gunzip(cached.data)
             if data is not None:
                 with contextlib.suppress(SourceFormatError):
                     return read(data), Retrieval.of(target, cached.meta)
@@ -734,7 +741,7 @@ class SpaceTrackClient:
             wait = interval - (now - last)
             raise RateLimited(
                 f"Space-Track allows one {query.request_class} query per "
-                f"{interval / 3600:g} h; the last was sent at {_utc(last)} "
+                f"{interval / HOUR:g} h; the last was sent at {_utc(last)} "
                 f"(recorded in {self.ledger}); try again in {_duration(wait)}",
                 retry_after=wait,
             )
@@ -858,7 +865,7 @@ class SpaceTrackClient:
 
     def _write_ledger(self, queried: Mapping[str, float]) -> None:
         record = {"format": _LEDGER_FORMAT, "queried": dict(sorted(queried.items()))}
-        store_bytes(self.ledger, (json.dumps(record, indent=2) + "\n").encode())
+        store_json(self.ledger, record)
 
 
 def read_catalog(data: bytes) -> tuple[Omm, ...]:
@@ -1018,22 +1025,30 @@ def _public_cdm(record: object) -> PublicCdm:
 
     def number(column: str) -> float:
         value = float(required(column))
-        if not math.isfinite(value) or value < 0.0:
-            raise ValueError(f"{column} must be finite and >= 0, got {value}")
+        require_non_negative(value, column)
         return value
 
     def catalog_number(column: str) -> int:
         value = int(required(column))
-        if value < 1:
-            raise ValueError(f"{column} must be at least 1, got {value}")
+        require_at_least(value, 1, column)
         return value
+
+    def public_object(n: int) -> PublicCdmObject:
+        # Space-Track spells the columns SAT_1_ID but SAT1_OBJECT_TYPE.
+        return PublicCdmObject(
+            catalog_number=catalog_number(f"SAT_{n}_ID"),
+            name=values[f"SAT_{n}_NAME"],
+            object_type=values[f"SAT{n}_OBJECT_TYPE"],
+            rcs_size=values[f"SAT{n}_RCS"],
+            exclusion_volume=values[f"SAT_{n}_EXCL_VOL"],
+        )
 
     reportable = required("EMERGENCY_REPORTABLE")
     if reportable not in _YES_NO:
         raise ValueError(f"EMERGENCY_REPORTABLE must be Y or N, got {reportable!r}")
-    probability = None if values["PC"] is None else number("PC")
-    if probability is not None and probability > 1.0:
-        raise ValueError(f"PC must be at most 1, got {probability}")
+    probability = None if values["PC"] is None else float(values["PC"])
+    if probability is not None:
+        require_probability(probability, "PC")
     return PublicCdm(
         cdm_id=catalog_number("CDM_ID"),
         created=_time(required("CREATED"), "CREATED"),
@@ -1041,20 +1056,8 @@ def _public_cdm(record: object) -> PublicCdm:
         tca=_time(required("TCA"), "TCA"),
         min_range=number("MIN_RNG"),
         probability=probability,
-        object1=PublicCdmObject(
-            catalog_number=catalog_number("SAT_1_ID"),
-            name=values["SAT_1_NAME"],
-            object_type=values["SAT1_OBJECT_TYPE"],
-            rcs_size=values["SAT1_RCS"],
-            exclusion_volume=values["SAT_1_EXCL_VOL"],
-        ),
-        object2=PublicCdmObject(
-            catalog_number=catalog_number("SAT_2_ID"),
-            name=values["SAT_2_NAME"],
-            object_type=values["SAT2_OBJECT_TYPE"],
-            rcs_size=values["SAT2_RCS"],
-            exclusion_volume=values["SAT_2_EXCL_VOL"],
-        ),
+        object1=public_object(1),
+        object2=public_object(2),
     )
 
 
@@ -1210,14 +1213,6 @@ def _login_refusal(body: bytes) -> str | None:
     return None
 
 
-def _gunzip(data: bytes) -> bytes | None:
-    """``data`` decompressed, or ``None`` if it is not gzip."""
-    try:
-        return gzip.decompress(data)
-    except (OSError, EOFError, zlib.error):
-        return None
-
-
 def _decoded(url: str, body: bytes, headers: email.message.Message) -> bytes:
     """``body`` as sent: decompressed if the server gzipped it
     (``Content-Encoding: gzip``, asked for by ``Accept-Encoding``).
@@ -1229,7 +1224,7 @@ def _decoded(url: str, body: bytes, headers: email.message.Message) -> bytes:
     """
     if headers.get("Content-Encoding", "").strip().lower() != "gzip":
         return body
-    data = _gunzip(body)
+    data = gunzip(body)
     if data is None:
         raise SourceUnavailable(f"{url}: the gzipped answer does not decompress")
     return data

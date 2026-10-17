@@ -64,10 +64,10 @@ from astropy.time import Time
 from keepout._types import (
     FloatArray,
     IndexArray,
+    require_at_least,
     require_non_negative,
     require_positive,
 )
-from keepout._units import DAY
 from keepout._workers import process_pool, resolve_workers
 from keepout.errors import KeepoutError
 from keepout.frames import frame_to_gcrf
@@ -101,6 +101,7 @@ from keepout.screening.volume import (
     volume_for,
 )
 from keepout.state import RefFrame, StateVector
+from keepout.units import DAY
 
 __all__ = ["DEFAULT_DURATION", "MAX_AGE", "MAX_LEAD", "screen"]
 
@@ -191,8 +192,7 @@ def screen(
     require_non_negative(max_lead, "max_lead")
     require_positive(step, "step")
     processes = resolve_workers(workers)
-    if max_states < 1:
-        raise ValueError(f"max_states must be at least 1, got {max_states}")
+    require_at_least(max_states, 1, "max_states")
     window = _Window(start, float(duration), float(step), max_states)
     own, dropped_primaries = _current(
         primaries, ScreeningRole.PRIMARY, window, max_age, max_lead
@@ -206,13 +206,13 @@ def screen(
     count = min(processes, len(others))
     parts = [
         _Part(
-            window,
-            propagator,
-            numbers,
-            bounds,
-            tuple(volumes),
-            others[part::count],
-            np.arange(part, len(others), count),
+            window=window,
+            primaries=propagator,
+            primary_numbers=numbers,
+            primary_bounds=bounds,
+            volumes=tuple(volumes),
+            catalog=others[part::count],
+            columns=np.arange(part, len(others), count),
         )
         for part in range(count)
     ]
@@ -267,7 +267,7 @@ class _Window:
     max_states: int
 
 
-@dataclass(frozen=True, eq=False, slots=True)
+@dataclass(frozen=True, eq=False, slots=True, kw_only=True)
 class _Part:
     """The primaries and one part of the catalog, to screen in one process."""
 

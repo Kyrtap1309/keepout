@@ -62,5 +62,5 @@ def test_non_convergence_at_the_order_cap_is_reported() -> None:
 
 @pytest.mark.parametrize("order", [0, -64])
 def test_order_must_be_positive(order: int) -> None:
-    with pytest.raises(ValueError, match="order must be >= 1"):
+    with pytest.raises(ValueError, match="order must be at least 1"):
         elrod(TYPICAL_HEAD_ON.plane, 5.0, order=order)

@@ -36,10 +36,10 @@ from typing import TypedDict
 
 from astropy.time import Time
 
-from keepout._units import DAY
 from keepout.omm import Omm, load
 from keepout.screening import ScreeningResult, ScreeningVolume, VolumeRule, screen
 from keepout.screening.volume import SOCRATES_RADIUS
+from keepout.units import DAY
 
 
 @dataclass(frozen=True, slots=True)

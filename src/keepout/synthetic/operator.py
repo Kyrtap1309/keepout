@@ -168,7 +168,7 @@ class OperatorResult:
         return tuple(event.cdm for event in self.events)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class _Settings:
     """How each approach becomes an event."""
 
@@ -259,15 +259,15 @@ def run(
     primaries = [newest[number] for number in fleet.catalog_numbers]
     screening = screen(primaries, elements, start, duration, volume, workers=workers)
     settings = _Settings(
-        fleet,
-        newest,
-        screening,
-        model,
-        issued,
-        originator,
-        method,
-        thresholds,
-        decision_config,
+        fleet=fleet,
+        elements=newest,
+        screening=screening,
+        model=model,
+        created=issued,
+        originator=originator,
+        method=method,
+        thresholds=thresholds,
+        decision_config=decision_config,
     )
     events = tuple(_event(approach, settings) for approach in screening.approaches)
     return OperatorResult(fleet, screening, events, model, issued)

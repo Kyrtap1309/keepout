@@ -21,9 +21,9 @@ from typing import Final
 
 from astropy.time import Time
 
-from keepout._units import DAY, KM, seconds_between
 from keepout.errors import SourceFormatError
 from keepout.omm import Omm
+from keepout.units import DAY, KM, seconds_between
 
 __all__ = [
     "COLUMNS",

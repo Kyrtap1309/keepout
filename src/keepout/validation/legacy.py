@@ -18,11 +18,11 @@ from typing import Final
 
 from astropy.time import Time
 
-from keepout._units import KM
 from keepout.cdm.keywords import covariance_matrix
 from keepout.errors import CaraFormatError, UnsupportedFrame
 from keepout.objects import ObjectState, ReportedObject, gcrf_object_states
 from keepout.state import StateVector, as_ref_frame
+from keepout.units import KM
 
 __all__ = ["legacy_objects"]
 

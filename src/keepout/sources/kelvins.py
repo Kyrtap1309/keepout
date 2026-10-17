@@ -31,10 +31,17 @@ from typing import Final, NamedTuple, TextIO, TypeAlias
 import numpy as np
 
 from keepout._types import FloatArray, read_only
-from keepout._units import DAY
 from keepout.errors import KelvinsFormatError
 from keepout.risk.observation import PcObservation
-from keepout.sources.cache import Sink, cache_dir, has_digest, http_stream, store
+from keepout.sources.cache import (
+    Sink,
+    cache_dir,
+    has_digest,
+    http_stream,
+    retrying,
+    store,
+)
+from keepout.units import DAY
 
 __all__ = [
     "ARCHIVE_SHA256",
@@ -143,7 +150,8 @@ def fetch_raw(
     Raises
     ------
     SourceUnavailable
-        If the download fails.
+        If the download fails, also when tried again
+        (:func:`~keepout.sources.cache.retrying`).
     ChecksumMismatch
         If the archive or the table does not have its pinned digest.
     KelvinsFormatError
@@ -157,11 +165,14 @@ def fetch_raw(
         archive.unlink(missing_ok=True)
         return target
     if not has_digest(archive, ARCHIVE_SHA256):
-        store(
-            archive,
-            lambda sink: download(ARCHIVE_URL, sink),
-            ARCHIVE_SHA256,
-            ARCHIVE_URL,
+        # Each attempt streams into a new temporary file.
+        retrying(
+            lambda: store(
+                archive,
+                lambda sink: download(ARCHIVE_URL, sink),
+                ARCHIVE_SHA256,
+                ARCHIVE_URL,
+            )
         )
     try:
         with zipfile.ZipFile(archive) as bundle, bundle.open(RAW_MEMBER) as member:
@@ -295,8 +306,8 @@ def _rows(path: Path) -> Iterator[tuple[int, list[str]]]:
             missing = sorted(set(COLUMNS) - set(header or ()))
             extra = sorted(set(header or ()) - set(COLUMNS))
             raise KelvinsFormatError(
-                f"{path}: header is not the Kelvins raw table's 103 columns in "
-                f"order (missing {missing}, unexpected {extra})"
+                f"{path}: header is not the Kelvins raw table's {len(COLUMNS)} "
+                f"columns in order (missing {missing}, unexpected {extra})"
             )
         for line, row in enumerate(reader, start=2):
             if len(row) != len(COLUMNS):

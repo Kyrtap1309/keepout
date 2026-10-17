@@ -85,15 +85,14 @@ from urllib.parse import parse_qs, urlsplit
 import snapshot_files
 from astropy.time import Time
 from generated import write_or_check
-from snapshot_files import FileDigest, file_digests, write_json
+from snapshot_files import FileDigest, file_digests
 
-from keepout._units import DAY
 from keepout.equinoctial import semi_major_axis
 from keepout.errors import SourceUnavailable
 from keepout.omm import Omm, load
 from keepout.omm.celestrak import dumps_csv, loads_csv
 from keepout.screening.volume import SFS_DEEP_SPACE_PERIOD, SFS_ECCENTRICITY
-from keepout.sources.cache import http_download, store_bytes
+from keepout.sources.cache import http_download, store_bytes, store_json
 from keepout.sources.catalog import Catalog
 from keepout.sources.celestrak import (
     GP_URL,
@@ -105,6 +104,7 @@ from keepout.sources.celestrak import (
     fetch_socrates,
 )
 from keepout.sources.socrates import SocratesApproach, epoch_matches, read_socrates
+from keepout.units import DAY
 
 REPO: Final = Path(__file__).resolve().parents[1]
 TOOL: Final = "tools/screening_snapshot.py"
@@ -324,7 +324,7 @@ def write_index(path: Path, bodies: Sequence[Body]) -> None:
         "format": RAW_FORMAT,
         "bodies": [body.record() for body in bodies],
     }
-    write_json(path, record)
+    store_json(path, record)
 
 
 def read_body(raw: Path, body: Body) -> bytes:

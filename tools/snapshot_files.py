@@ -6,13 +6,11 @@ from __future__ import annotations
 
 import gzip
 import hashlib
-import json
-import zlib
 from collections.abc import Collection, Mapping
 from pathlib import Path
 from typing import Protocol, TypedDict
 
-from keepout.sources.cache import store_bytes
+from keepout.sources.cache import gunzip
 
 
 class Digested(Protocol):
@@ -50,11 +48,6 @@ def read_body(raw: Path, saved: Digested, index: str) -> bytes:
     return data
 
 
-def write_json(path: Path, record: Mapping[str, object]) -> None:
-    """Write ``record`` as indented JSON, atomically."""
-    store_bytes(path, (json.dumps(record, indent=2) + "\n").encode())
-
-
 def file_digests(files: Mapping[str, bytes]) -> dict[str, FileDigest]:
     """Each file's length and digest, by name, as a manifest lists them."""
     return {
@@ -82,11 +75,3 @@ def stored_files(
         else:
             files[name] = gzip.compress(content, compresslevel=9, mtime=0)
     return files
-
-
-def gunzip(data: bytes) -> bytes | None:
-    """``data`` decompressed, or ``None`` if it is not gzip."""
-    try:
-        return gzip.decompress(data)
-    except (OSError, EOFError, zlib.error):
-        return None

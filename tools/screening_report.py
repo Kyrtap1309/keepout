@@ -34,7 +34,6 @@ from astropy.time import Time
 from generated import relative, replace_block, table, write_or_check
 from screening_snapshot import SocratesSummary
 
-from keepout._units import DAY, seconds_between
 from keepout.omm import Omm
 from keepout.screening import (
     DEFAULT_VOLUME,
@@ -45,6 +44,7 @@ from keepout.screening import (
 )
 from keepout.screening.pipeline import DEFAULT_DURATION, MAX_AGE, MAX_LEAD
 from keepout.sources.socrates import SocratesApproach, read_socrates
+from keepout.units import DAY, KM, seconds_between
 
 REPO: Final = Path(__file__).resolve().parents[1]
 PAGE: Final = REPO / "docs/screening-socrates.md"
@@ -868,7 +868,7 @@ def _introduction(summary: Summary) -> list[str]:
             "own pair only, so the rest of the catalog changes nothing). Each "
             "SOCRATES approach is matched with keepout's approach of the same pair "
             f"whose TCA is nearest, within {settings['match_window']:g} s. "
-            f"*Fast* approaches are those of {settings['fast_from'] / 1e3:g} km/s or "
+            f"*Fast* approaches are those of {settings['fast_from'] / KM:g} km/s or "
             "more by SOCRATES; the others, mostly formation flyers, are *slow*."
         ),
         "",

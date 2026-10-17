@@ -23,7 +23,7 @@ import erfa
 from astropy.time import Time
 from erfa import ErfaWarning
 
-from keepout._units import DAY
+from keepout.units import DAY
 
 __all__ = [
     "FieldValue",

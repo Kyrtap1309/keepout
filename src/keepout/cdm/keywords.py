@@ -17,8 +17,8 @@ from typing import Final, Literal, TypeAlias
 import numpy as np
 
 from keepout._types import FloatArray
-from keepout._units import DAY
 from keepout.ccsds.keywords import Keyword, ValueKind
+from keepout.units import DAY
 
 __all__ = [
     "COVARIANCE_AXES",

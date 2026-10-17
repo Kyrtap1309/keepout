@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Annotated, TypeAlias
 
 import typer
 
-from keepout._units import DAY
 from keepout.cli.events import (
     AssessedEvent,
     event_json,
@@ -25,6 +24,7 @@ from keepout.cli.options import (
     positive,
 )
 from keepout.cli.output import JsonValue, isot, plural, show, utc
+from keepout.units import DAY
 
 # The library is imported in the command: keepout --help need not load the
 # numerical libraries.

@@ -9,9 +9,9 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
 from keepout._types import require_positive
-from keepout._units import DAY
 from keepout.risk.observation import PC_FLOOR, PcObservation
 from keepout.risk.thresholds import RiskLevel, Thresholds
+from keepout.units import DAY
 
 __all__ = [
     "Direction",

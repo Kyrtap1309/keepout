@@ -2,6 +2,7 @@
 web and Space-Track, and a fleet with approaches in the screening fixture."""
 
 import io
+import time
 import urllib.request
 from collections.abc import Mapping
 from pathlib import Path
@@ -40,14 +41,17 @@ class _Response(io.BytesIO):
 class FakeWeb:
     """Serves fixed bodies by URL in place of ``urllib.request.urlopen``.
 
-    Records the URLs asked for; a URL it does not serve fails as an
-    unreachable server does.
+    Records the URLs asked for, and the waits before a download is tried
+    again (``time.sleep`` passes no time); a URL it does not serve fails as
+    an unreachable server does.
     """
 
     def __init__(self, monkeypatch: pytest.MonkeyPatch, pages: Mapping[str, bytes]):
         self.pages = dict(pages)
         self.urls: list[str] = []
+        self.waits: list[float] = []
         monkeypatch.setattr(urllib.request, "urlopen", self._open)
+        monkeypatch.setattr(time, "sleep", self.waits.append)
 
     def _open(self, request: urllib.request.Request, timeout: float) -> _Response:
         url = request.full_url

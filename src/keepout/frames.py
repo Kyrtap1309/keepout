@@ -25,9 +25,9 @@ import numpy.typing as npt
 from astropy.time import Time
 
 from keepout._types import FloatArray, read_only
-from keepout._units import DAY
 from keepout.errors import GeometryError
 from keepout.state import RefFrame, StateVector, as_ref_frame
+from keepout.units import DAY, MINUTE
 
 __all__ = [
     "FRAME_BIAS",
@@ -53,7 +53,7 @@ PARALLEL_RTOL: Final = 1e-12
 """Relative size below which a vector's component perpendicular to another
 is taken as zero: position and velocity are then parallel."""
 
-TEME_RATE_STEP: Final = 600.0
+TEME_RATE_STEP: Final = 10 * MINUTE
 """Half-width [s] of the central difference that gives the rate of the TEME
 to GCRF rotation: long enough for rounding in GMST and ERA to stay small,
 short against nutation (error below 1e-8 m/s at GEO)."""

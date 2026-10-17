@@ -84,3 +84,4 @@ nav:
       - Data cache: reference/cache.md
       - Validation tooling: reference/validation.md
       - Errors: reference/errors.md
+      - Units: reference/units.md

@@ -5,7 +5,6 @@ source: keepout's own Pc of each CDM of an event, or Pc values reported by
 others (ESA's Kelvins data).
 """
 
-from keepout._units import DAY
 from keepout.risk.decision import (
     Action,
     Assessment,
@@ -30,6 +29,7 @@ from keepout.risk.trend import (
     TrendPoint,
     analyse_trend,
 )
+from keepout.units import DAY
 
 __all__ = [
     "DAY",

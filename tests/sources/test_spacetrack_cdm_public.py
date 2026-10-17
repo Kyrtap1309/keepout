@@ -124,7 +124,7 @@ def test_an_approach_not_emergency_reportable_reads_false() -> None:
         (space_track_cdm_public(public_cdm(MIN_RNG="-1")), "MIN_RNG must be finite"),
         (space_track_cdm_public(public_cdm(MIN_RNG="nan")), "MIN_RNG must be finite"),
         (space_track_cdm_public(public_cdm(MIN_RNG="far")), "could not convert"),
-        (space_track_cdm_public(public_cdm(PC="1.5")), "PC must be at most 1"),
+        (space_track_cdm_public(public_cdm(PC="1.5")), r"PC must be in \[0, 1\]"),
         (
             space_track_cdm_public(public_cdm(SAT_2_ID="0")),
             "SAT_2_ID must be at least 1",

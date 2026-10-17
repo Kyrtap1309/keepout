@@ -6,6 +6,7 @@ import math
 from dataclasses import dataclass
 from typing import Final, Literal, TypeAlias, get_args
 
+from keepout._types import require_probability
 from keepout.pc.result import Method, PcResult
 
 __all__ = ["PC_FLOOR", "PC_KINDS", "UPPER_BOUND_METHODS", "PcKind", "PcObservation"]
@@ -27,11 +28,6 @@ UPPER_BOUND_METHODS: Final[frozenset[Method]] = frozenset(
 PC_FLOOR: Final = 1e-30
 """Smallest Pc on a logarithmic scale; smaller values (and 0) are drawn and
 fitted at this floor."""
-
-
-def _probability(name: str, value: float) -> None:
-    if not (math.isfinite(value) and 0.0 <= value <= 1.0):
-        raise ValueError(f"{name} must be in [0, 1], got {value}")
 
 
 @dataclass(frozen=True, eq=False, slots=True)
@@ -103,19 +99,19 @@ class PcObservation:
         if self.kind not in PC_KINDS:
             raise ValueError(f"kind must be one of {PC_KINDS}, got {self.kind!r}")
         if self.pc is not None:
-            _probability("pc", self.pc)
+            require_probability(self.pc, "pc")
             object.__setattr__(self, "pc", float(self.pc) + 0.0)
         if self.ci_high is not None:
             if self.pc is None:
                 raise ValueError("ci_high needs pc")
-            _probability("ci_high", self.ci_high)
+            require_probability(self.ci_high, "ci_high")
             if self.ci_high < self.pc:
                 raise ValueError(
                     f"ci_high ({self.ci_high}) must not be below pc ({self.pc})"
                 )
             object.__setattr__(self, "ci_high", float(self.ci_high) + 0.0)
         if self.reported_pc is not None:
-            _probability("reported_pc", self.reported_pc)
+            require_probability(self.reported_pc, "reported_pc")
         # Adding 0.0 turns -0.0 into 0.0: observations at TCA sort and print
         # alike whatever the sign of their zero.
         object.__setattr__(self, "time_to_tca", float(self.time_to_tca) + 0.0)

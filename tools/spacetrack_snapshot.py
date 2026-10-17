@@ -67,15 +67,14 @@ import astropy.units as u
 import snapshot_files
 from generated import write_or_check
 from screening_snapshot import REGIMES, SIX_DIGITS, Regime, regime, utc_text
-from snapshot_files import FileDigest, file_digests, write_json
+from snapshot_files import FileDigest, file_digests
 
-from keepout._units import seconds_between
 from keepout.errors import SourceFormatError, SourceUnavailable
 from keepout.omm import Omm, load
 from keepout.omm.celestrak import dumps_csv, loads_csv
 from keepout.screening import ScreeningVolume, screen
 from keepout.screening.result import CloseApproach
-from keepout.sources.cache import store_bytes
+from keepout.sources.cache import store_bytes, store_json
 from keepout.sources.catalog import Catalog
 from keepout.sources.spacetrack import (
     CATALOG,
@@ -95,6 +94,7 @@ from keepout.sources.spacetrack import (
     read_catalog,
     read_public_cdms,
 )
+from keepout.units import seconds_between
 
 REPO: Final = Path(__file__).resolve().parents[1]
 TOOL: Final = "tools/spacetrack_snapshot.py"
@@ -243,7 +243,7 @@ def write_index(raw: Path, answers: Sequence[Saved]) -> None:
         "format": RAW_FORMAT,
         "answers": [answer.record() for answer in answers],
     }
-    write_json(raw / RAW_INDEX, record)
+    store_json(raw / RAW_INDEX, record)
 
 
 def read_body(raw: Path, saved: Saved) -> bytes:

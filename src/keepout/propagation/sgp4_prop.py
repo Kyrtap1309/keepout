@@ -13,11 +13,11 @@ from astropy.time import Time
 from sgp4.api import Satrec, SatrecArray
 
 from keepout._types import FloatArray, IndexArray, override, require_non_negative
-from keepout._units import DAY, KM, MINUTE
 from keepout.errors import UnsupportedElements
 from keepout.omm.model import Omm
 from keepout.propagation._sgp4_radius import radius_bounds
 from keepout.propagation.base import Ephemeris, RadiusBounds, time_offsets
+from keepout.units import DAY, KM, MINUTE
 
 __all__ = ["Sgp4Propagator"]
 

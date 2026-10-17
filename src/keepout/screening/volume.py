@@ -34,10 +34,10 @@ import numpy as np
 import numpy.typing as npt
 
 from keepout._types import BoolArray, FloatArray, read_only, require_positive
-from keepout._units import KM, MINUTE
 from keepout.frames import relative_position_rtn
 from keepout.omm import Omm
 from keepout.propagation._sgp4_radius import brouwer_mean_motion
+from keepout.units import KM, MINUTE
 
 __all__ = [
     "DEFAULT_VOLUME",

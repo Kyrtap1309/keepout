@@ -110,7 +110,7 @@ def test_unknown_covariance_is_rejected() -> None:
 @pytest.mark.parametrize(
     ("options", "message"),
     [
-        ({"samples": 0}, "samples must be >= 1"),
+        ({"samples": 0}, "samples must be at least 1"),
         ({"rtol": 0.0}, "rtol must be finite and > 0"),
         ({"max_samples": 0}, "need max_samples >= 1"),
         ({"confidence": 1.0}, "0 < confidence < 1"),

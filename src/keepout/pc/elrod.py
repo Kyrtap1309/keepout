@@ -28,7 +28,7 @@ from typing import Final
 
 import numpy as np
 
-from keepout._types import FloatArray
+from keepout._types import FloatArray, require_at_least
 from keepout.encounter import EncounterPlane
 from keepout.pc._plane import PlaneGaussian, plane_gaussian, require_known_covariance
 from keepout.pc.result import PcResult
@@ -114,8 +114,8 @@ def elrod(
         If a covariance is unknown, or the plane covariance is not finite or
         has no positive eigenvalue.
     """
-    if order is not None and order < 1:
-        raise ValueError(f"order must be >= 1, got {order}")
+    if order is not None:
+        require_at_least(order, 1, "order")
     require_known_covariance(plane.unknown_covariance, "elrod")
     gaussian = plane_gaussian(plane.miss_vector, plane.covariance, hard_body_radius)
     diagnostics = list(gaussian.diagnostics)

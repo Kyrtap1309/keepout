@@ -212,7 +212,8 @@ layers = [
     "keepout.covariance | keepout.orbits",
     "keepout.frames",
     "keepout.state",
-    "keepout._types | keepout._units | keepout._workers | keepout.errors",
+    "keepout._workers",
+    "keepout._types | keepout.units | keepout.errors",
 ]
 
 [[tool.importlinter.contracts]]
