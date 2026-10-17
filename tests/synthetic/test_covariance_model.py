@@ -296,7 +296,7 @@ def test_parameters_are_stored_as_floats() -> None:
 
 def test_one_time_only() -> None:
     omm = BY_NUMBER[900]
-    times = omm.epoch + [0.0, 1.0] * u.day
+    times = omm.epoch + np.array([0.0, 1.0]) * u.day
     with pytest.raises(ValueError, match=r"a single time, got shape \(2,\)"):
         MODEL.sigmas(omm, times)
     with pytest.raises(ValueError, match="a single time"):

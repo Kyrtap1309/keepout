@@ -6,10 +6,38 @@ from __future__ import annotations
 import enum
 import functools
 import math
-from typing import Any, TypeAlias
+from typing import TYPE_CHECKING, Any, TypeAlias, TypeVar
 
 import numpy as np
 import numpy.typing as npt
+
+if TYPE_CHECKING:
+    # typing.override from Python 3.12, for the type checkers only, so
+    # typing_extensions stays out of the dependencies.
+    from typing_extensions import override
+else:
+    _Function = TypeVar("_Function")
+
+    def override(method: _Function) -> _Function:
+        """Mark a method as overriding one of its base class (checked statically)."""
+        return method
+
+
+__all__ = [
+    "BoolArray",
+    "ComplexArray",
+    "FloatArray",
+    "IndexArray",
+    "JsonValue",
+    "OrderedEnum",
+    "as_vector",
+    "from_eigen",
+    "override",
+    "read_only",
+    "require_non_negative",
+    "require_positive",
+    "symmetric_part",
+]
 
 FloatArray: TypeAlias = npt.NDArray[np.float64]
 """A float64 NumPy array."""
@@ -22,6 +50,11 @@ BoolArray: TypeAlias = npt.NDArray[np.bool_]
 
 IndexArray: TypeAlias = npt.NDArray[np.intp]
 """A NumPy array of indices."""
+
+JsonValue: TypeAlias = (
+    "dict[str, JsonValue] | list[JsonValue] | str | int | float | bool | None"
+)
+"""A value :func:`json.loads` returns, to narrow with ``isinstance``."""
 
 
 @functools.total_ordering

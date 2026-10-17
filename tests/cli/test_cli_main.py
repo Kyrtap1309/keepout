@@ -59,8 +59,11 @@ def test_the_library_does_not_import_the_extra() -> None:
         [
             sys.executable,
             "-c",
-            "import sys, keepout, keepout.cli, keepout.synthetic, keepout.validation;"
-            "print(sorted({'typer', 'rich'} & set(sys.modules)))",
+            (
+                "import sys, keepout, keepout.cli, keepout.synthetic,"
+                " keepout.validation;"
+                "print(sorted({'typer', 'rich'} & set(sys.modules)))"
+            ),
         ],
         capture_output=True,
         text=True,

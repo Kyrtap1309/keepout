@@ -1,4 +1,4 @@
-name: Nightly Monte Carlo validation and Kelvins risk report
+name: Nightly Monte Carlo validation, Kelvins risk report and dependency audit
 
 on:
   schedule:
@@ -17,9 +17,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 360
     steps:
-      - uses: actions/checkout@v5
-      - uses: astral-sh/setup-uv@v6
-      - uses: actions/cache@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/.cache/keepout/cara
           key: cara-${{ hashFiles('src/keepout/sources/cara_manifest.sha256') }}
@@ -27,7 +29,7 @@ jobs:
       - run: uv run python tools/validation_report.py --monte-carlo
       - run: git add --intent-to-add docs && git diff --exit-code -- docs README.md
       - if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: validation-monte-carlo-results
           path: |
@@ -39,16 +41,32 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v5
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
       - run: uv sync --locked
       - id: kelvins
         # Keyed by the pinned table, so editing the loader keeps the 221 MB cache.
         run: >-
           echo "key=kelvins-$(uv run python -c 'from keepout.sources import kelvins;
           print(kelvins.ZENODO_RECORD, kelvins.RAW_SHA256, sep="-")')" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/.cache/keepout/kelvins
           key: ${{ steps.kelvins.outputs.key }}
       - run: uv run python tools/risk_report.py --check
+
+  audit:
+    # Known vulnerabilities in every locked package, extras and dev tools included.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+      - run: >-
+          uv export --locked --all-extras --all-groups --no-emit-project
+          --format requirements-txt --output-file "$RUNNER_TEMP/requirements.txt"
+      - run: uvx pip-audit@2.10.1 --strict -r "$RUNNER_TEMP/requirements.txt"

@@ -110,8 +110,10 @@ def fleet_text(*satellites: str, radius: object = "1.0") -> str:
         ("catalog_hard_body_radius = 1.0\nsatellites = [1]\n", "1: must be a table"),
         (
             fleet_text(satellite(radius=5.0)),
-            "^satellite 1: unknown key\\(s\\) radius; expected catalog_number, "
-            "hard_body_radius, maneuverable, name$",
+            (
+                "^satellite 1: unknown key\\(s\\) radius; expected catalog_number, "
+                "hard_body_radius, maneuverable, name$"
+            ),
         ),
         (
             fleet_text(

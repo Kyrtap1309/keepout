@@ -416,11 +416,13 @@ def render_summary(summary: Summary) -> str:
         )
     return "\n".join(
         [
-            f"Screening {len(settings['primaries'])} LEO primaries against the "
-            f"{settings['objects']} element sets of the frozen {source.catalog} "
-            f"catalog ({source.provider}, retrieved {settings['retrieved']}) for "
-            f"{_days(settings['days'])} from {settings['start']} UTC, "
-            f"{_processes(settings['workers'])} (`{source.command}`):",
+            (
+                f"Screening {len(settings['primaries'])} LEO primaries against the "
+                f"{settings['objects']} element sets of the frozen {source.catalog} "
+                f"catalog ({source.provider}, retrieved {settings['retrieved']}) for "
+                f"{_days(settings['days'])} from {settings['start']} UTC, "
+                f"{_processes(settings['workers'])} (`{source.command}`):"
+            ),
             "",
             *table(
                 (
@@ -655,8 +657,10 @@ def render_comparison(
     verdict = "slower than allowed" if regression else "within the limit"
     lines += [
         "",
-        f"CPU time change: {comparison.change:+.1%} (limit {threshold:+.0%}): "
-        f"{verdict}.",
+        (
+            f"CPU time change: {comparison.change:+.1%} (limit {threshold:+.0%}): "
+            f"{verdict}."
+        ),
     ]
     return "\n".join(lines), regression
 

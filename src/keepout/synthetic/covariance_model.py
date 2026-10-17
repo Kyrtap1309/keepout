@@ -382,12 +382,18 @@ class SyntheticCovarianceModel:
         return (
             "Synthetic covariance: keepout GP element-set age model, an assumption",
             "sigma_T = f (sigma_T0 + k |t - epoch|); sigma_R, sigma_N constant",
-            f"Regime {regime.value}: sigma_R0 {parameters.radial / KM:.3f} km, "
-            f"sigma_T0 {parameters.transverse / KM:.3f} km, "
-            f"sigma_N0 {parameters.normal / KM:.3f} km",
-            f"k {parameters.transverse_rate * DAY / KM:.3f} km/day, "
-            f"safety factor f {self.safety_factor:g}",
+            (
+                f"Regime {regime.value}: sigma_R0 {parameters.radial / KM:.3f} km, "
+                f"sigma_T0 {parameters.transverse / KM:.3f} km, "
+                f"sigma_N0 {parameters.normal / KM:.3f} km"
+            ),
+            (
+                f"k {parameters.transverse_rate * DAY / KM:.3f} km/day, "
+                f"safety factor f {self.safety_factor:g}"
+            ),
             f"Element set epoch {epoch} UTC, age {age:+.3f} days",
-            f"Sigmas: R {sigmas.radial / KM:.3f} km, "
-            f"T {sigmas.transverse / KM:.3f} km, N {sigmas.normal / KM:.3f} km",
+            (
+                f"Sigmas: R {sigmas.radial / KM:.3f} km, "
+                f"T {sigmas.transverse / KM:.3f} km, N {sigmas.normal / KM:.3f} km"
+            ),
         )

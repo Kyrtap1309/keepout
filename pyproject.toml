@@ -50,8 +50,9 @@ select = [
     "ARG", "BLE", "C4", "D", "DTZ", "FBT", "FURB", "PERF", "PGH", "PIE", "PTH",
     "RET", "TID",
     "S", "C90", "PL", "PYI", "SLF", "ANN401",
-    # Preview: every exception a function raises is in its docstring.
-    "DOC501",
+    # Preview: every exception a function raises is in its docstring, and
+    # strings joined inside a list or call are parenthesized (no lost comma).
+    "DOC501", "ISC004",
 ]
 # Only the preview rules selected by code above, not all of them.
 preview = true
@@ -89,9 +90,9 @@ convention = "numpy"
 "src/keepout/cli/{assess,screen}.py" = ["DOC501"]
 # The tools run git and Python with arguments they build themselves.
 "tools/**" = ["S603", "S607"]
-# Stubs mirror the names sgp4 gives its attributes (jdsatepochF), and type
-# what astropy leaves dynamic (units, array-or-scalar values) as Any.
-"stubs/**" = ["N815", "ANN401"]
+# Stubs mirror the names sgp4 and astropy give (jdsatepochF, IERS_Auto), and
+# type what astropy leaves dynamic (array-or-scalar values) as Any.
+"stubs/**" = ["N801", "N815", "ANN401"]
 
 [tool.mypy]
 strict = true
@@ -109,7 +110,7 @@ enable_error_code = [
 ]
 
 [[tool.mypy.overrides]]
-module = ["erfa.*", "xlrd.*"]
+module = ["xlrd.*"]
 ignore_missing_imports = true
 
 [tool.codespell]
@@ -168,7 +169,9 @@ dev = [
     "ruff>=0.16.8",
     "scipy-stubs>=1.17.1.5",
     "types-openpyxl>=3.1.5.20260827",
+    "typing-extensions>=4.16.0",
     "xmlschema>=4.3.2",
+    "zizmor>=1.31.1",
 ]
 
 [tool.basedpyright]
@@ -176,8 +179,11 @@ dev = [
 include = ["src", "tests", "tools"]
 extraPaths = ["tests", "tools"]
 stubPath = "stubs"
-pythonVersion = "3.11"
 typeCheckingMode = "standard"
+# Two rules from the stricter levels: overriding methods say so, and no
+# deprecated typing forms. (Unused ignores are mypy's warn_unused_ignores.)
+reportImplicitOverride = "error"
+reportDeprecated = "error"
 
 [tool.deptry]
 # The tools and tests are not shipped: only the package's imports are checked.

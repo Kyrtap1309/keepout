@@ -279,7 +279,7 @@ def test_from_omms_sets_aside_the_elements_sgp4_cannot_hold() -> None:
 @pytest.mark.parametrize(
     ("epoch", "offsets", "message"),
     [
-        (START + [0.0, 1.0] * u.s, [0.0], "epoch must be a single time"),
+        (START + np.array([0.0, 1.0]) * u.s, [0.0], "epoch must be a single time"),
         (START, [[0.0]], "offsets must be one-dimensional"),
         (START, [np.nan], "offsets must be finite"),
     ],

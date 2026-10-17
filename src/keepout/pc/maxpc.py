@@ -150,8 +150,10 @@ def frisbee(plane: EncounterPlane, hard_body_radius: float) -> PcResult:
     k2 = gaussian.mahalanobis2
     miss = plane.miss_distance
     diagnostics = [
-        f"maximum Pc over the unknown {plane.unknown_covariance[0]} covariance "
-        "(Frisbee 2015): an upper bound, not an estimate",
+        (
+            f"maximum Pc over the unknown {plane.unknown_covariance[0]} covariance "
+            "(Frisbee 2015): an upper bound, not an estimate"
+        ),
         *gaussian.diagnostics,
     ]
     analytic = miss * miss * (k2 - 1.0) / k2 if k2 > 1.0 else 0.0

@@ -125,8 +125,10 @@ def test_zero_relative_velocity_is_supported() -> None:
     # samples enter repeatedly, so Nc is well above Pc here.)
     assert 1.3e-4 < result.value < 2.0e-4
     assert result.diagnostics == (
-        "relative velocity is zero: Nc counts repeated entries into the "
-        "hard-body sphere, so it is an upper bound on Pc",
+        (
+            "relative velocity is zero: Nc counts repeated entries into the "
+            "hard-body sphere, so it is an upper bound on Pc"
+        ),
     )
 
 
@@ -413,8 +415,10 @@ def test_floored_combined_covariance_is_reported() -> None:
     conjunction = Conjunction(primary, secondary, 5.0)
     result = hall3d(conjunction)
     assert result.diagnostics == (
-        "combined position covariance: smallest variance 1e-12 m^2 raised to "
-        "2.5e-07 m^2",
+        (
+            "combined position covariance: smallest variance 1e-12 m^2 raised to "
+            "2.5e-07 m^2"
+        ),
     )
     two_d = foster(conjunction.plane, 5.0)
     assert two_d.diagnostics[0].endswith("raised to 2.5e-07 m^2")

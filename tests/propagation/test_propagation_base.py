@@ -61,7 +61,10 @@ class LinearPropagator:
         closest = np.clip(-np.sum(self.r0 * self.v0, axis=1) / speed2, 0.0, duration)
 
         def radius(times: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
-            return np.linalg.norm(self.r0 + self.v0 * times[:, None], axis=1)
+            distances: npt.NDArray[np.float64] = np.linalg.norm(
+                self.r0 + self.v0 * times[:, None], axis=1
+            )
+            return distances
 
         ends = np.maximum(
             radius(np.zeros(len(self))), radius(np.full(len(self), duration))
@@ -109,7 +112,7 @@ def test_time_offsets_are_a_read_only_copy() -> None:
     ("epoch", "offsets", "message"),
     [
         (
-            EPOCH + [0.0, 1.0] * u.s,
+            EPOCH + np.array([0.0, 1.0]) * u.s,
             [0.0],
             r"epoch must be a single time, got shape \(2,\)",
         ),

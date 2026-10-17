@@ -10,7 +10,7 @@ from __future__ import annotations
 import contextlib
 import multiprocessing
 import os
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Mapping
 from concurrent.futures import ProcessPoolExecutor
 from types import MappingProxyType
 from typing import Final
@@ -50,7 +50,7 @@ def resolve_workers(workers: int | None) -> int:
 
 
 @contextlib.contextmanager
-def process_pool(workers: int) -> Iterator[ProcessPoolExecutor]:
+def process_pool(workers: int) -> Generator[ProcessPoolExecutor]:
     """A pool of ``workers`` spawned processes, each with :data:`ONE_THREAD`.
 
     The variables are set in this process's environment while the pool

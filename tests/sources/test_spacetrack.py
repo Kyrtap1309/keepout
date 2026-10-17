@@ -29,6 +29,7 @@ from spacetrack_builders import (
     FakeSpaceTrack,
     space_track_gp,
 )
+from typing_extensions import override
 
 from keepout.errors import (
     AuthError,
@@ -777,6 +778,7 @@ def test_read_catalog_reads_space_track_json() -> None:
 class BrokenBody(io.BytesIO):
     """A body the connection drops while it is read."""
 
+    @override
     def read(self, size: int | None = -1, /) -> bytes:
         raise http.client.IncompleteRead(b"")
 

@@ -435,7 +435,7 @@ def test_screening_needs_nothing_but_inputs() -> None:
     ("change", "message"),
     [
         (
-            {"start": START + [0.0, 1.0] * u.s},
+            {"start": START + np.array([0.0, 1.0]) * u.s},
             r"start must be a single time, got shape \(2,\)",
         ),
         ({"duration": -1.0}, "duration must be finite and >= 0, got -1.0"),

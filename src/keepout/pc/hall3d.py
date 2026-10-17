@@ -278,9 +278,11 @@ def _floor_notes(rate: CollisionRate) -> list[str]:
     """
     if rate.smallest_floored_variance < rate.floor_variance:
         return [
-            "combined position covariance: smallest variance "
-            f"{rate.smallest_floored_variance:.3g} m^2 raised to "
-            f"{rate.floor_variance:.3g} m^2"
+            (
+                "combined position covariance: smallest variance "
+                f"{rate.smallest_floored_variance:.3g} m^2 raised to "
+                f"{rate.floor_variance:.3g} m^2"
+            )
         ]
     return []
 

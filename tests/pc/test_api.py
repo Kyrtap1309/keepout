@@ -518,8 +518,10 @@ def test_auto_uses_hall_at_zero_relative_velocity(
     assert result.method == "hall3d"
     assert result.diagnostics == (
         "relative velocity is zero: 2-D Pc is undefined",
-        "the covariances of primary (TEST) and secondary (TEST) are known only "
-        "in position (zero velocity block): hall3d takes its velocity as exact",
+        (
+            "the covariances of primary (TEST) and secondary (TEST) are known only "
+            "in position (zero velocity block): hall3d takes its velocity as exact"
+        ),
     )
     assert "encounter_duration_s" not in result.details
 

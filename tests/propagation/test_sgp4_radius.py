@@ -212,7 +212,7 @@ def test_bounds_leave_the_states_unchanged() -> None:
     [
         (START, -1.0, "duration must be finite and >= 0, got -1.0"),
         (START, np.inf, "duration must be finite and >= 0, got inf"),
-        (START + [0.0, 1.0] * u.s, 1.0, "epoch must be a single time"),
+        (START + np.array([0.0, 1.0]) * u.s, 1.0, "epoch must be a single time"),
     ],
 )
 def test_the_span_is_checked(start: Time, duration: float, message: str) -> None:

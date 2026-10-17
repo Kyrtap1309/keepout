@@ -15,7 +15,7 @@ import contextlib
 import math
 import re
 import warnings
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Generator, Iterable, Sequence
 from dataclasses import dataclass
 from typing import Final, Literal, TypeAlias, assert_never
 
@@ -91,7 +91,7 @@ def normalize_unit(unit: str) -> str:
 
 
 @contextlib.contextmanager
-def _dubious_years_allowed() -> Iterator[None]:
+def _dubious_years_allowed() -> Generator[None]:
     """ERFA's "dubious year" warning is ignored, every other ERFA warning raised.
 
     ERFA calls a UTC year "dubious" outside its leap-second table: before
@@ -313,7 +313,7 @@ def _utc_isot(epoch: Time) -> str:
     ``d2dtf`` writes a time rounded past the end of a leap second.
     """
     utc = epoch.utc
-    year, month, day, fraction = erfa.jd2cal(utc.jd1, utc.jd2)
+    year, month, day, fraction = _calendar(float(utc.jd1), float(utc.jd2))
     if not 1960 <= year < 1972:
         return str(utc.isot)
     step = _utc_step(year, month, day)
@@ -326,14 +326,20 @@ def _utc_isot(epoch: Time) -> str:
     # rounding of the step (about 1e-15 s), far below a tick.
     if ticks >= math.ceil((DAY + step) * scale - _TICK_TOLERANCE):
         zero, mjd = erfa.cal2jd(year, month, day)
-        year, month, day, _ = erfa.jd2cal(zero, mjd + 1.0)
+        year, month, day, _ = _calendar(float(zero), float(mjd) + 1.0)
         ticks = 0
     seconds, part = divmod(ticks, scale)
     # From 23:59 on, the seconds run on past 59 into a positive step.
     minutes = min(seconds, 86_340) // 60
     clock = f"{minutes // 60:02d}:{minutes % 60:02d}:{seconds - 60 * minutes:02d}"
-    date = f"{int(year):04d}-{int(month):02d}-{int(day):02d}"
+    date = f"{year:04d}-{month:02d}-{day:02d}"
     return f"{date}T{clock}" + (f".{part:0{digits}d}" if digits else "")
+
+
+def _calendar(jd1: float, jd2: float) -> tuple[int, int, int, float]:
+    """Year, month, day and fraction of the day of a two-part Julian date."""
+    year, month, day, fraction = erfa.jd2cal(jd1, jd2)
+    return int(year), int(month), int(day), float(fraction)
 
 
 def _day_of_year(isot: str) -> str:
@@ -359,7 +365,7 @@ def _utc_step(year: int, month: int, day: int) -> float:
     start = erfa.dat(year, month, day, 0.0)
     noon = erfa.dat(year, month, day, 0.5)
     zero, mjd = erfa.cal2jd(year, month, day)
-    next_year, next_month, next_day, _ = erfa.jd2cal(zero, mjd + 1.0)
+    next_year, next_month, next_day, _ = _calendar(float(zero), float(mjd) + 1.0)
     end = erfa.dat(next_year, next_month, next_day, 0.0)
     return float(end - (2.0 * noon - start))
 

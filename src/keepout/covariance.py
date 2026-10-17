@@ -283,8 +283,10 @@ def repair(matrix: npt.ArrayLike) -> tuple[FloatArray, tuple[str, ...]]:
     # Each block's own eigenvalues may be within tolerance while the matrix
     # is not: the repair still ran, so it is still reported.
     diagnostics += notes or [
-        f"made positive semi-definite (min correlation-matrix eigenvalue "
-        f"{float(eigenvalues[0]):.3g})"
+        (
+            f"made positive semi-definite (min correlation-matrix eigenvalue "
+            f"{float(eigenvalues[0]):.3g})"
+        )
     ]
     return fixed, tuple(diagnostics)
 

@@ -1,7 +1,5 @@
 """TEME (the SGP4 output frame) to GCRF."""
 
-from typing import cast
-
 import astropy.units as u
 import numpy as np
 import pytest
@@ -45,14 +43,12 @@ def astropy_teme_to_gcrs(
     representation = CartesianRepresentation(
         r.T * u.m, differentials=CartesianDifferential(v.T * u.m / u.s)
     )
-    # astropy's inferred types are a union; both are Cartesian here.
-    cartesian = cast(
-        CartesianRepresentation,
+    cartesian = (
         TEME(representation, obstime=epochs)
         .transform_to(GCRS(obstime=epochs))
-        .cartesian,
+        .cartesian
     )
-    velocity = cast(CartesianDifferential, cartesian.differentials["s"])
+    velocity = cartesian.differentials["s"]
     return (
         cartesian.xyz.to_value(u.m).T,
         velocity.d_xyz.to_value(u.m / u.s).T,
@@ -188,7 +184,7 @@ def test_epochs_and_states_broadcast() -> None:
         (EPOCH, [1.0, 2.0], [1.0, 2.0, 3.0], r"r must have 3 components"),
         (EPOCH, [1.0, 2.0, 3.0], 1.0, r"v must have 3 components"),
         (
-            EPOCH + [0.0, 1.0, 2.0] * u.s,
+            EPOCH + np.array([0.0, 1.0, 2.0]) * u.s,
             np.ones((2, 3)),
             np.ones((2, 3)),
             r"epochs \(3,\), r \(2, 3\) and v \(2, 3\) do not broadcast",

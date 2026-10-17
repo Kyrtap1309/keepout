@@ -88,7 +88,7 @@ def test_the_miss_vector_is_the_relative_position_in_rtn(
     primary = StateVector(TCA, r, v, "GCRF")
     secondary = StateVector(TCA, r + miss, v, "GCRF")
     approach = CloseApproach(1, 2, primary, secondary)
-    scale = 1e-9 * max(np.linalg.norm(r), 1.0)
+    scale = 1e-9 * max(float(np.linalg.norm(r)), 1.0)
     np.testing.assert_allclose(approach.miss_rtn, rtn_rotation(r, v) @ miss, atol=scale)
     assert np.linalg.norm(approach.miss_rtn) == pytest.approx(
         approach.miss_distance, abs=scale

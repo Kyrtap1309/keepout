@@ -100,8 +100,10 @@ def test_a_green_upper_bound_is_monitored() -> None:
     decision = decide(analyse_trend([bound]))
     assert decision.action is Action.MONITOR
     assert decision.reasons == (
-        "latest Pc 1.00e-09 is green (an upper bound: a covariance is unknown), "
-        "1.00 d before TCA",
+        (
+            "latest Pc 1.00e-09 is green (an upper bound: a covariance is unknown), "
+            "1.00 d before TCA"
+        ),
         "trend undetermined",
         "the Pc is an upper bound, not an estimate",
     )
@@ -186,8 +188,10 @@ def test_a_missing_latest_pc_after_a_red_upper_bound_names_the_concern() -> None
     assert decision.action is Action.PREPARE_MANOEUVRE
     assert decision.reasons == (
         "latest observation has no Pc: GeometryError: no plane",
-        "the latest observation with a Pc was red: Pc 1.00e-03 (an upper bound: "
-        "a covariance is unknown), 3.00 d before TCA",
+        (
+            "the latest observation with a Pc was red: Pc 1.00e-03 (an upper bound: "
+            "a covariance is unknown), 3.00 d before TCA"
+        ),
         "trend undetermined",
         "before the decision point (2.00 d before TCA): prepare a manoeuvre",
         "the Pc is an upper bound, not an estimate",

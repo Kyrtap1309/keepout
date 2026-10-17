@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from typing import Final, Self, TypeAlias
 
 import numpy as np
@@ -61,7 +62,7 @@ class Satrec:
 class SatrecArray:
     # The compiled SGP4 over several records (sgp4.wrapper.SatrecArray).
 
-    def __init__(self, satrecs: list[Satrec]) -> None: ...
+    def __init__(self, satrecs: Sequence[Satrec]) -> None: ...
     def __len__(self) -> int: ...
     def sgp4(
         self, jd: npt.NDArray[np.float64], fr: npt.NDArray[np.float64]

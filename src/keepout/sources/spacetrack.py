@@ -91,6 +91,7 @@ from typing import Final, Literal, Protocol, Self, TypeAlias, TypeVar
 
 from astropy.time import Time
 
+from keepout._types import JsonValue, override
 from keepout.errors import (
     AuthError,
     HttpStatusError,
@@ -229,6 +230,7 @@ class Credentials:
         if not self.identity or not self.password:
             raise ValueError("Space-Track identity and password must not be empty")
 
+    @override
     def __repr__(self) -> str:
         return f"Credentials({HIDDEN})"
 
@@ -551,6 +553,7 @@ class SpaceTrackClient:
         self._logged_in = False
         self._stopped: RateLimited | None = None
 
+    @override
     def __repr__(self) -> str:
         if self._stopped is not None:
             state = " (stopped)"
@@ -823,7 +826,7 @@ class SpaceTrackClient:
 
     def _read_ledger(self) -> dict[str, float]:
         try:
-            record = json.loads(self.ledger.read_bytes())
+            record: JsonValue = json.loads(self.ledger.read_bytes())
         except FileNotFoundError:
             return {}
         except (OSError, ValueError) as exc:
@@ -831,20 +834,27 @@ class SpaceTrackClient:
                 f"cannot read the Space-Track request record {self.ledger}: {exc}"
             ) from exc
         queried = record.get("queried") if isinstance(record, dict) else None
+        sent = (
+            {
+                query: time
+                for query, time in queried.items()
+                if isinstance(time, float) and math.isfinite(time)
+            }
+            if isinstance(queried, dict)
+            else {}
+        )
         if (
-            not isinstance(queried, dict)
+            not isinstance(record, dict)
+            or not isinstance(queried, dict)
             or record.get("format") != _LEDGER_FORMAT
-            or not all(
-                isinstance(sent, float) and math.isfinite(sent)
-                for sent in queried.values()
-            )
+            or len(sent) != len(queried)
         ):
             raise SourceFormatError(
                 f"{self.ledger} is not a Space-Track request record of this "
                 "keepout version; delete it only if no query was sent in the "
                 "last 8 hours"
             )
-        return queried
+        return sent
 
     def _write_ledger(self, queried: Mapping[str, float]) -> None:
         record = {"format": _LEDGER_FORMAT, "queried": dict(sorted(queried.items()))}
@@ -965,7 +975,7 @@ def read_public_cdms(data: bytes) -> tuple[PublicCdm, ...]:
         lacks a column or has a value that cannot be read.
     """
     try:
-        records: object = json.loads(data.decode("utf-8"))
+        records: JsonValue = json.loads(data.decode("utf-8"))
     except ValueError as exc:
         raise SourceFormatError(
             f"Space-Track did not send JSON ({exc}); it starts with {data[:60]!r}"
@@ -1192,7 +1202,7 @@ def _redacted_excerpt(credentials: Credentials, text: str, length: int) -> str:
 def _login_refusal(body: bytes) -> str | None:
     """Space-Track's reason for refusing a login (``{"Login": "Failed"}``)."""
     try:
-        answer = json.loads(body)
+        answer: JsonValue = json.loads(body)
     except ValueError:
         return None
     if isinstance(answer, dict) and "Login" in answer:

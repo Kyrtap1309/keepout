@@ -141,13 +141,17 @@ def test_text_values_keep_brackets() -> None:
         ),
         (
             "\nCCSDS_OMM_VERS = 1.0\n",
-            r"unsupported OMM version '1.0', expected 2.0 or 3.0 "
-            r"\(record 1, line 2, keyword CCSDS_OMM_VERS\)",
+            (
+                r"unsupported OMM version '1.0', expected 2.0 or 3.0 "
+                r"\(record 1, line 2, keyword CCSDS_OMM_VERS\)"
+            ),
         ),
         (
             ISS_KVN + "\nCCSDS_OMM_VERS = 3.0\nmean_motion = 1\n",
-            r"expected 'KEYWORD = value', got 'mean_motion = 1' "
-            r"\(record 2, line 30\)",
+            (
+                r"expected 'KEYWORD = value', got 'mean_motion = 1' "
+                r"\(record 2, line 30\)"
+            ),
         ),
         (
             iss_kvn("= 999\n", "= 999\nELEMENT_SET_NO = 1\n"),
@@ -159,8 +163,10 @@ def test_text_values_keep_brackets() -> None:
         ),
         (
             iss_kvn("[rev/day]", "[rev/s]"),
-            r"unit \[rev/s\] does not match expected \[rev/day\] "
-            r"\(record 1, line 13, keyword MEAN_MOTION\)",
+            (
+                r"unit \[rev/s\] does not match expected \[rev/day\] "
+                r"\(record 1, line 13, keyword MEAN_MOTION\)"
+            ),
         ),
         (
             iss_kvn("= 0.00068585", "= 0.000685.85"),
@@ -168,8 +174,10 @@ def test_text_values_keep_brackets() -> None:
         ),
         (
             iss_kvn("= 51.6314", "= 181"),
-            r"inclination must be in \[0, pi\].* \(record 1, line 15, keyword "
-            r"INCLINATION\)",
+            (
+                r"inclination must be in \[0, pi\].* \(record 1, line 15, keyword "
+                r"INCLINATION\)"
+            ),
         ),
         (
             iss_kvn("= TEME", "= GCRF"),
@@ -177,13 +185,17 @@ def test_text_values_keep_brackets() -> None:
         ),
         (
             iss_kvn("= SGP4", "= SGP4-XP"),
-            r"must be SGP4 or SGP/SGP4, got 'SGP4-XP' "
-            r"\(record 1, line 10, keyword MEAN_ELEMENT_THEORY\)",
+            (
+                r"must be SGP4 or SGP/SGP4, got 'SGP4-XP' "
+                r"\(record 1, line 10, keyword MEAN_ELEMENT_THEORY\)"
+            ),
         ),
         (
             iss_kvn("EPHEMERIS_TYPE      = 0", "EPHEMERIS_TYPE = 4"),
-            r"ephemeris type 4 is not SGP4 \(0\) \(record 1, line 20, keyword "
-            r"EPHEMERIS_TYPE\)",
+            (
+                r"ephemeris type 4 is not SGP4 \(0\) \(record 1, line 20, keyword "
+                r"EPHEMERIS_TYPE\)"
+            ),
         ),
     ],
 )

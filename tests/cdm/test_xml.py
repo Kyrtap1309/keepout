@@ -159,8 +159,10 @@ def test_kvn_to_xml_property(cdm: Cdm) -> None:
         ("<cdm/>", "<cdm> has no version attribute"),
         ('<cdm version="1.0"><header/></cdm>', "expected exactly one <body>, found 0"),
         (
-            '<?xml version="1.0"?>'
-            '<!DOCTYPE cdm [<!ENTITY a "aaaa">]><cdm version="1.0"/>',
+            (
+                '<?xml version="1.0"?>'
+                '<!DOCTYPE cdm [<!ENTITY a "aaaa">]><cdm version="1.0"/>'
+            ),
             "DOCTYPE declarations are not allowed",
         ),
     ],

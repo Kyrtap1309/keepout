@@ -212,8 +212,10 @@ def _velocity_notes(conjunction: Conjunction, method: Method) -> tuple[str, ...]
     if method not in _VELOCITY_METHODS or not position_only:
         return ()
     return (
-        f"{_known_only_in_position(conjunction, position_only)}: {method} "
-        "takes its velocity as exact",
+        (
+            f"{_known_only_in_position(conjunction, position_only)}: {method} "
+            "takes its velocity as exact"
+        ),
     )
 
 

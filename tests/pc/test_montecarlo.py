@@ -12,6 +12,7 @@ from builders import (
     object_state,
 )
 from faults import failing_where, not_converging
+from typing_extensions import override
 
 from keepout._types import FloatArray, IndexArray
 from keepout.conjunction import Conjunction
@@ -153,6 +154,7 @@ class _Line(_Trials):
     def __init__(self) -> None:
         pass
 
+    @override
     def relative(
         self, t: float | FloatArray, rows: slice | IndexArray = slice(None)
     ) -> tuple[FloatArray, FloatArray, FloatArray]:

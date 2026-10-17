@@ -111,7 +111,7 @@ SHA-256; they are never redistributed with keepout. See the
 
 ```bash
 uv sync
-uv run pre-commit install     # ruff, mypy and the lock checked on commit
+uv run pre-commit install     # every CI lint check, run on commit
 uv run pytest                 # offline test suite
 uv run pytest -m validation   # slow checks; downloads CARA and Kelvins data
 uv run python tools/validation_report.py   # regenerate the validation report

@@ -352,38 +352,44 @@ def _introduction(summary: Summary) -> list[str]:
     fleet = summary["fleet"]
     names = ", ".join(_object(s["catalog_number"], s["name"]) for s in fleet)
     return [
-        "keepout ran as a conjunction assessment service for a small fleet: "
-        f"{len(fleet)} real satellites ({names}), named in the fleet file "
-        f"`{settings['fleet']}`. It screened them against the "
-        f"{catalog['element_sets']} element sets of the public GP catalog "
-        f"({catalog['screened']} screened, {catalog['skipped']} left out by "
-        "screening's rules), "
-        f"{settings['days']:g} days from "
-        f"{settings['start'][:16].replace('T', ' ')} UTC with the "
-        f"{settings['volume']}, issued a CCSDS CDM for every close approach, "
-        "computed the Pc from each CDM and assessed each event with keepout's "
-        f"default thresholds (green below {settings['green_below']:.0e}, red "
-        f"from {settings['red_from']:.0e}, {settings['basis']} basis) and "
-        f"decision point ({settings['decision_point_days']:g} days before "
-        "TCA). See [Synthetic operator](synthetic.md), [Screening](screening.md) "
-        "and [Risk assessment](risk.md). "
-        "keepout is not these satellites' operator, and nothing here is advice "
-        "about them.",
+        (
+            "keepout ran as a conjunction assessment service for a small fleet: "
+            f"{len(fleet)} real satellites ({names}), named in the fleet file "
+            f"`{settings['fleet']}`. It screened them against the "
+            f"{catalog['element_sets']} element sets of the public GP catalog "
+            f"({catalog['screened']} screened, {catalog['skipped']} left out by "
+            "screening's rules), "
+            f"{settings['days']:g} days from "
+            f"{settings['start'][:16].replace('T', ' ')} UTC with the "
+            f"{settings['volume']}, issued a CCSDS CDM for every close approach, "
+            "computed the Pc from each CDM and assessed each event with keepout's "
+            f"default thresholds (green below {settings['green_below']:.0e}, red "
+            f"from {settings['red_from']:.0e}, {settings['basis']} basis) and "
+            f"decision point ({settings['decision_point_days']:g} days before "
+            "TCA). See [Synthetic operator](synthetic.md), [Screening](screening.md) "
+            "and [Risk assessment](risk.md). "
+            "keepout is not these satellites' operator, and nothing here is advice "
+            "about them."
+        ),
         "",
         '!!! warning "Assumed covariances"',
-        "    GP element sets carry no covariance. Every covariance here is "
-        "keepout's synthetic model (`keepout.synthetic.SyntheticCovarianceModel`): "
-        "sigmas per orbit regime from the literature, the along-track sigma "
-        "growing with the element set's age, times a safety factor of "
-        f"{settings['safety_factor']:g}. It is an assumption, not orbit "
-        "determination: the Pc values show what the model implies, not the "
-        "real risk of these satellites. The CDMs say so in their comments "
-        "and give `COVARIANCE_METHOD = DEFAULT`. [Assumptions](assumptions.md) "
-        "gives the model's sources and limits.",
+        (
+            "    GP element sets carry no covariance. Every covariance here is "
+            "keepout's synthetic model (`keepout.synthetic.SyntheticCovarianceModel`): "
+            "sigmas per orbit regime from the literature, the along-track sigma "
+            "growing with the element set's age, times a safety factor of "
+            f"{settings['safety_factor']:g}. It is an assumption, not orbit "
+            "determination: the Pc values show what the model implies, not the "
+            "real risk of these satellites. The CDMs say so in their comments "
+            "and give `COVARIANCE_METHOD = DEFAULT`. [Assumptions](assumptions.md) "
+            "gives the model's sources and limits."
+        ),
         "",
-        "Data: USSPACECOM/18 SDS via Space-Track.org, retrieved from CelesTrak "
-        f"(celestrak.org) on {catalog['retrieved']} (see "
-        "`tests/screening/data/NOTICE`).",
+        (
+            "Data: USSPACECOM/18 SDS via Space-Track.org, retrieved from CelesTrak "
+            f"(celestrak.org) on {catalog['retrieved']} (see "
+            "`tests/screening/data/NOTICE`)."
+        ),
     ]
 
 
@@ -412,8 +418,10 @@ def _fleet(summary: Summary) -> list[str]:
             ],
         ),
         "",
-        f"Every other object is given a hard-body radius of {radius:g} m. The "
-        "radii are illustrative round numbers, not the operators' own values.",
+        (
+            f"Every other object is given a hard-body radius of {radius:g} m. The "
+            "radii are illustrative round numbers, not the operators' own values."
+        ),
     ]
 
 
@@ -421,11 +429,13 @@ def _model(summary: Summary) -> list[str]:
     events = summary["events"]
     factor = summary["settings"]["safety_factor"]
     lines = [
-        "Each object's position covariance in its RTN frame is diagonal: "
-        "sigma_R = f sigma_R0, sigma_T = f (sigma_T0 + k |t - epoch|), "
-        f"sigma_N = f sigma_N0, with f = {factor:g} and the velocity block "
-        "zero (so `auto` keeps the 2-D Pc). The parameters per regime, before "
-        "f (epoch sigmas: Flohrer et al. 2009; k: Levit and Marshall 2011):",
+        (
+            "Each object's position covariance in its RTN frame is diagonal: "
+            "sigma_R = f sigma_R0, sigma_T = f (sigma_T0 + k |t - epoch|), "
+            f"sigma_N = f sigma_N0, with f = {factor:g} and the velocity block "
+            "zero (so `auto` keeps the 2-D Pc). The parameters per regime, before "
+            "f (epoch sigmas: Flohrer et al. 2009; k: Levit and Marshall 2011):"
+        ),
         "",
         *table(
             ("Regime", "sigma_R0", "sigma_T0", "sigma_N0", "k"),
@@ -445,8 +455,10 @@ def _model(summary: Summary) -> list[str]:
     if sigmas:
         lines += [
             "",
-            "At the approaches' TCAs, sigma_T is "
-            f"{_km(min(sigmas))} to {_km(max(sigmas))} km.",
+            (
+                "At the approaches' TCAs, sigma_T is "
+                f"{_km(min(sigmas))} to {_km(max(sigmas))} km."
+            ),
         ]
     return lines
 
@@ -458,9 +470,11 @@ def _decisions(summary: Summary) -> list[str]:
             [(name, count) for name, count in summary["actions"].items()],
         ),
         "",
-        "Each approach is an event with a single CDM, issued at the start of "
-        "the window, so the trend is undetermined and the decision rests on the "
-        "Pc's level and the time from the CDM to TCA.",
+        (
+            "Each approach is an event with a single CDM, issued at the start of "
+            "the window, so the trend is undetermined and the decision rests on the "
+            "Pc's level and the time from the CDM to TCA."
+        ),
     ]
 
 
@@ -505,24 +519,28 @@ def _approaches(summary: Summary) -> list[str]:
     bounded = [e for e in events if e["diluted"] is False]
     lines += [
         "",
-        "sigma_T: the satellite's and the object's along-track sigmas at TCA. "
-        "Pc: keepout's Pc from the CDM, as its recipient would compute it "
-        "(method `auto`, which keeps the 2-D Pc for position-only covariances). "
-        "Max Pc: the largest Pc over a scale factor of the combined covariance "
-        "(`keepout.pc.dilution`; Alfano 2005), and that factor: an upper "
-        "bound that shows how far each Pc rests on the assumed size of the "
-        "covariance.",
+        (
+            "sigma_T: the satellite's and the object's along-track sigmas at TCA. "
+            "Pc: keepout's Pc from the CDM, as its recipient would compute it "
+            "(method `auto`, which keeps the 2-D Pc for position-only covariances). "
+            "Max Pc: the largest Pc over a scale factor of the combined covariance "
+            "(`keepout.pc.dilution`; Alfano 2005), and that factor: an upper "
+            "bound that shows how far each Pc rests on the assumed size of the "
+            "covariance."
+        ),
         "",
-        f"{len(diluted)} of {len(events)} Pc "
-        f"{'value is' if len(diluted) == 1 else 'values are'} in the dilution "
-        "region (the maximum needs a smaller covariance, so a better-known "
-        "orbit could raise the Pc). For "
-        f"{'the other one' if len(bounded) == 1 else f'the other {len(bounded)}'} "
-        "the maximum needs "
-        "a larger covariance: the miss is far from the hard body against the "
-        "covariance's narrow directions, so the Pc rises steeply as the "
-        "covariance grows. Either way, the decisions hold only as far as the "
-        "model does.",
+        (
+            f"{len(diluted)} of {len(events)} Pc "
+            f"{'value is' if len(diluted) == 1 else 'values are'} in the dilution "
+            "region (the maximum needs a smaller covariance, so a better-known "
+            "orbit could raise the Pc). For "
+            f"{'the other one' if len(bounded) == 1 else f'the other {len(bounded)}'} "
+            "the maximum needs "
+            "a larger covariance: the miss is far from the hard body against the "
+            "covariance's narrow directions, so the Pc rises steeply as the "
+            "covariance grows. Either way, the decisions hold only as far as the "
+            "model does."
+        ),
     ]
     noted = [e for e in events if e["notes"]]
     if noted:
@@ -541,12 +559,14 @@ def _example(summary: Summary, cdm: str | None) -> list[str]:
     event = next(e for e in summary["events"] if e["message_id"] == summary["example"])
     names = {s["catalog_number"]: s["name"] for s in summary["fleet"]}
     return [
-        "The CDM of the closest approach "
-        f"({_object(event['primary'], names[event['primary']])} and "
-        f"{_object(event['secondary'], event['secondary_name'])}, "
-        f"{event['miss_distance']:.0f} m) in KVN, its numbers rounded to "
-        f"{SIGNIFICANT_DIGITS} significant digits and those below "
-        f"{NOISE_FLOOR:g} (rounding noise) shown as 0.0:",
+        (
+            "The CDM of the closest approach "
+            f"({_object(event['primary'], names[event['primary']])} and "
+            f"{_object(event['secondary'], event['secondary_name'])}, "
+            f"{event['miss_distance']:.0f} m) in KVN, its numbers rounded to "
+            f"{SIGNIFICANT_DIGITS} significant digits and those below "
+            f"{NOISE_FLOOR:g} (rounding noise) shown as 0.0:"
+        ),
         "",
         "```text",
         *rounded(cdm).rstrip("\n").split("\n"),

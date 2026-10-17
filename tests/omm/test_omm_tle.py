@@ -178,8 +178,10 @@ def _fixed(line: str, column: int, text: str) -> str:
         ),
         (
             _goes(line_2=_fixed(GOES_LINE_2, 3, "23582")),
-            r"line 2 is of object '23582', line 1 of '23581' "
-            r"\(record 1, line 3, keyword NORAD_CAT_ID\)",
+            (
+                r"line 2 is of object '23582', line 1 of '23581' "
+                r"\(record 1, line 3, keyword NORAD_CAT_ID\)"
+            ),
         ),
         (
             _goes(_fixed(GOES_LINE_1, 3, "I0000")),
@@ -187,8 +189,10 @@ def _fixed(line: str, column: int, text: str) -> str:
         ),
         (
             _goes(_fixed(GOES_LINE_1, 19, "07366")),
-            r"invalid TLE field '07366.44075725': no day 366 in 2007 "
-            r"\(record 1, line 2, keyword EPOCH\)",
+            (
+                r"invalid TLE field '07366.44075725': no day 366 in 2007 "
+                r"\(record 1, line 2, keyword EPOCH\)"
+            ),
         ),
         (
             _goes(_fixed(GOES_LINE_1, 34, "-0.0000011")),
@@ -208,8 +212,10 @@ def _fixed(line: str, column: int, text: str) -> str:
         ),
         (
             _goes(line_2=_fixed(GOES_LINE_2, 9, "181.0000")),
-            r"inclination must be in \[0, pi\].* \(record 1, line 3, keyword "
-            r"INCLINATION\)",
+            (
+                r"inclination must be in \[0, pi\].* \(record 1, line 3, keyword "
+                r"INCLINATION\)"
+            ),
         ),
     ],
 )

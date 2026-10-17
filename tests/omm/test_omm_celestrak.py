@@ -121,8 +121,10 @@ def test_space_track_json_is_read() -> None:
         ),
         (
             csv_text([{**ISS, "ECCENTRICITY": "1.2"}]),
-            r"eccentricity must be in \[0, 1\), got 1.2 "
-            r"\(record 1, line 2, keyword ECCENTRICITY\)",
+            (
+                r"eccentricity must be in \[0, 1\), got 1.2 "
+                r"\(record 1, line 2, keyword ECCENTRICITY\)"
+            ),
         ),
         (
             csv_text([{**ISS, "EPOCH": "2026-02-30T00:00:00.000000"}]),

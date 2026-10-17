@@ -79,9 +79,11 @@ def test_diagnostics_label_each_objects_covariance_repairs() -> None:
     )
     conjunction = Conjunction(base.primary, secondary, 5.0)
     assert conjunction.diagnostics == (
-        "secondary (99): clipped 1 negative eigenvalue(s) of the velocity "
-        "covariance conditional on position to zero (most negative -1 in "
-        "correlation units)",
+        (
+            "secondary (99): clipped 1 negative eigenvalue(s) of the velocity "
+            "covariance conditional on position to zero (most negative -1 in "
+            "correlation units)"
+        ),
     )
 
 

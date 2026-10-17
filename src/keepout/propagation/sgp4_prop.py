@@ -12,7 +12,7 @@ import numpy.typing as npt
 from astropy.time import Time
 from sgp4.api import Satrec, SatrecArray
 
-from keepout._types import FloatArray, IndexArray, require_non_negative
+from keepout._types import FloatArray, IndexArray, override, require_non_negative
 from keepout._units import DAY, KM, MINUTE
 from keepout.errors import UnsupportedElements
 from keepout.omm.model import Omm
@@ -176,9 +176,11 @@ class Sgp4Propagator:
     def __len__(self) -> int:
         return len(self._omms)
 
+    @override
     def __repr__(self) -> str:
         return f"{type(self).__name__}({len(self)} objects)"
 
+    @override
     def __reduce__(self) -> tuple[type[Self], tuple[tuple[Omm, ...]]]:
         return type(self), (self._omms,)
 

@@ -48,3 +48,9 @@ repos:
         entry: uv run codespell
         language: system
         types: [text]
+      - id: zizmor
+        name: zizmor
+        entry: uv run zizmor --offline .github
+        language: system
+        files: ^\.github/
+        pass_filenames: false

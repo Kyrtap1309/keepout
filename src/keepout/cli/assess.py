@@ -5,7 +5,7 @@ from __future__ import annotations
 import enum
 from collections import Counter
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, TypeAlias, TypeGuard, get_args
+from typing import TYPE_CHECKING, Annotated, TypeAlias, get_args
 
 import typer
 
@@ -22,6 +22,8 @@ from keepout.errors import KeepoutError
 # The library is imported where it is used: keepout --help need not load the
 # numerical libraries.
 if TYPE_CHECKING:
+    from typing_extensions import TypeIs
+
     from keepout.pc import MethodChoice
 
 __all__ = ["PcMethod", "assess_command", "method_choice"]
@@ -40,7 +42,7 @@ class PcMethod(enum.StrEnum):
     ALFANO = "alfano"
 
 
-def _is_method(name: str) -> TypeGuard[MethodChoice]:
+def _is_method(name: str) -> TypeIs[MethodChoice]:
     from keepout.pc import Method
 
     return name == "auto" or name in get_args(Method)
@@ -135,8 +137,10 @@ def assess_command(
         f"{actions[action]} {action.label}" for action in sorted(actions, reverse=True)
     )
     text = [
-        f"{plural(len(assessed), 'event')} from {plural(len(messages), 'CDM')}: "
-        f"{counted}.",
+        (
+            f"{plural(len(assessed), 'event')} from {plural(len(messages), 'CDM')}: "
+            f"{counted}."
+        ),
     ]
     if assumed:
         text.append(

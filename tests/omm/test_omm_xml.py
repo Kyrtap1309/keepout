@@ -129,18 +129,24 @@ def test_an_empty_ndm_holds_no_omms() -> None:
         ),
         (
             iss_xml('version="3.0"', 'version="1.0"'),
-            r"unsupported OMM version '1.0', expected 2.0 or 3.0 "
-            r"\(record 1, at ndm/omm\[1\], keyword CCSDS_OMM_VERS\)",
+            (
+                r"unsupported OMM version '1.0', expected 2.0 or 3.0 "
+                r"\(record 1, at ndm/omm\[1\], keyword CCSDS_OMM_VERS\)"
+            ),
         ),
         (
             iss_xml("<segment>", "<segment/><segment>"),
-            r"expected exactly one <segment>, found 2 "
-            r"\(record 1, at ndm/omm\[1\]/body\)",
+            (
+                r"expected exactly one <segment>, found 2 "
+                r"\(record 1, at ndm/omm\[1\]/body\)"
+            ),
         ),
         (
             iss_xml("<metadata>", "<metadata><NORAD_CAT_ID>1</NORAD_CAT_ID>"),
-            r"duplicate keyword \(record 1, at ndm/omm\[1\]/body/segment/data/"
-            r"tleParameters/NORAD_CAT_ID, keyword NORAD_CAT_ID\)",
+            (
+                r"duplicate keyword \(record 1, at ndm/omm\[1\]/body/segment/data/"
+                r"tleParameters/NORAD_CAT_ID, keyword NORAD_CAT_ID\)"
+            ),
         ),
         (
             ISS_XML.replace(
@@ -153,18 +159,25 @@ def test_an_empty_ndm_holds_no_omms() -> None:
                 )
                 + "</ndm>",
             ),
-            r"missing keyword \(record 2, at ndm/omm\[2\]/body/segment, "
-            r"keyword REV_AT_EPOCH\)",
+            (
+                r"missing keyword \(record 2, at ndm/omm\[2\]/body/segment, "
+                r"keyword REV_AT_EPOCH\)"
+            ),
         ),
         (
             iss_xml('units="deg"', 'units="rad"'),
-            r"unit \[rad\] does not match expected \[deg\] \(record 1, at ndm/omm\[1\]"
-            r"/body/segment/data/meanElements/INCLINATION, keyword INCLINATION\)",
+            (
+                r"unit \[rad\] does not match expected \[deg\] \(record 1, "
+                r"at ndm/omm\[1\]/body/segment/data/meanElements/INCLINATION, "
+                r"keyword INCLINATION\)"
+            ),
         ),
         (
             iss_xml(">0.00068585<", ">-0.1<"),
-            r"eccentricity must be in \[0, 1\).* \(record 1, at ndm/omm\[1\]/body/"
-            r"segment/data/meanElements/ECCENTRICITY, keyword ECCENTRICITY\)",
+            (
+                r"eccentricity must be in \[0, 1\).* \(record 1, at ndm/omm\[1\]/body/"
+                r"segment/data/meanElements/ECCENTRICITY, keyword ECCENTRICITY\)"
+            ),
         ),
     ],
 )

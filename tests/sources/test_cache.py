@@ -10,6 +10,7 @@ from pathlib import Path
 
 import platformdirs
 import pytest
+from typing_extensions import override
 
 from keepout.errors import ChecksumMismatch, HttpStatusError, SourceUnavailable
 from keepout.sources import cache
@@ -130,6 +131,7 @@ def test_http_download_refuses_a_success_other_than_200(
 
 
 class _BrokenBody(_Response):
+    @override
     def read(self, size: int | None = -1) -> bytes:
         raise http.client.IncompleteRead(b"partial")
 

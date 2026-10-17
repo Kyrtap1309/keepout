@@ -721,9 +721,11 @@ def render_summary(summary: Summary, page: str) -> str:
         )
     return "\n".join(
         [
-            "Close approaches from `screen` against CelesTrak's SOCRATES, on the "
-            f"{socrates['comparable']} SOCRATES approaches computed from the same "
-            f"element sets ([report]({page})):",
+            (
+                "Close approaches from `screen` against CelesTrak's SOCRATES, on the "
+                f"{socrates['comparable']} SOCRATES approaches computed from the same "
+                f"element sets ([report]({page})):"
+            ),
             "",
             *_agreement(summary, columns=5),
             *(["", " ".join(notes)] if notes else []),
@@ -784,11 +786,13 @@ def _keepout_only(summary: Summary) -> list[str]:
     if not summary["keepout_only"]:
         return ["None."]
     return [
-        "Formation flyers can have two range minima per orbit, minutes apart, "
-        "with a maximum at most a few metres higher between them. keepout reports "
-        "every local minimum inside the volume; SOCRATES lists only one of the two "
-        "once they come close. The last column gives the time to the nearest "
-        "other approach keepout reports for the pair.",
+        (
+            "Formation flyers can have two range minima per orbit, minutes apart, "
+            "with a maximum at most a few metres higher between them. keepout reports "
+            "every local minimum inside the volume; SOCRATES lists only one of the two "
+            "once they come close. The last column gives the time to the nearest "
+            "other approach keepout reports for the pair."
+        ),
         "",
         *table(
             ("Pair", "TCA (UTC)", "Range", "Relative speed", "Nearest other approach"),
@@ -814,8 +818,10 @@ def _skipped(summary: Summary) -> list[str]:
         return []
     return [
         "",
-        f"{_count(len(skipped), 'approach has', 'approaches have')} an object "
-        "`screen` left out, with its defaults:",
+        (
+            f"{_count(len(skipped), 'approach has', 'approaches have')} an object "
+            "`screen` left out, with its defaults:"
+        ),
         "",
         *table(
             ("Pair", "SOCRATES TCA (UTC)", "Object", "Reason", "Detail"),
@@ -837,35 +843,41 @@ def _introduction(summary: Summary) -> list[str]:
     settings = summary["settings"]
     socrates = summary["socrates"]
     return [
-        "CelesTrak's [SOCRATES](https://celestrak.org/SOCRATES/) lists, for a "
-        "week, the approaches within 5 km of the objects it screens, from SGP4 "
-        "on the GP element sets of its time. keepout screened the same element "
-        "sets with `keepout.screening.screen` and its defaults: the "
-        f"{settings['volume']}, {settings['days']:g} days from "
-        f"{settings['start'][:16].replace('T', ' ')} UTC (SOCRATES's window), "
-        f"element sets at most {settings['max_age_days']:g} days older than the "
-        f"window's end and {settings['max_lead_days']:g} days newer than its "
-        "start.",
+        (
+            "CelesTrak's [SOCRATES](https://celestrak.org/SOCRATES/) lists, for a "
+            "week, the approaches within 5 km of the objects it screens, from SGP4 "
+            "on the GP element sets of its time. keepout screened the same element "
+            "sets with `keepout.screening.screen` and its defaults: the "
+            f"{settings['volume']}, {settings['days']:g} days from "
+            f"{settings['start'][:16].replace('T', ' ')} UTC (SOCRATES's window), "
+            f"element sets at most {settings['max_age_days']:g} days older than the "
+            f"window's end and {settings['max_lead_days']:g} days newer than its "
+            "start."
+        ),
         "",
-        "SOCRATES gives each object's epoch only as days from it to TCA (DSE, "
-        "three decimals: 43 s), and CelesTrak serves only the latest element "
-        f"sets. Of the {socrates['approaches']} approaches of SOCRATES's report "
-        f"(TCA {socrates['first_tca'][:16].replace('T', ' ')} to "
-        f"{socrates['last_tca'][:16].replace('T', ' ')} UTC), "
-        f"{socrates['comparable']} have both objects in the public catalog with "
-        "the epochs SOCRATES used; these are compared. SOCRATES's "
-        f"{settings['primaries']} first objects are the primaries, its "
-        f"{settings['objects']} objects the catalog (an approach depends on its "
-        "own pair only, so the rest of the catalog changes nothing). Each "
-        "SOCRATES approach is matched with keepout's approach of the same pair "
-        f"whose TCA is nearest, within {settings['match_window']:g} s. "
-        f"*Fast* approaches are those of {settings['fast_from'] / 1e3:g} km/s or "
-        "more by SOCRATES; the others, mostly formation flyers, are *slow*.",
+        (
+            "SOCRATES gives each object's epoch only as days from it to TCA (DSE, "
+            "three decimals: 43 s), and CelesTrak serves only the latest element "
+            f"sets. Of the {socrates['approaches']} approaches of SOCRATES's report "
+            f"(TCA {socrates['first_tca'][:16].replace('T', ' ')} to "
+            f"{socrates['last_tca'][:16].replace('T', ' ')} UTC), "
+            f"{socrates['comparable']} have both objects in the public catalog with "
+            "the epochs SOCRATES used; these are compared. SOCRATES's "
+            f"{settings['primaries']} first objects are the primaries, its "
+            f"{settings['objects']} objects the catalog (an approach depends on its "
+            "own pair only, so the rest of the catalog changes nothing). Each "
+            "SOCRATES approach is matched with keepout's approach of the same pair "
+            f"whose TCA is nearest, within {settings['match_window']:g} s. "
+            f"*Fast* approaches are those of {settings['fast_from'] / 1e3:g} km/s or "
+            "more by SOCRATES; the others, mostly formation flyers, are *slow*."
+        ),
         "",
-        "Data: USSPACECOM/18 SDS via Space-Track.org, retrieved from CelesTrak "
-        f"(celestrak.org) on {summary['retrieved']}; the public catalog and the "
-        "SOCRATES report sorted by minimum range (see "
-        "`tests/screening/data/NOTICE`).",
+        (
+            "Data: USSPACECOM/18 SDS via Space-Track.org, retrieved from CelesTrak "
+            f"(celestrak.org) on {summary['retrieved']}; the public catalog and the "
+            "SOCRATES report sorted by minimum range (see "
+            "`tests/screening/data/NOTICE`)."
+        ),
     ]
 
 
@@ -908,18 +920,24 @@ def _tolerances(summary: Summary) -> list[str]:
 def _not_compared(summary: Summary) -> list[str]:
     not_compared = summary["not_compared"]
     return [
-        f"- **{not_compared['outside_catalog']} approaches with an object outside "
-        "the public catalog**: SOCRATES screens the whole catalog of "
-        "Space-Track.org; CelesTrak publishes only part of it.",
-        f"- **{not_compared['other_element_sets']} approaches whose objects are "
-        "in the public catalog with other element sets**: the snapshot was "
-        "downloaded hours after SOCRATES's data cut-off, and most objects had new "
-        "element sets by then.",
-        "- **Pairs SOCRATES does not list.** SOCRATES does not report every pair "
-        "that comes within 5 km: TerraSAR-X (31698) and TanDEM-X (36605), for "
-        "example, fly in formation a few hundred metres apart and are not in its "
-        "report. keepout's approaches are compared only for the pairs SOCRATES "
-        "lists.",
+        (
+            f"- **{not_compared['outside_catalog']} approaches with an object outside "
+            "the public catalog**: SOCRATES screens the whole catalog of "
+            "Space-Track.org; CelesTrak publishes only part of it."
+        ),
+        (
+            f"- **{not_compared['other_element_sets']} approaches whose objects are "
+            "in the public catalog with other element sets**: the snapshot was "
+            "downloaded hours after SOCRATES's data cut-off, and most objects had new "
+            "element sets by then."
+        ),
+        (
+            "- **Pairs SOCRATES does not list.** SOCRATES does not report every pair "
+            "that comes within 5 km: TerraSAR-X (31698) and TanDEM-X (36605), for "
+            "example, fly in formation a few hundred metres apart and are not in its "
+            "report. keepout's approaches are compared only for the pairs SOCRATES "
+            "lists."
+        ),
         *_skipped(summary),
     ]
 
@@ -937,11 +955,13 @@ def render_page(summary: Summary, known: Mapping[int, str] = KNOWN_DIFFERENCES) 
         "",
         *_agreement(summary),
         "",
-        "Worst: the largest difference between keepout and SOCRATES among the "
-        "approaches within tolerance; the last column is how much the range "
-        "changes when TCA moves by the TCA difference (v² Δt² / 2r, with r "
-        "the range at keepout's minimum). The approaches outside tolerance are "
-        "under [Differences](#differences).",
+        (
+            "Worst: the largest difference between keepout and SOCRATES among the "
+            "approaches within tolerance; the last column is how much the range "
+            "changes when TCA moves by the TCA difference (v² Δt² / 2r, with r "
+            "the range at keepout's minimum). The approaches outside tolerance are "
+            "under [Differences](#differences)."
+        ),
         "",
         "## Tolerances",
         "",

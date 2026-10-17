@@ -210,7 +210,7 @@ line](docs/cli.md) and [Space-Track data](docs/spacetrack.md).
 
 ```bash
 uv sync
-uv run pre-commit install     # ruff, mypy and the lock checked on commit
+uv run pre-commit install     # every CI lint check, run on commit
 uv run pytest                 # offline test suite
 uv run pytest -m validation   # slow checks; downloads CARA and Kelvins data
 uv run python tools/validation_report.py   # regenerate the validation report
@@ -222,7 +222,7 @@ uv run python tools/screening_benchmark.py --source spacetrack   # on the full c
 uv run python tools/synthetic_operator_report.py   # synthetic operator report (offline)
 uv run python tools/spacetrack_snapshot.py verify   # frozen Space-Track catalog (offline)
 uv run ruff check && uv run ruff format --check
-uv run mypy
+uv run mypy && uv run basedpyright
 ```
 
 ## Licence

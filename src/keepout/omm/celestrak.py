@@ -26,6 +26,7 @@ import json
 from collections.abc import Iterable
 from pathlib import Path
 
+from keepout._types import JsonValue
 from keepout.ccsds.keywords import preparse_epochs
 from keepout.errors import OmmParseError
 from keepout.omm._io import load_file, parse_record
@@ -141,7 +142,7 @@ def loads_json(text: str) -> tuple[Omm, ...]:
         values are invalid.
     """
     try:
-        data = json.loads(
+        data: JsonValue = json.loads(
             text.removeprefix("\ufeff"),
             parse_float=str,
             parse_int=str,

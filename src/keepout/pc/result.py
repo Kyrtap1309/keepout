@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Literal, Self, TypeAlias
 
+from keepout._types import override
+
 __all__ = ["Method", "PcResult"]
 
 Method: TypeAlias = Literal[
@@ -53,6 +55,7 @@ class PcResult:
         object.__setattr__(self, "diagnostics", tuple(self.diagnostics))
         object.__setattr__(self, "details", MappingProxyType(dict(self.details)))
 
+    @override
     def __reduce__(self) -> tuple[type[Self], tuple[object, ...]]:
         # A mapping proxy does not pickle: pickle the plain mapping.
         return type(self), (

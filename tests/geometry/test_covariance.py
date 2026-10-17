@@ -115,8 +115,10 @@ def test_raise_policy_rejects_invalid_matrix() -> None:
 def test_make_covariance_repairs_with_diagnostic() -> None:
     covariance = make_covariance(with_entry(5, 5, -1.0), "RTN", EPOCH)
     assert covariance.repairs == (
-        "clipped 1 negative eigenvalue(s) of the velocity covariance conditional "
-        "on position to zero (most negative -1 in correlation units)",
+        (
+            "clipped 1 negative eigenvalue(s) of the velocity covariance conditional "
+            "on position to zero (most negative -1 in correlation units)"
+        ),
     )
     assert covariance.matrix[5, 5] == pytest.approx(0.0, abs=1e-12)
     np.testing.assert_allclose(np.diag(covariance.matrix)[:5], np.diag(VALID)[:5])

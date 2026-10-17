@@ -218,10 +218,12 @@ def screen_command(
         else f"{count - len(unscreened)} of {plural(count, 'fleet satellite')}"
     )
     head = [
-        f"Screened {screened} "
-        f"against {plural(screening.catalog_count, 'object')} ({described}) "
-        f"from {utc(screening.start)} to {utc(screening.end)} UTC: "
-        f"{plural(len(result.events), 'close approach', 'close approaches')}.",
+        (
+            f"Screened {screened} "
+            f"against {plural(screening.catalog_count, 'object')} ({described}) "
+            f"from {utc(screening.start)} to {utc(screening.end)} UTC: "
+            f"{plural(len(result.events), 'close approach', 'close approaches')}."
+        ),
         *(_not_screened(skipped, satellites) for skipped in unscreened),
     ]
     tail: list[str] = []

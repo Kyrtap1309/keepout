@@ -31,16 +31,20 @@ import threading
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Callable, Collection, Iterator, Mapping
+from collections.abc import Callable, Collection, Generator, Mapping
 from dataclasses import dataclass
 from http import HTTPStatus
 from importlib.metadata import version
 from pathlib import Path
-from typing import Final, NamedTuple, Protocol, TypeAlias, TypeGuard
+from typing import TYPE_CHECKING, Final, NamedTuple, Protocol, TypeAlias
 
 import platformdirs
 
+from keepout._types import JsonValue
 from keepout.errors import ChecksumMismatch, HttpStatusError, SourceUnavailable
+
+if TYPE_CHECKING:
+    from typing_extensions import TypeIs
 
 __all__ = [
     "CHUNK_SIZE",
@@ -151,7 +155,7 @@ def http_request(
 
 
 @contextlib.contextmanager
-def network_errors(message: str) -> Iterator[None]:
+def network_errors(message: str) -> Generator[None]:
     """Turn a network or protocol error inside into
     :class:`~keepout.errors.SourceUnavailable`, ``<message>: <error>``.
 
@@ -398,7 +402,7 @@ def read_copy(target: Path, url: str) -> CachedCopy | None:
     of this layout or names another URL, or the digest does not match.
     """
     try:
-        record = json.loads(meta_path(target).read_bytes())
+        record: JsonValue = json.loads(meta_path(target).read_bytes())
         data = target.read_bytes()
     except (OSError, ValueError):
         return None
@@ -418,7 +422,7 @@ def read_copy(target: Path, url: str) -> CachedCopy | None:
     return CachedCopy(data, meta)
 
 
-def _is_time(value: object) -> TypeGuard[float]:
+def _is_time(value: object) -> TypeIs[float]:
     """Whether ``value`` is a Unix time as :func:`write_meta` writes one."""
     return isinstance(value, float) and math.isfinite(value)
 

@@ -167,7 +167,10 @@ def _iterate_overlap(
         inverse2 = _floored_inverse(p2[:, :3, :3], floor)
         precision = inverse1 + inverse2
         rhs = _apply(inverse1, x1[:, :3]) + _apply(inverse2, x2[:, :3])
-        peak = np.linalg.solve(precision, rhs[..., None])[..., 0]
+        # numpy < 2.5 types the solution as any floating dtype; it is float64.
+        peak = np.linalg.solve(precision, rhs[..., None])[..., 0].astype(
+            np.float64, copy=False
+        )
         if previous is not None:
             step = peak - previous
             distance = np.einsum("mi,mi->m", _apply(precision, step), step)

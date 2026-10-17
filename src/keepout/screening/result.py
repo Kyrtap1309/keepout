@@ -27,7 +27,7 @@ import astropy.units as u
 import numpy as np
 from astropy.time import Time
 
-from keepout._types import FloatArray, read_only
+from keepout._types import FloatArray, override, read_only
 from keepout.conjunction import Conjunction, combined_hard_body_radius
 from keepout.covariance import Covariance
 from keepout.errors import GeometryError
@@ -308,6 +308,7 @@ class ScreeningResult:
         )
         object.__setattr__(self, "volumes", MappingProxyType(dict(self.volumes)))
 
+    @override
     def __reduce__(self) -> tuple[type[Self], tuple[object, ...]]:
         # A mapping proxy does not pickle: pickle the plain mapping.
         return type(self), (

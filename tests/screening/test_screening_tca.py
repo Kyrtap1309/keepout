@@ -123,7 +123,10 @@ class StraightLines:
         closest = np.clip(along, first, first + duration)
 
         def radius(times: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
-            return np.linalg.norm(self.r0 + self.v0 * times[:, None], axis=1)
+            distances: npt.NDArray[np.float64] = np.linalg.norm(
+                self.r0 + self.v0 * times[:, None], axis=1
+            )
+            return distances
 
         ends = np.maximum(
             radius(np.full(len(self), first)),
@@ -828,7 +831,7 @@ def check_against_oracle(
     for (primary, secondary), minima in found.items():
         for minimum in minima:
             # Far enough to see the range rise: 1e-5 m at 5 km.
-            speed = np.linalg.norm(minimum.v_secondary - minimum.v_primary)
+            speed = float(np.linalg.norm(minimum.v_secondary - minimum.v_primary))
             delta = min(60.0, max(0.5, 0.5 / speed))
             around = range_at(
                 primary,
