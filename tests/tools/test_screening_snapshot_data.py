@@ -1,11 +1,11 @@
 """The committed screening data: digests, and that every file follows from
 the catalog, the SOCRATES excerpt and the manifest."""
 
-import hashlib
 from typing import Any
 
 import pytest
 import screening_snapshot as snapshot
+import snapshot_files
 
 from keepout.omm import Omm, load
 from keepout.sources.socrates import read_socrates
@@ -30,10 +30,8 @@ def test_files_match_the_manifest(manifest: Any) -> None:
         snapshot.FIXTURE,
         snapshot.NOTICE,
     }
-    for name, entry in manifest["files"].items():
-        stored = (DATA / name).read_bytes()
-        assert len(stored) == entry["bytes"], name
-        assert hashlib.sha256(stored).hexdigest() == entry["sha256"], name
+    stored = {name: (DATA / name).read_bytes() for name in manifest["files"]}
+    assert snapshot_files.file_digests(stored) == manifest["files"]
 
 
 def test_every_file_follows_from_the_data(inputs: snapshot.Inputs) -> None:

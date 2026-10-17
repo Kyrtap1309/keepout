@@ -14,7 +14,7 @@ each once: the login, the full GP catalog
 (:data:`~keepout.sources.spacetrack.CATALOG`), the public CDM summaries of
 the approaches to come (:data:`~keepout.sources.spacetrack.PUBLIC_CDMS`) and
 the logout. Each answer is saved unchanged in the new directory ``RAW``
-(listed with its status, digest and time in :data:`RAW_INDEX`) before the
+(listed with its status, digest and time in :data:`INDEX`) before the
 client reads it; an answer holding the account's identity or password is
 saved with them replaced by ``<hidden>``. Nothing is retried: a second
 request to a URL, or a ``RAW`` that already holds a download, is refused.
@@ -30,8 +30,8 @@ and writes the committed data in ``tests/screening/spacetrack-data/``:
 - :data:`SNAPSHOT`: the catalog, one element set per object (the newest),
   by catalog number, as gzipped CelesTrak CSV (the OMM keywords;
   Space-Track's further columns are left out);
-- :data:`NOTICE` and :data:`MANIFEST`: source, citation and licence; the
-  download, counts and SHA-256 digests.
+- :data:`NOTICE` and :data:`~snapshot_files.MANIFEST`: source, citation and
+  licence; the download, counts and SHA-256 digests.
 
 ``build --check`` fails instead of writing when a file is out of date;
 ``verify`` checks the committed files against each other offline. Output is
@@ -51,30 +51,39 @@ with citation, is committed.
 from __future__ import annotations
 
 import argparse
+import dataclasses
+import functools
 import json
 import statistics
 import sys
 import tempfile
 import time
-from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
-from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final, TypedDict, TypeGuard
+from typing import Final, Literal, TypedDict, cast
 
-import astropy.units as u
 import snapshot_files
-from generated import write_or_check
-from screening_snapshot import REGIMES, SIX_DIGITS, Regime, regime, utc_text
-from snapshot_files import FileDigest, file_digests
+from generated import REPO, json_text, positive
+from screening_snapshot import REGIMES, nearest_approach, regime, utc_text
+from snapshot_files import (
+    MANIFEST,
+    MANIFEST_FORMAT,
+    RAW_INDEX,
+    CatalogCounts,
+    FileDigest,
+    RawIndex,
+    catalog_counts,
+    file_digests,
+    read_body,
+)
 
+from keepout._workers import process_pool, resolve_workers
 from keepout.errors import SourceFormatError, SourceUnavailable
 from keepout.omm import Omm, load
-from keepout.omm.celestrak import dumps_csv, loads_csv
-from keepout.screening import ScreeningVolume, screen
+from keepout.omm.celestrak import dumps_csv
 from keepout.screening.result import CloseApproach
-from keepout.sources.cache import store_bytes, store_json
+from keepout.sources.cache import store_bytes
 from keepout.sources.catalog import Catalog
 from keepout.sources.spacetrack import (
     CATALOG,
@@ -91,12 +100,11 @@ from keepout.sources.spacetrack import (
     UrllibTransport,
     fetch_catalog,
     fetch_public_cdms,
-    read_catalog,
     read_public_cdms,
 )
+from keepout.sources.spacetrack import read_catalog as read_gp
 from keepout.units import seconds_between
 
-REPO: Final = Path(__file__).resolve().parents[1]
 TOOL: Final = "tools/spacetrack_snapshot.py"
 DATA: Final = REPO / "tests/screening/spacetrack-data"
 """Where ``build`` writes the committed data."""
@@ -104,12 +112,6 @@ DATA: Final = REPO / "tests/screening/spacetrack-data"
 RAW_VARIABLE: Final = "KEEPOUT_SPACETRACK_RAW"
 """The environment variable naming a ``RAW`` directory for the local
 validation tests (they are skipped without it)."""
-
-RAW_INDEX: Final = "raw.json"
-"""The file in ``RAW`` listing each saved answer."""
-
-RAW_FORMAT: Final = 1
-"""Version of the :data:`RAW_INDEX` layout."""
 
 RAW_FILES: Final[Mapping[str, str]] = {
     LOGIN_URL: "login.json",
@@ -127,12 +129,6 @@ by catalog number, gzipped."""
 NOTICE: Final = "NOTICE"
 """Source, citation, retrieval time and licence of the data."""
 
-MANIFEST: Final = "manifest.json"
-"""The download, counts and the SHA-256 digest of every other file."""
-
-MANIFEST_FORMAT: Final = 1
-"""Version of the :data:`MANIFEST` layout."""
-
 REPLAY: Final = Credentials("replay", "replay")
 """Credentials for replaying saved answers (no server sees them)."""
 
@@ -145,7 +141,7 @@ the errors of GP data, so the range minimum is found wherever it is."""
 
 
 class SavedRecord(TypedDict):
-    """A :class:`Saved` answer as JSON, in :data:`RAW_INDEX` and the manifest."""
+    """A :class:`Saved` answer as JSON, in the raw index and the manifest."""
 
     method: str
     url: str
@@ -192,69 +188,11 @@ class Saved:
 
     def record(self) -> SavedRecord:
         """The answer as JSON."""
-        return {
-            "method": self.method,
-            "url": self.url,
-            "status": self.status,
-            "file": self.file,
-            "sha256": self.sha256,
-            "size": self.size,
-            "retrieved": self.retrieved,
-            "redacted": self.redacted,
-        }
+        return cast("SavedRecord", dataclasses.asdict(self))
 
 
-class RawIndex(TypedDict):
-    """The :data:`RAW_INDEX` file."""
-
-    format: int
-    answers: list[SavedRecord]
-
-
-def read_index(raw: Path) -> tuple[Saved, ...]:
-    """The answers saved in ``raw`` (none if it has no index).
-
-    Raises
-    ------
-    ValueError
-        If the index is not one this tool wrote.
-    """
-    path = raw / RAW_INDEX
-    if not path.exists():
-        return ()
-    record: object = json.loads(path.read_text(encoding="utf-8"))
-    if not _is_raw_index(record):
-        raise ValueError(f"{path} is not a raw index of format {RAW_FORMAT}")
-    return tuple(Saved(**answer) for answer in record["answers"])
-
-
-def _is_raw_index(value: object) -> TypeGuard[RawIndex]:
-    """Whether ``value`` is a raw index as :func:`write_index` writes one."""
-    return (
-        isinstance(value, dict)
-        and value.get("format") == RAW_FORMAT
-        and isinstance(value.get("answers"), list)
-    )
-
-
-def write_index(raw: Path, answers: Sequence[Saved]) -> None:
-    """Write the :data:`RAW_INDEX` file atomically."""
-    record: RawIndex = {
-        "format": RAW_FORMAT,
-        "answers": [answer.record() for answer in answers],
-    }
-    store_json(raw / RAW_INDEX, record)
-
-
-def read_body(raw: Path, saved: Saved) -> bytes:
-    """A saved body, checked against its digest.
-
-    Raises
-    ------
-    ValueError
-        If the file's digest is not the one listed.
-    """
-    return snapshot_files.read_body(raw, saved, RAW_INDEX)
+INDEX: Final = RawIndex("answers", Saved)
+"""The answers saved in ``RAW``, in :data:`~snapshot_files.RAW_INDEX`."""
 
 
 def scrub(body: bytes, credentials: Credentials) -> bytes:
@@ -326,7 +264,7 @@ class Recorder:
             retrieved=utc_text(self.clock()),
             redacted=body != response.body,
         )
-        write_index(self.raw, tuple(self.saved.values()))
+        INDEX.write(self.raw, tuple(self.saved.values()))
         return response
 
 
@@ -341,7 +279,7 @@ class Replay:
 
     def __init__(self, raw: Path) -> None:
         self.raw = raw
-        self.saved = {saved.url: saved for saved in read_index(raw)}
+        self.saved = {saved.url: saved for saved in INDEX.read(raw)}
         if not self.saved:
             raise ValueError(f"no answers saved in {raw}")
 
@@ -434,7 +372,7 @@ def saved_answer(raw: Path, url: str) -> bytes:
         If no answer to ``url`` is saved, or the body does not match its
         digest.
     """
-    for saved in read_index(raw):
+    for saved in INDEX.read(raw):
         if saved.url == url:
             return read_body(raw, saved)
     raise ValueError(f"no answer to {url} in {raw}")
@@ -456,22 +394,17 @@ def replay_public_cdms(raw: Path) -> tuple[PublicCdm, ...]:
         ).cdms
 
 
-class CatalogSummary(TypedDict):
+class CatalogSummary(CatalogCounts):
     """What the manifest records of the catalog."""
 
     rows: int
     duplicates: int
-    objects: int
-    six_digit: int
-    regimes: dict[Regime, int]
-    oldest_epoch: str
-    newest_epoch: str
 
 
 class Manifest(TypedDict):
-    """The :data:`MANIFEST` file."""
+    """The :data:`~snapshot_files.MANIFEST` file."""
 
-    format: int
+    format: Literal[1]
     download: SavedRecord
     catalog: CatalogSummary
     files: dict[str, FileDigest]
@@ -509,9 +442,8 @@ def inputs_from_raw(raw: Path) -> Inputs:
         from CSV as the same element sets.
     """
     catalog = replay_catalog(raw)
-    if loads_csv(dumps_csv(catalog.omms)) != catalog.omms:
-        raise ValueError("the catalog does not read back unchanged from CSV")
-    (gp,) = (saved for saved in read_index(raw) if saved.url == CATALOG.url)
+    snapshot_files.check_round_trip(catalog.omms)
+    (gp,) = (saved for saved in INDEX.read(raw) if saved.url == CATALOG.url)
     return Inputs(
         download=gp,
         rows=len(catalog.parts[0].omms),
@@ -521,12 +453,17 @@ def inputs_from_raw(raw: Path) -> Inputs:
 
 
 def read_manifest(data: Path) -> Manifest:
-    """The :data:`MANIFEST` in ``data``."""
-    manifest: Manifest = json.loads((data / MANIFEST).read_text(encoding="utf-8"))
-    return manifest
+    """The :data:`~snapshot_files.MANIFEST` in ``data``.
+
+    Raises
+    ------
+    ValueError
+        If it is not one this tool writes.
+    """
+    return snapshot_files.read_manifest(data, Manifest)
 
 
-def read_snapshot(data: Path) -> tuple[Omm, ...]:
+def read_catalog(data: Path) -> tuple[Omm, ...]:
     """The catalog in ``data`` (:data:`SNAPSHOT`)."""
     return load(data / SNAPSHOT)
 
@@ -538,13 +475,19 @@ def retrieval_day(manifest: Manifest) -> str:
 
 def inputs_from_data(data: Path) -> Inputs:
     """The inputs, from the committed catalog and what only the manifest
-    records (the download, the rows and duplicates)."""
+    records (the download, the rows and duplicates).
+
+    Raises
+    ------
+    ValueError
+        If the manifest is not one this tool writes.
+    """
     manifest = read_manifest(data)
     return Inputs(
         download=Saved(**manifest["download"]),
         rows=manifest["catalog"]["rows"],
         duplicates=manifest["catalog"]["duplicates"],
-        omms=read_snapshot(data),
+        omms=read_catalog(data),
     )
 
 
@@ -589,31 +532,24 @@ def render_manifest(inputs: Inputs, files: Mapping[str, bytes]) -> str:
     files
         The stored bytes of every other committed file, by name.
     """
-    omms = inputs.omms
-    regimes = Counter(regime(omm) for omm in omms)
     manifest: Manifest = {
         "format": MANIFEST_FORMAT,
         "download": inputs.download.record(),
         "catalog": {
             "rows": inputs.rows,
             "duplicates": inputs.duplicates,
-            "objects": len(omms),
-            "six_digit": sum(omm.catalog_number >= SIX_DIGITS for omm in omms),
-            "regimes": {name: regimes[name] for name in REGIMES},
-            "oldest_epoch": min(omm.epoch for omm in omms).isot,
-            "newest_epoch": max(omm.epoch for omm in omms).isot,
+            **catalog_counts(inputs.omms, regime, REGIMES),
         },
         "files": file_digests(files),
     }
-    return json.dumps(manifest, indent=2) + "\n"
+    return json_text(manifest)
 
 
 def stored_files(data: Path, inputs: Inputs) -> dict[str, bytes]:
     """The bytes every committed file should hold, the manifest last
     (:func:`snapshot_files.stored_files`)."""
-    files = snapshot_files.stored_files(data, contents(inputs), {SNAPSHOT})
-    files[MANIFEST] = render_manifest(inputs, files).encode()
-    return files
+    manifest = functools.partial(render_manifest, inputs)
+    return snapshot_files.stored_files(data, contents(inputs), {SNAPSHOT}, manifest)
 
 
 @dataclass(frozen=True, slots=True)
@@ -624,48 +560,38 @@ class Match:
     ----------
     cdm
         The public CDM.
-    tca_difference
-        keepout's TCA minus Space-Track's [s]; ``None`` if keepout found no
-        range minimum within :data:`WINDOW` of Space-Track's TCA.
-    miss_distance
-        keepout's range at its TCA [m]; ``None`` likewise.
+    approach
+        keepout's approach of the two objects nearest Space-Track's TCA;
+        ``None`` if keepout found no range minimum within :data:`WINDOW` of
+        it.
     """
 
     cdm: PublicCdm
-    tca_difference: float | None
-    miss_distance: float | None
+    approach: CloseApproach | None
+
+    @property
+    def tca_difference(self) -> float | None:
+        """TCA by keepout minus TCA by Space-Track [s]; ``None`` without an
+        approach."""
+        if self.approach is None:
+            return None
+        return seconds_between(self.cdm.tca, self.approach.tca)
+
+    @property
+    def miss_distance(self) -> float | None:
+        """Range by keepout at its TCA [m]; ``None`` without an approach."""
+        return None if self.approach is None else self.approach.miss_distance
 
 
-def nearest_approach(cdm: PublicCdm, first: Omm, second: Omm) -> Match:
-    """The approach of the CDM's two objects keepout finds nearest its TCA.
-
-    The two objects are screened with each other from :data:`WINDOW` before
-    to :data:`WINDOW` after the CDM's TCA, in a :data:`SEARCH_RADIUS` sphere.
-    """
-    start = cdm.tca - WINDOW * u.s
-    result = screen(
-        [first],
-        [second],
-        start,
-        2 * WINDOW,
-        ScreeningVolume.sphere(SEARCH_RADIUS),
+def _match(job: tuple[PublicCdm, Omm, Omm]) -> Match:
+    """The CDM's match: its two objects screened with each other from
+    :data:`WINDOW` before to :data:`WINDOW` after its TCA, in a
+    :data:`SEARCH_RADIUS` sphere (:func:`screening_snapshot.nearest_approach`)."""
+    cdm, first, second = job
+    approach = nearest_approach(
+        first, second, cdm.tca, window=WINDOW, radius=SEARCH_RADIUS
     )
-    differences = [
-        (seconds_between(cdm.tca, approach.tca), approach)
-        for approach in result.approaches
-    ]
-    if not differences:
-        return Match(cdm, None, None)
-    difference, approach = min(differences, key=_by_size)
-    return Match(cdm, difference, approach.miss_distance)
-
-
-def _by_size(item: tuple[float, CloseApproach]) -> float:
-    return abs(item[0])
-
-
-def _nearest(job: tuple[PublicCdm, Omm, Omm]) -> Match:
-    return nearest_approach(*job)
+    return Match(cdm, approach)
 
 
 @dataclass(frozen=True, slots=True)
@@ -688,7 +614,7 @@ def compare(
     cdms: Sequence[PublicCdm], omms: Sequence[Omm], *, workers: int = 1
 ) -> Comparison:
     """Screen the two objects of every public CDM with the catalog's
-    element sets around its TCA (:func:`nearest_approach`).
+    element sets around its TCA (:class:`Match`).
 
     Parameters
     ----------
@@ -711,10 +637,10 @@ def compare(
         and cdm.object2.catalog_number in by_number
     ]
     if workers == 1:
-        matches = [_nearest(job) for job in jobs]
+        matches = [_match(job) for job in jobs]
     else:
-        with ProcessPoolExecutor(workers) as pool:
-            matches = list(pool.map(_nearest, jobs, chunksize=16))
+        with process_pool(resolve_workers(workers)) as pool:
+            matches = list(pool.map(_match, jobs, chunksize=16))
     return Comparison(tuple(matches), len(cdms) - len(jobs))
 
 
@@ -756,22 +682,21 @@ def spread(values: Sequence[float]) -> Spread:
 def summarise(comparison: Comparison) -> ComparisonSummary:
     """Counts, and how keepout's approaches differ from the public CDMs."""
     found = [
-        (match, match.tca_difference, match.miss_distance)
+        (match.cdm, match.approach)
         for match in comparison.matches
-        if match.tca_difference is not None and match.miss_distance is not None
+        if match.approach is not None
     ]
+    misses = [(cdm.min_range, approach.miss_distance) for cdm, approach in found]
     return {
         "cdms": len(comparison.matches) + comparison.outside_catalog,
         "outside_catalog": comparison.outside_catalog,
         "compared": len(comparison.matches),
         "found": len(found),
-        "tca_difference": spread([abs(dt) for _, dt, _ in found]),
-        "range_difference": spread(
-            [abs(miss - match.cdm.min_range) for match, _, miss in found]
+        "tca_difference": spread(
+            [abs(seconds_between(cdm.tca, approach.tca)) for cdm, approach in found]
         ),
-        "range_ratio": spread(
-            [match.cdm.min_range / miss for match, _, miss in found if miss > 0.0]
-        ),
+        "range_difference": spread([abs(miss - rng) for rng, miss in misses]),
+        "range_ratio": spread([rng / miss for rng, miss in misses if miss > 0.0]),
     }
 
 
@@ -791,19 +716,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     get.add_argument("raw", type=Path)
     get.add_argument("--cache", type=Path, default=None)
-    build = commands.add_parser("build", help="write the data from the answers in RAW")
-    build.add_argument("raw", type=Path)
-    build.add_argument("--check", action="store_true", help="fail if out of date")
-    build.add_argument("--data", type=Path, default=DATA)
-    verify = commands.add_parser(
-        "verify", help="check the committed files against each other (offline)"
-    )
-    verify.add_argument("--data", type=Path, default=DATA)
+    snapshot_files.add_data_commands(commands.add_parser, DATA, "answers")
     check = commands.add_parser(
         "compare", help="compare the public CDMs in RAW with keepout (offline)"
     )
     check.add_argument("raw", type=Path)
-    check.add_argument("--workers", type=int, default=1)
+    check.add_argument("--workers", type=positive, default=1)
     args = parser.parse_args(argv)
     if args.command == "download":
         return _download(args.raw, args.cache)
@@ -815,15 +733,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         print(json.dumps(summarise(comparison), indent=2))
         return 0
-    if args.command == "build":
-        inputs, checking = inputs_from_raw(args.raw), args.check
-    else:
-        inputs, checking = inputs_from_data(args.data), True
-    files = stored_files(args.data, inputs)
-    return write_or_check(
-        {args.data / name: stored for name, stored in files.items()},
-        check=checking,
-        tool=f"{TOOL} build",
+    return snapshot_files.build_or_verify(
+        args, inputs_from_raw, inputs_from_data, stored_files, TOOL
     )
 
 
@@ -836,7 +747,7 @@ def _download(raw: Path, cache: Path | None) -> int:
             f"{saved.size} bytes in {saved.file}{hidden}"
         )
     try:
-        omms = read_catalog(saved_answer(raw, CATALOG.url))
+        omms = read_gp(saved_answer(raw, CATALOG.url))
         cdms = read_public_cdms(saved_answer(raw, PUBLIC_CDMS.url))
     except SourceFormatError as exc:
         print(f"saved, but keepout cannot read it: {exc}")

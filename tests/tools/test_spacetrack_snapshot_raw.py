@@ -59,7 +59,7 @@ def summary(
 
 
 def test_four_requests_were_sent_and_answered(raw: Path) -> None:
-    index = snapshot.read_index(raw)
+    index = snapshot.INDEX.read(raw)
     assert [(saved.url, saved.status) for saved in index] == [
         (LOGIN_URL, 200),
         (CATALOG.url, 200),

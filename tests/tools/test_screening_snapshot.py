@@ -8,6 +8,7 @@ from pathlib import Path
 import astropy.units as u
 import pytest
 import screening_snapshot as snapshot
+import snapshot_files
 from celestrak_builders import SAMPLE, SOCRATES_HEADER, FakeCelesTrak, socrates_row
 from hypothesis import given
 from hypothesis import strategies as st
@@ -75,7 +76,7 @@ def test_download_asks_for_each_url_once_and_keeps_the_bodies(
     raw: Path, celestrak: FakeCelesTrak
 ) -> None:
     assert celestrak.urls == URLS
-    index = snapshot.read_index(raw / snapshot.RAW_INDEX)
+    index = snapshot.INDEX.read(raw)
     assert [body.url for body in index] == URLS
     for body in index:
         data = (raw / body.file).read_bytes()
@@ -102,7 +103,7 @@ def test_download_stops_at_the_first_error_and_resumes_after_it(
     with pytest.raises(SourceUnavailable, match="403"):
         snapshot.main(["download", str(raw)])
     assert celestrak.urls == URLS[:3]
-    saved = [body.url for body in snapshot.read_index(raw / snapshot.RAW_INDEX)]
+    saved = [body.url for body in snapshot.INDEX.read(raw)]
     assert saved == URLS[:2]
     celestrak.answers[group_url("analyst")] = BODIES[group_url("analyst")]
     celestrak.urls.clear()
@@ -133,9 +134,9 @@ def test_a_changed_body_is_refused(raw: Path) -> None:
 
 
 def test_an_unknown_raw_index_is_refused(tmp_path: Path) -> None:
-    (tmp_path / snapshot.RAW_INDEX).write_text('{"format": 2}', encoding="utf-8")
+    (tmp_path / snapshot_files.RAW_INDEX).write_text('{"format": 2}', encoding="utf-8")
     with pytest.raises(ValueError, match="format 1"):
-        snapshot.read_index(tmp_path / snapshot.RAW_INDEX)
+        snapshot.INDEX.read(tmp_path)
 
 
 @pytest.mark.parametrize(
@@ -173,7 +174,7 @@ def test_build_writes_the_data_then_checks_it(raw: Path, tmp_path: Path) -> None
     )
     excerpt = gzip.decompress((data / snapshot.SOCRATES).read_bytes()).decode()
     assert excerpt == SOCRATES_HEADER + DOCKED + FAST
-    manifest = json.loads((data / snapshot.MANIFEST).read_text(encoding="utf-8"))
+    manifest = json.loads((data / snapshot_files.MANIFEST).read_text(encoding="utf-8"))
     assert manifest["retrieved"] == {
         "first": manifest["downloads"][0]["retrieved"],
         "last": manifest["downloads"][-1]["retrieved"],
@@ -278,7 +279,7 @@ def test_notice_cites_the_source_and_date(raw: Path, tmp_path: Path) -> None:
     data = tmp_path / "data"
     assert build(raw, data) == 0
     notice = (data / snapshot.NOTICE).read_text(encoding="utf-8")
-    first = snapshot.read_index(raw / snapshot.RAW_INDEX)[0].retrieved
+    first = snapshot.INDEX.read(raw)[0].retrieved
     assert notice.startswith(
         "Data: USSPACECOM/18 SDS via Space-Track.org, retrieved from CelesTrak\n"
         f"(celestrak.org) on {first[:10]}.\n\n"

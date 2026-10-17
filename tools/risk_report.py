@@ -13,16 +13,23 @@ required to exist (SVG bytes vary with the matplotlib version).
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final, Literal, TypeAlias, TypedDict, TypeVar, assert_never, get_args
+from typing import Final, Literal, TypeAlias, TypedDict, TypeVar, get_args
 
 import matplotlib as mpl
-from generated import relative, replace_block, table, write_or_check
+from generated import (
+    README,
+    REPO,
+    json_text,
+    readme_with,
+    relative,
+    table,
+    write_or_check,
+)
 from matplotlib.figure import Figure
 
 from keepout.risk import (
@@ -42,7 +49,6 @@ from keepout.risk import (
 from keepout.sources import kelvins
 from keepout.sources.kelvins import KelvinsEvent
 
-REPO: Final = Path(__file__).resolve().parents[1]
 PAGE: Final = REPO / "docs/risk-kelvins.md"
 IMAGES: Final = REPO / "docs/img/risk-kelvins"
 START: Final = "<!-- risk-kelvins-summary:start -->"
@@ -55,24 +61,24 @@ DECISION: Final = DecisionConfig()
 HIGH_RISK: Final = -6.0
 """The challenge's high-risk label: log10 Pc of an event's last CDM >= -6."""
 
-ActionName: TypeAlias = Literal["ignore", "monitor", "prepare manoeuvre", "manoeuvre"]
-"""An :class:`~keepout.risk.Action` as the report names it."""
-
-LevelName: TypeAlias = Literal["green", "yellow", "red", "none"]
-"""A :class:`~keepout.risk.RiskLevel` as the report names it (``"none"``: no
-Pc)."""
-
 Label: TypeAlias = Literal["high", "low"]
 """The challenge's risk label of an event."""
 
-ACTIONS: Final[tuple[ActionName, ...]] = get_args(ActionName)
+NO_LEVEL: Final = "none"
+"""The level of an event without a Pc, as the report names it."""
+
+ACTIONS: Final = tuple(action.label for action in Action)
+"""Every :class:`~keepout.risk.Action`, as the report names it
+(:attr:`~keepout.risk.Action.label`)."""
 DIRECTIONS: Final = (
     Direction.RISING,
     Direction.STEADY,
     Direction.FALLING,
     Direction.UNDETERMINED,
 )
-LEVELS: Final[tuple[LevelName, ...]] = get_args(LevelName)
+LEVELS: Final = (*(level.label for level in RiskLevel), NO_LEVEL)
+"""Every :class:`~keepout.risk.RiskLevel`, as the report names it
+(:attr:`~keepout.risk.RiskLevel.label`), then :data:`NO_LEVEL`."""
 LABELS: Final[tuple[Label, ...]] = get_args(Label)
 
 PLOT_DAYS: Final = 7.5
@@ -88,35 +94,9 @@ COLOURS: Final[Mapping[RiskLevel, str]] = {
 }
 
 
-def action_name(assessment: Assessment) -> ActionName:
-    """The decision as one of :data:`ACTIONS`."""
-    action = assessment.decision.action
-    match action:
-        case Action.IGNORE:
-            return "ignore"
-        case Action.MONITOR:
-            return "monitor"
-        case Action.PREPARE_MANOEUVRE:
-            return "prepare manoeuvre"
-        case Action.MANOEUVRE:
-            return "manoeuvre"
-        case _:
-            assert_never(action)
-
-
-def level_name(level: RiskLevel | None) -> LevelName:
-    """A level as one of :data:`LEVELS` (``"none"`` for no Pc)."""
-    match level:
-        case None:
-            return "none"
-        case RiskLevel.GREEN:
-            return "green"
-        case RiskLevel.YELLOW:
-            return "yellow"
-        case RiskLevel.RED:
-            return "red"
-        case _:
-            assert_never(level)
+def level_label(level: RiskLevel | None) -> str:
+    """A level as one of :data:`LEVELS` (:data:`NO_LEVEL` for no Pc)."""
+    return NO_LEVEL if level is None else level.label
 
 
 class Settings(TypedDict):
@@ -137,10 +117,10 @@ class Summary(TypedDict):
     settings: Settings
     events: int
     cdms: int
-    actions: dict[ActionName, int]
+    actions: dict[str, int]
     directions: dict[Direction, int]
-    decision_point_vs_final: dict[LevelName, dict[LevelName, int]]
-    challenge_label: dict[ActionName, dict[Label, int]]
+    decision_point_vs_final: dict[str, dict[str, int]]
+    challenge_label: dict[str, dict[Label, int]]
     examples: dict[str, int]
 
 
@@ -221,16 +201,16 @@ def choose(
 def summarise(events: Sequence[KelvinsEvent]) -> Summary:
     """The report's numbers."""
     assessed: dict[int, Assessment] = {}
-    known: dict[LevelName, Counter[LevelName]] = {level: Counter() for level in LEVELS}
-    labels: dict[ActionName, Counter[Label]] = {action: Counter() for action in ACTIONS}
+    known: dict[str, Counter[str]] = {level: Counter() for level in LEVELS}
+    labels: dict[str, Counter[Label]] = {action: Counter() for action in ACTIONS}
     for event in events:
         observations = event.observations()
         assessment = assessed[event.event_id] = assess_with_settings(observations)
-        final = level_name(assessment.level)
-        known[level_name(at_decision_point(observations))][final] += 1
+        final = level_label(assessment.level)
+        known[level_label(at_decision_point(observations))][final] += 1
         high = event.column("risk")[-1] >= HIGH_RISK
-        labels[action_name(assessment)]["high" if high else "low"] += 1
-    actions = Counter(action_name(a) for a in assessed.values())
+        labels[assessment.decision.action.label]["high" if high else "low"] += 1
+    actions = Counter(a.decision.action.label for a in assessed.values())
     directions = Counter(a.trend.direction for a in assessed.values())
     return {
         "doi": kelvins.DOI,
@@ -433,7 +413,7 @@ def plot(event: KelvinsEvent, assessment: Assessment, path: Path) -> None:
         axes.set_ylabel("Pc (ESA)")
         axes.set_title(
             f"Kelvins event {event.event_id} (mission {event.mission_id}): "
-            f"{action_name(assessment)}, trend {assessment.trend.direction}"
+            f"{assessment.decision.action.label}, trend {assessment.trend.direction}"
         )
         axes.grid(visible=True, which="major", alpha=0.3)
         figure.tight_layout()
@@ -456,20 +436,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--page", type=Path, default=PAGE)
     parser.add_argument("--images", type=Path, default=IMAGES)
-    parser.add_argument("--readme", type=Path, default=REPO / "README.md")
+    parser.add_argument("--readme", type=Path, default=README)
     args = parser.parse_args(argv)
 
     events = kelvins.load(args.table)
     summary = summarise(events)
+    block = render_summary(summary, relative(args.images, args.readme.parent))
     files = {
-        args.page.with_suffix(".json"): json.dumps(summary, indent=2) + "\n",
+        args.page.with_suffix(".json"): json_text(summary),
         args.page: render_page(summary, relative(args.images, args.page.parent)),
-        args.readme: replace_block(
-            args.readme.read_text(encoding="utf-8"),
-            START,
-            END,
-            render_summary(summary, relative(args.images, args.readme.parent)),
-        ),
+        args.readme: readme_with(args.readme, START, END, block),
     }
     status = write_or_check(files, check=args.check, tool="tools/risk_report.py")
     by_id = {event.event_id: event for event in events}

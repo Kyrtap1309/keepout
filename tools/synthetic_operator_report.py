@@ -20,7 +20,6 @@ gives the largest Pc over a scale factor of the combined covariance
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import sys
 from collections import Counter
@@ -30,7 +29,7 @@ from typing import Final, TypedDict
 
 import screening_snapshot as snapshot
 from astropy.time import Time
-from generated import table, write_or_check
+from generated import REPO, json_text, pc_text, positive, table, write_or_check
 
 from keepout.cdm import kvn
 from keepout.encounter import encounter_plane
@@ -51,7 +50,6 @@ from keepout.synthetic import (
 from keepout.synthetic.operator import UNKNOWN, run
 from keepout.units import DAY, KM
 
-REPO: Final = Path(__file__).resolve().parents[1]
 PAGE: Final = REPO / "docs/synthetic-operator.md"
 FLEET: Final = REPO / "examples/synthetic-operator/fleet.toml"
 TOOL: Final = "tools/synthetic_operator_report.py"
@@ -245,6 +243,7 @@ def summarise(
     catalog: Sequence[Omm],
     retrieved: str,
     fleet: str,
+    example: OperatorEvent | None,
 ) -> Summary:
     """The report's numbers.
 
@@ -258,12 +257,13 @@ def summarise(
         The day the catalog was retrieved (UTC, ISO 8601).
     fleet
         The fleet file, as the page names it.
+    example
+        The event whose CDM the page shows: :func:`closest`.
     """
     screening = result.screening
     elements = {omm.catalog_number: omm for omm in deduplicate(catalog).kept}
     per_satellite = Counter(e.approach.primary_number for e in result.events)
     actions = Counter(e.action for e in result.events)
-    example = closest(result)
     model = result.model
     return {
         "settings": {
@@ -337,10 +337,6 @@ def rounded(
 
 def _km(metres: float) -> str:
     return f"{metres / KM:.3f}"
-
-
-def _pc(value: float | None) -> str:
-    return "-" if value is None else f"{value:.2e}"
 
 
 def _object(number: int, name: str) -> str:
@@ -491,10 +487,10 @@ def _approaches(summary: Summary) -> list[str]:
             f"{e['miss_distance']:.0f} m",
             f"{e['relative_speed']:.1f} m/s",
             " / ".join(_km(sigma) for sigma in e["transverse_sigmas"]),
-            _pc(e["pc"]),
+            pc_text(e["pc"]),
             "-"
             if e["max_pc"] is None
-            else f"{_pc(e['max_pc'])} ({e['scale_factor']:.3g})",
+            else f"{pc_text(e['max_pc'])} ({e['scale_factor']:.3g})",
             e["level"] or "-",
             e["action"],
         )
@@ -621,7 +617,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--fleet", type=Path, default=FLEET)
     parser.add_argument("--page", type=Path, default=PAGE)
     parser.add_argument(
-        "--workers", type=int, default=4, help="processes to screen with"
+        "--workers", type=positive, default=4, help="processes to screen with"
     )
     args = parser.parse_args(argv)
 
@@ -638,13 +634,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         thresholds=THRESHOLDS,
         decision_config=DECISION,
     )
-    summary = summarise(
-        result, catalog, snapshot.retrieval_day(manifest), shown(args.fleet)
-    )
     example = closest(result)
+    summary = summarise(
+        result, catalog, snapshot.retrieval_day(manifest), shown(args.fleet), example
+    )
     cdm = None if example is None else kvn.dumps(example.cdm)
     files = {
-        args.page.with_suffix(".json"): json.dumps(summary, indent=2) + "\n",
+        args.page.with_suffix(".json"): json_text(summary),
         args.page: render_page(summary, cdm),
     }
     return write_or_check(files, check=args.check, tool=TOOL)

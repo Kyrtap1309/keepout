@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 import screening_snapshot as snapshot
+import snapshot_files
 import synthetic_operator_report as report
 from astropy.time import Time
 from cli_builders import FLEET_TOML
@@ -25,7 +26,7 @@ def arguments(tmp_path: Path) -> list[str]:
     data.mkdir()
     csv = dumps_csv(load_fixture()).encode()
     (data / snapshot.SNAPSHOT).write_bytes(gzip.compress(csv))
-    shutil.copy(snapshot.DATA / snapshot.MANIFEST, data / snapshot.MANIFEST)
+    shutil.copy(snapshot.DATA / snapshot_files.MANIFEST, data / snapshot_files.MANIFEST)
     fleet = tmp_path / "fleet.toml"
     fleet.write_text(FLEET_TOML, encoding="utf-8")
     page = tmp_path / "docs" / "synthetic-operator.md"
@@ -258,9 +259,8 @@ def test_an_observation_without_a_pc_is_summarised_with_its_error() -> None:
         event.observation, pc=None, result=None, error="no covariance", diagnostics=()
     )
     failed = dataclasses.replace(event, observation=observation)
-    summary = report.summarise(
-        dataclasses.replace(result, events=(failed,)), fixture, "day", "fleet.toml"
-    )
+    failing = dataclasses.replace(result, events=(failed,))
+    summary = report.summarise(failing, fixture, "day", "fleet.toml", failed)
     (summarised,) = summary["events"]
     assert summarised["pc"] is None
     assert summarised["max_pc"] is None

@@ -11,6 +11,7 @@ import astropy.units as u
 import pytest
 import screening_report as report
 import screening_snapshot as snapshot
+import snapshot_files
 from astropy.time import Time
 from screening_data import socrates_text
 
@@ -61,7 +62,7 @@ def data_dir(
     )
     omms = objects() if catalog is None else catalog
     (data / snapshot.SNAPSHOT).write_bytes(gzip.compress(dumps_csv(omms).encode()))
-    shutil.copy(snapshot.DATA / snapshot.MANIFEST, data / snapshot.MANIFEST)
+    shutil.copy(snapshot.DATA / snapshot_files.MANIFEST, data / snapshot_files.MANIFEST)
     return data
 
 

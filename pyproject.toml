@@ -168,6 +168,7 @@ dev = [
     "pytest-xdist>=3.8.0",
     "ruff>=0.16.8",
     "scipy-stubs>=1.17.1.5",
+    "typeguard>=4.6.0",
     "types-openpyxl>=3.1.5.20260827",
     "typing-extensions>=4.16.0",
     "xmlschema>=4.3.2",

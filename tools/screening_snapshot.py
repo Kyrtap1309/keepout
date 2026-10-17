@@ -20,8 +20,8 @@ committed data in ``tests/screening/data/``:
   gzipped CSV lines unchanged from the report (see below);
 - :data:`FIXTURE`: about 200 objects of the catalog for tests
   (:func:`select_fixture`);
-- :data:`NOTICE` and :data:`MANIFEST`: source and licence; downloads,
-  counts and SHA-256 digests.
+- :data:`NOTICE` and :data:`~snapshot_files.MANIFEST`: source and licence;
+  downloads, counts and SHA-256 digests.
 
 ``build --check`` fails instead of writing when a file is out of date.
 ``verify`` checks the committed files against each other offline: it
@@ -60,39 +60,43 @@ gives. It is not covered by keepout's MIT licence.
 from __future__ import annotations
 
 import argparse
+import dataclasses
+import functools
 import gzip
-import json
 import math
 import sys
 import tempfile
 import textwrap
 import time
-from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import (
-    Final,
-    Literal,
-    TypeAlias,
-    TypedDict,
-    TypeGuard,
-    TypeVar,
-    get_args,
-)
+from typing import Final, Literal, TypeAlias, TypedDict, TypeVar, cast, get_args
 from urllib.parse import parse_qs, urlsplit
 
+import astropy.units as u
 import snapshot_files
 from astropy.time import Time
-from generated import write_or_check
-from snapshot_files import FileDigest, file_digests
+from generated import REPO, json_text
+from snapshot_files import (
+    MANIFEST,
+    MANIFEST_FORMAT,
+    SIX_DIGITS,
+    CatalogCounts,
+    FileDigest,
+    RawIndex,
+    catalog_counts,
+    file_digests,
+    read_body,
+)
 
 from keepout.equinoctial import semi_major_axis
 from keepout.errors import SourceUnavailable
 from keepout.omm import Omm, load
 from keepout.omm.celestrak import dumps_csv, loads_csv
+from keepout.screening import CloseApproach, ScreeningVolume, screen
 from keepout.screening.volume import SFS_DEEP_SPACE_PERIOD, SFS_ECCENTRICITY
-from keepout.sources.cache import http_download, store_bytes, store_json
+from keepout.sources.cache import http_download, store_bytes
 from keepout.sources.catalog import Catalog
 from keepout.sources.celestrak import (
     GP_URL,
@@ -104,18 +108,12 @@ from keepout.sources.celestrak import (
     fetch_socrates,
 )
 from keepout.sources.socrates import SocratesApproach, epoch_matches, read_socrates
-from keepout.units import DAY
+from keepout.synthetic.covariance_model import LEO_HIGHEST_APOGEE
+from keepout.units import DAY, seconds_between
 
-REPO: Final = Path(__file__).resolve().parents[1]
 TOOL: Final = "tools/screening_snapshot.py"
 DATA: Final = REPO / "tests/screening/data"
 """Where ``build`` writes the committed data."""
-
-RAW_INDEX: Final = "raw.json"
-"""The file in ``RAW`` listing each saved body: URL, file, digest, time."""
-
-RAW_FORMAT: Final = 1
-"""Version of the :data:`RAW_INDEX` layout."""
 
 SNAPSHOT: Final = "celestrak-public.csv.gz"
 """The catalog: CelesTrak CSV of every object of the public groups, one
@@ -132,22 +130,10 @@ FIXTURE: Final = "celestrak-fixture.csv"
 NOTICE: Final = "NOTICE"
 """Source, retrieval time and licence of the data."""
 
-MANIFEST: Final = "manifest.json"
-"""Downloads, counts and the SHA-256 digest of every other file."""
-
-MANIFEST_FORMAT: Final = 1
-"""Version of the :data:`MANIFEST` layout."""
-
 GZIPPED: Final = frozenset({SNAPSHOT, SOCRATES})
 
 EARTH_RADIUS: Final = 6_378_137.0
 """Equatorial radius of the Earth [m] (WGS 84), for altitudes."""
-
-LEO_APOGEE: Final = 2_000e3
-"""Highest apogee altitude of a LEO orbit [m]."""
-
-SIX_DIGITS: Final = 100_000
-"""The first six-digit catalog number."""
 
 CLOSEST: Final = 10
 """Closest pairs of comparable SOCRATES approaches taken into the fixture."""
@@ -172,7 +158,7 @@ _T = TypeVar("_T")
 
 
 class BodyRecord(TypedDict):
-    """A :class:`Body` as JSON, in :data:`RAW_INDEX` and the manifest."""
+    """A :class:`Body` as JSON, in the raw index and the manifest."""
 
     url: str
     file: str
@@ -207,20 +193,11 @@ class Body:
 
     def record(self) -> BodyRecord:
         """The body as JSON."""
-        return {
-            "url": self.url,
-            "file": self.file,
-            "sha256": self.sha256,
-            "size": self.size,
-            "retrieved": self.retrieved,
-        }
+        return cast("BodyRecord", dataclasses.asdict(self))
 
 
-class RawIndex(TypedDict):
-    """The :data:`RAW_INDEX` file."""
-
-    format: int
-    bodies: list[BodyRecord]
+INDEX: Final = RawIndex("bodies", Body)
+"""The bodies saved in ``RAW``, in :data:`~snapshot_files.RAW_INDEX`."""
 
 
 def raw_name(url: str) -> str:
@@ -249,7 +226,7 @@ class RawBodies:
 
     A URL already saved there is answered from the saved body, never asked
     for again. Otherwise, if ``download`` is given, the URL is downloaded
-    once and the body is saved (and listed in :data:`RAW_INDEX`) before it
+    once and the body is saved (and listed in :data:`INDEX`) before it
     is returned; with no ``download`` it is an error.
 
     Parameters
@@ -271,9 +248,7 @@ class RawBodies:
         self.raw = raw
         self.download = download
         self.clock = clock
-        self.bodies: dict[str, Body] = {
-            body.url: body for body in read_index(raw / RAW_INDEX)
-        }
+        self.bodies: dict[str, Body] = {body.url: body for body in INDEX.read(raw)}
 
     def __call__(self, url: str) -> bytes:
         """The body of ``url``: the saved one, or downloaded and saved.
@@ -293,49 +268,8 @@ class RawBodies:
         retrieved = utc_text(self.clock())
         digest = store_bytes(self.raw / name, data)
         self.bodies[url] = Body(url, name, digest, len(data), retrieved)
-        write_index(self.raw / RAW_INDEX, tuple(self.bodies.values()))
+        INDEX.write(self.raw, tuple(self.bodies.values()))
         return data
-
-
-def read_index(path: Path) -> tuple[Body, ...]:
-    """The bodies listed in a :data:`RAW_INDEX` file (none if it is missing).
-
-    Raises
-    ------
-    ValueError
-        If the file is not an index this tool wrote.
-    """
-    if not path.exists():
-        return ()
-    record: object = json.loads(path.read_text(encoding="utf-8"))
-    if not _is_raw_index(record):
-        raise ValueError(f"{path} is not a raw index of format {RAW_FORMAT}")
-    return tuple(Body(**body) for body in record["bodies"])
-
-
-def _is_raw_index(value: object) -> TypeGuard[RawIndex]:
-    """Whether ``value`` is a raw index as :func:`write_index` writes one."""
-    return isinstance(value, dict) and value.get("format") == RAW_FORMAT
-
-
-def write_index(path: Path, bodies: Sequence[Body]) -> None:
-    """Write the :data:`RAW_INDEX` file atomically."""
-    record: RawIndex = {
-        "format": RAW_FORMAT,
-        "bodies": [body.record() for body in bodies],
-    }
-    store_json(path, record)
-
-
-def read_body(raw: Path, body: Body) -> bytes:
-    """A saved body, checked against its digest.
-
-    Raises
-    ------
-    ValueError
-        If the file's digest is not the one listed.
-    """
-    return snapshot_files.read_body(raw, body, RAW_INDEX)
 
 
 def fetch(raw: Path, download: Downloader | None) -> tuple[Catalog, SocratesReport]:
@@ -384,6 +318,29 @@ def comparable(
     ]
 
 
+def nearest_approach(
+    first: Omm, second: Omm, tca: Time, *, window: float, radius: float
+) -> CloseApproach | None:
+    """The approach of two objects keepout finds nearest ``tca``, if any.
+
+    The two objects are screened with each other from ``window`` [s] before
+    to ``window`` after ``tca``, in a sphere of ``radius`` [m] around the
+    first.
+    """
+    result = screen(
+        [first],
+        [second],
+        tca - window * u.s,
+        2.0 * window,
+        ScreeningVolume.sphere(radius),
+    )
+    return min(
+        result.approaches,
+        key=lambda approach: abs(seconds_between(tca, approach.tca)),
+        default=None,
+    )
+
+
 Regime: TypeAlias = Literal["LEO", "MEO", "GEO", "HEO"]
 """Orbit regimes the fixture spreads over (:func:`regime`)."""
 
@@ -404,7 +361,7 @@ def regime(omm: Omm) -> Regime:
     if omm.eccentricity >= SFS_ECCENTRICITY:
         return "HEO"
     axis = semi_major_axis(omm.mean_motion)
-    if axis * (1.0 + omm.eccentricity) - EARTH_RADIUS <= LEO_APOGEE:
+    if axis * (1.0 + omm.eccentricity) - EARTH_RADIUS <= LEO_HIGHEST_APOGEE:
         return "LEO"
     lowest, highest = SFS_DEEP_SPACE_PERIOD
     if lowest <= 2.0 * math.pi / omm.mean_motion <= highest:
@@ -507,16 +464,11 @@ class Retrieved(TypedDict):
     last: str
 
 
-class CatalogSummary(TypedDict):
+class CatalogSummary(CatalogCounts):
     """What the manifest records of the catalog."""
 
     group_rows: dict[str, int]
     duplicates: int
-    objects: int
-    six_digit: int
-    regimes: dict[Regime, int]
-    oldest_epoch: str
-    newest_epoch: str
 
 
 class FixtureSummary(TypedDict):
@@ -527,9 +479,9 @@ class FixtureSummary(TypedDict):
 
 
 class Manifest(TypedDict):
-    """The :data:`MANIFEST` file."""
+    """The :data:`~snapshot_files.MANIFEST` file."""
 
-    format: int
+    format: Literal[1]
     retrieved: Retrieved
     downloads: list[BodyRecord]
     catalog: CatalogSummary
@@ -539,9 +491,14 @@ class Manifest(TypedDict):
 
 
 def read_manifest(data: Path) -> Manifest:
-    """The :data:`MANIFEST` in ``data``."""
-    manifest: Manifest = json.loads((data / MANIFEST).read_text(encoding="utf-8"))
-    return manifest
+    """The :data:`~snapshot_files.MANIFEST` in ``data``.
+
+    Raises
+    ------
+    ValueError
+        If it is not one this tool writes.
+    """
+    return snapshot_files.read_manifest(data, Manifest)
 
 
 def read_catalog(data: Path) -> tuple[Omm, ...]:
@@ -551,7 +508,7 @@ def read_catalog(data: Path) -> tuple[Omm, ...]:
 
 def read_excerpt(data: Path) -> str:
     """The SOCRATES excerpt in ``data`` (:data:`SOCRATES`), as text."""
-    return gzip.decompress((data / SOCRATES).read_bytes()).decode("utf-8")
+    return contents_of(SOCRATES, (data / SOCRATES).read_bytes()).decode("utf-8")
 
 
 def retrieval_day(manifest: Manifest) -> str:
@@ -619,10 +576,9 @@ def inputs_from_raw(raw: Path) -> Inputs:
         If the catalog would not read back from CSV as the same element sets.
     """
     catalog, report = fetch(raw, None)
-    if loads_csv(dumps_csv(catalog.omms)) != catalog.omms:
-        raise ValueError("the catalog does not read back unchanged from CSV")
+    snapshot_files.check_round_trip(catalog.omms)
     return Inputs(
-        downloads=tuple(RawBodies(raw, None).bodies.values()),
+        downloads=INDEX.read(raw),
         group_rows={part.name: len(part.omms) for part in catalog.parts},
         duplicates=len(catalog.duplicates),
         omms=catalog.omms,
@@ -634,7 +590,13 @@ def inputs_from_raw(raw: Path) -> Inputs:
 def inputs_from_data(data: Path) -> Inputs:
     """The inputs, from the committed catalog and excerpt, and what only the
     manifest records (downloads, group sizes, duplicates, the whole
-    report's summary)."""
+    report's summary).
+
+    Raises
+    ------
+    ValueError
+        If the manifest is not one this tool writes.
+    """
     manifest = read_manifest(data)
     return Inputs(
         downloads=tuple(Body(**body) for body in manifest["downloads"]),
@@ -708,7 +670,6 @@ def render_manifest(inputs: Inputs, files: Mapping[str, bytes]) -> str:
     """
     fixture = loads_csv(contents_of(FIXTURE, files[FIXTURE]).decode())
     first, last = retrieved_span(inputs)
-    regimes = Counter(regime(omm) for omm in inputs.omms)
     manifest: Manifest = {
         "format": MANIFEST_FORMAT,
         "retrieved": {"first": first, "last": last},
@@ -716,11 +677,7 @@ def render_manifest(inputs: Inputs, files: Mapping[str, bytes]) -> str:
         "catalog": {
             "group_rows": inputs.group_rows,
             "duplicates": inputs.duplicates,
-            "objects": len(inputs.omms),
-            "six_digit": sum(omm.catalog_number >= SIX_DIGITS for omm in inputs.omms),
-            "regimes": {name: regimes[name] for name in REGIMES},
-            "oldest_epoch": min(omm.epoch for omm in inputs.omms).isot,
-            "newest_epoch": max(omm.epoch for omm in inputs.omms).isot,
+            **catalog_counts(inputs.omms, regime, REGIMES),
         },
         "socrates": inputs.summary,
         "fixture": {
@@ -731,7 +688,7 @@ def render_manifest(inputs: Inputs, files: Mapping[str, bytes]) -> str:
         },
         "files": file_digests(files),
     }
-    return json.dumps(manifest, indent=2) + "\n"
+    return json_text(manifest)
 
 
 def contents_of(name: str, stored: bytes) -> bytes:
@@ -742,9 +699,8 @@ def contents_of(name: str, stored: bytes) -> bytes:
 def stored_files(data: Path, inputs: Inputs) -> dict[str, bytes]:
     """The bytes every committed file should hold, the manifest last
     (:func:`snapshot_files.stored_files`)."""
-    files = snapshot_files.stored_files(data, contents(inputs), GZIPPED)
-    files[MANIFEST] = render_manifest(inputs, files).encode()
-    return files
+    manifest = functools.partial(render_manifest, inputs)
+    return snapshot_files.stored_files(data, contents(inputs), GZIPPED, manifest)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -762,14 +718,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "download", help="download each URL once, saving the bodies in RAW"
     )
     download.add_argument("raw", type=Path)
-    build = commands.add_parser("build", help="write the data from the bodies in RAW")
-    build.add_argument("raw", type=Path)
-    build.add_argument("--check", action="store_true", help="fail if out of date")
-    build.add_argument("--data", type=Path, default=DATA)
-    verify = commands.add_parser(
-        "verify", help="check the committed files against each other (offline)"
-    )
-    verify.add_argument("--data", type=Path, default=DATA)
+    snapshot_files.add_data_commands(commands.add_parser, DATA, "bodies")
     args = parser.parse_args(argv)
     if args.command == "download":
         catalog, report = fetch(args.raw, http_download)
@@ -779,15 +728,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"{len(report.approaches())} SOCRATES approaches"
         )
         return 0
-    if args.command == "build":
-        inputs, check = inputs_from_raw(args.raw), args.check
-    else:
-        inputs, check = inputs_from_data(args.data), True
-    files = stored_files(args.data, inputs)
-    return write_or_check(
-        {args.data / name: stored for name, stored in files.items()},
-        check=check,
-        tool=f"{TOOL} build",
+    return snapshot_files.build_or_verify(
+        args, inputs_from_raw, inputs_from_data, stored_files, TOOL
     )
 
 

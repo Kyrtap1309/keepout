@@ -51,7 +51,6 @@ from __future__ import annotations
 import argparse
 import datetime
 import gzip
-import json
 import os
 import platform
 import statistics
@@ -61,14 +60,26 @@ import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final, TypedDict
+from typing import Any, Final, Protocol, TypedDict, TypeVar
 
 import screening_snapshot as snapshot
 import spacetrack_snapshot
 from astropy.time import Time
-from generated import replace_block, table, write_or_check
+from generated import (
+    README,
+    REPO,
+    json_text,
+    parse_json,
+    plural,
+    positive,
+    read_json,
+    readme_with,
+    table,
+    write_or_check,
+)
 from screening_timing import TimingOutput, select, timed
 
+from keepout._workers import ONE_THREAD
 from keepout.omm import Omm
 from keepout.omm.celestrak import dumps_csv
 from keepout.screening import (
@@ -82,14 +93,7 @@ from keepout.screening.pipeline import DEFAULT_DURATION
 from keepout.screening.volume import SOCRATES_RADIUS
 from keepout.units import DAY, KM
 
-REPO: Final = Path(__file__).resolve().parents[1]
-RESULTS: Final = REPO / "docs/screening-benchmark.json"
-SPACETRACK_RESULTS: Final = REPO / "docs/screening-benchmark-spacetrack.json"
 TIMING: Final = Path(__file__).resolve().with_name("screening_timing.py")
-START: Final = "<!-- screening-benchmark-summary:start -->"
-END: Final = "<!-- screening-benchmark-summary:end -->"
-SPACETRACK_START: Final = "<!-- screening-benchmark-spacetrack-summary:start -->"
-SPACETRACK_END: Final = "<!-- screening-benchmark-spacetrack-summary:end -->"
 TOOL: Final = "tools/screening_benchmark.py"
 CPUINFO: Final = Path("/proc/cpuinfo")
 
@@ -145,13 +149,7 @@ THRESHOLD: Final = 0.2
 """``compare`` fails when this tree's median CPU time exceeds the base's by
 more than this fraction, unless told otherwise."""
 
-ONE_THREAD: Final[Mapping[str, str]] = {
-    "OMP_NUM_THREADS": "1",
-    "OPENBLAS_NUM_THREADS": "1",
-    "MKL_NUM_THREADS": "1",
-}
-"""Environment of the timed processes: numerical libraries use one thread
-each, so their CPU time does not depend on idle cores."""
+_Manifest = TypeVar("_Manifest")
 
 
 class Settings(TypedDict):
@@ -220,20 +218,21 @@ def _processes(workers: int) -> str:
     return "in one process" if workers == 1 else f"with {workers} worker processes"
 
 
-def read_catalog(data: Path) -> tuple[tuple[Omm, ...], str]:
-    """The snapshot's element sets and the day it was retrieved (UTC, ISO)."""
-    manifest = snapshot.read_manifest(data)
-    return snapshot.read_catalog(data), snapshot.retrieval_day(manifest)
+class Snapshot(Protocol[_Manifest]):
+    """A snapshot tool, :mod:`screening_snapshot` or
+    :mod:`spacetrack_snapshot`: how the benchmark reads its frozen catalog."""
 
+    def read_manifest(self, data: Path) -> _Manifest:
+        """The manifest in ``data``."""
+        ...
 
-def read_spacetrack(data: Path) -> tuple[tuple[Omm, ...], str]:
-    """The frozen Space-Track catalog's element sets and the day it was
-    retrieved (UTC, ISO)."""
-    manifest = spacetrack_snapshot.read_manifest(data)
-    return (
-        spacetrack_snapshot.read_snapshot(data),
-        spacetrack_snapshot.retrieval_day(manifest),
-    )
+    def read_catalog(self, data: Path) -> tuple[Omm, ...]:
+        """The catalog in ``data``."""
+        ...
+
+    def retrieval_day(self, manifest: _Manifest) -> str:
+        """The day the catalog was retrieved, UTC, ISO 8601."""
+        ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -249,23 +248,51 @@ class Source:
         (``provider``, retrieved ...).
     data
         Its directory (the default of ``--data``).
-    read
-        Reads the directory: the element sets and the day they were
-        retrieved (UTC, ISO).
-    results
-        Its results file (the default of ``--results``).
-    start, end
-        The markers of its README block.
+    snapshot
+        The tool that froze it, which reads it.
     """
 
     name: str
     catalog: str
     provider: str
     data: Path
-    read: Callable[[Path], tuple[tuple[Omm, ...], str]]
-    results: Path
-    start: str
-    end: str
+    snapshot: Snapshot[Any]
+
+    def read(self, data: Path) -> tuple[tuple[Omm, ...], str]:
+        """The element sets in the directory ``data`` and the day they were
+        retrieved (UTC, ISO).
+
+        Raises
+        ------
+        ValueError
+            If its manifest is not one the snapshot tool writes.
+        """
+        manifest = self.snapshot.read_manifest(data)
+        return self.snapshot.read_catalog(data), self.snapshot.retrieval_day(manifest)
+
+    @property
+    def stem(self) -> str:
+        """The name of its results file and README block:
+        ``screening-benchmark``, and the source's name unless it is the
+        default."""
+        if self.name == DEFAULT_SOURCE:
+            return "screening-benchmark"
+        return f"screening-benchmark-{self.name}"
+
+    @property
+    def results(self) -> Path:
+        """Its results file (the default of ``--results``)."""
+        return REPO / "docs" / f"{self.stem}.json"
+
+    @property
+    def start(self) -> str:
+        """The start marker of its README block."""
+        return f"<!-- {self.stem}-summary:start -->"
+
+    @property
+    def end(self) -> str:
+        """The end marker of its README block."""
+        return f"<!-- {self.stem}-summary:end -->"
 
     @property
     def command(self) -> str:
@@ -284,20 +311,14 @@ SOURCES: Final[Mapping[str, Source]] = {
             catalog="public",
             provider="CelesTrak",
             data=snapshot.DATA,
-            read=read_catalog,
-            results=RESULTS,
-            start=START,
-            end=END,
+            snapshot=snapshot,
         ),
         Source(
             name="spacetrack",
             catalog="full",
             provider="Space-Track",
             data=spacetrack_snapshot.DATA,
-            read=read_spacetrack,
-            results=SPACETRACK_RESULTS,
-            start=SPACETRACK_START,
-            end=SPACETRACK_END,
+            snapshot=spacetrack_snapshot,
         ),
     )
 }
@@ -331,7 +352,8 @@ def benchmark(
     repeat: int,
     volumes: Mapping[str, ScreeningVolume | VolumeRule] = VOLUMES,
 ) -> tuple[list[Found], list[Measured]]:
-    """Screen with each volume ``repeat`` times; what each found, median times.
+    """Screen with each volume ``repeat`` times; what each found, median
+    times to the millisecond.
 
     Raises
     ------
@@ -352,36 +374,27 @@ def benchmark(
         timings.append(
             {
                 "volume": name,
-                "wall": statistics.median(timing.wall for _, timing in runs),
-                "cpu": statistics.median(timing.cpu for _, timing in runs),
+                "wall": round(statistics.median(timing.wall for _, timing in runs), 3),
+                "cpu": round(statistics.median(timing.cpu for _, timing in runs), 3),
             }
         )
     return data, timings
 
 
 def read_timings(path: Path) -> Timings | None:
-    """The timings of the results file at ``path``, if it exists."""
-    if not path.exists():
-        return None
-    summary: Summary = json.loads(path.read_text(encoding="utf-8"))
-    return summary["timings"]
-
-
-def positive(text: str) -> int:
-    """A command-line count: an integer of at least 1.
+    """The timings of the results file at ``path``, if it exists.
 
     Raises
     ------
-    argparse.ArgumentTypeError
-        If the integer in ``text`` is less than 1.
+    ValueError
+        If the file is not a results file this tool writes.
     """
-    value = int(text)
-    if value < 1:
-        raise argparse.ArgumentTypeError(f"must be at least 1, got {value}")
-    return value
+    if not path.exists():
+        return None
+    return read_json(path, Summary)["timings"]
 
 
-def _seconds(value: float) -> str:
+def _seconds_text(value: float) -> str:
     return f"{value:.1f} s"
 
 
@@ -401,8 +414,8 @@ def render_summary(summary: Summary) -> str:
                 numbers["screened"],
                 skipped or "-",
                 numbers["approaches"],
-                "-" if times is None else _seconds(times["wall"]),
-                "-" if times is None else _seconds(times["cpu"]),
+                "-" if times is None else _seconds_text(times["wall"]),
+                "-" if times is None else _seconds_text(times["cpu"]),
             )
         )
     if timings is None:
@@ -470,14 +483,7 @@ def benchmark_main(args: argparse.Namespace) -> int:
             "python": platform.python_version(),
             "runs": args.repeat,
             "date": datetime.datetime.now(datetime.UTC).date().isoformat(),
-            "volumes": [
-                {
-                    "volume": m["volume"],
-                    "wall": round(m["wall"], 3),
-                    "cpu": round(m["cpu"], 3),
-                }
-                for m in measured
-            ],
+            "volumes": measured,
         }
     summary: Summary = {
         "settings": {
@@ -493,12 +499,9 @@ def benchmark_main(args: argparse.Namespace) -> int:
         "timings": timings,
     }
     files = {
-        args.results: json.dumps(summary, indent=2) + "\n",
-        args.readme: replace_block(
-            args.readme.read_text(encoding="utf-8"),
-            source.start,
-            source.end,
-            render_summary(summary),
+        args.results: json_text(summary),
+        args.readme: readme_with(
+            args.readme, source.start, source.end, render_summary(summary)
         ),
     }
     return write_or_check(files, check=args.check, tool=source.command)
@@ -545,6 +548,8 @@ def run_timing(command: Sequence[str]) -> Run:
     ------
     TimingFailed
         If the process cannot start or fails.
+    ValueError
+        If it prints something other than a measurement.
     """
     try:
         done = subprocess.run(
@@ -559,7 +564,7 @@ def run_timing(command: Sequence[str]) -> Run:
     if done.returncode != 0:
         lines = done.stderr.strip().splitlines()[-5:]
         raise TimingFailed("\n".join(lines) or f"exit status {done.returncode}")
-    output: TimingOutput = json.loads(done.stdout)
+    output = parse_json(done.stdout, TimingOutput, f"the output of {command[0]}")
     return Run(wall=output["wall"], cpu=output["cpu"], approaches=output["approaches"])
 
 
@@ -701,7 +706,7 @@ def compare_main(args: argparse.Namespace) -> int:
     setting = (
         f"{len(args.primaries)} primaries x {len(reduced)} objects x "
         f"{_days(args.days)}, {SOCRATES_RADIUS / KM:g} km sphere, 1 process, "
-        f"{args.repeat} {'run' if args.repeat == 1 else 'runs'} per tree"
+        f"{plural(args.repeat, 'run')} per tree"
     )
     text, regression = render_comparison(comparison, setting, args.threshold)
     print(text)
@@ -739,7 +744,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--check", action="store_true", help="fail if out of date")
     parser.add_argument("--results", type=Path, help="default: the source's")
-    parser.add_argument("--readme", type=Path, default=REPO / "README.md")
+    parser.add_argument("--readme", type=Path, default=README)
     parser.add_argument("--workers", type=positive, default=WORKERS)
     parser.add_argument(
         "--repeat", type=positive, default=REPEAT, help="runs per volume (not --check)"

@@ -28,7 +28,11 @@ def summary() -> report.Summary:
         decision_config=report.DECISION,
     )
     return report.summarise(
-        result, catalog, snapshot.retrieval_day(manifest), report.shown(report.FLEET)
+        result,
+        catalog,
+        snapshot.retrieval_day(manifest),
+        report.shown(report.FLEET),
+        report.closest(result),
     )
 
 

@@ -22,15 +22,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final, TypeAlias
 
-from generated import replace_block, table, write_or_check
+from generated import README, REPO, positive, replace_block, table, write_or_check
 
 from keepout.pc.result import Method
 from keepout.sources.cara import CARA_COMMIT
 from keepout.validation.cases import load_all, load_monte_carlo_cases
 from keepout.validation.criteria import Criterion
 from keepout.validation.evaluation import Outcome, evaluate
-
-REPO: Final = Path(__file__).resolve().parents[1]
 
 PAPER: Final = Criterion(relative=1e-3)
 """Agreement with Alfano's published values (as in CARA's own tests)."""
@@ -469,10 +467,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--page", type=Path, default=None, help="the page; its results go next to it"
     )
-    parser.add_argument("--readme", type=Path, default=REPO / "README.md")
+    parser.add_argument("--readme", type=Path, default=README)
     parser.add_argument(
         "--workers",
-        type=int,
+        type=positive,
         default=None,
         help="processes to run the cases in (default: one per CPU, at most 4)",
     )

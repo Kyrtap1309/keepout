@@ -1,7 +1,22 @@
+import argparse
+import json
+import re
 from pathlib import Path
+from typing import Literal, TypedDict
 
 import pytest
-from generated import replace_block, write_or_check
+from generated import (
+    REPO,
+    json_text,
+    parse_json,
+    pc_text,
+    plural,
+    positive,
+    read_json,
+    readme_with,
+    replace_block,
+    write_or_check,
+)
 
 
 def test_replace_block_rewrites_only_the_marked_block() -> None:
@@ -43,3 +58,107 @@ def test_write_creates_stale_files_and_leaves_current_ones(
     assert stale.read_text(encoding="utf-8") == "fresh"
     assert same.stat().st_mtime_ns == before
     assert write_or_check(files, check=True, tool="tool.py") == 0
+
+
+@pytest.mark.parametrize(("text", "value"), [("1", 1), ("12", 12)])
+def test_a_positive_count_is_read(text: str, value: int) -> None:
+    assert positive(text) == value
+
+
+@pytest.mark.parametrize("text", ["0", "-3"])
+def test_a_count_below_one_is_refused(text: str) -> None:
+    with pytest.raises(argparse.ArgumentTypeError, match="must be at least 1"):
+        positive(text)
+
+
+def test_every_workers_option_takes_only_positive_counts() -> None:
+    for tool in sorted((REPO / "tools").glob("*.py")):
+        text = tool.read_text(encoding="utf-8")
+        if '"--workers"' in text and tool.name != "screening_timing.py":
+            assert re.search(r'"--workers",\s*type=positive', text), tool.name
+
+
+class Inner(TypedDict):
+    name: Literal["a", "b"]
+    sizes: list[float]
+
+
+class Outer(TypedDict):
+    count: int
+    flag: bool
+    inner: Inner | None
+    by_name: dict[str, Inner]
+
+
+GOOD: Outer = {
+    "count": 1,
+    "flag": True,
+    "inner": {"name": "a", "sizes": [1.5, 2]},
+    "by_name": {"x": {"name": "b", "sizes": []}},
+}
+
+
+@pytest.mark.parametrize("value", [GOOD, {**GOOD, "inner": None}])
+def test_json_of_the_shape_is_parsed(value: Outer) -> None:
+    assert parse_json(json_text(value), Outer, "text") == value
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        [],
+        {**GOOD, "count": 1.0},
+        {**GOOD, "flag": 1},
+        {**GOOD, "inner": {"name": "c", "sizes": []}},
+        {**GOOD, "inner": {"name": "a", "sizes": ["1"]}},
+        {**GOOD, "inner": {"name": "a"}},
+        {**GOOD, "by_name": {"x": None}},
+        {**GOOD, "extra": 0},
+        {key: value for key, value in GOOD.items() if key != "flag"},
+    ],
+)
+def test_json_of_another_shape_is_refused(value: object) -> None:
+    with pytest.raises(ValueError, match=r"^text is not a Outer: "):
+        parse_json(json_text(value), Outer, "text")
+
+
+def test_text_that_is_not_json_is_refused() -> None:
+    with pytest.raises(json.JSONDecodeError):
+        parse_json("{", Outer, "text")
+
+
+def test_read_json_gives_a_file_of_the_shape(tmp_path: Path) -> None:
+    path = tmp_path / "good.json"
+    path.write_text(json_text(GOOD), encoding="utf-8")
+    assert read_json(path, Outer) == GOOD
+
+
+def test_read_json_refuses_a_file_of_another_shape(tmp_path: Path) -> None:
+    path = tmp_path / "bad.json"
+    path.write_text(json_text({**GOOD, "count": "1"}), encoding="utf-8")
+    with pytest.raises(ValueError, match=r"bad\.json is not a Outer"):
+        read_json(path, Outer)
+
+
+def test_json_text_is_indented_with_a_final_newline() -> None:
+    assert json_text({"a": [1]}) == '{\n  "a": [\n    1\n  ]\n}\n'
+
+
+def test_readme_with_puts_the_block_in_the_file_text(tmp_path: Path) -> None:
+    readme = tmp_path / "README.md"
+    readme.write_text("intro\n<s>\nold\n<e>\n", encoding="utf-8")
+    assert readme_with(readme, "<s>", "<e>", "new") == "intro\n<s>\nnew\n<e>\n"
+
+
+@pytest.mark.parametrize(
+    ("count", "nouns", "text"),
+    [(1, None, "1 run"), (2, None, "2 runs"), (0, "minima", "0 minima")],
+)
+def test_plural_names_one_or_many(count: int, nouns: str | None, text: str) -> None:
+    noun = "minimum" if nouns else "run"
+    assert plural(count, noun, nouns) == text
+
+
+def test_pc_text_gives_three_digits_or_a_dash() -> None:
+    assert pc_text(1.234e-5) == "1.23e-05"
+    assert pc_text(None) == "-"

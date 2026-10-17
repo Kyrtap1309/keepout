@@ -7,6 +7,7 @@ from pathlib import Path
 
 import astropy.units as u
 import pytest
+import snapshot_files
 import spacetrack_snapshot as snapshot
 from celestrak_builders import SAMPLE
 from hypothesis import given
@@ -100,7 +101,7 @@ def test_download_sends_each_request_once_and_keeps_the_answers(
     raw: Path, server: FakeSpaceTrack
 ) -> None:
     assert [request.url for request in server.requests] == URLS
-    index = snapshot.read_index(raw)
+    index = snapshot.INDEX.read(raw)
     assert [saved.url for saved in index] == URLS
     assert [saved.method for saved in index] == ["POST", "GET", "GET", "GET"]
     assert [saved.file for saved in index] == [
@@ -142,7 +143,7 @@ def test_download_refuses_an_answer_from_the_cache(
     with pytest.raises(ValueError, match="answered from the cache"):
         download(again, server, tmp_path / "cache")
     assert len(server.requests) == 4
-    assert snapshot.read_index(again) == ()
+    assert snapshot.INDEX.read(again) == ()
 
 
 def test_download_stops_at_an_error_and_keeps_the_answers(tmp_path: Path) -> None:
@@ -151,7 +152,7 @@ def test_download_stops_at_an_error_and_keeps_the_answers(tmp_path: Path) -> Non
     with pytest.raises(HttpStatusError, match="HTTP 500"):
         download(raw, server, tmp_path / "cache")
     assert server.calls == ["login", CATALOG.url, "logout"]
-    index = snapshot.read_index(raw)
+    index = snapshot.INDEX.read(raw)
     assert [(saved.url, saved.status) for saved in index] == [
         (LOGIN_URL, 200),
         (CATALOG.url, 500),
@@ -171,7 +172,7 @@ def test_download_hides_the_credentials_and_sends_no_second_login(
     with pytest.raises(SourceUnavailable, match="was sent already"):
         download(raw, server, tmp_path / "cache")
     assert server.calls == ["login", CATALOG.url]
-    login, gp = snapshot.read_index(raw)
+    login, gp = snapshot.INDEX.read(raw)
     assert login.redacted is True
     saved = (raw / login.file).read_text()
     assert saved == '{"user": "<hidden>", "note": "<hidden>"}'
@@ -311,9 +312,9 @@ def test_a_changed_answer_is_refused(raw: Path) -> None:
 
 
 def test_an_unknown_raw_index_is_refused(tmp_path: Path) -> None:
-    (tmp_path / snapshot.RAW_INDEX).write_text('{"format": 2}', encoding="utf-8")
+    (tmp_path / snapshot_files.RAW_INDEX).write_text('{"format": 2}', encoding="utf-8")
     with pytest.raises(ValueError, match="format 1"):
-        snapshot.read_index(tmp_path)
+        snapshot.INDEX.read(tmp_path)
 
 
 def test_build_writes_the_data_then_checks_it(raw: Path, tmp_path: Path) -> None:
@@ -325,8 +326,8 @@ def test_build_writes_the_data_then_checks_it(raw: Path, tmp_path: Path) -> None
     assert load(data / snapshot.SNAPSHOT) == tuple(
         sorted([*SAMPLE, CROSSING], key=lambda omm: omm.catalog_number)
     )
-    manifest = json.loads((data / snapshot.MANIFEST).read_text(encoding="utf-8"))
-    assert manifest["download"] == snapshot.read_index(raw)[1].record()
+    manifest = json.loads((data / snapshot_files.MANIFEST).read_text(encoding="utf-8"))
+    assert manifest["download"] == snapshot.INDEX.read(raw)[1].record()
     assert manifest["catalog"] == {
         "rows": 10,
         "duplicates": 1,
@@ -362,7 +363,7 @@ def test_nothing_of_the_public_cdms_is_committed(raw: Path, tmp_path: Path) -> N
 def test_build_is_deterministic(raw: Path, tmp_path: Path) -> None:
     assert build(raw, tmp_path / "one") == 0
     assert build(raw, tmp_path / "two") == 0
-    for name in (snapshot.SNAPSHOT, snapshot.NOTICE, snapshot.MANIFEST):
+    for name in (snapshot.SNAPSHOT, snapshot.NOTICE, snapshot_files.MANIFEST):
         one = (tmp_path / "one" / name).read_bytes()
         assert one == (tmp_path / "two" / name).read_bytes()
     stored = (tmp_path / "one" / snapshot.SNAPSHOT).read_bytes()
@@ -403,7 +404,7 @@ def test_verify_finds_a_changed_file(raw: Path, tmp_path: Path) -> None:
 def test_build_refuses_a_catalog_csv_cannot_hold(
     raw: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(snapshot, "loads_csv", lambda text: ())
+    monkeypatch.setattr(snapshot_files, "loads_csv", lambda text: ())
     with pytest.raises(ValueError, match="does not read back"):
         build(raw, tmp_path / "data")
 
@@ -428,7 +429,8 @@ def test_compare_finds_keepouts_approach_of_each_pair(raw: Path) -> None:
     assert passing.cdm == cdms[0]
     assert passing.tca_difference == pytest.approx(-2.0, abs=1e-3)
     assert passing.miss_distance == pytest.approx(42195.4, abs=0.1)
-    assert apart == snapshot.Match(cdms[2], None, None)
+    assert apart == snapshot.Match(cdms[2], None)
+    assert (apart.tca_difference, apart.miss_distance) == (None, None)
     summary = snapshot.summarise(comparison)
     assert summary["cdms"] == 3
     assert (summary["compared"], summary["found"]) == (2, 1)
@@ -440,7 +442,11 @@ def test_compare_finds_keepouts_approach_of_each_pair(raw: Path) -> None:
 def test_compare_in_processes_gives_the_same(raw: Path) -> None:
     cdms = snapshot.replay_public_cdms(raw)
     omms = snapshot.replay_catalog(raw).omms
-    assert snapshot.compare(cdms, omms, workers=2) == snapshot.compare(cdms, omms)
+    one, two = snapshot.compare(cdms, omms), snapshot.compare(cdms, omms, workers=2)
+    assert [(m.cdm, m.tca_difference, m.miss_distance) for m in two.matches] == [
+        (m.cdm, m.tca_difference, m.miss_distance) for m in one.matches
+    ]
+    assert two.outside_catalog == one.outside_catalog
 
 
 def test_main_compare_prints_the_summary(

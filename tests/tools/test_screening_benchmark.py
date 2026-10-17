@@ -13,8 +13,10 @@ from typing import Any
 import pytest
 import screening_benchmark as benchmark
 import screening_snapshot as snapshot
+import snapshot_files
 import spacetrack_snapshot
 from astropy.time import Time
+from generated import README
 from screening_timing import Timing, timed
 
 from keepout.omm import Omm, load
@@ -22,6 +24,8 @@ from keepout.omm.celestrak import dumps_csv
 from keepout.screening import DEFAULT_VOLUME, ScreeningResult
 
 FIXTURE = load(snapshot.DATA / snapshot.FIXTURE)
+CELESTRAK = benchmark.SOURCES["celestrak"]
+SPACETRACK = benchmark.SOURCES["spacetrack"]
 PRIMARIES = ["63216", "58509", "44476"]
 """LEO objects of the test fixture with approaches in the week."""
 
@@ -31,7 +35,7 @@ def data_dir(tmp_path: Path) -> Path:
     data = tmp_path / "data"
     data.mkdir()
     shutil.copy(snapshot.DATA / snapshot.FIXTURE, data / snapshot.SNAPSHOT)
-    shutil.copy(snapshot.DATA / snapshot.MANIFEST, data / snapshot.MANIFEST)
+    shutil.copy(snapshot.DATA / snapshot_files.MANIFEST, data / snapshot_files.MANIFEST)
     return data
 
 
@@ -41,14 +45,15 @@ def spacetrack_data(tmp_path: Path) -> Path:
     data.mkdir()
     csv_text = dumps_csv(FIXTURE).encode("utf-8")
     (data / spacetrack_snapshot.SNAPSHOT).write_bytes(gzip.compress(csv_text))
-    manifest = {"download": {"retrieved": "2026-10-15T16:28:59.977Z"}}
-    (data / spacetrack_snapshot.MANIFEST).write_text(json.dumps(manifest))
+    manifest = spacetrack_snapshot.read_manifest(spacetrack_snapshot.DATA)
+    manifest["download"]["retrieved"] = "2026-10-15T16:28:59.977Z"
+    (data / snapshot_files.MANIFEST).write_text(json.dumps(manifest))
     return data
 
 
 def arguments(tmp_path: Path) -> list[str]:
     readme = tmp_path / "README.md"
-    readme.write_text(f"intro\n{benchmark.START}\n{benchmark.END}\n", encoding="utf-8")
+    readme.write_text(f"intro\n{CELESTRAK.start}\n{CELESTRAK.end}\n", encoding="utf-8")
     return [
         "--data",
         str(data_dir(tmp_path)),
@@ -78,7 +83,7 @@ def rewrite(tmp_path: Path, summary: benchmark.Summary) -> None:
     readme = tmp_path / "README.md"
     block = benchmark.render_summary(summary)
     readme.write_text(
-        f"intro\n{benchmark.START}\n{block}\n{benchmark.END}\n", encoding="utf-8"
+        f"intro\n{CELESTRAK.start}\n{block}\n{CELESTRAK.end}\n", encoding="utf-8"
     )
 
 
@@ -252,10 +257,9 @@ def test_main_benchmarks_the_spacetrack_catalog_in_its_own_block(
 
     monkeypatch.setattr(benchmark, "benchmark", fake)
     readme = tmp_path / "README.md"
-    public = f"{benchmark.START}\nthe public catalog's block\n{benchmark.END}"
+    public = f"{CELESTRAK.start}\nthe public catalog's block\n{CELESTRAK.end}"
     readme.write_text(
-        f"intro\n{public}\n{benchmark.SPACETRACK_START}\n{benchmark.SPACETRACK_END}\n",
-        encoding="utf-8",
+        f"intro\n{public}\n{SPACETRACK.start}\n{SPACETRACK.end}\n", encoding="utf-8"
     )
     results = tmp_path / "docs" / "screening-benchmark-spacetrack.json"
     args = [
@@ -302,15 +306,15 @@ def test_each_source_defaults_to_its_own_committed_files(name: str) -> None:
     source = benchmark.SOURCES[name]
     results = json.loads(source.results.read_text(encoding="utf-8"))
     assert results["settings"]["source"] == name
-    readme = (benchmark.REPO / "README.md").read_text(encoding="utf-8")
+    readme = README.read_text(encoding="utf-8")
     assert source.start in readme
     assert source.end in readme
 
 
-def test_read_spacetrack_gives_the_catalog_and_its_retrieval_day(
+def test_the_spacetrack_source_reads_the_catalog_and_its_retrieval_day(
     tmp_path: Path,
 ) -> None:
-    catalog, retrieved = benchmark.read_spacetrack(spacetrack_data(tmp_path))
+    catalog, retrieved = SPACETRACK.read(spacetrack_data(tmp_path))
     assert catalog == FIXTURE
     assert retrieved == "2026-10-15"
 
@@ -458,7 +462,13 @@ def compare_arguments(tmp_path: Path, base_python: str) -> list[str]:
 def fake_python(tmp_path: Path, cpu: float) -> str:
     """An executable printing one measurement whatever it is asked."""
     path = tmp_path / "fake-python"
-    measurement = {"wall": cpu, "cpu": cpu, "approaches": 1, "screened": 1}
+    measurement = {
+        "wall": cpu,
+        "cpu": cpu,
+        "approaches": 1,
+        "screened": 1,
+        "objects": 1,
+    }
     path.write_text(
         f"#!{sys.executable}\nprint({json.dumps(json.dumps(measurement))})\n"
     )

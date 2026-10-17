@@ -1,9 +1,8 @@
 """The committed Space-Track GP catalog: digests, and that every file follows
 from the catalog and the manifest."""
 
-import hashlib
-
 import pytest
+import snapshot_files
 import spacetrack_snapshot as snapshot
 
 from keepout.sources.spacetrack import CATALOG
@@ -24,12 +23,10 @@ def inputs() -> snapshot.Inputs:
 def test_files_match_the_manifest(manifest: snapshot.Manifest) -> None:
     assert set(manifest["files"]) == {snapshot.SNAPSHOT, snapshot.NOTICE}
     assert sorted(path.name for path in DATA.iterdir()) == sorted(
-        [snapshot.SNAPSHOT, snapshot.NOTICE, snapshot.MANIFEST]
+        [snapshot.SNAPSHOT, snapshot.NOTICE, snapshot_files.MANIFEST]
     )
-    for name, entry in manifest["files"].items():
-        stored = (DATA / name).read_bytes()
-        assert len(stored) == entry["bytes"], name
-        assert hashlib.sha256(stored).hexdigest() == entry["sha256"], name
+    stored = {name: (DATA / name).read_bytes() for name in manifest["files"]}
+    assert snapshot_files.file_digests(stored) == manifest["files"]
 
 
 def test_every_file_follows_from_the_data(inputs: snapshot.Inputs) -> None:

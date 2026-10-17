@@ -10,11 +10,9 @@ from builders import series
 
 from keepout.risk import (
     DAY,
-    Action,
     Assessment,
     DecisionConfig,
     PcObservation,
-    RiskLevel,
     Thresholds,
     TrendConfig,
 )
@@ -155,8 +153,3 @@ def test_plots_use_the_reports_settings(
     assert "within the decision point (5.00 d before TCA)" in (
         plotted[5490].decision.reasons
     )
-
-
-def test_the_report_names_actions_and_levels_as_keepout_does() -> None:
-    assert tuple(action.label for action in Action) == report.ACTIONS
-    assert (*(level.label for level in RiskLevel), "none") == report.LEVELS

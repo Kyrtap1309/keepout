@@ -20,7 +20,6 @@ whole catalog, in seconds instead of minutes.
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
@@ -28,25 +27,27 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Final, Literal, TypeAlias, TypedDict, get_args
 
-import astropy.units as u
 import screening_snapshot as snapshot
 from astropy.time import Time
-from generated import relative, replace_block, table, write_or_check
+from generated import (
+    README,
+    REPO,
+    json_text,
+    plural,
+    positive,
+    readme_with,
+    relative,
+    table,
+    write_or_check,
+)
 from screening_snapshot import SocratesSummary
 
 from keepout.omm import Omm
-from keepout.screening import (
-    DEFAULT_VOLUME,
-    CloseApproach,
-    ScreeningResult,
-    ScreeningVolume,
-    screen,
-)
+from keepout.screening import DEFAULT_VOLUME, CloseApproach, ScreeningResult, screen
 from keepout.screening.pipeline import DEFAULT_DURATION, MAX_AGE, MAX_LEAD
 from keepout.sources.socrates import SocratesApproach, read_socrates
 from keepout.units import DAY, KM, seconds_between
 
-REPO: Final = Path(__file__).resolve().parents[1]
 PAGE: Final = REPO / "docs/screening-socrates.md"
 START: Final = "<!-- screening-socrates-summary:start -->"
 END: Final = "<!-- screening-socrates-summary:end -->"
@@ -190,7 +191,7 @@ class Match:
         """TCA by keepout minus TCA by SOCRATES [s] (NaN if keepout has none)."""
         if self.keepout is None:
             return float("nan")
-        return float((self.keepout.tca - self.socrates.tca).to_value(u.s))
+        return seconds_between(self.socrates.tca, self.keepout.tca)
 
     @property
     def miss_distance_difference(self) -> float:
@@ -325,12 +326,9 @@ def _nearest_matches(
     for position, approach in enumerate(found):
         by_pair[_pair_of(approach)].append(position)
     found_at = [seconds_between(start, approach.tca) for approach in found]
+    socrates_at = [seconds_between(start, approach.tca) for approach in socrates]
     candidates = sorted(
-        (
-            abs(found_at[position] - seconds_between(start, approach.tca)),
-            index,
-            position,
-        )
+        (abs(found_at[position] - socrates_at[index]), index, position)
         for index, approach in enumerate(socrates)
         for position in by_pair[_pair_of(approach)]
     )
@@ -341,23 +339,6 @@ def _nearest_matches(
             chosen[index] = position
             taken.add(position)
     return chosen
-
-
-def closest(primary: Omm, secondary: Omm, tca: Time) -> CloseApproach | None:
-    """The approach keepout finds for a pair nearest ``tca``, within
-    :data:`MATCH_WINDOW` of it and :data:`LOOKUP_RADIUS` of the primary."""
-    result = screen(
-        [primary],
-        [secondary],
-        tca - MATCH_WINDOW * u.s,
-        2.0 * MATCH_WINDOW,
-        ScreeningVolume.sphere(LOOKUP_RADIUS),
-    )
-    return min(
-        result.approaches,
-        key=lambda a: abs(float((a.tca - tca).to_value(u.s))),
-        default=None,
-    )
 
 
 class Worst(TypedDict):
@@ -456,19 +437,19 @@ class Summary(TypedDict):
     not_compared: NotCompared
 
 
-def _seconds(value: float) -> float:
-    return round(value, 6)
+def _round_s(seconds: float) -> float:
+    return round(seconds, 6)
 
 
-def _metres(value: float) -> float:
-    return round(value, 5)
+def _round_m(metres: float) -> float:
+    return round(metres, 5)
 
 
 def _values(approach: CloseApproach, tca: Time) -> Values:
     return {
-        "tca_difference": _seconds(float((approach.tca - tca).to_value(u.s))),
-        "miss_distance": _metres(approach.miss_distance),
-        "relative_speed": _metres(approach.relative_speed),
+        "tca_difference": _round_s(seconds_between(tca, approach.tca)),
+        "miss_distance": _round_m(approach.miss_distance),
+        "relative_speed": _round_m(approach.relative_speed),
     }
 
 
@@ -481,11 +462,11 @@ def _group_summary(matches: Sequence[Match]) -> GroupSummary:
     worst: Worst | None = None
     if agree:
         worst = {
-            "tca": _seconds(max(abs(m.tca_difference) for m in agree)),
-            "miss_distance": _metres(
+            "tca": _round_s(max(abs(m.tca_difference) for m in agree)),
+            "miss_distance": _round_m(
                 max(abs(m.miss_distance_difference) for m in agree)
             ),
-            "relative_speed": _metres(
+            "relative_speed": _round_m(
                 max(abs(m.relative_speed_difference) for m in agree)
             ),
             "range_change": float(f"{max(m.range_change for m in agree):.3g}"),
@@ -499,7 +480,7 @@ def _nearest_other(
     """Seconds to the nearest other approach of ``of_pair``, the approaches of
     ``approach``'s pair."""
     gaps = [
-        abs(float((other.tca - approach.tca).to_value(u.s)))
+        abs(seconds_between(approach.tca, other.tca))
         for other in of_pair
         if other is not approach
     ]
@@ -515,8 +496,12 @@ def _list_differences(
         if match.agrees():
             continue
         a = match.socrates
-        keepout = match.keepout or closest(
-            by_number[a.primary], by_number[a.secondary], a.tca
+        keepout = match.keepout or snapshot.nearest_approach(
+            by_number[a.primary],
+            by_number[a.secondary],
+            a.tca,
+            window=MATCH_WINDOW,
+            radius=LOOKUP_RADIUS,
         )
         differences.append(
             {
@@ -543,8 +528,8 @@ def _list_keepout_only(comparison: Comparison) -> list[KeepoutOnly]:
             "primary": a.primary_number,
             "secondary": a.secondary_number,
             "tca": a.tca.iso,
-            "miss_distance": _metres(a.miss_distance),
-            "relative_speed": _metres(a.relative_speed),
+            "miss_distance": _round_m(a.miss_distance),
+            "relative_speed": _round_m(a.relative_speed),
             "nearest_other": _nearest_other(a, by_pair[_pair_of(a)]),
         }
         for a in comparison.keepout_only
@@ -658,10 +643,6 @@ def _speed(speed: float) -> str:
     return f"{speed:.3f} m/s"
 
 
-def _count(number: int, one: str, many: str) -> str:
-    return f"{number} {one if number == 1 else many}"
-
-
 def _pair(primary: int, secondary: int) -> str:
     return f"{primary} - {secondary}"
 
@@ -703,19 +684,19 @@ def render_summary(summary: Summary, page: str) -> str:
     unexplained = sum(d["cause"] is None for d in differences)
     notes = []
     if causes:
-        explained = _count(len(differences) - unexplained, "approach", "approaches")
+        explained = plural(len(differences) - unexplained, "approach", "approaches")
         notes.append(
             f"{explained} outside tolerance involve "
-            f"{_count(len(causes), 'object', 'objects')} whose element sets "
+            f"{plural(len(causes), 'object')} whose element sets "
             "evidently differ from SOCRATES's."
         )
     if unexplained:
         notes.append(
-            f"{_count(unexplained, 'approach differs', 'approaches differ')} "
+            f"{plural(unexplained, 'approach differs', 'approaches differ')} "
             "without a known cause."
         )
     if summary["keepout_only"]:
-        minima = _count(len(summary["keepout_only"]), "minimum", "minima")
+        minima = plural(len(summary["keepout_only"]), "minimum", "minima")
         notes.append(
             f"keepout also reports {minima} of these pairs that SOCRATES does not list."
         )
@@ -819,7 +800,7 @@ def _skipped(summary: Summary) -> list[str]:
     return [
         "",
         (
-            f"{_count(len(skipped), 'approach has', 'approaches have')} an object "
+            f"{plural(len(skipped), 'approach has', 'approaches have')} an object "
             "`screen` left out, with its defaults:"
         ),
         "",
@@ -995,9 +976,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--check", action="store_true", help="fail if out of date")
     parser.add_argument("--data", type=Path, default=snapshot.DATA)
     parser.add_argument("--page", type=Path, default=PAGE)
-    parser.add_argument("--readme", type=Path, default=REPO / "README.md")
+    parser.add_argument("--readme", type=Path, default=README)
     parser.add_argument(
-        "--workers", type=int, default=4, help="processes to screen with"
+        "--workers", type=positive, default=4, help="processes to screen with"
     )
     args = parser.parse_args(argv)
 
@@ -1006,14 +987,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     comparison = compare(inputs.approaches, inputs.catalog, start, workers=args.workers)
     known = known_differences(inputs.approaches)
     summary = summarise(comparison, inputs, start, known)
+    page = relative(args.page, args.readme.parent)
     files = {
-        args.page.with_suffix(".json"): json.dumps(summary, indent=2) + "\n",
+        args.page.with_suffix(".json"): json_text(summary),
         args.page: render_page(summary, known),
-        args.readme: replace_block(
-            args.readme.read_text(encoding="utf-8"),
-            START,
-            END,
-            render_summary(summary, relative(args.page, args.readme.parent)),
+        args.readme: readme_with(
+            args.readme, START, END, render_summary(summary, page)
         ),
     }
     status = write_or_check(files, check=args.check, tool=TOOL)
