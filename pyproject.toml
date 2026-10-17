@@ -214,7 +214,7 @@ layers = [
     "keepout.frames",
     "keepout.state",
     "keepout._workers",
-    "keepout._types | keepout.units | keepout.errors",
+    "keepout._types | keepout._methods | keepout.units | keepout.errors",
 ]
 
 [[tool.importlinter.contracts]]

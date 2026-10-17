@@ -133,7 +133,7 @@ def test_validate_reports_the_interval_of_monte_carlo_results(
     use(monkeypatch, PASSING)
 
     def evaluate(cases: list[ValidationCase], *, workers: int) -> list[Outcome]:
-        result = PcResult(1e-3, "montecarlo", (), {"ci_low": 5e-4, "ci_high": 2e-3})
+        result = PcResult(1e-3, "montecarlo", interval=(5e-4, 2e-3))
         return [Outcome(cases[0], result)]
 
     monkeypatch.setattr(evaluation, "evaluate", evaluate)

@@ -1,15 +1,20 @@
-"""Shared by the CDM readers and writers: file encoding and parse errors."""
+"""Shared by the CDM readers and writers: the family, files, values and
+parse errors."""
 
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import NamedTuple
+from typing import Final
 
 from keepout.ccsds import files
+from keepout.ccsds.message import COMMENT, Family, Located
 from keepout.cdm.keywords import SectionKind
-from keepout.cdm.model import Cdm, DuplicateKeyword, Field, Section
-from keepout.errors import CdmParseError
+from keepout.cdm.model import Cdm, Field, Section, parse_field
+from keepout.errors import CdmParseError, CdmWriteError
+
+CDM: Final = Family("CDM", CdmParseError, CdmWriteError, keyword_width=30)
+"""The CDM message family."""
 
 
 def load_file(path: str | Path, loads: Callable[[str], Cdm]) -> Cdm:
@@ -20,7 +25,7 @@ def load_file(path: str | Path, loads: Callable[[str], Cdm]) -> Cdm:
     CdmParseError
         If the file is broken gzip data or not UTF-8 text.
     """
-    return files.load_file(path, loads, CdmParseError)
+    return files.load_file(path, loads, CDM)
 
 
 def dump_file(cdm: Cdm, path: str | Path, dumps: Callable[[Cdm], str]) -> None:
@@ -28,36 +33,40 @@ def dump_file(cdm: Cdm, path: str | Path, dumps: Callable[[Cdm], str]) -> None:
     Path(path).write_text(dumps(cdm), encoding="utf-8")
 
 
-class Location(NamedTuple):
-    """Where something is in a message: a KVN line or an XML element path."""
-
-    line: int | None = None
-    path: str | None = None
-
-
-def build_section(
-    kind: SectionKind,
-    fields: Sequence[Field],
-    locations: Sequence[Location],
-    at: Location | None = None,
-) -> Section:
-    """The section of ``fields``, read at ``locations`` (one per field).
+def field_of(kind: SectionKind, keyword: str, value: Located) -> Field:
+    """The field of a section of ``kind`` that ``keyword``'s ``value`` gives.
 
     Raises
     ------
     CdmParseError
-        Where the section repeats a keyword, or at ``at`` if it is otherwise
-        invalid (no location if ``at`` is ``None``).
+        At ``value``, if it is not a valid value of ``keyword``.
+    """
+    if keyword == COMMENT:
+        return Field(COMMENT, value.text)
+    try:
+        return parse_field(kind, keyword, value.text, value.unit)
+    except ValueError as exc:
+        raise CdmParseError(
+            str(exc), line=value.line, path=value.path, keyword=keyword
+        ) from exc
+
+
+def build_section(
+    kind: SectionKind, fields: Sequence[Field], at: Located | None = None
+) -> Section:
+    """The section of ``fields``; their keywords are already known not to
+    repeat (:class:`~keepout.ccsds.message.KeywordValues`).
+
+    Raises
+    ------
+    CdmParseError
+        At ``at`` if the section is invalid (no location if ``at`` is
+        ``None``).
     """
     try:
         return Section(kind, tuple(fields))
-    except DuplicateKeyword as exc:
-        where = locations[exc.index]
-        raise CdmParseError(
-            "duplicate keyword", line=where.line, path=where.path, keyword=exc.keyword
-        ) from exc
     except ValueError as exc:
-        where = at or Location()
+        where = at or Located("")
         raise CdmParseError(str(exc), line=where.line, path=where.path) from exc
 
 

@@ -28,13 +28,16 @@ objects, a repeated `MESSAGE_ID`, TCAs further apart or different
 `CONJUNCTION_ID` values. `group_events` sorts a pile of CDMs into events.
 
 `event.observations()` computes keepout's own Pc for every CDM with
-`compute_pc` (`"auto"` by default; another method by name, or a function for
-a method with options) and keeps the originator's `COLLISION_PROBABILITY`
+`compute_pc` (`"auto"` by default; `compute=computation("elrod")` for
+another method, `computation("montecarlo", samples=100_000, seed=1)` for a
+method with options) and keeps the originator's `COLLISION_PROBABILITY`
 next to it in `reported_pc`. Each result becomes a `PcObservation`: the time
 from the CDM's creation to TCA, the Pc, what kind of value it is, and the
 diagnostics. A CDM whose Pc cannot be computed (an unusable covariance, no
 convergence) gives an observation with the error instead of stopping the
-others. A missing hard-body radius is the one exception: it is reported
+others. An observation's `source` names the method that gave the value,
+e.g. `keepout (foster)` when `"auto"` chose Foster; a failed one names the
+method asked for, e.g. `keepout (auto)`. A missing hard-body radius is the one exception: it is reported
 before anything is computed, since every CDM would fail the same way.
 
 Observations can also come from elsewhere. ESA's Kelvins data
@@ -116,5 +119,5 @@ orbit; set it with `DecisionConfig(decision_point=...)` (seconds).
 - The trend extrapolates nothing except the rising-green check; forecasting
   the Pc at TCA is out of scope until v1.x.
 - Each CDM is computed independently with `compute_pc`: in `"auto"` mode a
-  slow encounter can take up to a minute per CDM; `method="foster"` takes
-  milliseconds.
+  slow encounter can take up to a minute per CDM; `computation("foster")`
+  takes milliseconds.

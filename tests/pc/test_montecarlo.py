@@ -19,7 +19,13 @@ from faults import (
 
 from keepout.conjunction import Conjunction
 from keepout.errors import CovarianceError, PcConvergenceError
-from keepout.pc import foster, hall3d, montecarlo
+from keepout.pc import PcResult, foster, hall3d, montecarlo
+
+
+def interval(result: PcResult) -> tuple[float, float]:
+    """The result's confidence interval, which Monte Carlo always gives."""
+    assert result.interval is not None
+    return result.interval
 
 
 def test_fast_encounter_agrees_with_2d_pc() -> None:
@@ -27,9 +33,12 @@ def test_fast_encounter_agrees_with_2d_pc() -> None:
     result = montecarlo(conjunction, samples=20_000, seed=1)
     assert result.method == "montecarlo"
     expected = foster(conjunction.plane, 5.0).value
-    assert result.details["ci_low"] <= expected <= result.details["ci_high"]
+    assert interval(result)[0] <= expected <= interval(result)[1]
     assert result.details["samples"] == 20_000
     assert result.value == result.details["hits"] / 20_000
+    # The interval is a field; details keep the numbers shown with it.
+    assert result.details["confidence"] == 0.99
+    assert {"ci_low", "ci_high"}.isdisjoint(result.details)
 
 
 def test_slow_uncertain_drift_agrees_with_3d_not_2d_pc() -> None:
@@ -38,7 +47,7 @@ def test_slow_uncertain_drift_agrees_with_3d_not_2d_pc() -> None:
     # brackets Hall's Nc and excludes Foster's straight-line Pc.
     conjunction = drifting(velocity_sigma=0.5)
     result = montecarlo(conjunction, window=DRIFT_WINDOW, samples=20_000, seed=1)
-    low, high = result.details["ci_low"], result.details["ci_high"]
+    low, high = interval(result)
     assert low <= hall3d(conjunction, window=DRIFT_WINDOW).value <= high
     assert foster(conjunction.plane, 5.0).value < low
 
@@ -59,7 +68,7 @@ def test_each_seed_s_interval_holds_the_exact_pc(seed: int) -> None:
     conjunction = head_on(8.0, 10.0, 20.0, 5.0)
     result = montecarlo(conjunction, samples=5_000, seed=seed)
     expected = foster(conjunction.plane, 5.0).value
-    assert result.details["ci_low"] <= expected <= result.details["ci_high"]
+    assert interval(result)[0] <= expected <= interval(result)[1]
 
 
 def test_stops_when_the_interval_is_narrow_enough(
@@ -69,11 +78,12 @@ def test_stops_when_the_interval_is_narrow_enough(
     monte_carlo_batches(monkeypatch, 2_000)
     conjunction = head_on(8.0, 10.0, 20.0, 5.0)
     result = montecarlo(conjunction, rtol=0.2, max_samples=100_000, seed=5)
-    half = 0.5 * (result.details["ci_high"] - result.details["ci_low"])
+    low, high = interval(result)
+    half = 0.5 * (high - low)
     assert half <= 0.2 * result.value
     assert 2_000 < result.details["samples"] < 100_000
     expected = foster(conjunction.plane, 5.0).value
-    assert result.details["ci_low"] <= expected <= result.details["ci_high"]
+    assert interval(result)[0] <= expected <= interval(result)[1]
     assert result.diagnostics == ()
 
 
@@ -82,7 +92,8 @@ def test_budget_exhausted_is_reported() -> None:
     result = montecarlo(far, max_samples=2_000, seed=1)
     assert result.value == 0.0
     assert result.details["samples"] == 2_000
-    assert result.details["ci_high"] > 0.0
+    low, high = interval(result)
+    assert low == 0.0 < high
     assert result.diagnostics[0].startswith("Monte Carlo stopped at 2000 trials")
 
 
@@ -127,6 +138,7 @@ def test_no_encounter_in_the_window_runs_no_trial() -> None:
     result = montecarlo(TYPICAL_HEAD_ON, window=(100.0, 101.0))
     assert result.value == 0.0
     assert result.details["samples"] == 0.0
+    assert result.interval == (0.0, 0.0)
     (note,) = result.diagnostics
     assert note.startswith(
         "no encounter: collision rate negligible over the whole window"

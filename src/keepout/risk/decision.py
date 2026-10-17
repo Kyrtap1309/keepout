@@ -45,7 +45,7 @@ class Action(OrderedEnum):
     @property
     def label(self) -> str:
         """The action in words, as keepout prints it: ``prepare manoeuvre``."""
-        return self.name.lower().replace("_", " ")
+        return self.key.replace("_", " ")
 
 
 @dataclass(frozen=True, slots=True)

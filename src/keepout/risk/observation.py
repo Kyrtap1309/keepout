@@ -7,9 +7,10 @@ from dataclasses import dataclass
 from typing import Final, Literal, TypeAlias, get_args
 
 from keepout._types import require_probability
-from keepout.pc.result import Method, PcResult
+from keepout.pc.api import PcComputation
+from keepout.pc.result import PcResult
 
-__all__ = ["PC_FLOOR", "PC_KINDS", "UPPER_BOUND_METHODS", "PcKind", "PcObservation"]
+__all__ = ["PC_FLOOR", "PC_KINDS", "PcKind", "PcObservation"]
 
 PcKind: TypeAlias = Literal["estimate", "upper_bound", "below_floor"]
 """What a Pc value means: an ``"estimate"`` of the probability; an
@@ -19,11 +20,6 @@ most the value given (ESA's Kelvins data floors log10 Pc at -30)."""
 
 PC_KINDS: Final[tuple[PcKind, ...]] = get_args(PcKind)
 """Every :data:`PcKind`."""
-
-UPPER_BOUND_METHODS: Final[frozenset[Method]] = frozenset(
-    {"frisbee", "dilution", "alfano"}
-)
-"""Pc methods whose value is an upper bound, not an estimate."""
 
 PC_FLOOR: Final = 1e-30
 """Smallest Pc on a logarithmic scale; smaller values (and 0) are drawn and
@@ -134,8 +130,11 @@ class PcObservation:
     ) -> PcObservation:
         """The observation of a keepout result.
 
-        A maximum-Pc method gives an ``"upper_bound"``; Monte Carlo keeps the
-        upper end of its confidence interval in ``ci_high``.
+        The result's :attr:`~keepout.pc.PcResult.kind` is kept (a maximum-Pc
+        method gives an ``"upper_bound"``), and so is the upper end of its
+        confidence interval (Monte Carlo) in ``ci_high``. The source is
+        :attr:`~keepout.pc.PcComputation.label` of the method that gave the
+        value.
 
         Parameters
         ----------
@@ -150,15 +149,12 @@ class PcObservation:
         assumed_covariance
             Whether the message gives an object's covariance as assumed.
         """
-        ci_high = (
-            result.details.get("ci_high") if result.method == "montecarlo" else None
-        )
         return cls(
             time_to_tca=time_to_tca,
-            source=f"keepout ({result.method})",
+            source=PcComputation(result.method).label,
             pc=result.value,
-            kind="upper_bound" if result.method in UPPER_BOUND_METHODS else "estimate",
-            ci_high=ci_high,
+            kind=result.kind,
+            ci_high=None if result.interval is None else result.interval[1],
             message_id=message_id,
             reported_pc=reported_pc,
             diagnostics=result.diagnostics,

@@ -13,7 +13,7 @@ from screening_data import FIXTURE_START, fixture_by_number, load_fixture
 
 from keepout.cdm import kvn, make_message_id, xml
 from keepout.errors import FleetError
-from keepout.pc import compute_pc
+from keepout.pc import computation, compute_pc
 from keepout.risk import Action, DecisionConfig, RiskLevel, Thresholds
 from keepout.screening import ScreeningVolume
 from keepout.synthetic import (
@@ -196,7 +196,7 @@ def test_the_options_reach_the_cdms_and_the_assessment() -> None:
         model=model,
         created=created,
         originator="TEST OPERATOR",
-        method="elrod",
+        compute=computation("elrod"),
         thresholds=Thresholds(green_below=1e-16, red_from=1e-14),
         decision_config=DecisionConfig(decision_point=2 * DAY),
     )

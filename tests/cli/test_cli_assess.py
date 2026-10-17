@@ -9,10 +9,10 @@ from cli_builders import DAYS, FIXTURE_CSV, FLEET_TOML, START, keepout
 from inline_snapshot import snapshot
 
 from keepout.cdm import kvn, xml
-from keepout.cli.assess import PcMethod, method_choice
+from keepout.cli.assess import AUTO_METHOD, PcMethod, method_choice
 from keepout.cli.output import ExitCode
 from keepout.omm import load
-from keepout.pc import Method
+from keepout.pc import METHODS, Method
 from keepout.synthetic import read_fleet
 from keepout.synthetic.operator import run
 
@@ -160,9 +160,11 @@ def test_assess_refuses_a_wrong_command_line(
 
 
 def test_the_method_option_offers_every_pc_method() -> None:
-    # PcMethod repeats keepout.pc's names for Typer, which needs an enum.
-    assert {m.value for m in PcMethod} == {"auto", *get_args(Method)}
+    # PcMethod is built from keepout.pc's names for Typer, which needs an enum.
+    assert [m.value for m in PcMethod] == ["auto", *get_args(Method)]
+    assert set(get_args(Method)) == set(METHODS)
     assert [method_choice(m.value) for m in PcMethod] == list(PcMethod)
+    assert AUTO_METHOD is PcMethod("auto")
 
 
 def test_a_name_that_is_no_pc_method_is_refused() -> None:

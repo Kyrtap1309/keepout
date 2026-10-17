@@ -98,18 +98,19 @@ def test_an_estimate_from_a_keepout_result() -> None:
     assert seen.result is result
 
 
-@pytest.mark.parametrize("method", ["frisbee", "dilution", "alfano"])
-def test_a_maximum_pc_is_an_upper_bound(method: Any) -> None:
-    seen = PcObservation.from_result(PcResult(1e-3, method), time_to_tca=DAY)
-    assert seen.kind == "upper_bound"
+def test_a_maximum_pc_is_an_upper_bound() -> None:
+    # The result says what its value is; the observation keeps it.
+    bound = PcResult(1e-3, "frisbee", kind="upper_bound")
+    seen = PcObservation.from_result(bound, time_to_tca=DAY)
+    assert (seen.kind, seen.source) == ("upper_bound", "keepout (frisbee)")
 
 
 def test_monte_carlo_keeps_the_upper_end_of_its_interval() -> None:
-    result = PcResult(2e-4, "montecarlo", details={"ci_low": 1e-4, "ci_high": 3e-4})
+    result = PcResult(2e-4, "montecarlo", interval=(1e-4, 3e-4))
     seen = PcObservation.from_result(result, time_to_tca=DAY)
     assert (seen.kind, seen.ci_high) == ("estimate", 3e-4)
 
 
-def test_only_monte_carlo_has_an_interval() -> None:
+def test_a_result_without_an_interval_has_no_upper_end() -> None:
     result = PcResult(2e-4, "hall3d", details={"nc": 2e-4})
     assert PcObservation.from_result(result, time_to_tca=DAY).ci_high is None

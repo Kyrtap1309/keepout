@@ -3,18 +3,16 @@
 from __future__ import annotations
 
 import dataclasses
+import inspect
 from collections.abc import Callable, Mapping
-from typing import (
-    Concatenate,
-    Final,
-    Literal,
-    NamedTuple,
-    TypeAlias,
-    overload,
-)
+from dataclasses import dataclass, field
+from types import MappingProxyType
+from typing import Final, Literal, NamedTuple, Self, TypeAlias, overload
 
 import numpy as np
 
+from keepout._methods import MethodChoice
+from keepout._types import override
 from keepout.conjunction import Conjunction
 from keepout.encounter import Role
 from keepout.errors import GeometryError, PcConvergenceError
@@ -25,6 +23,8 @@ from keepout.pc._duration import (
     encounter_duration,
     long_encounter,
 )
+from keepout.pc._plane import MissingCovariance
+from keepout.pc._rate import UnusableOrbit
 from keepout.pc.elrod import elrod
 from keepout.pc.foster import foster
 from keepout.pc.hall3d import Encounters, hall3d, integrate
@@ -33,19 +33,22 @@ from keepout.pc.montecarlo import montecarlo, sample
 from keepout.pc.result import Method, PcResult
 
 __all__ = [
+    "AUTO",
     "AUTO_MC_SAMPLES",
     "AUTO_MC_SEED",
     "DURATION_LIMIT",
+    "METHODS",
     "SIGMA_EXTENT",
     "TCA_OFFSET_LIMIT",
     "MethodChoice",
+    "MethodKind",
+    "MethodSpec",
+    "PcComputation",
     "applicability",
+    "computation",
     "compute_pc",
     "encounter_duration",
 ]
-
-MethodChoice: TypeAlias = Literal["auto"] | Method
-"""Methods :func:`compute_pc` accepts; ``"auto"`` picks one."""
 
 TCA_OFFSET_LIMIT: Final = 0.01
 """Largest relative-position component along the relative velocity, as a
@@ -120,44 +123,120 @@ def _assess(conjunction: Conjunction) -> _Assessment:
     return _Assessment(notes, details)
 
 
-_Runner: TypeAlias = Callable[Concatenate[Conjunction, ...], PcResult]
-"""A method run on a conjunction, with the method's keyword options."""
+MethodKind: TypeAlias = Literal["2d", "3d", "montecarlo", "maxpc"]
+"""A family of Pc methods: 2-D on the encounter plane, 3-D, Monte Carlo, or
+maximum Pc (upper bounds on the encounter plane)."""
 
 
-def _on_plane(method: Callable[..., PcResult]) -> _Runner:
-    """Adapt a 2-D method ``f(plane, radius, **options)`` to a conjunction."""
+@dataclass(frozen=True, eq=False, slots=True)
+class MethodSpec:
+    """What a Pc method is and how :func:`compute_pc` runs it.
 
-    def run(conjunction: Conjunction, /, **options: object) -> PcResult:
-        return method(conjunction.plane, conjunction.hard_body_radius, **options)
+    Parameters
+    ----------
+    function
+        The method's function: ``f(plane, hard_body_radius, **options)`` for
+        a 2-D or maximum-Pc method, ``f(conjunction, **options)`` for a 3-D
+        or Monte Carlo one.
+    kind
+        The method's family.
 
-    return run
-
-
-def _on_conjunction(method: Callable[..., PcResult]) -> _Runner:
-    """A 3-D method ``f(conjunction, **options)`` as a runner.
-
-    The runners take untyped options: :func:`compute_pc`'s overloads type
-    them for each method, and the method rejects one it does not take.
+    Attributes
+    ----------
+    options
+        The keyword-only parameters of ``function``: the options
+        :func:`compute_pc` passes on.
     """
-    return method
+
+    function: Callable[..., PcResult]
+    kind: MethodKind
+    options: frozenset[str] = field(init=False)
+
+    def __post_init__(self) -> None:
+        parameters = inspect.signature(self.function).parameters.values()
+        options = frozenset(
+            p.name for p in parameters if p.kind is inspect.Parameter.KEYWORD_ONLY
+        )
+        object.__setattr__(self, "options", options)
+
+    @property
+    def on_plane(self) -> bool:
+        """Whether the method works on the encounter plane (2-D, maximum Pc)."""
+        return self.kind in ("2d", "maxpc")
+
+    @property
+    def uses_velocity(self) -> bool:
+        """Whether the method uses the velocity uncertainty (3-D, Monte Carlo)."""
+        return not self.on_plane
+
+    def run(self, conjunction: Conjunction, options: Mapping[str, object]) -> PcResult:
+        """The method's result on a conjunction, with options it takes."""
+        if self.on_plane:
+            return self.function(
+                conjunction.plane, conjunction.hard_body_radius, **options
+            )
+        return self.function(conjunction, **options)
 
 
-_METHODS: Final[Mapping[Method, _Runner]] = {
-    "foster": _on_plane(foster),
-    "elrod": _on_plane(elrod),
-    "frisbee": _on_plane(frisbee),
-    "dilution": _on_plane(dilution),
-    "alfano": _on_plane(alfano),
-    "hall3d": _on_conjunction(hall3d),
-    "montecarlo": _on_conjunction(montecarlo),
-}
+METHODS: Final[Mapping[Method, MethodSpec]] = MappingProxyType(
+    {
+        "foster": MethodSpec(foster, "2d"),
+        "elrod": MethodSpec(elrod, "2d"),
+        "frisbee": MethodSpec(frisbee, "maxpc"),
+        "dilution": MethodSpec(dilution, "maxpc"),
+        "alfano": MethodSpec(alfano, "maxpc"),
+        "hall3d": MethodSpec(hall3d, "3d"),
+        "montecarlo": MethodSpec(montecarlo, "montecarlo"),
+    }
+)
+"""Every Pc method by name: the one table of what each is and takes."""
 
 
-_VELOCITY_METHODS: Final[frozenset[Method]] = frozenset({"hall3d", "montecarlo"})
-"""The methods that use the velocity uncertainty (the 3-D ones)."""
+def _spec(method: str) -> MethodSpec:
+    """The :class:`MethodSpec` of a method name.
+
+    Raises
+    ------
+    ValueError
+        If ``method`` names no method (nor does ``"auto"``: it is a choice).
+    """
+    spec = next((s for name, s in METHODS.items() if name == method), None)
+    if spec is None:
+        raise ValueError(
+            f"unknown Pc method {method!r}; expected 'auto' or one of {tuple(METHODS)}"
+        )
+    return spec
+
+
+def _require_options(method: MethodChoice, options: Mapping[str, object]) -> None:
+    """Raise unless ``method`` is known and takes every option in ``options``.
+
+    Raises
+    ------
+    ValueError
+        If ``method`` is unknown, or options are given with ``"auto"``.
+    TypeError
+        If the method does not take an option.
+    """
+    if method == "auto":
+        if options:
+            raise ValueError(f"options {sorted(options)} need an explicit method")
+        return
+    spec = _spec(method)
+    refused = sorted(options.keys() - spec.options)
+    if refused:
+        takes = ", ".join(sorted(spec.options)) or "none"
+        raise TypeError(f"{method} takes no option {refused}; it takes: {takes}")
+
 
 _Choice: TypeAlias = tuple[PcResult, tuple[str, ...], dict[str, float]]
 """A method's result, applicability notes and extra details."""
+
+_NO_PLANE: Final = (
+    "no Pc method applies: the relative velocity is zero (no encounter plane)"
+)
+"""Start of ``"auto"``'s error when the 3-D methods, the only ones left at
+zero relative velocity, cannot run."""
 
 
 def _bound(conjunction: Conjunction) -> bool:
@@ -168,11 +247,30 @@ def _bound(conjunction: Conjunction) -> bool:
 
 
 def _auto(conjunction: Conjunction) -> _Choice:
-    """Pick and run a method; return its result, applicability notes and details."""
+    """Pick and run a method; return its result, applicability notes and details.
+
+    Raises
+    ------
+    GeometryError
+        If the relative velocity is zero and the 3-D methods cannot run.
+    """
     if conjunction.relative_speed == 0.0:
-        _require_three_d(conjunction)
+        try:
+            encounters = Encounters.scan(conjunction, None)
+        except MissingCovariance as error:
+            labels = [conjunction.label(role) for role in error.roles]
+            whose = "covariances of" if len(labels) == 2 else "covariance of"
+            verb = "are" if len(labels) == 2 else "is"
+            raise GeometryError(
+                f"{_NO_PLANE} and the {whose} {' and '.join(labels)} {verb} unknown"
+            ) from error
+        except UnusableOrbit as error:
+            raise GeometryError(
+                f"{_NO_PLANE} and the 3-D methods cannot use the orbit of "
+                f"{conjunction.label(error.role)}: {error}"
+            ) from error
         notes: tuple[str, ...] = ("relative velocity is zero: 2-D Pc is undefined",)
-        return _three_d(conjunction, notes, {})
+        return _three_d(conjunction, encounters, notes, {})
     unknown = conjunction.unknown_covariance
     notes, details = _assess(conjunction)
     if len(unknown) == 2:
@@ -193,7 +291,8 @@ def _auto(conjunction: Conjunction) -> _Choice:
             details,
         )
     two_d = foster(conjunction.plane, conjunction.hard_body_radius).value
-    return _three_d(conjunction, notes, {**details, "pc_2d": two_d})
+    encounters = Encounters.scan(conjunction, None)
+    return _three_d(conjunction, encounters, notes, {**details, "pc_2d": two_d})
 
 
 def _known_only_in_position(conjunction: Conjunction, roles: tuple[Role, ...]) -> str:
@@ -209,7 +308,7 @@ def _velocity_notes(conjunction: Conjunction, method: Method) -> tuple[str, ...]
     has none: whichever way the method was chosen, it takes that velocity as
     exact."""
     position_only = conjunction.position_only_covariance
-    if method not in _VELOCITY_METHODS or not position_only:
+    if not METHODS[method].uses_velocity or not position_only:
         return ()
     return (
         (
@@ -219,36 +318,13 @@ def _velocity_notes(conjunction: Conjunction, method: Method) -> tuple[str, ...]
     )
 
 
-def _require_three_d(conjunction: Conjunction) -> None:
-    """Raise unless a 3-D method applies at zero relative velocity.
-
-    Without an encounter plane only the 3-D methods remain, and they need
-    both covariances and elliptic orbits.
-
-    Raises
-    ------
-    GeometryError
-        If a covariance is unknown or an orbit is not elliptic.
-    """
-    reason = "no Pc method applies: the relative velocity is zero (no encounter plane)"
-    unknown = [conjunction.label(role) for role in conjunction.unknown_covariance]
-    if len(unknown) == 2:
-        raise GeometryError(
-            f"{reason} and the covariances of {' and '.join(unknown)} are unknown"
-        )
-    if unknown:
-        raise GeometryError(f"{reason} and the covariance of {unknown[0]} is unknown")
-    if not _bound(conjunction):
-        raise GeometryError(f"{reason} and an orbit is not elliptic")
-
-
 def _three_d(
     conjunction: Conjunction,
+    encounters: Encounters,
     notes: tuple[str, ...],
     details: dict[str, float],
 ) -> _Choice:
-    """Hall's 3D-Nc, or Monte Carlo over the same encounter scan if it fails."""
-    encounters = Encounters.scan(conjunction, "hall3d", None)
+    """Hall's 3D-Nc over an encounter scan, or Monte Carlo over it if Hall fails."""
     try:
         return integrate(conjunction, encounters), notes, details
     except PcConvergenceError as error:
@@ -260,6 +336,24 @@ def _three_d(
             conjunction, encounters, max_samples=AUTO_MC_SAMPLES, seed=AUTO_MC_SEED
         )
         return result, (*notes, fallback), details
+
+
+def _compute(
+    conjunction: Conjunction, method: MethodChoice, options: Mapping[str, object]
+) -> PcResult:
+    """:func:`compute_pc` with its options as a mapping."""
+    _require_options(method, options)
+    if method == "auto":
+        result, notes, details = _auto(conjunction)
+    else:
+        notes, details = _assess(conjunction)
+        result = METHODS[method].run(conjunction, options)
+    notes += _velocity_notes(conjunction, result.method)
+    return dataclasses.replace(
+        result,
+        diagnostics=conjunction.diagnostics + notes + result.diagnostics,
+        details={**result.details, **details},
+    )
 
 
 @overload
@@ -385,22 +479,83 @@ def compute_pc(
         screen ruled it negligible, or the rate cannot be computed on the scan
         grid), since the Monte Carlo fallback shares that scan.
     """
-    if method == "auto":
-        if options:
-            raise ValueError(f"options {sorted(options)} need an explicit method")
-        result, notes, details = _auto(conjunction)
-    else:
-        run = _METHODS.get(method)
-        if run is None:
-            raise ValueError(
-                f"unknown Pc method {method!r}; expected 'auto' or one of "
-                f"{tuple(_METHODS)}"
-            )
-        notes, details = _assess(conjunction)
-        result = run(conjunction, **options)
-    notes += _velocity_notes(conjunction, result.method)
-    return dataclasses.replace(
-        result,
-        diagnostics=conjunction.diagnostics + notes + result.diagnostics,
-        details={**result.details, **details},
-    )
+    return _compute(conjunction, method, options)
+
+
+@dataclass(frozen=True, eq=False, slots=True)
+class PcComputation:
+    """A Pc method with its options, to run on conjunctions; see
+    :func:`computation`.
+
+    Calling it on a conjunction is :func:`compute_pc` with this method and
+    these options.
+
+    Parameters
+    ----------
+    method
+        A method name, or ``"auto"``.
+    options
+        The method's options, as :func:`compute_pc` takes them; stored as a
+        read-only copy.
+
+    Raises
+    ------
+    ValueError
+        If ``method`` is unknown, or options are given with ``"auto"``.
+    TypeError
+        If the method does not take an option.
+    """
+
+    method: MethodChoice = "auto"
+    options: Mapping[str, object] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        _require_options(self.method, self.options)
+        object.__setattr__(self, "options", MappingProxyType(dict(self.options)))
+
+    @override
+    def __reduce__(self) -> tuple[type[Self], tuple[object, ...]]:
+        # A mapping proxy does not pickle: pickle the plain mapping.
+        return type(self), (self.method, dict(self.options))
+
+    @property
+    def label(self) -> str:
+        """Who computes the Pc: ``"keepout (<method>)"``.
+
+        A risk observation's source: keepout's results are labelled by the
+        method that gave the value (``"keepout (foster)"`` when ``"auto"``
+        picked Foster), and failures by the method asked for (``"keepout
+        (auto)"``).
+        """
+        return f"keepout ({self.method})"
+
+    def __call__(self, conjunction: Conjunction) -> PcResult:
+        """The Pc of ``conjunction`` (see :func:`compute_pc`)."""
+        return _compute(conjunction, self.method, self.options)
+
+
+AUTO: Final = PcComputation()
+"""``"auto"`` without options: :func:`compute_pc`'s default."""
+
+
+def computation(method: MethodChoice = "auto", **options: object) -> PcComputation:
+    """A Pc method with its options, to run on many conjunctions.
+
+    E.g. ``computation("montecarlo", samples=100_000, seed=1)``; the options
+    are checked here, not on the first conjunction.
+
+    Parameters
+    ----------
+    method
+        A method name, or ``"auto"`` (default); see :func:`compute_pc`.
+    **options
+        The method's options (see :func:`compute_pc`).
+
+    Raises
+    ------
+    ValueError
+        If ``method`` is unknown, or options are given with ``"auto"``.
+    TypeError
+        If the method does not take an option.
+    """
+    return PcComputation(method, options)

@@ -68,7 +68,6 @@ from __future__ import annotations
 
 import contextlib
 import email.message
-import gzip
 import http.client
 import http.cookiejar
 import json
@@ -110,11 +109,10 @@ from keepout.omm.model import Omm
 from keepout.sources.cache import (
     DOWNLOAD_TIMEOUT,
     cache_dir,
+    cached_fetch,
     gunzip,
     http_request,
     network_errors,
-    read_copy,
-    save_copy,
     store_json,
 )
 from keepout.sources.catalog import Catalog, CatalogPart, Retrieval
@@ -638,37 +636,36 @@ class SpaceTrackClient:
             keepout wrote.
         """
         interval = query.interval
-        if max_age is None:
-            max_age = interval
-        if not max_age >= interval:
-            raise ValueError(
-                f"max_age must be at least {interval:g} s (Space-Track allows "
-                f"one {query.request_class} query per {interval:g} s), got {max_age}"
-            )
         url = query.url
-        target = self._root / query.request_class / f"{query.name}.json.gz"
-        now = self._now()
-        cached = read_copy(target, url)
-        if cached is not None and 0.0 <= now - cached.meta.retrieved < max_age:
-            data = gunzip(cached.data)
-            if data is not None:
-                with contextlib.suppress(SourceFormatError):
-                    return read(data), Retrieval.of(target, cached.meta)
-        self._check_interval(query, self._read_ledger(), now)
-        self._check_running()
-        if not self._logged_in:
-            self._login()
+
+        def send() -> bytes:
             now = self._now()
-        # Another process may have queried while this one logged in: check
-        # the record again, and keep what it holds.
-        ledger = self._read_ledger()
-        self._check_interval(query, ledger, now)
-        self._write_ledger({**ledger, query.request_class: now})
-        data = self._query(url)
-        value = read(data)
-        # Kept compressed: the full catalog is 36 MB of JSON, 5 MB gzipped.
-        stored = gzip.compress(data, compresslevel=6, mtime=0)
-        return value, Retrieval.of(target, save_copy(target, url, stored, now))
+            self._check_interval(query, self._read_ledger(), now)
+            self._check_running()
+            if not self._logged_in:
+                self._login()
+                now = self._now()
+            # Another process may have queried while this one logged in:
+            # check the record again, and keep what it holds.
+            ledger = self._read_ledger()
+            self._check_interval(query, ledger, now)
+            self._write_ledger({**ledger, query.request_class: now})
+            return self._query(url)
+
+        target = self._root / query.request_class / f"{query.name}.json.gz"
+        value, meta = cached_fetch(
+            target,
+            url,
+            read,
+            send,
+            max_age=interval if max_age is None else max_age,
+            interval=interval,
+            reason=f"Space-Track allows one {query.request_class} query per "
+            f"{interval:g} s",
+            now=self._now,
+            compressed=True,
+        )
+        return value, Retrieval.of(target, meta)
 
     def fetch_catalog(self, *, max_age: float | None = None) -> Catalog:
         """The full GP catalog (:data:`CATALOG`), from the cache or Space-Track.

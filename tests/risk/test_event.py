@@ -6,8 +6,9 @@ from builders import CDM_DATA
 from risk_builders import b1_cdm
 
 import keepout.cdm
-from keepout import Conjunction, EventError, PcConvergenceError, compute_pc
+from keepout import EventError, PcConvergenceError, compute_pc
 from keepout.cdm import Cdm
+from keepout.pc import MethodChoice, api, computation
 from keepout.risk import DAY, Action, assess
 from keepout.risk.event import ConjunctionEvent, group_events, time_to_tca
 
@@ -119,7 +120,7 @@ def test_an_assumed_covariance_is_flagged_on_its_observation_and_event() -> None
 
 def test_a_named_method_is_used() -> None:
     (seen,) = ConjunctionEvent("E", (b1_cdm(),)).observations(
-        method="elrod", hard_body_radius=HBR
+        compute=computation("elrod"), hard_body_radius=HBR
     )
     assert seen.source == "keepout (elrod)"
     assert seen.result is not None
@@ -127,45 +128,53 @@ def test_a_named_method_is_used() -> None:
 
 
 def test_a_computation_with_options_is_used() -> None:
-    def montecarlo(conjunction: Conjunction) -> keepout.PcResult:
-        return compute_pc(conjunction, "montecarlo", samples=2_000, seed=1)
-
     (seen,) = ConjunctionEvent("E", (b1_cdm(),)).observations(
-        method=montecarlo, hard_body_radius=HBR
+        compute=computation("montecarlo", samples=2_000, seed=1),
+        hard_body_radius=HBR,
     )
     assert seen.source == "keepout (montecarlo)"
     assert seen.ci_high is not None
 
 
-def test_a_failed_cdm_is_kept_with_its_error() -> None:
-    def stuck(conjunction: Conjunction) -> keepout.PcResult:
+@pytest.mark.parametrize(
+    ("method", "source"), [("auto", "keepout (auto)"), ("hall3d", "keepout (hall3d)")]
+)
+def test_a_failed_cdm_is_kept_with_its_error(
+    monkeypatch: pytest.MonkeyPatch, method: MethodChoice, source: str
+) -> None:
+    # A failure is labelled by the method asked for, since none gave a value.
+    def stuck(*_: object) -> keepout.PcResult:
         raise PcConvergenceError("rate not computable")
 
+    monkeypatch.setattr(api, "_compute", stuck)
     (seen,) = ConjunctionEvent("E", (b1_cdm(),)).observations(
-        method=stuck, hard_body_radius=HBR
+        compute=computation(method), hard_body_radius=HBR
     )
     assert not seen.ok
     assert seen.error == "PcConvergenceError: rate not computable"
     assert (seen.source, seen.message_id, seen.reported_pc) == (
-        "keepout",
+        source,
         "B1-1",
         4.835e-05,
     )
 
 
-def test_a_missing_hbr_is_reported_before_any_computation() -> None:
-    def refuse(conjunction: Conjunction) -> keepout.PcResult:
+def test_a_missing_hbr_is_reported_before_any_computation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def refuse(*_: object) -> keepout.PcResult:
         raise AssertionError("computed")
 
+    monkeypatch.setattr(api, "_compute", refuse)
     event = ConjunctionEvent("E", (b1_cdm("A"), b1_cdm("B")))
     with pytest.raises(ValueError, match="no HBR for both objects in A, B"):
-        event.observations(method=refuse)
+        event.observations()
 
 
 def test_a_cdm_without_hbr_is_named() -> None:
     message = keepout.cdm.load(CDM_DATA / "tracss_v2.kvn")
     with pytest.raises(ValueError, match="TRACSS-TEST-0001"):
-        ConjunctionEvent("E", (message,)).observations(method="foster")
+        ConjunctionEvent("E", (message,)).observations(compute=computation("foster"))
 
 
 def test_hbr_from_the_cdms() -> None:
@@ -177,7 +186,9 @@ def test_hbr_from_the_cdms() -> None:
             secondary, f"{secondary}HBR                            = 1.00 [m]\n"
         )
     )
-    (seen,) = ConjunctionEvent("E", (message,)).observations(method="foster")
+    (seen,) = ConjunctionEvent("E", (message,)).observations(
+        compute=computation("foster")
+    )
     conjunction = message.conjunction()
     assert conjunction.hard_body_radius == 6.0
     assert seen.pc == compute_pc(conjunction, "foster").value

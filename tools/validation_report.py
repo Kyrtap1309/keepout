@@ -20,10 +20,19 @@ from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final, TypeAlias
+from typing import Any, Final, TypeAlias, TypedDict
 
-from generated import README, REPO, positive, replace_block, table, write_or_check
+from generated import (
+    README,
+    REPO,
+    parse_json,
+    positive,
+    replace_block,
+    table,
+    write_or_check,
+)
 
+from keepout.pc import METHODS
 from keepout.pc.result import Method
 from keepout.sources.cara import CARA_COMMIT
 from keepout.validation.cases import load_all, load_monte_carlo_cases
@@ -121,6 +130,75 @@ MONTE_CARLO: Final = Report(
 )
 
 
+class CriterionJson(TypedDict):
+    """A :class:`~keepout.validation.criteria.Criterion` as JSON."""
+
+    relative: float | None
+    absolute: float | None
+    small: float
+    interval: bool
+
+
+class RowJson(TypedDict):
+    """A :class:`Row` as JSON: its fields, with lists for the pairs."""
+
+    suite: str
+    case_id: str
+    hard_body_radius: float
+    reference: float
+    criterion: CriterionJson
+    method: Method
+    value: float
+    error: float
+    relative: bool
+    passed: bool
+    paper: float | None
+    interval: list[float] | None
+    informative: list[str | float] | None
+    ci: list[float] | None
+    samples: int | None
+
+
+class RecordJson(TypedDict):
+    """A :class:`Record` as JSON."""
+
+    cara_commit: str
+    rows: list[RowJson]
+
+
+def _pair(values: list[float] | None) -> tuple[float, float] | None:
+    """A JSON pair of numbers as a tuple.
+
+    Raises
+    ------
+    ValueError
+        If ``values`` is not two numbers.
+    """
+    if values is None:
+        return None
+    if len(values) != 2:
+        raise ValueError(f"expected a pair of numbers, got {values}")
+    return values[0], values[1]
+
+
+def _labelled(values: list[str | float] | None) -> tuple[str, float] | None:
+    """A JSON ``[label, value]`` as a tuple.
+
+    Raises
+    ------
+    ValueError
+        If ``values`` is not a string and a number.
+    """
+    if values is None:
+        return None
+    if len(values) != 2:
+        raise ValueError(f"expected [label, value], got {values}")
+    label, value = values
+    if not isinstance(label, str) or isinstance(value, str):
+        raise ValueError(f"expected [label, value], got {values}")
+    return label, value
+
+
 @dataclass(frozen=True, slots=True)
 class Row:
     """One method on one case as published: CARA's data and keepout's result.
@@ -179,14 +257,31 @@ class Row:
         )
 
     @classmethod
-    def from_json(cls, data: Mapping[str, Any]) -> Row:
-        """The row :meth:`to_json` gave."""
-        fields: dict[str, Any] = dict(data)
-        fields["criterion"] = Criterion(**data["criterion"])
-        for pair in ("interval", "informative", "ci"):
-            if fields[pair] is not None:
-                fields[pair] = tuple(fields[pair])
-        return cls(**fields)
+    def from_json(cls, data: RowJson) -> Row:
+        """The row :meth:`to_json` gave (checked by :func:`generated.parse_json`).
+
+        Raises
+        ------
+        ValueError
+            If a pair is not two numbers, or the criterion is invalid.
+        """
+        return cls(
+            suite=data["suite"],
+            case_id=data["case_id"],
+            hard_body_radius=data["hard_body_radius"],
+            reference=data["reference"],
+            criterion=Criterion(**data["criterion"]),
+            method=data["method"],
+            value=data["value"],
+            error=data["error"],
+            relative=data["relative"],
+            passed=data["passed"],
+            paper=data["paper"],
+            interval=_pair(data["interval"]),
+            informative=_labelled(data["informative"]),
+            ci=_pair(data["ci"]),
+            samples=data["samples"],
+        )
 
     def to_json(self) -> dict[str, Any]:
         """The row as JSON values."""
@@ -225,9 +320,15 @@ class Record:
         return cls(CARA_COMMIT, tuple(Row.of(o) for o in outcomes))
 
     @classmethod
-    def loads(cls, text: str) -> Record:
-        """The record :meth:`dumps` gave."""
-        data = json.loads(text)
+    def loads(cls, text: str, source: str = "validation results") -> Record:
+        """The record :meth:`dumps` gave.
+
+        Raises
+        ------
+        ValueError
+            If ``text`` is not such a record; the message names ``source``.
+        """
+        data = parse_json(text, RecordJson, source)
         return cls(data["cara_commit"], tuple(Row.from_json(r) for r in data["rows"]))
 
     def dumps(self) -> str:
@@ -310,7 +411,7 @@ class _Columns:
 
 
 def _method_columns(method: Method) -> _Columns:
-    monte_carlo = method == "montecarlo"
+    monte_carlo = METHODS[method].kind == "montecarlo"
     titles: tuple[str, ...] = (METHOD_TITLES[method], "error")
     if monte_carlo:
         titles += ("keepout interval", "trials")
@@ -434,7 +535,7 @@ def published(fresh: Record, data: Path) -> tuple[Record, list[str]]:
     """
     if not data.exists():
         return fresh, [f"{data} is missing"]
-    previous = Record.loads(data.read_text(encoding="utf-8"))
+    previous = Record.loads(data.read_text(encoding="utf-8"), str(data))
     differences = fresh.differences(previous)
     return (fresh if differences else previous), differences
 

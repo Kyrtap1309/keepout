@@ -1,17 +1,19 @@
-"""Shared by the OMM readers: files, and keyword values into an :class:`Omm`."""
+"""Shared by the OMM readers: the family, files, and keyword values into an
+:class:`Omm`."""
 
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, NamedTuple, TypeVar
+from typing import Any, Final, NamedTuple, TypeVar
 
 from astropy.time import Time
 
 from keepout.ccsds import files
 from keepout.ccsds.keywords import format_epoch, parse_value
-from keepout.errors import OmmParseError
+from keepout.ccsds.message import Family, Located
+from keepout.errors import OmmParseError, OmmWriteError
 from keepout.omm.keywords import (
     ATTRIBUTES,
     FIXED_METADATA,
@@ -26,25 +28,10 @@ _KEYWORD_OF: dict[str, str] = {attribute: key for key, attribute in ATTRIBUTES.i
 _T = TypeVar("_T")
 
 
-class Text(NamedTuple):
-    """A keyword's value as written in a message, with its unit and place.
-
-    Parameters
-    ----------
-    text
-        The value, without its unit.
-    unit
-        The unit given with the value (KVN ``[unit]``, XML ``units``), if any.
-    line
-        Line of the value in a text format.
-    path
-        Element path of the value in an XML message.
-    """
-
-    text: str
-    unit: str | None = None
-    line: int | None = None
-    path: str | None = None
+OMM: Final = Family(
+    "OMM", OmmParseError, OmmWriteError, keyword_width=len("MEAN_ELEMENT_THEORY")
+)
+"""The OMM message family."""
 
 
 def load_file(path: str | Path, loads: Callable[[str], _T]) -> _T:
@@ -55,7 +42,7 @@ def load_file(path: str | Path, loads: Callable[[str], _T]) -> _T:
     OmmParseError
         If the file is broken gzip data or not UTF-8 text.
     """
-    return files.load_file(path, loads, OmmParseError)
+    return files.load_file(path, loads, OMM)
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,8 +56,8 @@ class _Errors:
 
     def __call__(self, message: str, keyword: str) -> OmmParseError:
         place = self.values.get(keyword)
-        if not isinstance(place, Text):
-            place = Text("")
+        if not isinstance(place, Located):
+            place = Located("")
         return OmmParseError(
             message,
             record=self.record,
@@ -96,8 +83,9 @@ def parse_record(
     Parameters
     ----------
     values
-        Value of each keyword: its text, or a :class:`Text` with its unit and
-        place. Surrounding blanks are ignored.
+        Value of each keyword: its text, or a
+        :class:`~keepout.ccsds.message.Located` with its unit and place.
+        Surrounding blanks are ignored.
     record
         Position of the object in its file, for error messages.
     line
@@ -119,12 +107,12 @@ def parse_record(
     """
     error = _Errors(values, record, line, path)
 
-    def text_of(keyword: str) -> Text:
+    def text_of(keyword: str) -> Located:
         match values[keyword]:
-            case Text() as value:
+            case Located() as value:
                 return value._replace(text=value.text.strip())
             case str() as value:
-                return Text(value.strip())
+                return Located(value.strip())
             case value:
                 raise error(f"must be text, got {value!r}", keyword)
 

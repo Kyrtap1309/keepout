@@ -1,13 +1,24 @@
 import dataclasses
+import importlib
 from pathlib import Path
+from typing import get_args
 
 import astropy.units as u
+import pytest
 from astropy.time import Time
 from celestrak_builders import SAMPLE
 
 from keepout.omm import Omm
+from keepout.sources import celestrak, spacetrack
 from keepout.sources.cache import CopyMeta, read_copy, save_copy
-from keepout.sources.catalog import Catalog, CatalogPart, Retrieval
+from keepout.sources.catalog import (
+    CATALOG_SOURCES,
+    DEFAULT_SOURCE,
+    Catalog,
+    CatalogPart,
+    CatalogSourceName,
+    Retrieval,
+)
 
 NOW = 1_791_000_000.0
 URL = "https://example.org/gp"
@@ -51,3 +62,33 @@ def test_a_saved_copy_reads_back_with_its_metadata(tmp_path: Path) -> None:
     assert cached is not None
     assert cached.data == b"[]"
     assert cached.meta == meta
+
+
+def test_the_catalog_sources_are_named_by_their_keys() -> None:
+    assert tuple(CATALOG_SOURCES) == get_args(CatalogSourceName)
+    assert all(name == source.name for name, source in CATALOG_SOURCES.items())
+    assert DEFAULT_SOURCE in CATALOG_SOURCES
+
+
+def test_a_catalog_is_reused_as_long_as_its_source_allows() -> None:
+    assert CATALOG_SOURCES["celestrak"].reuse == celestrak.TTL
+    assert CATALOG_SOURCES["spacetrack"].reuse == spacetrack.CLASS_INTERVALS["gp"]
+
+
+@pytest.mark.parametrize("name", get_args(CatalogSourceName))
+def test_a_catalog_source_fetches_with_its_module(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, name: CatalogSourceName
+) -> None:
+    source = CATALOG_SOURCES[name]
+    fetched = Catalog((), (), ())
+    asked: list[object] = []
+
+    def fetch_catalog(*, cache: Path | None) -> Catalog:
+        asked.append(cache)
+        return fetched
+
+    monkeypatch.setattr(
+        importlib.import_module(source.module), "fetch_catalog", fetch_catalog
+    )
+    assert source.fetch(tmp_path) is fetched
+    assert asked == [tmp_path]

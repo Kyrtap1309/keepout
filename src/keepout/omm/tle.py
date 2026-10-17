@@ -30,8 +30,9 @@ from typing import Final, NamedTuple
 from sgp4.alpha5 import from_alpha5
 from sgp4.io import compute_checksum
 
+from keepout.ccsds.message import Located
 from keepout.errors import OmmParseError
-from keepout.omm._io import Text, load_file, parse_record
+from keepout.omm._io import load_file, parse_record
 from keepout.omm.keywords import DEFAULTS
 from keepout.omm.model import Omm
 
@@ -227,7 +228,7 @@ def loads(text: str) -> tuple[Omm, ...]:
         if not title.startswith("1 "):
             name = title.removeprefix("0 ").strip()
             index += 1
-        values: dict[str, Text] = {"OBJECT_NAME": Text(name, line=number)}
+        values: dict[str, Located] = {"OBJECT_NAME": Located(name, line=number)}
         first = _fields(lines, index, "1", record)
         second = _fields(lines, index + 1, "2", record)
         if first.number != second.number:
@@ -248,7 +249,7 @@ class _Line(NamedTuple):
     """One TLE line read: its catalog number field and its OMM values."""
 
     number: str
-    values: dict[str, Text]
+    values: dict[str, Located]
 
 
 def _fields(lines: list[tuple[int, str]], index: int, digit: str, record: int) -> _Line:
@@ -279,10 +280,10 @@ def _fields(lines: list[tuple[int, str]], index: int, digit: str, record: int) -
             record=record,
             line=number,
         )
-    values: dict[str, Text] = {}
+    values: dict[str, Located] = {}
     for keyword, convert in _FIELDS[digit].items():
         try:
-            values[keyword] = Text(convert(match[keyword]), line=number)
+            values[keyword] = Located(convert(match[keyword]), line=number)
         except ValueError as exc:
             raise OmmParseError(
                 str(exc), record=record, line=number, keyword=keyword

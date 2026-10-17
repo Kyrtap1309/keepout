@@ -1,5 +1,6 @@
 import inspect
 import math
+import pickle
 import re
 import typing
 from collections.abc import Callable
@@ -31,8 +32,10 @@ from keepout.errors import CovarianceError, GeometryError, PcConvergenceError
 from keepout.objects import ObjectState
 from keepout.orbits import orbital_period
 from keepout.pc import (
+    METHODS,
     PcResult,
     alfano,
+    computation,
     compute_pc,
     dilution,
     elrod,
@@ -86,7 +89,9 @@ def test_a_looser_tolerance_reaches_foster() -> None:
 
 
 def test_option_of_another_method_is_rejected() -> None:
-    with pytest.raises(TypeError, match="order"):
+    with pytest.raises(
+        TypeError, match=r"^foster takes no option \['order'\]; it takes: rtol$"
+    ):
         compute_pc(TYPICAL_HEAD_ON, "foster", order=16)  # type: ignore[call-overload]
 
 
@@ -119,6 +124,64 @@ def test_overloads_follow_the_methods_options() -> None:
         name: _keyword_only(function) for name, function in functions.items()
     }
     assert set(typing.get_args(Method)) == set(functions)
+    # The registry holds the same functions and reads their options from them.
+    assert {name: spec.function for name, spec in METHODS.items()} == functions
+    assert {name: set(spec.options) for name, spec in METHODS.items()} == {
+        name: set(_keyword_only(function)) for name, function in functions.items()
+    }
+
+
+def test_the_registry_says_what_each_method_is() -> None:
+    kinds = {name: spec.kind for name, spec in METHODS.items()}
+    assert kinds == {
+        "foster": "2d",
+        "elrod": "2d",
+        "frisbee": "maxpc",
+        "dilution": "maxpc",
+        "alfano": "maxpc",
+        "hall3d": "3d",
+        "montecarlo": "montecarlo",
+    }
+    velocity = {name for name, spec in METHODS.items() if spec.uses_velocity}
+    assert velocity == {"hall3d", "montecarlo"}
+
+
+@pytest.mark.parametrize("method", ["frisbee", "dilution", "alfano"])
+def test_a_maximum_pc_is_an_upper_bound(method: Method) -> None:
+    conjunction = secondary_unknown() if method == "frisbee" else TYPICAL_HEAD_ON
+    assert compute_pc(conjunction, method).kind == "upper_bound"
+    assert compute_pc(TYPICAL_HEAD_ON).kind == "estimate"
+
+
+def test_a_computation_is_compute_pc_with_its_method_and_options() -> None:
+    run = computation("elrod", order=16)
+    assert (run.method, dict(run.options), run.label) == (
+        "elrod",
+        {"order": 16},
+        "keepout (elrod)",
+    )
+    assert (
+        run(TYPICAL_HEAD_ON).value
+        == compute_pc(TYPICAL_HEAD_ON, "elrod", order=16).value
+    )
+    assert computation().label == "keepout (auto)"
+    assert pickle.loads(pickle.dumps(run)).options == {"order": 16}
+
+
+@pytest.mark.parametrize(
+    ("method", "options", "error", "message"),
+    [
+        ("foster", {"order": 16}, TypeError, r"foster takes no option \['order'\]"),
+        ("alfano", {"rtol": 1e-6}, TypeError, "it takes: none$"),
+        ("auto", {"rtol": 1e-6}, ValueError, "need an explicit method"),
+        ("coppola", {}, ValueError, "unknown Pc method 'coppola'"),
+    ],
+)
+def test_a_computation_checks_its_options_at_once(
+    method: str, options: dict[str, object], error: type[Exception], message: str
+) -> None:
+    with pytest.raises(error, match=message):
+        computation(method, **options)  # type: ignore[arg-type]
 
 
 def test_unknown_method_is_rejected_naming_every_method() -> None:
@@ -442,10 +505,8 @@ def _scan_spy(monkeypatch: pytest.MonkeyPatch) -> list[Encounters]:
     scans: list[Encounters] = []
     real = Encounters.scan
 
-    def spy(
-        conjunction: Conjunction, method: Method, window: tuple[float, float] | None
-    ) -> Encounters:
-        scans.append(real(conjunction, method, window))
+    def spy(conjunction: Conjunction, window: tuple[float, float] | None) -> Encounters:
+        scans.append(real(conjunction, window))
         return scans[-1]
 
     monkeypatch.setattr(Encounters, "scan", spy)
@@ -552,8 +613,14 @@ def test_auto_refuses_zero_relative_velocity_with_an_unknown_covariance(
 
 
 def test_auto_refuses_zero_relative_velocity_with_an_unbound_orbit() -> None:
+    # The scan's error names the object; no method is named, as none ran.
     with pytest.raises(
-        GeometryError, match=r"relative velocity is zero .* not elliptic"
+        GeometryError,
+        match=(
+            r"^no Pc method applies: the relative velocity is zero \(no encounter "
+            r"plane\) and the 3-D methods cannot use the orbit of primary \(PRI\): "
+            r".* the state is unbound$"
+        ),
     ):
         compute_pc(side_by_side(1.5 * LEO_V))
 

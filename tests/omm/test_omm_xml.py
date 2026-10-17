@@ -165,6 +165,30 @@ def test_an_empty_ndm_holds_no_omms() -> None:
             ),
         ),
         (
+            iss_xml(
+                "</tleParameters>",
+                "</tleParameters><userDefinedParameters>"
+                "<USER_DEFINED>1</USER_DEFINED></userDefinedParameters>",
+            ),
+            (
+                r"USER_DEFINED has no parameter attribute \(record 1, at ndm/omm"
+                r"\[1\]/body/segment/data/userDefinedParameters/USER_DEFINED\)"
+            ),
+        ),
+        (
+            iss_xml(
+                "</tleParameters>",
+                "</tleParameters><userDefinedParameters>"
+                '<USER_DEFINED parameter="A">1</USER_DEFINED>'
+                '<USER_DEFINED parameter="A">2</USER_DEFINED>'
+                "</userDefinedParameters>",
+            ),
+            (
+                r"duplicate keyword \(record 1, at .*/USER_DEFINED, "
+                r"keyword USER_DEFINED_A\)"
+            ),
+        ),
+        (
             iss_xml('units="deg"', 'units="rad"'),
             (
                 r"unit \[rad\] does not match expected \[deg\] \(record 1, "

@@ -10,13 +10,14 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
-from typing import Final, NamedTuple
+from typing import Final, NamedTuple, Self
 
 import numpy as np
 from scipy import special
 
-from keepout._types import BoolArray, FloatArray, IndexArray, from_eigen
+from keepout._types import BoolArray, FloatArray, IndexArray, from_eigen, override
 from keepout.conjunction import Conjunction
+from keepout.encounter import Role
 from keepout.errors import GeometryError, PcConvergenceError
 from keepout.pc._orbit import OrbitUncertainty
 from keepout.pc._plane import SIGMA_FLOOR, SQRT_2, SQRT_2PI, require_known_covariance
@@ -29,7 +30,6 @@ from keepout.pc._timeline import (
     regions,
     straight_line_half_window,
 )
-from keepout.pc.result import Method
 
 OVERLAP_TOLERANCE: Final = 1e-6
 """Convergence of the peak-overlap iteration: squared Mahalanobis step of
@@ -488,20 +488,65 @@ def reach(largest_variance: float, radius: float) -> float:
     return math.sqrt(NEGLIGIBLE_DISTANCE * largest_variance) + radius
 
 
-def collision_rate(conjunction: Conjunction, method: Method) -> CollisionRate:
-    """The 3D-Nc collision rate of a conjunction with both covariances known.
+class UnusableOrbit(GeometryError):
+    """An object's orbit has no equinoctial elements (not elliptic,
+    rectilinear, or on the elements' singularity), so the 3D-Nc rate is
+    undefined.
+
+    Parameters
+    ----------
+    role
+        The object.
+    reason
+        Why, as :func:`~keepout.equinoctial.to_equinoctial` says; it is the
+        message.
+    """
+
+    role: Role
+
+    def __init__(self, role: Role, reason: str) -> None:
+        super().__init__(reason)
+        self.role = role
+
+    @override
+    def __reduce__(self) -> tuple[type[Self], tuple[object, ...]]:
+        # Unpickled (from a worker process) by its arguments, not the message.
+        return type(self), (self.role, str(self))
+
+
+def _orbit(conjunction: Conjunction, role: Role) -> OrbitUncertainty:
+    """The orbit uncertainty of one object of a conjunction.
 
     Raises
     ------
-    CovarianceError
-        If a covariance is unknown; the message names ``method``.
-    GeometryError
-        If an orbit is not elliptic.
+    UnusableOrbit
+        If the orbit has no equinoctial elements.
     """
-    require_known_covariance(conjunction.unknown_covariance, method)
+    item = conjunction.primary if role == "primary" else conjunction.secondary
+    try:
+        return OrbitUncertainty.of(item)
+    except GeometryError as error:
+        raise UnusableOrbit(role, str(error)) from error
+
+
+def collision_rate(conjunction: Conjunction) -> CollisionRate:
+    """The 3D-Nc collision rate of a conjunction with both covariances known.
+
+    It names no method: :func:`~keepout.pc.hall3d.hall3d` and
+    :func:`~keepout.pc.montecarlo.montecarlo` check the covariances
+    themselves, and :func:`~keepout.pc.compute_pc` reads these errors.
+
+    Raises
+    ------
+    MissingCovariance
+        If a covariance is unknown.
+    UnusableOrbit
+        If an orbit has no equinoctial elements.
+    """
+    require_known_covariance(conjunction.unknown_covariance)
     return CollisionRate(
-        OrbitUncertainty.of(conjunction.primary),
-        OrbitUncertainty.of(conjunction.secondary),
+        _orbit(conjunction, "primary"),
+        _orbit(conjunction, "secondary"),
         conjunction.hard_body_radius,
     )
 

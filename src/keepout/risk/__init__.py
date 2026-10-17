@@ -16,7 +16,6 @@ from keepout.risk.decision import (
 from keepout.risk.event import (
     DEFAULT_TCA_TOLERANCE,
     ConjunctionEvent,
-    PcComputation,
     group_events,
     time_to_tca,
 )
@@ -42,7 +41,6 @@ __all__ = [
     "Decision",
     "DecisionConfig",
     "Direction",
-    "PcComputation",
     "PcKind",
     "PcObservation",
     "RiskLevel",

@@ -73,6 +73,12 @@ class OrderedEnum(enum.Enum):
             return NotImplemented
         return bool(self.value < other.value)
 
+    @property
+    def key(self) -> str:
+        """The member's stable name in data such as JSON: its name in lower
+        case, ``prepare_manoeuvre``."""
+        return self.name.lower()
+
 
 def read_only(*arrays: npt.NDArray[Any]) -> None:
     """Mark arrays read-only in place."""

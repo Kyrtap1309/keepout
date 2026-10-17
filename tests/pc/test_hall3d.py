@@ -1,5 +1,6 @@
 import importlib
 import math
+import pickle
 import re
 from typing import Final
 
@@ -45,6 +46,9 @@ from keepout.errors import CovarianceError, GeometryError, PcConvergenceError
 from keepout.orbits import orbital_period
 from keepout.pc import _rate as rate_module
 from keepout.pc import foster, hall3d
+from keepout.pc._plane import MissingCovariance
+from keepout.pc._rate import UnusableOrbit
+from keepout.pc.hall3d import Encounters
 
 # The package exports the function hall3d under the module's name.
 hall3d_module = importlib.import_module("keepout.pc.hall3d")
@@ -118,6 +122,24 @@ def test_unbound_orbit_is_rejected() -> None:
     secondary = object_state(LEO_R + np.array([30.0, 0.0, 0.0]), LEO_V, np.eye(3))
     with pytest.raises(GeometryError, match="unbound"):
         hall3d(Conjunction(primary, secondary, 5.0))
+
+
+def test_the_encounter_scan_names_the_object_not_a_method() -> None:
+    # Shared by hall3d, montecarlo and auto's fallback: each adds its own
+    # context to these errors.
+    base = TYPICAL_HEAD_ON
+    unknown = Conjunction(base.primary, without_covariance(base.secondary), 5.0)
+    with pytest.raises(MissingCovariance) as missing:
+        Encounters.scan(unknown, None)
+    assert missing.value.roles == ("secondary",)
+    assert str(missing.value) == "both covariances are needed; unknown: secondary"
+    fast = object_state(LEO_R, np.array([0.0, 15000.0, 0.0]), np.eye(3))
+    with pytest.raises(UnusableOrbit, match="unbound") as unusable:
+        Encounters.scan(Conjunction(base.primary, fast, 5.0), None)
+    assert unusable.value.role == "secondary"
+    for error in (missing.value, unusable.value):
+        copy = pickle.loads(pickle.dumps(error))
+        assert (type(copy), str(copy)) == (type(error), str(error))
 
 
 def test_zero_relative_velocity_nc_matches_a_brute_force_count() -> None:

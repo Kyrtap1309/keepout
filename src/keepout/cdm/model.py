@@ -20,6 +20,7 @@ from astropy.time import Time
 
 from keepout._types import FloatArray, read_only
 from keepout.ccsds.keywords import FieldValue, ValueKind, format_value, parse_value
+from keepout.ccsds.message import COMMENT, USER_DEFINED_PREFIX
 from keepout.cdm.keywords import (
     KEYWORDS,
     REQUIRED,
@@ -48,8 +49,6 @@ __all__ = [
     "parse_field",
 ]
 
-COMMENT: Final = "COMMENT"
-USER_DEFINED_PREFIX: Final = "USER_DEFINED_"
 
 KEYWORD_PATTERN: Final = re.compile(r"[A-Z][A-Z0-9_]*")
 """What a keyword may look like: valid in KVN and as an XML element name."""

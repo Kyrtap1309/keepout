@@ -25,7 +25,7 @@ class RiskLevel(OrderedEnum):
     @property
     def label(self) -> str:
         """The level in words, as keepout prints it: ``yellow``."""
-        return self.name.lower()
+        return self.key
 
 
 Basis: TypeAlias = Literal["conservative", "estimate"]

@@ -10,9 +10,11 @@ an ``<ndm>`` of version 3.0 OMMs, valid against the NDM/XML 4.0.0 schema.
 Only the SGP4 elements of :data:`keepout.omm.keywords.KEYWORDS` are kept; the
 reader reads every element of the segment wherever it is grouped and ignores
 the header, comments, ``GM``, spacecraft parameters, covariance and
-user-defined parameters. ``EPHEMERIS_TYPE`` and ``CLASSIFICATION_TYPE`` may be
-omitted (:data:`~keepout.omm.keywords.DEFAULTS`). DOCTYPE declarations are
-refused, which rules out entity-expansion attacks.
+user-defined parameters, though a segment may not repeat a keyword and a
+``<USER_DEFINED>`` element must name its ``parameter`` (it is the keyword
+``USER_DEFINED_NAME``, as in KVN). ``EPHEMERIS_TYPE`` and
+``CLASSIFICATION_TYPE`` may be omitted (:data:`~keepout.omm.keywords.DEFAULTS`).
+DOCTYPE declarations are refused, which rules out entity-expansion attacks.
 """
 
 from __future__ import annotations
@@ -24,10 +26,11 @@ from xml.etree import ElementTree
 
 from astropy.time import Time
 
-from keepout.ccsds.xml import XSI, add_leaf, leaves, local, parse, single, tostring
-from keepout.errors import OmmParseError, OmmWriteError
+from keepout.ccsds.message import COMMENT, KeywordValues
+from keepout.ccsds.xml import XSI, add_leaf, local, parse, single, tostring, values
+from keepout.errors import OmmParseError
 from keepout.omm._io import (
-    Text,
+    OMM,
     ccsds_values,
     check_version,
     creation_date_text,
@@ -44,8 +47,7 @@ SCHEMA_LOCATION: Final = (
 )
 """Schema of the NDM/XML 4.0.0 suite, which includes OMM 3.0."""
 
-_USER_DEFINED: Final = "USER_DEFINED"
-_NDM_PARTS: Final = frozenset({"COMMENT", "MESSAGE_ID"})
+_NDM_PARTS: Final = frozenset({COMMENT, "MESSAGE_ID"})
 """Children of ``<ndm>`` that are not messages."""
 
 
@@ -80,27 +82,16 @@ def _record(element: ElementTree.Element, path: str, record: int) -> Omm:
     if version is None:
         raise OmmParseError("<omm> has no version attribute", record=record, path=path)
     check_version(version, record=record, path=path)
-    body, body_path = single(element, "body", path, OmmParseError, record=record)
-    segment, segment_path = single(
-        body, "segment", body_path, OmmParseError, record=record
-    )
-    values: dict[str, Text] = {}
+    body, body_path = single(element, "body", path, OMM, record=record)
+    segment, segment_path = single(body, "segment", body_path, OMM, record=record)
+    found = KeywordValues(OMM, record=record)
     for part in ("metadata", "data"):
         container, container_path = single(
-            segment, part, segment_path, OmmParseError, record=record
+            segment, part, segment_path, OMM, record=record
         )
-        for leaf, leaf_path in leaves(container, container_path):
-            keyword = local(leaf.tag)
-            if keyword == "COMMENT":
-                continue
-            if keyword == _USER_DEFINED:
-                keyword += "_" + leaf.get("parameter", "")
-            if keyword in values:
-                raise OmmParseError(
-                    "duplicate keyword", record=record, path=leaf_path, keyword=keyword
-                )
-            values[keyword] = Text(leaf.text or "", leaf.get("units"), path=leaf_path)
-    return parse_record({**DEFAULTS, **values}, record=record, path=segment_path)
+        for keyword, value in values(container, container_path, OMM, record=record):
+            found.add(keyword, value)
+    return parse_record({**DEFAULTS, **found.values}, record=record, path=segment_path)
 
 
 def loads(text: str) -> tuple[Omm, ...]:
@@ -123,10 +114,11 @@ def loads(text: str) -> tuple[Omm, ...]:
         ``<omm>`` nor ``<ndm>``, an ``<ndm>`` holds another kind of message,
         a message lacks its version or has an unsupported one, its structure
         (``body``, ``segment``, ``metadata``, ``data``) is broken, it repeats
-        a keyword, or its elements are missing or invalid. The error names the
+        a keyword, a ``USER_DEFINED`` element has no ``parameter``, or its
+        elements are missing or invalid. The error names the
         message (``record``) and the element path.
     """
-    root = parse(text, "OMM", OmmParseError)
+    root = parse(text, OMM)
     return tuple(
         _record(element, path, record)
         for record, (element, path) in enumerate(_messages(root), start=1)
@@ -199,4 +191,4 @@ def dumps(
 def _leaf(
     parent: ElementTree.Element, keyword: str, value: str, unit: str | None
 ) -> None:
-    add_leaf(parent, keyword, value, unit, error=OmmWriteError)
+    add_leaf(parent, keyword, value, unit, OMM)

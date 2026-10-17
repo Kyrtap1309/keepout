@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 from keepout._workers import process_pool, resolve_workers
-from keepout.pc import compute_pc
+from keepout.pc import computation
 from keepout.pc.result import Method, PcResult
 from keepout.validation.cases import ValidationCase
 from keepout.validation.criteria import Verdict
@@ -15,7 +15,6 @@ __all__ = [
     "MethodSummary",
     "Outcome",
     "Verdict",
-    "confidence_interval",
     "evaluate",
     "judge",
     "run",
@@ -23,19 +22,9 @@ __all__ = [
 ]
 
 
-def confidence_interval(result: PcResult) -> tuple[float, float] | None:
-    """The result's confidence interval, if its method gives one (Monte Carlo)."""
-    details = result.details
-    if "ci_low" not in details:
-        return None
-    return details["ci_low"], details["ci_high"]
-
-
 def judge(case: ValidationCase, result: PcResult) -> Verdict:
     """Compare a result with the case's reference under the case's criterion."""
-    return case.criterion.judge(
-        result.value, case.reference, confidence_interval(result)
-    )
+    return case.criterion.judge(result.value, case.reference, result.interval)
 
 
 @dataclass(frozen=True, eq=False, slots=True)
@@ -52,7 +41,8 @@ class Outcome:
     Attributes
     ----------
     ci
-        keepout's confidence interval, if the method gives one.
+        keepout's confidence interval, if the method gives one
+        (:attr:`~keepout.pc.PcResult.interval`).
     verdict
         Error against the reference and pass/fail.
     """
@@ -63,7 +53,7 @@ class Outcome:
     verdict: Verdict = field(init=False)
 
     def __post_init__(self) -> None:
-        ci = confidence_interval(self.result)
+        ci = self.result.interval
         case = self.case
         verdict = case.criterion.judge(self.result.value, case.reference, ci)
         object.__setattr__(self, "ci", ci)
@@ -81,12 +71,7 @@ def run(case: ValidationCase, method: Method) -> PcResult:
     :class:`ValidationCase` checks that its methods take its options, so
     each method is given all of them.
     """
-    conjunction, options = case.conjunction, case.options
-    if method == "montecarlo":
-        return compute_pc(conjunction, method, **options)
-    if method == "hall3d":
-        return compute_pc(conjunction, method, window=options.get("window"))
-    return compute_pc(conjunction, method)
+    return computation(method, **case.options)(case.conjunction)
 
 
 def evaluate(

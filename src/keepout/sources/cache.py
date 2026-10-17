@@ -12,7 +12,9 @@ never read.
 
 A download kept for reuse (CelesTrak, Space-Track) has a ``.meta.json``
 file next to it recording its URL, digest and times (:class:`CopyMeta`);
-:func:`read_copy` gives the copy only if both files are intact.
+:func:`read_copy` gives the copy only if both files are intact, and
+:func:`cached_fetch` holds the policy around it: use a fresh copy that can
+be read, else download, read and save (gzipped if asked).
 """
 
 from __future__ import annotations
@@ -44,7 +46,12 @@ from typing import TYPE_CHECKING, Final, NamedTuple, Protocol, TypeAlias, TypeVa
 import platformdirs
 
 from keepout._types import JsonValue
-from keepout.errors import ChecksumMismatch, HttpStatusError, SourceUnavailable
+from keepout.errors import (
+    ChecksumMismatch,
+    HttpStatusError,
+    SourceFormatError,
+    SourceUnavailable,
+)
 
 if TYPE_CHECKING:
     from typing_extensions import TypeIs
@@ -58,7 +65,9 @@ __all__ = [
     "CachedCopy",
     "CopyMeta",
     "Sink",
+    "Unchanged",
     "cache_dir",
+    "cached_fetch",
     "forget_verified",
     "gunzip",
     "has_digest",
@@ -68,6 +77,7 @@ __all__ = [
     "meta_path",
     "network_errors",
     "read_copy",
+    "require_max_age",
     "retrying",
     "save_copy",
     "store",
@@ -549,3 +559,131 @@ def write_meta(target: Path, meta: CopyMeta) -> None:
     """
     record = {"format": _META_FORMAT, **dataclasses.asdict(meta)}
     store_json(meta_path(target), record)
+
+
+class Unchanged(SourceUnavailable):
+    """The source answered that the copy cached is current (CelesTrak's HTTP
+    403 for unchanged data); raised by the ``download`` of
+    :func:`cached_fetch`.
+
+    :func:`cached_fetch` then uses the cached copy, however old, and records
+    the check; it raises this error itself only if there is no readable copy,
+    so the message says what the answer means without one.
+    """
+
+
+def require_max_age(max_age: float, interval: float, reason: str) -> None:
+    """Refuse a ``max_age`` below a source's least ``interval`` between two
+    downloads.
+
+    Raises
+    ------
+    ValueError
+        ``max_age must be at least <interval> s (<reason>), got <max_age>``,
+        if ``max_age`` is below ``interval`` (or NaN).
+    """
+    if not max_age >= interval:
+        raise ValueError(
+            f"max_age must be at least {interval:g} s ({reason}), got {max_age}"
+        )
+
+
+def cached_fetch(
+    target: Path,
+    url: str,
+    read: Callable[[bytes], _T],
+    download: Callable[[], bytes],
+    *,
+    max_age: float,
+    interval: float,
+    reason: str,
+    now: Callable[[], float],
+    compressed: bool = False,
+) -> tuple[_T, CopyMeta]:
+    """``url`` read from the copy cached at ``target``, else downloaded,
+    read and cached.
+
+    A copy last checked current less than ``max_age`` ago (by
+    :attr:`CopyMeta.checked`, which is its download time unless the source
+    confirmed it later) is used if ``read`` can read it. Otherwise
+    ``download`` is called once; if it raises :class:`Unchanged`, the
+    cached copy is used however old and its check time is renewed. A
+    download is read before it is cached, so one ``read`` refuses is not
+    kept.
+
+    Parameters
+    ----------
+    target
+        The cached copy, with its ``.meta.json`` file beside it.
+    url
+        Where the copy comes from, recorded in its metadata.
+    read
+        Reads a body; raises :class:`~keepout.errors.SourceFormatError` if
+        it cannot.
+    download
+        Downloads ``url`` and returns the body; called only if no fresh
+        readable copy is cached.
+    max_age
+        Seconds a copy is used without downloading again.
+    interval
+        The least ``max_age`` allowed: the source's update interval or
+        rate limit.
+    reason
+        Why ``interval`` is the least, for the error message.
+    now
+        Gives the current Unix time [s]: called before the cache is read
+        (the age of the copy, the time of a check) and again once a
+        download has arrived (its retrieval time).
+    compressed
+        Whether the copy is kept gzipped (the body is compressed before it
+        is stored and decompressed before it is read).
+
+    Returns
+    -------
+    tuple[T, CopyMeta]
+        What ``read`` made of the body, and the metadata of its copy.
+
+    Raises
+    ------
+    ValueError
+        If ``max_age`` is below ``interval``.
+    Unchanged
+        If ``download`` raised it and there is no readable cached copy.
+    SourceUnavailable, SourceFormatError
+        What ``download`` or ``read`` raised for a download.
+    """
+    require_max_age(max_age, interval, reason)
+    start = now()
+    cached = read_copy(target, url)
+    if cached is not None and 0.0 <= start - cached.meta.checked < max_age:
+        value = _read_cached(read, cached, compressed=compressed)
+        if value is not None:
+            return value[0], cached.meta
+    try:
+        data = download()
+    except Unchanged:
+        if cached is None:
+            raise
+        value = _read_cached(read, cached, compressed=compressed)
+        if value is None:
+            raise
+        meta = dataclasses.replace(cached.meta, checked=start)
+        write_meta(target, meta)
+        return value[0], meta
+    result = read(data)
+    # The full Space-Track catalog is 36 MB of JSON, 5 MB gzipped.
+    stored = gzip.compress(data, compresslevel=6, mtime=0) if compressed else data
+    return result, save_copy(target, url, stored, now())
+
+
+def _read_cached(
+    read: Callable[[bytes], _T], cached: CachedCopy, *, compressed: bool
+) -> tuple[_T] | None:
+    """``(read(body),)`` of a cached copy; ``None`` if it cannot be read."""
+    data = gunzip(cached.data) if compressed else cached.data
+    if data is None:
+        return None
+    try:
+        return (read(data),)
+    except SourceFormatError:
+        return None

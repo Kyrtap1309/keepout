@@ -304,3 +304,12 @@ def test_an_action_is_labelled_in_words() -> None:
         "prepare manoeuvre",
         "manoeuvre",
     ]
+
+
+def test_an_action_has_a_stable_key_for_data() -> None:
+    assert [action.key for action in Action] == [
+        "ignore",
+        "monitor",
+        "prepare_manoeuvre",
+        "manoeuvre",
+    ]

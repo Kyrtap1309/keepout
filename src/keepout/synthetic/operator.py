@@ -58,13 +58,12 @@ from keepout.cdm import (
 from keepout.cdm.builder import ORIGINATOR
 from keepout.errors import FleetError
 from keepout.omm import Omm, deduplicate
-from keepout.pc import MethodChoice
+from keepout.pc.api import AUTO, PcComputation
 from keepout.risk import (
     Action,
     Assessment,
     ConjunctionEvent,
     DecisionConfig,
-    PcComputation,
     PcObservation,
     Thresholds,
     assess,
@@ -178,7 +177,7 @@ class _Settings:
     model: SyntheticCovarianceModel
     created: Time
     originator: str
-    method: MethodChoice | PcComputation
+    compute: PcComputation
     thresholds: Thresholds | None
     decision_config: DecisionConfig | None
 
@@ -194,7 +193,7 @@ def run(
     workers: int | None = 1,
     created: Time | None = None,
     originator: str = ORIGINATOR,
-    method: MethodChoice | PcComputation = "auto",
+    compute: PcComputation = AUTO,
     thresholds: Thresholds | None = None,
     decision_config: DecisionConfig | None = None,
 ) -> OperatorResult:
@@ -223,10 +222,10 @@ def run(
         at; ``start`` if ``None``.
     originator
         ``ORIGINATOR`` of the CDMs.
-    method
-        Pc method, as for :meth:`keepout.risk.ConjunctionEvent.observations`;
-        ``"auto"`` keeps the 2-D Pc for the model's position-only
-        covariances.
+    compute
+        Pc method and options, as for
+        :meth:`keepout.risk.ConjunctionEvent.observations`; ``"auto"``
+        keeps the 2-D Pc for the model's position-only covariances.
     thresholds, decision_config
         Risk thresholds and decision point, as for
         :func:`keepout.risk.assess`; defaults if ``None``.
@@ -265,7 +264,7 @@ def run(
         model=model,
         created=issued,
         originator=originator,
-        method=method,
+        compute=compute,
         thresholds=thresholds,
         decision_config=decision_config,
     )
@@ -324,7 +323,7 @@ def _event(approach: CloseApproach, settings: _Settings) -> OperatorEvent:
         comments=HEADER_COMMENTS,
     )
     event = ConjunctionEvent.from_cdms([cdm])
-    (observation,) = event.observations(method=settings.method)
+    (observation,) = event.observations(compute=settings.compute)
     assessment = assess(
         [observation],
         thresholds=settings.thresholds,

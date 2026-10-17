@@ -77,7 +77,7 @@ result = compute_pc(conjunction)  # picks Foster, Hall 3D-Nc or a maximum Pc
 print(result.method, result.value, result.diagnostics)
 print(compute_pc(conjunction, "hall3d").details["nc"])  # a method by name
 mc = compute_pc(conjunction, "montecarlo", samples=100_000, seed=1)
-print(mc.value, mc.details["ci_low"], mc.details["ci_high"])
+print(mc.value, mc.interval)  # with its 99% confidence interval
 ```
 
 ## Risk of an event

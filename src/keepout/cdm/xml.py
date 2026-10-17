@@ -16,25 +16,25 @@ from pathlib import Path
 from typing import Final
 from xml.etree import ElementTree
 
-from keepout.ccsds.xml import XSI, add_leaf, leaves, local, parse, single, tostring
+from keepout.ccsds.message import (
+    COMMENT,
+    USER_DEFINED,
+    USER_DEFINED_PREFIX,
+    KeywordValues,
+    Located,
+)
+from keepout.ccsds.xml import XSI, add_leaf, local, parse, single, tostring, values
 from keepout.cdm._io import (
-    Location,
+    CDM,
     build_cdm,
     build_section,
     dump_file,
+    field_of,
     load_file,
 )
 from keepout.cdm.keywords import KEYWORDS, SectionKind
-from keepout.cdm.model import (
-    COMMENT,
-    USER_DEFINED_PREFIX,
-    Cdm,
-    Field,
-    Section,
-    format_field,
-    parse_field,
-)
-from keepout.errors import CdmParseError, CdmWriteError
+from keepout.cdm.model import Cdm, Field, Section, format_field
+from keepout.errors import CdmParseError
 
 __all__ = ["NDM_NAMESPACE", "dump", "dumps", "load", "loads"]
 
@@ -44,7 +44,6 @@ NDM_NAMESPACE: Final = "urn:ccsds:schema:ndmxml"
 _CDM_1_0_SCHEMA_LOCATION: Final = (
     "https://sanaregistry.org/r/ndmxml_unqualified/ndmxml-2.0.0-master-2.0.xsd"
 )
-_USER_DEFINED: Final = "USER_DEFINED"
 _USER_GROUP: Final = ("data", "userDefinedParameters")
 _GROUPS: Final = frozenset(
     {
@@ -58,37 +57,18 @@ _GROUPS: Final = frozenset(
 """Grouping elements; they are structure even when empty."""
 
 
-def _keyword(leaf: ElementTree.Element, path: str) -> str:
-    keyword = local(leaf.tag)
-    if keyword != _USER_DEFINED:
-        return keyword
-    parameter = leaf.get("parameter")
-    if not parameter:
-        raise CdmParseError("USER_DEFINED has no parameter attribute", path=path)
-    return USER_DEFINED_PREFIX + parameter
-
-
 def _section(
     kind: SectionKind,
     element: ElementTree.Element,
     path: str,
-    leading: Sequence[Field] = (),
+    leading: Sequence[tuple[str, Located]] = (),
 ) -> Section:
-    fields = list(leading)
-    locations = [Location(path=path)] * len(fields)
-    for leaf, leaf_path in leaves(element, path, _GROUPS):
-        keyword = _keyword(leaf, leaf_path)
-        text = (leaf.text or "").strip()
-        try:
-            fields.append(
-                Field(COMMENT, text)
-                if keyword == COMMENT
-                else parse_field(kind, keyword, text, leaf.get("units"))
-            )
-        except ValueError as exc:
-            raise CdmParseError(str(exc), path=leaf_path, keyword=keyword) from exc
-        locations.append(Location(path=leaf_path))
-    return build_section(kind, fields, locations, Location(path=path))
+    found = KeywordValues(CDM)
+    fields: list[Field] = []
+    for keyword, value in (*leading, *values(element, path, CDM, _GROUPS)):
+        found.add(keyword, value)
+        fields.append(field_of(kind, keyword, value))
+    return build_section(kind, fields, Located("", path=path))
 
 
 def loads(text: str) -> Cdm:
@@ -104,24 +84,27 @@ def loads(text: str) -> Cdm:
     CdmParseError
         If the message is malformed; the error names the element path.
     """
-    root = parse(text, "CDM", CdmParseError)
+    root = parse(text, CDM)
     if local(root.tag) != "cdm":
         raise CdmParseError(f"root element must be <cdm>, got <{local(root.tag)}>")
     version = root.get("version")
     if not version:
         raise CdmParseError("<cdm> has no version attribute")
-    header, header_path = single(root, "header", "cdm", CdmParseError)
-    body, body_path = single(root, "body", "cdm", CdmParseError)
-    relative, relative_path = single(
-        body, "relativeMetadataData", body_path, CdmParseError
-    )
+    header, header_path = single(root, "header", "cdm", CDM)
+    body, body_path = single(root, "body", "cdm", CDM)
+    relative, relative_path = single(body, "relativeMetadataData", body_path, CDM)
     segments = [child for child in body if local(child.tag) == "segment"]
     if len(segments) != 2:
         raise CdmParseError(
             f"expected 2 <segment> elements, found {len(segments)}", path=body_path
         )
     return build_cdm(
-        _section("header", header, header_path, [Field("CCSDS_CDM_VERS", version)]),
+        _section(
+            "header",
+            header,
+            header_path,
+            [("CCSDS_CDM_VERS", Located(version, path=header_path))],
+        ),
         _section("relative", relative, relative_path),
         [
             _section("segment", segment, f"{body_path}/segment[{index}]")
@@ -171,7 +154,7 @@ def _insert_comment(element: ElementTree.Element, text: str) -> None:
     position = next(
         (i for i, child in enumerate(element) if child.tag != COMMENT), len(element)
     )
-    comment = add_leaf(element, COMMENT, text, None, error=CdmWriteError)
+    comment = add_leaf(element, COMMENT, text, None, CDM)
     element.remove(comment)
     element.insert(position, comment)
 
@@ -198,7 +181,7 @@ def _write(
         text, unit = format_field(kind, field)
         if field.keyword.startswith(USER_DEFINED_PREFIX) and group == _USER_GROUP:
             parameter = field.keyword.removeprefix(USER_DEFINED_PREFIX)
-            tag, attributes = _USER_DEFINED, {"parameter": parameter}
+            tag, attributes = USER_DEFINED, {"parameter": parameter}
         else:
             tag, attributes = field.keyword, None
         add_leaf(
@@ -206,7 +189,7 @@ def _write(
             tag,
             text,
             unit,
-            error=CdmWriteError,
+            CDM,
             keyword=field.keyword,
             attributes=attributes,
         )

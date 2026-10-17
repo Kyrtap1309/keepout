@@ -48,7 +48,7 @@ class Criterion:
         Reference below which the absolute bound applies.
     interval
         Pass if the reference lies within the result's confidence interval
-        (``details["ci_low"]``, ``details["ci_high"]``) instead.
+        (:attr:`~keepout.pc.PcResult.interval`) instead.
 
     Raises
     ------

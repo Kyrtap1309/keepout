@@ -15,15 +15,10 @@ from keepout.cli.events import (
     events_table,
     reasons,
 )
-from keepout.cli.fetch import SOURCE_NAMES, load_catalog
-from keepout.cli.options import (
-    CacheDir,
-    CatalogSource,
-    JsonFlag,
-    Workers,
-    positive,
-)
+from keepout.cli.fetch import load_catalog
+from keepout.cli.options import CacheDir, JsonFlag, Workers, positive
 from keepout.cli.output import JsonValue, isot, plural, show, utc
+from keepout.sources.catalog import CATALOG_SOURCES, DEFAULT_SOURCE, CatalogSourceName
 from keepout.units import DAY
 
 # The library is imported in the command: keepout --help need not load the
@@ -114,12 +109,12 @@ CatalogFile: TypeAlias = Annotated[
 """``--catalog``: a local catalog file instead of a source."""
 
 SourceOption: TypeAlias = Annotated[
-    CatalogSource | None,
+    CatalogSourceName | None,
     typer.Option(
         "--source",
         help=(
             "Catalog to screen against, as keepout fetch catalog gets it "
-            "(default: celestrak)."
+            f"(default: {DEFAULT_SOURCE})."
         ),
     ),
 ]
@@ -176,9 +171,9 @@ def screen_command(
         omms = load(catalog)
         described = str(catalog)
     else:
-        chosen = source or CatalogSource.CELESTRAK
+        chosen = source or DEFAULT_SOURCE
         omms = load_catalog(chosen, cache_dir).omms
-        described = SOURCE_NAMES[chosen]
+        described = CATALOG_SOURCES[chosen].title
     began = (
         parse_time(start)
         if start is not None

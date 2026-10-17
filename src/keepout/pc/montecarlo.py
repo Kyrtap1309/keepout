@@ -32,6 +32,7 @@ from keepout._types import (
 from keepout.conjunction import Conjunction
 from keepout.equinoctial import Orbits
 from keepout.orbits import EARTH_MU
+from keepout.pc._plane import require_known_covariance
 from keepout.pc._rate import check_fallbacks
 from keepout.pc._timeline import RateScan, negligible_note
 from keepout.pc.hall3d import Encounters
@@ -168,15 +169,12 @@ def _percent(fraction: float) -> str:
 def _details(
     found: RateScan,
     confidence: float,
-    interval: tuple[float, float],
     trials: int,
     hits: int,
     inside: int,
 ) -> dict[str, float]:
     """The ``details`` of a Monte Carlo result."""
     return {
-        "ci_low": interval[0],
-        "ci_high": interval[1],
         "confidence": confidence,
         "samples": float(trials),
         "hits": float(hits),
@@ -192,8 +190,8 @@ def _no_encounter(found: RateScan, confidence: float) -> PcResult:
         f"no encounter: {negligible_note(found)}, so no trial can collide there; "
         "no trials were run"
     )
-    details = _details(found, confidence, (0.0, 0.0), 0, 0, 0)
-    return PcResult(0.0, "montecarlo", (note,), details)
+    details = _details(found, confidence, 0, 0, 0)
+    return PcResult(0.0, "montecarlo", (note,), details, interval=(0.0, 0.0))
 
 
 def montecarlo(
@@ -232,12 +230,13 @@ def montecarlo(
     Returns
     -------
     PcResult
-        ``value`` = collisions / trials. ``details``: ``"ci_low"``,
-        ``"ci_high"``, ``"confidence"``, ``"samples"``, ``"hits"``,
-        ``"inside_at_start"`` (fraction of trials overlapping at the window
-        start, not counted), ``"window_start_s"``, ``"window_end_s"``. If
-        the rate scan finds no encounter in the window, no trial is run:
-        ``value``, ``"samples"`` and the interval are 0, with a diagnostic.
+        ``value`` = collisions / trials, with the Clopper-Pearson
+        ``interval``. ``details``: ``"confidence"`` (the interval's level),
+        ``"samples"``, ``"hits"``, ``"inside_at_start"`` (fraction of trials
+        overlapping at the window start, not counted), ``"window_start_s"``,
+        ``"window_end_s"``. If the rate scan finds no encounter in the
+        window, no trial is run: ``value``, ``"samples"`` and the interval
+        are 0, with a diagnostic.
 
     Raises
     ------
@@ -258,7 +257,8 @@ def montecarlo(
     require_positive(rtol, "rtol")
     if not (max_samples >= 1 and 0.0 < confidence < 1.0):
         raise ValueError("need max_samples >= 1 and 0 < confidence < 1")
-    encounters = Encounters.scan(conjunction, "montecarlo", window)
+    require_known_covariance(conjunction.unknown_covariance, "montecarlo")
+    encounters = Encounters.scan(conjunction, window)
     return sample(
         conjunction,
         encounters,
@@ -327,5 +327,7 @@ def sample(
             f"{inside / done:.3g} of the trials already overlap at the window "
             "start; only entries into the hard body count"
         )
-    details = _details(found, confidence, (low, high), done, hits, inside)
-    return PcResult(hits / done, "montecarlo", tuple(diagnostics), details)
+    details = _details(found, confidence, done, hits, inside)
+    return PcResult(
+        hits / done, "montecarlo", tuple(diagnostics), details, interval=(low, high)
+    )

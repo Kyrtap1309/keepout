@@ -18,7 +18,8 @@
   covariance along the miss vector with ``sigma^2 = 2 d R / ln((d+R)/(d-R))``
   (Alfano 2005).
 
-All three are upper bounds, not estimates; each says so in its diagnostics.
+All three are upper bounds, not estimates: their results have
+``kind="upper_bound"`` and say so in their diagnostics.
 """
 
 from __future__ import annotations
@@ -188,7 +189,9 @@ def frisbee(plane: EncounterPlane, hard_body_radius: float) -> PcResult:
         "mahalanobis": math.sqrt(k2),
         "pc_analytic": pc_analytic,
     }
-    return PcResult.clamped(value, "frisbee", tuple(diagnostics), details)
+    return PcResult.clamped(
+        value, "frisbee", tuple(diagnostics), details, kind="upper_bound"
+    )
 
 
 def dilution(plane: EncounterPlane, hard_body_radius: float) -> PcResult:
@@ -207,9 +210,9 @@ def dilution(plane: EncounterPlane, hard_body_radius: float) -> PcResult:
         ``details``: ``"pc_nominal"`` (scale 1), ``"scale_factor"`` (the
         variance scale of the maximum; 0 when the miss is inside the hard
         body, 1 when no scale beats the nominal Pc by more than
-        :data:`SEARCH_GAIN_RTOL`) and ``"diluted"`` (1 if
-        the maximum needs a smaller covariance and exceeds the nominal Pc by
-        more than :data:`DILUTION_TOLERANCE`).
+        :data:`SEARCH_GAIN_RTOL`). ``diluted`` is true if the maximum needs
+        a smaller covariance and exceeds the nominal Pc by more than
+        :data:`DILUTION_TOLERANCE`.
 
     Raises
     ------
@@ -224,9 +227,16 @@ def dilution(plane: EncounterPlane, hard_body_radius: float) -> PcResult:
     miss = plane.miss_distance
     note = "maximum Pc over covariance scaling (dilution): an upper bound"
     if miss < hard_body_radius:
-        details = {"pc_nominal": nominal, "scale_factor": 0.0, "diluted": 1.0}
+        details = {"pc_nominal": nominal, "scale_factor": 0.0}
         inside = _INSIDE.format(miss=miss, radius=hard_body_radius)
-        return PcResult(1.0, "dilution", (note, inside), details)
+        return PcResult(
+            1.0,
+            "dilution",
+            (note, inside),
+            details,
+            kind="upper_bound",
+            diluted=True,
+        )
     seed_scale = max(gaussian.mahalanobis2 / 2.0, SEED_SCALE_FLOOR)
 
     def pc(scale: float) -> float:
@@ -235,8 +245,10 @@ def dilution(plane: EncounterPlane, hard_body_radius: float) -> PcResult:
     seed = _prefer((1.0, nominal), (seed_scale, pc(seed_scale)))
     scale, value = _prefer(seed, _search_log_max(pc, math.log10(seed_scale)))
     diluted = scale < 1.0 and value > nominal * (1.0 + DILUTION_TOLERANCE)
-    details = {"pc_nominal": nominal, "scale_factor": scale, "diluted": float(diluted)}
-    return PcResult.clamped(value, "dilution", (note,), details)
+    details = {"pc_nominal": nominal, "scale_factor": scale}
+    return PcResult.clamped(
+        value, "dilution", (note,), details, kind="upper_bound", diluted=diluted
+    )
 
 
 def alfano(plane: EncounterPlane, hard_body_radius: float) -> PcResult:
@@ -270,11 +282,17 @@ def alfano(plane: EncounterPlane, hard_body_radius: float) -> PcResult:
     )
     if d < radius:
         inside = _INSIDE.format(miss=d, radius=radius)
-        return PcResult(1.0, "alfano", (note, inside), {"sigma_m": 0.0})
+        return PcResult(
+            1.0, "alfano", (note, inside), {"sigma_m": 0.0}, kind="upper_bound"
+        )
     if d == radius:  # ln((d+R)/(d-R)) diverges: sigma -> 0, Pc -> 1/2
         edge = _EDGE.format(miss=d)
-        return PcResult(0.5, "alfano", (note, edge), {"sigma_m": 0.0})
+        return PcResult(
+            0.5, "alfano", (note, edge), {"sigma_m": 0.0}, kind="upper_bound"
+        )
     sigma = math.sqrt(2.0 * d * radius / math.log1p(2.0 * radius / (d - radius)))
     scale = math.sqrt(2.0) * sigma
     value = 0.5 * (math.erfc((d - radius) / scale) - math.erfc((d + radius) / scale))
-    return PcResult.clamped(value, "alfano", (note,), {"sigma_m": sigma})
+    return PcResult.clamped(
+        value, "alfano", (note,), {"sigma_m": sigma}, kind="upper_bound"
+    )

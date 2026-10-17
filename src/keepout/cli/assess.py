@@ -5,10 +5,11 @@ from __future__ import annotations
 import enum
 from collections import Counter
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, TypeAlias, get_args
+from typing import TYPE_CHECKING, Annotated, Final, TypeAlias
 
 import typer
 
+from keepout._methods import METHOD_CHOICES, MethodChoice
 from keepout.cli.events import (
     AssessedEvent,
     event_json,
@@ -20,32 +21,31 @@ from keepout.cli.output import ExitCode, JsonValue, fail, plural, show
 from keepout.errors import KeepoutError
 
 # The library is imported where it is used: keepout --help need not load the
-# numerical libraries.
+# numerical libraries (keepout._methods loads none).
 if TYPE_CHECKING:
     from typing_extensions import TypeIs
 
-    from keepout.pc import MethodChoice
+__all__ = ["AUTO_METHOD", "PcMethod", "assess_command", "method_choice"]
 
-__all__ = ["PcMethod", "assess_command", "method_choice"]
+if TYPE_CHECKING:
 
+    class PcMethod(enum.StrEnum):
+        """``--method``: the Pc methods of :func:`keepout.pc.compute_pc`."""
 
-class PcMethod(enum.StrEnum):
-    """``--method``: the Pc methods of :func:`keepout.pc.compute_pc`."""
+else:
+    # Built from the names, so a new method needs no edit here; the type
+    # checkers see an enum whose members they do not know.
+    PcMethod = enum.StrEnum(
+        "PcMethod", {name.upper(): name for name in METHOD_CHOICES}, module=__name__
+    )
+    PcMethod.__doc__ = "``--method``: the Pc methods of :func:`keepout.pc.compute_pc`."
 
-    AUTO = "auto"
-    FOSTER = "foster"
-    ELROD = "elrod"
-    HALL3D = "hall3d"
-    MONTECARLO = "montecarlo"
-    FRISBEE = "frisbee"
-    DILUTION = "dilution"
-    ALFANO = "alfano"
+AUTO_METHOD: Final = PcMethod("auto")
+"""``--method``'s default."""
 
 
 def _is_method(name: str) -> TypeIs[MethodChoice]:
-    from keepout.pc import Method
-
-    return name == "auto" or name in get_args(Method)
+    return name in METHOD_CHOICES
 
 
 def method_choice(name: str) -> MethodChoice:
@@ -95,7 +95,7 @@ HardBodyRadius: TypeAlias = Annotated[
 def assess_command(
     files: Files,
     *,
-    method: MethodOption = PcMethod.AUTO,
+    method: MethodOption = AUTO_METHOD,
     hbr: HardBodyRadius = None,
     as_json: JsonFlag = False,
 ) -> None:
@@ -109,6 +109,7 @@ def assess_command(
     manoeuvre.
     """
     from keepout import cdm
+    from keepout.pc import computation
     from keepout.risk import Action, assess, group_events
 
     messages = []
@@ -117,10 +118,10 @@ def assess_command(
             messages.append(cdm.load(path))
         except KeepoutError as exc:
             fail(f"{path}: {exc}")
-    choice = method_choice(method.value)
+    compute = computation(method_choice(method.value))
     assessed = [
         AssessedEvent(
-            event, assess(event.observations(method=choice, hard_body_radius=hbr))
+            event, assess(event.observations(compute=compute, hard_body_radius=hbr))
         )
         for event in group_events(messages)
     ]

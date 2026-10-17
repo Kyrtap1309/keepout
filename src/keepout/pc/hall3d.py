@@ -35,6 +35,7 @@ from keepout._types import require_positive
 from keepout.conjunction import Conjunction
 from keepout.errors import PcConvergenceError
 from keepout.pc._duration import encounter_duration, long_encounter
+from keepout.pc._plane import require_known_covariance
 from keepout.pc._rate import (
     CollisionRate,
     check_fallbacks,
@@ -50,7 +51,7 @@ from keepout.pc._timeline import (
     integrate_segments,
     negligible_note,
 )
-from keepout.pc.result import Method, PcResult
+from keepout.pc.result import PcResult
 
 __all__ = [
     "HALL_RTOL",
@@ -154,7 +155,8 @@ def hall3d(
         finite and positive.
     """
     require_positive(rtol, "rtol")
-    encounters = Encounters.scan(conjunction, "hall3d", window)
+    require_known_covariance(conjunction.unknown_covariance, "hall3d")
+    encounters = Encounters.scan(conjunction, window)
     return integrate(conjunction, encounters, rtol=rtol)
 
 
@@ -189,24 +191,25 @@ class Encounters:
     def scan(
         cls,
         conjunction: Conjunction,
-        method: Method,
         window: tuple[float, float] | None,
     ) -> Encounters:
         """Scan the rate over ``window``, or an automatic one if ``None``.
 
         Raises
         ------
-        CovarianceError
-            If a covariance is unknown; the message names ``method``.
-        GeometryError
-            If an orbit is not elliptic.
+        MissingCovariance
+            If a covariance is unknown (a :class:`CovarianceError` naming
+            no method: the callers do).
+        UnusableOrbit
+            If an orbit has no equinoctial elements (a
+            :class:`GeometryError`, with the object).
         ValueError
             If ``window`` is not finite with ``start < end``.
         PcConvergenceError
             If the encounters cannot be resolved (see
             :func:`~keepout.pc._rate.encounter_scan`).
         """
-        rate = collision_rate(conjunction, method)
+        rate = collision_rate(conjunction)
         found = encounter_scan(conjunction, rate, window)
         return cls(rate, found, window is not None, tuple(rate.fallbacks))
 

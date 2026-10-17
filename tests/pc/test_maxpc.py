@@ -171,14 +171,15 @@ def test_dilution_reports_the_nominal_pc(case: PlaneCase) -> None:
 
 def test_a_large_covariance_is_diluted() -> None:
     wide = dilution(PlaneCase(200.0, 0.0, 5000.0, 3000.0, 0.0, 10.0).plane(), 10.0)
-    assert wide.details["diluted"] == 1.0
+    assert wide.diluted is True
+    assert wide.kind == "upper_bound"
     assert wide.details["scale_factor"] < 1.0
     assert wide.value > wide.details["pc_nominal"]
 
 
 def test_a_small_covariance_is_not_diluted() -> None:
     tight = dilution(PlaneCase(200.0, 0.0, 20.0, 10.0, 0.0, 10.0).plane(), 10.0)
-    assert tight.details["diluted"] == 0.0
+    assert tight.diluted is False
     assert tight.details["scale_factor"] > 1.0
 
 
@@ -186,6 +187,7 @@ def test_dilution_with_the_miss_inside_the_hard_body_is_one() -> None:
     result = dilution(PlaneCase(3.0, 0.0, 50.0, 20.0, 0.0, 10.0).plane(), 10.0)
     assert result.value == 1.0
     assert result.details["scale_factor"] == 0.0
+    assert result.diluted is True
     assert "inside the hard body" in result.diagnostics[-1]
 
 
@@ -195,7 +197,7 @@ def test_dilution_at_the_optimal_scale_reports_scale_one() -> None:
     result = dilution(plane, 0.1)
     assert result.value == result.details["pc_nominal"] > 0.0
     assert result.details["scale_factor"] == 1.0
-    assert result.details["diluted"] == 0.0
+    assert result.diluted is False
 
 
 def test_dilution_needs_both_covariances() -> None:

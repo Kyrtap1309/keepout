@@ -208,7 +208,7 @@ def _event(
         method = str(observation.result.method)
         max_pc = _significant(bound.value)
         scale = _significant(bound.details["scale_factor"])
-        diluted = bool(bound.details["diluted"])
+        diluted = bound.diluted
     notes = list(observation.diagnostics)
     if observation.error is not None:
         notes.append(observation.error)

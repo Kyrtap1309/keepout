@@ -2,6 +2,8 @@
 
 ::: keepout.ccsds
 
+::: keepout.ccsds.message
+
 ::: keepout.ccsds.keywords
 
 ::: keepout.ccsds.kvn

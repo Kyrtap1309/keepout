@@ -3,26 +3,23 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from dataclasses import dataclass, replace
-from typing import Final, TypeAlias
+from typing import Final
 
 from astropy.time import Time
 
 from keepout._types import is_probability, require_non_negative
 from keepout.cdm.model import Cdm
-from keepout.conjunction import Conjunction
 from keepout.covariance import Policy
 from keepout.errors import EventError, HardBodyRadiusError, KeepoutError
-from keepout.pc.api import MethodChoice, compute_pc
-from keepout.pc.result import PcResult
+from keepout.pc.api import AUTO, PcComputation
 from keepout.risk.observation import PcObservation
 from keepout.units import MINUTE
 
 __all__ = [
     "DEFAULT_TCA_TOLERANCE",
     "ConjunctionEvent",
-    "PcComputation",
     "group_events",
     "time_to_tca",
 ]
@@ -31,10 +28,6 @@ DEFAULT_TCA_TOLERANCE: Final = 10 * MINUTE
 """Largest spread [s] of the TCAs of one event's CDMs. Successive CDMs of an
 encounter move its TCA by milliseconds to seconds; two encounters of the same
 pair are at least a large fraction of an orbit apart."""
-
-PcComputation: TypeAlias = Callable[[Conjunction], PcResult]
-"""A Pc computation with its own options, e.g.
-``lambda c: compute_pc(c, "montecarlo", samples=100_000, seed=1)``."""
 
 
 def time_to_tca(cdm: Cdm) -> float:
@@ -192,15 +185,15 @@ class ConjunctionEvent:
     def observations(
         self,
         *,
-        method: MethodChoice | PcComputation = "auto",
+        compute: PcComputation = AUTO,
         policy: Policy = "repair",
         hard_body_radius: float | None = None,
     ) -> tuple[PcObservation, ...]:
         """Keepout's Pc of every CDM, oldest first.
 
-        Each CDM is computed as :func:`~keepout.pc.api.compute_pc` would (in
-        ``"auto"`` mode a slow encounter can take up to a minute per CDM;
-        ``method="foster"`` takes milliseconds). A CDM whose Pc cannot be
+        Each CDM's Pc is computed by ``compute`` (in ``"auto"`` mode a slow
+        encounter can take up to a minute per CDM;
+        ``compute=computation("foster")`` takes milliseconds). A CDM whose Pc cannot be
         computed (a :class:`~keepout.errors.KeepoutError`: a covariance or
         geometry problem, no convergence) gives an observation with the
         error instead of stopping the others. The originator's Pc is kept in
@@ -208,9 +201,11 @@ class ConjunctionEvent:
 
         Parameters
         ----------
-        method
-            A method name, or ``"auto"``, or a :data:`PcComputation` for a
-            method with options.
+        compute
+            The Pc method and its options, from
+            :func:`~keepout.pc.computation`; ``"auto"`` by default. Its
+            :attr:`~keepout.pc.PcComputation.label` is the source of a failed
+            CDM's observation.
         policy
             Covariance policy; see :func:`keepout.covariance.make_covariance`.
         hard_body_radius
@@ -234,26 +229,14 @@ class ConjunctionEvent:
                     f"no HBR for both objects in {', '.join(missing)}: pass "
                     "hard_body_radius= (combined, in metres)"
                 )
-        compute: PcComputation
-        if callable(method):
-            compute, source = method, "keepout"
-        else:
-            choice = method
-
-            def by_name(conjunction: Conjunction) -> PcResult:
-                return compute_pc(conjunction, choice)
-
-            compute, source = by_name, f"keepout ({method})"
         return tuple(
-            _observe(cdm, compute, source, policy, hard_body_radius)
-            for cdm in self.cdms
+            _observe(cdm, compute, policy, hard_body_radius) for cdm in self.cdms
         )
 
 
 def _observe(
     cdm: Cdm,
     compute: PcComputation,
-    source: str,
     policy: Policy,
     hard_body_radius: float | None,
 ) -> PcObservation:
@@ -267,7 +250,7 @@ def _observe(
     except KeepoutError as exc:
         return PcObservation(
             time_to_tca=when,
-            source=source,
+            source=compute.label,
             error=f"{type(exc).__name__}: {exc}",
             message_id=cdm.message_id,
             reported_pc=reported,

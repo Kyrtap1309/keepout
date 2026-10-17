@@ -12,6 +12,7 @@ from keepout.validation.evaluation import (
     Verdict,
     evaluate,
     judge,
+    run,
     summarise,
 )
 
@@ -49,9 +50,10 @@ def test_case_criterion_replaces_the_default() -> None:
 
 def test_interval_criterion_uses_the_result_interval() -> None:
     case = dataclasses.replace(case_with_reference(0.02), criterion=MONTE_CARLO)
-    inside = result(0.021, ci_low=0.019, ci_high=0.023)
+    inside = PcResult(0.021, "montecarlo", interval=(0.019, 0.023))
     assert judge(case, inside) == pytest.approx(Verdict(0.05, True, True))
-    assert not judge(case, result(0.03, ci_low=0.025, ci_high=0.035)).passed
+    outside = PcResult(0.03, "montecarlo", interval=(0.025, 0.035))
+    assert not judge(case, outside).passed
 
 
 @pytest.mark.parametrize(
@@ -73,6 +75,20 @@ def test_evaluate_runs_the_case_methods_and_keeps_the_full_result() -> None:
     assert [o.result.method for o in outcomes] == ["foster", "elrod"]
     assert all(o.case is case and o.passed for o in outcomes)
     assert all("encounter_duration_s" in o.result.details for o in outcomes)
+
+
+def test_run_passes_the_case_options_to_its_method() -> None:
+    case = dataclasses.replace(
+        case_with_reference(0.0),
+        methods=("hall3d", "montecarlo"),
+        options={"window": (-1.0, 1.0)},
+    )
+    hall = run(case, "hall3d")
+    assert (hall.details["window_start_s"], hall.details["window_end_s"]) == (-1, 1)
+    only = dataclasses.replace(
+        case, methods=("montecarlo",), options={"window": (-2.0, 2.0), "seed": 1}
+    )
+    assert run(only, "montecarlo").details["window_start_s"] == -2.0
 
 
 def test_evaluate_in_processes_gives_the_same_outcomes_in_order() -> None:

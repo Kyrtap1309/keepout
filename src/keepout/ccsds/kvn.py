@@ -9,8 +9,10 @@ section 4). The message readers and writers (:mod:`keepout.cdm.kvn`,
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
-from typing import Final
+from typing import TYPE_CHECKING, Final
+
+if TYPE_CHECKING:
+    from keepout.ccsds.message import Family
 
 __all__ = ["assignment", "comment", "format_line", "split_unit"]
 
@@ -69,15 +71,9 @@ def split_unit(text: str) -> tuple[str, str | None]:
     return match["value"].strip(), match["unit"].strip()
 
 
-def format_line(
-    keyword: str,
-    value: str,
-    unit: str | None,
-    *,
-    width: int,
-    error: Callable[[str], Exception],
-) -> str:
-    """A ``KEYWORD = value [unit]`` line, the keyword padded to ``width``.
+def format_line(keyword: str, value: str, unit: str | None, family: Family) -> str:
+    """A ``KEYWORD = value [unit]`` line, the keyword padded to the family's
+    :attr:`~keepout.ccsds.message.Family.keyword_width`.
 
     Parameters
     ----------
@@ -87,20 +83,19 @@ def format_line(
         Its value as message text.
     unit
         Its unit, or None to write none.
-    width
-        Width the keyword is padded to, aligning the ``=`` of a message.
-    error
-        Makes the exception raised for a value KVN cannot hold, from its
-        message: the writer error of the message family.
+    family
+        The message family.
 
     Raises
     ------
-    Exception
-        ``error(...)`` if the value contains a line break (KVN has no
-        escaping).
+    KeepoutError
+        The family's write error if the value contains a line break (KVN
+        has no escaping).
     """
     # The brackets make a leading or trailing line break count as well.
     if len(f"<{value}>".splitlines()) > 1:
-        raise error(f"{keyword}: KVN cannot hold a line break in {value!r}")
-    line = f"{keyword:<{width}} = {value}"
+        raise family.write_error(
+            f"{keyword}: KVN cannot hold a line break in {value!r}"
+        )
+    line = f"{keyword:<{family.keyword_width}} = {value}"
     return f"{line} [{unit}]" if unit is not None else line.rstrip()

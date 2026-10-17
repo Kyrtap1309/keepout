@@ -149,11 +149,14 @@ the point budget).
 Trials run in batches of 50 000 until the Clopper-Pearson interval
 (99% by default) has a half-width below `rtol = 0.1` of the estimate, or the
 budget of `max_samples = 1e7` is spent; `samples=` fixes the count and
-`seed=` makes a run reproducible.
+`seed=` makes a run reproducible. The interval is the result's `interval`
+(`low`, `high`), its level `details["confidence"]`.
 
 ## Maximum Pc
 
-All three are **upper bounds**, not estimates, and their diagnostics say so.
+All three are **upper bounds**, not estimates: their results have
+`kind == "upper_bound"` (the other methods' `"estimate"`), and their
+diagnostics say so.
 
 - **Frisbee** (one covariance unknown). The unknown covariance is taken as a
   variance `s >= 0` added along the miss direction `u = m/|m|` to the known
@@ -175,8 +178,9 @@ All three are **upper bounds**, not estimates, and their diagnostics say so.
   optimum `k = K^2/2`; the nominal `k = 1` is reported unless a scale beats
   its Pc by more than 1e-8 relative. The conjunction is *diluted* when the
   maximum needs a smaller covariance (`k < 1`) and exceeds the nominal Pc by
-  more than 0.1%. With the miss inside the hard body the supremum is 1, as the
-  covariance shrinks to zero.
+  more than 0.1% (`result.diluted`, `None` for the other methods). With the
+  miss inside the hard body the supremum is 1, as the covariance shrinks to
+  zero.
 - **Alfano** (none known). Over every 2-D covariance, the maximum for miss
   distance `d` is reached by a line-like covariance along the miss vector
   with `sigma^2 = 2 d R / ln((d+R)/(d-R))` (Alfano 2005); for `d >> R` it is
@@ -192,8 +196,8 @@ covariance (operators send zeros when they have none).
 `compute_pc(conjunction)` (`method="auto"`):
 
 1. zero relative velocity: `hall3d` (there is no encounter plane, so a
-   `GeometryError` names the cause if a covariance is unknown or an orbit is
-   not elliptic);
+   `GeometryError` names the cause if a covariance is unknown or the 3-D
+   methods cannot use an object's orbit, e.g. one that is not elliptic);
 2. both covariances unknown: `alfano`; one unknown: `frisbee`;
 3. a questionable 2-D assumption (encounter longer than 1% of an orbit, or
    states off TCA), with elliptic orbits and both covariances known in
@@ -233,7 +237,12 @@ known.
 
 The choice costs time: the 2-D and maximum-Pc methods take milliseconds,
 `hall3d` about 1-60 s and the Monte Carlo fallback up to about a minute. For a
-batch of conjunctions, look at `result.method` or choose a method explicitly.
+batch of conjunctions, look at `result.method` or choose a method explicitly:
+`computation("foster")`, or `computation("montecarlo", samples=100_000,
+seed=1)` for a method with options, is a `PcComputation` to call on each
+conjunction (its options are checked once, when it is made).
+`keepout.pc.METHODS` says what each method is (`kind`: `"2d"`, `"3d"`,
+`"montecarlo"` or `"maxpc"`) and which options it takes.
 
 ## Slow encounters: the methods compared
 

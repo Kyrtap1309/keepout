@@ -39,7 +39,6 @@ such when you republish it.
 
 from __future__ import annotations
 
-import dataclasses
 import re
 import time
 from collections.abc import Callable, Iterable
@@ -48,21 +47,15 @@ from http import HTTPStatus
 from pathlib import Path
 from typing import Final, TypeAlias, TypeVar
 
-from keepout.errors import (
-    HttpStatusError,
-    OmmParseError,
-    SourceFormatError,
-    SourceUnavailable,
-)
+from keepout.errors import HttpStatusError, OmmParseError, SourceFormatError
 from keepout.omm.celestrak import loads_csv
 from keepout.omm.model import Omm
 from keepout.sources.cache import (
-    CachedCopy,
+    Unchanged,
     cache_dir,
+    cached_fetch,
     http_download,
-    read_copy,
-    save_copy,
-    write_meta,
+    require_max_age,
 )
 from keepout.sources.catalog import Catalog, CatalogPart, Retrieval
 from keepout.sources.socrates import COLUMNS, SocratesApproach, read_socrates
@@ -105,6 +98,9 @@ the three largest fragmentations still in orbit. They overlap (a new
 satellite is in ``active`` and ``last-30-days``); :func:`fetch_catalog`
 keeps one element set per object. Supplemental GP data (operator
 ephemerides) is not GP data of the 18th SDS and is left out."""
+
+_TTL_REASON: Final = "CelesTrak updates GP data every two hours"
+"""Why ``max_age`` may not be below :data:`TTL`, for the error message."""
 
 _GROUP_NAME: Final = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 """A CelesTrak group name, lower case: ``active``, ``last-30-days``."""
@@ -248,7 +244,7 @@ def fetch_catalog(
     names = tuple(dict.fromkeys(_group_name(name) for name in groups))
     if not names:
         raise ValueError("no groups to fetch")
-    _check_max_age(max_age)
+    require_max_age(max_age, TTL, _TTL_REASON)
     fetched = tuple(
         fetch_group(name, cache=cache, max_age=max_age, download=download, now=now)
         for name in names
@@ -302,14 +298,6 @@ def _group_name(name: str) -> str:
     return group
 
 
-def _check_max_age(max_age: float) -> None:
-    if not max_age >= TTL:
-        raise ValueError(
-            f"max_age must be at least {TTL:g} s (CelesTrak updates GP data "
-            f"every two hours), got {max_age}"
-        )
-
-
 def _root(cache: Path | None) -> Path:
     return cache_dir(cache) / "celestrak"
 
@@ -341,25 +329,16 @@ def _read_socrates(data: bytes) -> str:
     return text
 
 
-def _parsed(read: Callable[[bytes], _T], cached: CachedCopy | None) -> _T | None:
-    """The cached copy read, or ``None`` if there is none or it cannot be read."""
-    if cached is None:
-        return None
-    try:
-        return read(cached.data)
-    except SourceFormatError:
-        return None
-
-
 def _fetch(
     url: str,
     target: Path,
     read: Callable[[bytes], _T],
     max_age: float,
     download: Downloader,
-    clock: Callable[[], float],
+    now: Callable[[], float],
 ) -> tuple[_T, Retrieval]:
-    """``url`` read from the cache at ``target`` or downloaded, by the policy.
+    """``url`` read from the cache at ``target`` or downloaded, by the policy
+    (:func:`~keepout.sources.cache.cached_fetch`, HTTP 403 meaning unchanged).
 
     Raises
     ------
@@ -370,28 +349,28 @@ def _fetch(
     SourceUnavailable
         If CelesTrak answers HTTP 403 and there is no usable cached copy.
     """
-    _check_max_age(max_age)
-    cached = read_copy(target, url)
-    now = clock()
-    if cached is not None and 0.0 <= now - cached.meta.checked < max_age:
-        value = _parsed(read, cached)
-        if value is not None:
-            return value, Retrieval.of(target, cached.meta)
-    try:
-        data = download(url)
-    except HttpStatusError as exc:
-        if exc.status != HTTPStatus.FORBIDDEN:
-            raise
-        value = _parsed(read, cached)
-        if cached is None or value is None:
-            raise SourceUnavailable(
+
+    def get() -> bytes:
+        try:
+            return download(url)
+        except HttpStatusError as exc:
+            if exc.status != HTTPStatus.FORBIDDEN:
+                raise
+            raise Unchanged(
                 f"{url}: CelesTrak answered HTTP 403, which means the data has "
                 "not changed since this address last downloaded it, but there "
                 f"is no usable copy at {target}; it can be downloaded again "
                 "after CelesTrak's next update (about every two hours)"
             ) from exc
-        meta = dataclasses.replace(cached.meta, checked=now)
-        write_meta(target, meta)
-        return value, Retrieval.of(target, meta)
-    value = read(data)
-    return value, Retrieval.of(target, save_copy(target, url, data, now))
+
+    value, meta = cached_fetch(
+        target,
+        url,
+        read,
+        get,
+        max_age=max_age,
+        interval=TTL,
+        reason=_TTL_REASON,
+        now=now,
+    )
+    return value, Retrieval.of(target, meta)

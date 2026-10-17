@@ -47,7 +47,8 @@ def test_a_fast_approach_takes_every_method() -> None:
     # Pc ~ 1.5e-8 gives no hit in 1000 trials; the interval still holds it.
     assert sampled.value == 0.0
     assert sampled.details["samples"] == 1_000
-    assert sampled.details["ci_high"] > auto.value
+    assert sampled.interval is not None
+    assert sampled.interval[1] > auto.value
 
 
 def test_a_slow_approach_keeps_the_2d_pc_with_both_notes() -> None:

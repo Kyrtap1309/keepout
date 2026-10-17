@@ -23,9 +23,10 @@ from typing import Final
 from astropy.time import Time
 
 from keepout.ccsds.kvn import assignment, comment, format_line, split_unit
-from keepout.errors import OmmParseError, OmmWriteError
+from keepout.ccsds.message import KeywordValues, Located
+from keepout.errors import OmmParseError
 from keepout.omm._io import (
-    Text,
+    OMM,
     ccsds_values,
     check_version,
     creation_date_text,
@@ -38,16 +39,15 @@ from keepout.omm.model import Omm
 __all__ = ["dumps", "load", "loads"]
 
 VERSION_KEYWORD: Final = "CCSDS_OMM_VERS"
-_KEYWORD_WIDTH: Final = len("MEAN_ELEMENT_THEORY")
 
 
-def _value(keyword: str, text: str, line: int) -> Text:
+def _value(keyword: str, text: str, line: int) -> Located:
     spec = KEYWORDS.get(keyword)
     if spec is None or spec.kind == "str":
         # Text values keep brackets: "GOES 9 [P]" is a name, not a unit.
-        return Text(text, line=line)
+        return Located(text, line=line)
     value, unit = split_unit(text)
-    return Text(value, unit, line)
+    return Located(value, unit, line)
 
 
 def loads(text: str) -> tuple[Omm, ...]:
@@ -72,7 +72,7 @@ def loads(text: str) -> tuple[Omm, ...]:
         message (``record``), line and keyword.
     """
     # Each message's first line and values, keyed by keyword.
-    messages: list[tuple[int, dict[str, Text]]] = []
+    messages: list[tuple[int, KeywordValues]] = []
     for number, raw in enumerate(text.splitlines(), start=1):
         line = raw.strip()
         if not line:
@@ -81,8 +81,9 @@ def loads(text: str) -> tuple[Omm, ...]:
         assigned = assignment(line)
         keyword = assigned[0] if assigned else None
         if assigned and keyword == VERSION_KEYWORD:
-            check_version(assigned[1], record=len(messages) + 1, line=number)
-            messages.append((number, {}))
+            record = len(messages) + 1
+            check_version(assigned[1], record=record, line=number)
+            messages.append((number, KeywordValues(OMM, record=record)))
             continue
         if current is None:
             raise OmmParseError(
@@ -97,15 +98,10 @@ def loads(text: str) -> tuple[Omm, ...]:
                 f"expected 'KEYWORD = value', got {line!r}", record=current, line=number
             )
         keyword, value = assigned
-        values = messages[-1][1]
-        if keyword in values:
-            raise OmmParseError(
-                "duplicate keyword", record=current, line=number, keyword=keyword
-            )
-        values[keyword] = _value(keyword, value, number)
+        messages[-1][1].add(keyword, _value(keyword, value, number))
     return tuple(
-        parse_record({**DEFAULTS, **values}, record=record, line=start)
-        for record, (start, values) in enumerate(messages, start=1)
+        parse_record({**DEFAULTS, **found.values}, record=record, line=start)
+        for record, (start, found) in enumerate(messages, start=1)
     )
 
 
@@ -165,4 +161,4 @@ def dumps(
 
 
 def _line(keyword: str, value: str, unit: str | None) -> str:
-    return format_line(keyword, value, unit, width=_KEYWORD_WIDTH, error=OmmWriteError)
+    return format_line(keyword, value, unit, OMM)

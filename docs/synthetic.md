@@ -128,7 +128,8 @@ does what a conjunction assessment service does for an operator:
    `catalog_hard_body_radius`.
 4. **CDMs.** Each conjunction becomes a CDM (below).
 5. **Risk.** Each CDM is assessed as its recipient would assess it: the Pc
-   is computed from the message (`method="auto"` by default), and the event
+   is computed from the message (`"auto"` by default; `compute=` takes a
+   `keepout.pc.computation`), and the event
    is assessed with keepout's [risk rules](risk.md) (`thresholds=` and
    `decision_config=` change them).
 

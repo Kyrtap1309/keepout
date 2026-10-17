@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import enum
 import math
 from pathlib import Path
 from typing import Annotated, TypeAlias
@@ -11,20 +10,10 @@ import typer
 
 __all__ = [
     "CacheDir",
-    "CatalogSource",
     "JsonFlag",
     "Workers",
     "positive",
 ]
-
-
-class CatalogSource(enum.StrEnum):
-    """Where the GP catalog comes from."""
-
-    CELESTRAK = "celestrak"
-    """CelesTrak's public groups: no account, about 20 000 objects."""
-    SPACETRACK = "spacetrack"
-    """Space-Track's full catalog: an account, about 32 000 objects."""
 
 
 JsonFlag: TypeAlias = Annotated[

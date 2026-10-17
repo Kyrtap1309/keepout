@@ -8,54 +8,44 @@ from pathlib import Path
 from typing import Final
 
 from keepout.ccsds.kvn import assignment, comment, format_line, split_unit
+from keepout.ccsds.message import COMMENT, KeywordValues, Located
 from keepout.cdm._io import (
-    Location,
+    CDM,
     build_cdm,
     build_section,
     dump_file,
+    field_of,
     load_file,
 )
 from keepout.cdm.keywords import KEYWORDS, SectionKind
-from keepout.cdm.model import (
-    COMMENT,
-    Cdm,
-    Field,
-    Section,
-    format_field,
-    parse_field,
-)
-from keepout.errors import CdmParseError, CdmWriteError
+from keepout.cdm.model import Cdm, Field, Section, format_field
+from keepout.errors import CdmParseError
 
 __all__ = ["dump", "dumps", "load", "loads"]
 
-_KEYWORD_WIDTH: Final = 30
 _LAYOUT: Final[tuple[SectionKind, ...]] = ("header", "relative", "segment", "segment")
 
 
-def _field(kind: SectionKind, keyword: str, text: str, line: int) -> Field:
+def _value(kind: SectionKind, keyword: str, text: str, line: int) -> Located:
     spec = KEYWORDS[kind].get(keyword)
     value, unit = (text, None) if spec and spec.kind == "str" else split_unit(text)
-    try:
-        return parse_field(kind, keyword, value, unit)
-    except ValueError as exc:
-        raise CdmParseError(str(exc), line=line, keyword=keyword) from exc
+    return Located(value, unit, line)
 
 
 @dataclass
 class _Building:
-    """A section being read: its fields and the line of each."""
+    """A section being read: its fields, its keywords' values."""
 
     kind: SectionKind
     fields: list[Field] = dataclasses.field(default_factory=list)
-    lines: list[int] = dataclasses.field(default_factory=list)
+    found: KeywordValues = dataclasses.field(default_factory=lambda: KeywordValues(CDM))
 
-    def add(self, item: Field, line: int) -> None:
-        self.fields.append(item)
-        self.lines.append(line)
+    def add(self, keyword: str, value: Located) -> None:
+        self.found.add(keyword, value)
+        self.fields.append(field_of(self.kind, keyword, value))
 
     def build(self) -> Section:
-        locations = [Location(line=line) for line in self.lines]
-        return build_section(self.kind, self.fields, locations)
+        return build_section(self.kind, self.fields)
 
 
 def _opened(kinds: list[SectionKind], keyword: str, line: int) -> SectionKind | None:
@@ -108,7 +98,7 @@ def loads(text: str) -> Cdm:
         If the message is malformed; the error names the line and keyword.
     """
     building: list[_Building] = []
-    pending: list[tuple[Field, int]] = []
+    pending: list[Located] = []
     for number, raw in enumerate(text.splitlines(), start=1):
         line = raw.strip()
         if not line:
@@ -119,7 +109,7 @@ def loads(text: str) -> Cdm:
                 raise CdmParseError(
                     "CCSDS_CDM_VERS must be the first keyword", line=number
                 )
-            pending.append((Field(COMMENT, remark), number))
+            pending.append(Located(remark, line=number))
             continue
         assigned = assignment(line)
         if assigned is None:
@@ -131,12 +121,12 @@ def loads(text: str) -> Cdm:
         if opened is not None:
             building.append(_Building(opened))
         current = building[-1]
-        for item, at in pending:
-            current.add(item, at)
+        for held in pending:
+            current.add(COMMENT, held)
         pending.clear()
-        current.add(_field(current.kind, keyword, value, number), number)
-    for item, at in pending:
-        building[-1].add(item, at)
+        current.add(keyword, _value(current.kind, keyword, value, number))
+    for held in pending:
+        building[-1].add(COMMENT, held)
     if tuple(b.kind for b in building) != _LAYOUT:
         raise CdmParseError(
             "a CDM needs a header, relative metadata (starting at TCA) and "
@@ -172,15 +162,7 @@ def dumps(cdm: Cdm) -> str:
                 )
                 continue
             text, unit = format_field(section.kind, field)
-            lines.append(
-                format_line(
-                    field.keyword,
-                    text,
-                    unit,
-                    width=_KEYWORD_WIDTH,
-                    error=CdmWriteError,
-                )
-            )
+            lines.append(format_line(field.keyword, text, unit, CDM))
     return "\n".join(lines) + "\n"
 
 

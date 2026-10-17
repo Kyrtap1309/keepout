@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Mapping
 from pathlib import Path
-from types import MappingProxyType
-from typing import TYPE_CHECKING, Annotated, Final, TypeAlias
+from typing import TYPE_CHECKING, Annotated, TypeAlias
 
 import typer
 
-from keepout.cli.options import CacheDir, CatalogSource, JsonFlag
+from keepout.cli.options import CacheDir, JsonFlag
 from keepout.cli.output import JsonValue, isot, minute, pc_text, show, table, utc
+from keepout.sources.catalog import CATALOG_SOURCES, DEFAULT_SOURCE, CatalogSourceName
+from keepout.units import HOUR
 
 # The sources are imported in the commands: keepout --help need not load
 # the numerical libraries.
@@ -20,7 +20,6 @@ if TYPE_CHECKING:
     from keepout.sources.spacetrack import PublicCdm, PublicCdmObject
 
 __all__ = [
-    "SOURCE_NAMES",
     "fetch_cara",
     "fetch_catalog",
     "fetch_cdm",
@@ -28,35 +27,21 @@ __all__ = [
     "load_catalog",
 ]
 
-SOURCE_NAMES: Final[Mapping[CatalogSource, str]] = MappingProxyType(
-    {
-        CatalogSource.CELESTRAK: "CelesTrak public GP groups",
-        CatalogSource.SPACETRACK: "Space-Track full GP catalog",
-    }
-)
-"""Each catalog source as the commands name it."""
-
-PART_TITLES: Final[Mapping[CatalogSource, str]] = MappingProxyType(
-    {CatalogSource.CELESTRAK: "Group", CatalogSource.SPACETRACK: "Query"}
-)
-"""What one download of each source's catalog is (a table column)."""
-
 SourceOption: TypeAlias = Annotated[
-    CatalogSource,
+    CatalogSourceName,
     typer.Option(
         "--source",
-        help=(
-            "celestrak: public groups, no account. spacetrack: the full "
-            "catalog, needs SPACETRACK_IDENTITY and SPACETRACK_PASSWORD."
+        help=" ".join(
+            f"{source.name}: {source.summary}." for source in CATALOG_SOURCES.values()
         ),
     ),
 ]
 """``--source``: where ``fetch catalog`` gets the catalog."""
 
 
-def load_catalog(source: CatalogSource, cache: Path | None) -> Catalog:
-    """The catalog of ``source``: its cached copy while that is current (2 h
-    for CelesTrak, 1 h for Space-Track), else a download.
+def load_catalog(source: CatalogSourceName, cache: Path | None) -> Catalog:
+    """The catalog of ``source``: its cached copy while that is current, else a
+    download (:meth:`keepout.sources.catalog.CatalogSource.fetch`).
 
     Raises
     ------
@@ -64,11 +49,12 @@ def load_catalog(source: CatalogSource, cache: Path | None) -> Catalog:
         As :func:`keepout.sources.celestrak.fetch_catalog` or
         :func:`keepout.sources.spacetrack.fetch_catalog`.
     """
-    from keepout.sources import celestrak, spacetrack
+    return CATALOG_SOURCES[source].fetch(cache)
 
-    if source is CatalogSource.SPACETRACK:
-        return spacetrack.fetch_catalog(cache=cache)
-    return celestrak.fetch_catalog(cache=cache)
+
+def _hours(seconds: float) -> str:
+    """A whole number of hours in words: ``an hour``, ``2 hours``."""
+    return "an hour" if seconds == HOUR else f"{seconds / HOUR:g} hours"
 
 
 def fetch_cara(*, cache_dir: CacheDir = None, as_json: JsonFlag = False) -> None:
@@ -118,17 +104,17 @@ def fetch_kelvins(*, cache_dir: CacheDir = None, as_json: JsonFlag = False) -> N
 
 def fetch_catalog(
     *,
-    source: SourceOption = CatalogSource.CELESTRAK,
+    source: SourceOption = DEFAULT_SOURCE,
     cache_dir: CacheDir = None,
     as_json: JsonFlag = False,
 ) -> None:
     """Download the GP element sets of every object in orbit, for keepout screen.
 
     From CelesTrak (default): its public groups, about 20 000 objects, no
-    account; a copy is reused for 2 hours (CelesTrak's update interval).
+    account; a copy is reused for {celestrak} (CelesTrak's update interval).
     From Space-Track: the full catalog, about 32 000 objects, with the
     account in SPACETRACK_IDENTITY and SPACETRACK_PASSWORD; a copy is
-    reused for an hour, and Space-Track is asked at most once an hour.
+    reused for {spacetrack}, and Space-Track is asked at most once {spacetrack}.
     The data is basic SSA data of USSPACECOM (18th Space Defense
     Squadron); cite it as such.
     """
@@ -139,8 +125,9 @@ def fetch_catalog(
         "duplicates": len(catalog.duplicates),
         "parts": [_part_json(part) for part in catalog.parts],
     }
-    parts = table(SOURCE_NAMES[source])
-    parts.add_column(PART_TITLES[source])
+    described = CATALOG_SOURCES[source]
+    parts = table(described.title)
+    parts.add_column(described.part_title)
     parts.add_column("Objects", justify="right")
     parts.add_column("Retrieved (UTC)")
     for part in catalog.parts:
@@ -153,6 +140,12 @@ def fetch_catalog(
         f"cached in {catalog.parts[0].retrieval.path.parent}",
         as_json=as_json,
     )
+
+
+# The reuse times in the help are the sources' own (none under python -OO).
+fetch_catalog.__doc__ = (fetch_catalog.__doc__ or "").format_map(
+    {name: _hours(source.reuse) for name, source in CATALOG_SOURCES.items()}
+)
 
 
 def fetch_cdm(*, cache_dir: CacheDir = None, as_json: JsonFlag = False) -> None:

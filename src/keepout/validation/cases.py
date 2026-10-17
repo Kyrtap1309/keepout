@@ -19,6 +19,7 @@ from keepout.conjunction import Conjunction
 from keepout.covariance import Covariance, make_covariance
 from keepout.errors import CaraFormatError
 from keepout.objects import ObjectState
+from keepout.pc.api import METHODS
 from keepout.pc.result import Method
 from keepout.sources import cara
 from keepout.sources.cara import Cell
@@ -79,7 +80,10 @@ NOMINAL_EPOCH: Final = Time("2000-01-01T00:00:00", scale="utc")
 sheets and CARA's inline unit-test cases): inertial vectors at TCA; no Pc
 depends on it."""
 
-TWO_D_METHODS: Final[tuple[Method, ...]] = ("foster", "elrod")
+TWO_D_METHODS: Final[tuple[Method, ...]] = tuple(
+    name for name, spec in METHODS.items() if spec.kind == "2d"
+)
+"""The 2-D methods (:data:`~keepout.pc.METHODS`), which the 2-D cases compare."""
 
 ALFANO: Final = "Alfano (2009)"
 ALFANO_3D: Final = "Alfano (2009), 3-D"
@@ -116,21 +120,14 @@ class MonteCarloSizing(TypedDict):
 class CaseOptions(TypedDict, total=False):
     """Options a case passes to :func:`~keepout.pc.compute_pc`.
 
-    ``window`` is passed to ``"hall3d"`` and ``"montecarlo"``, the others
-    to ``"montecarlo"`` only.
+    ``"hall3d"`` takes ``window``, ``"montecarlo"`` every one (see
+    :attr:`~keepout.pc.MethodSpec.options`).
     """
 
     window: tuple[float, float]
     samples: int
     seed: int
     confidence: float
-
-
-_ACCEPTED: Final[Mapping[Method, frozenset[str]]] = {
-    "hall3d": frozenset({"window"}),
-    "montecarlo": CaseOptions.__optional_keys__,
-}
-"""The :class:`CaseOptions` each method takes; the others take none."""
 
 
 @dataclass(frozen=True, eq=False, slots=True)
@@ -155,8 +152,8 @@ class ValidationCase:
         Value published with the test case (Alfano 2009), if any.
     options
         Passed to :func:`~keepout.pc.compute_pc`; each must be taken by
-        every method of the case (see :class:`CaseOptions`). Stored as a
-        copy.
+        every method of the case (its :attr:`~keepout.pc.MethodSpec.options`).
+        Stored as a copy.
     interval
         CARA's own confidence interval (Monte Carlo references), if any.
     informative
@@ -176,7 +173,7 @@ class ValidationCase:
 
     def __post_init__(self) -> None:
         for method in self.methods:
-            refused = self.options.keys() - _ACCEPTED.get(method, frozenset())
+            refused = self.options.keys() - METHODS[method].options
             if refused:
                 raise ValueError(
                     f"case {self.suite}/{self.case_id}: {method} takes no "
