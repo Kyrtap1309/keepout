@@ -19,6 +19,7 @@ from omm_builders import (
 )
 from sgp4 import omm as sgp4_omm
 
+from keepout.ccsds.keywords import parse_epoch
 from keepout.errors import OmmParseError
 from keepout.omm import Omm, celestrak
 from keepout.omm.celestrak import (
@@ -143,6 +144,22 @@ def test_space_track_json_is_read() -> None:
             csv_text([ISS]) + '"unterminated\n',
             r"invalid CSV: unexpected end of data \(line 3\)",
         ),
+        # A row before broken quoting is read, and refused, first.
+        (
+            csv_text([ISS, {**ISS, "BSTAR": "x"}]) + '"unterminated\n',
+            r"invalid number 'x' \(record 2, line 3, keyword BSTAR\)",
+        ),
+        # An invalid epoch is reported in its row, after an earlier row's error.
+        (
+            csv_text(
+                [
+                    {**ISS, "EPOCH": "2026-01-01T00:00:00.000000"},
+                    {**ISS, "INCLINATION": "x"},
+                    {**ISS, "EPOCH": "2026-02-30T00:00:00.000000"},
+                ]
+            ),
+            r"invalid number 'x' \(record 2, line 3, keyword INCLINATION\)",
+        ),
     ],
 )
 def test_invalid_csv_is_refused_with_its_place(text: str, message: str) -> None:
@@ -181,6 +198,37 @@ def test_invalid_csv_is_refused_with_its_place(text: str, message: str) -> None:
 def test_invalid_json_is_refused_with_its_place(text: str, message: str) -> None:
     with pytest.raises(OmmParseError, match=message):
         loads_json(text)
+
+
+def test_an_invalid_epoch_is_refused_with_its_place_among_valid_ones() -> None:
+    rows = [{**ISS, "EPOCH": f"2026-02-{day:02d}T00:00:00.000000"} for day in (1, 30)]
+    message = r"(?s)invalid CCSDS epoch .* \(record 2, keyword EPOCH\)"
+    with pytest.raises(OmmParseError, match=message):
+        loads_json(json_text(rows))
+    with pytest.raises(
+        OmmParseError, match=message.replace("record 2", "record 2, line 3")
+    ):
+        loads_csv(csv_text(rows))
+
+
+@settings(deadline=None, max_examples=50)
+@given(st.lists(records(), min_size=1, max_size=30))
+def test_epochs_read_from_a_catalog_are_those_parsed_one_by_one(
+    values: list[dict[str, str]],
+) -> None:
+    rows = [
+        {**row, "EPOCH": row["EPOCH"][: 20 + index % 8].removesuffix(".")}
+        for index, row in enumerate(values)
+    ]
+    for omms in (loads_csv(csv_text(rows)), loads_json(json_text(rows))):
+        for omm, row in zip(omms, rows, strict=True):
+            expected = parse_epoch(row["EPOCH"])
+            epoch = omm.epoch
+            assert (epoch.jd1, epoch.jd2) == (expected.jd1, expected.jd2)
+            assert (epoch.precision, epoch.format) == (
+                expected.precision,
+                expected.format,
+            )
 
 
 def test_writers_give_back_the_sample() -> None:

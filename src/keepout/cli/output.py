@@ -12,15 +12,17 @@ import enum
 import functools
 import json
 from collections.abc import Callable, Mapping, Sequence
-from typing import NoReturn, ParamSpec, TypeAlias, TypeVar
+from typing import TYPE_CHECKING, NoReturn, ParamSpec, TypeAlias, TypeVar
 
 import typer
-from astropy.time import Time
 from rich import box
 from rich.console import Console, RenderableType
 from rich.table import Table
 
 from keepout.errors import KeepoutError
+
+if TYPE_CHECKING:
+    from astropy.time import Time
 
 __all__ = [
     "ExitCode",

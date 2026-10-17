@@ -15,6 +15,11 @@ Every conversion accepts complex input, so :func:`complex_step` gives
 derivatives accurate to machine precision.
 """
 
+# The conversions are generic over a constrained TypeVar (real or complex
+# arrays). mypy checks each constraint in turn; pyright cannot follow NumPy's
+# overloads through one (it types ``chi * chi`` of float64 arrays as
+# complex), so the lines it misreads carry a pyright ignore.
+
 from __future__ import annotations
 
 import math
@@ -90,17 +95,17 @@ def _basis(chi: _Array, psi: _Array, fr: RetrogradeFactor) -> tuple[_Array, _Arr
     g = np.stack(
         [2.0 * fr * chi * psi, fr * (1.0 + chi * chi - psi * psi), 2.0 * psi], -1
     )
-    return f / d[..., None], g / d[..., None]
+    return f / d[..., None], g / d[..., None]  # pyright: ignore[reportReturnType]
 
 
 def _atan2(y: _Array, x: _Array) -> _Array:
     """``arctan2`` that also carries a complex-step derivative."""
     if not (np.iscomplexobj(y) or np.iscomplexobj(x)):
-        real: _Array = np.arctan2(y, x)
+        real: _Array = np.arctan2(y, x)  # pyright: ignore[reportAssignmentType]
         return real
-    y, x = np.asarray(y, complex), np.asarray(x, complex)
+    y, x = np.asarray(y, complex), np.asarray(x, complex)  # pyright: ignore[reportAssignmentType]
     angle = np.arctan2(y.real, x.real)
-    result: _Array = angle + 1j * (x.real * y.imag - y.real * x.imag) / (
+    result: _Array = angle + 1j * (x.real * y.imag - y.real * x.imag) / (  # pyright: ignore[reportAssignmentType]
         y.real**2 + x.real**2
     )
     return result
@@ -166,13 +171,13 @@ def to_equinoctial(state: _Array, fr: RetrogradeFactor, mu: float = EARTH_MU) ->
     ) / mu
     af, ag = np.sum(eccentricity * f, -1), np.sum(eccentricity * g, -1)
     big_x, big_y = np.sum(r * f, -1), np.sum(r * g, -1)
-    root: _Array = np.sqrt(1.0 - af * af - ag * ag)
+    root: _Array = np.sqrt(1.0 - af * af - ag * ag)  # pyright: ignore[reportAssignmentType]
     shape = _Shape.of(af, ag, root)
     sin_f = ag + (shape.c_ag * big_y - shape.cross * big_x) / (a * root)
     cos_f = af + (shape.c_af * big_x - shape.cross * big_y) / (a * root)
     longitude = _atan2(sin_f, cos_f)
     mean_longitude = longitude + ag * cos_f - af * sin_f
-    return np.stack([np.sqrt(mu / a**3), af, ag, chi, psi, mean_longitude], -1)
+    return np.stack([np.sqrt(mu / a**3), af, ag, chi, psi, mean_longitude], -1)  # pyright: ignore[reportReturnType]
 
 
 def to_cartesian(
@@ -202,15 +207,15 @@ def to_cartesian(
     """
     array = np.asarray(elements)
     n, af, ag, chi, psi, lam = (array[..., k] for k in range(6))
-    a = semi_major_axis(n, mu)
+    a = semi_major_axis(n, mu)  # pyright: ignore[reportArgumentType]
     shape = _Shape.of(af, ag)
-    f, g = _basis(chi, psi, fr)
-    return _state(n, a, af, ag, shape, _eccentric_longitude(lam, af, ag), f, g)
+    f, g = _basis(chi, psi, fr)  # pyright: ignore[reportArgumentType]
+    return _state(n, a, af, ag, shape, _eccentric_longitude(lam, af, ag), f, g)  # pyright: ignore[reportArgumentType]
 
 
 def semi_major_axis(n: _Number, mu: float = EARTH_MU) -> _Number:
     """Semi-major axis [m] of the mean motion ``n`` [rad/s] (Kepler's third law)."""
-    a: _Number = (mu / (n * n)) ** (1.0 / 3.0)
+    a: _Number = (mu / (n * n)) ** (1.0 / 3.0)  # pyright: ignore[reportAssignmentType]
     return a
 
 
@@ -228,9 +233,9 @@ class _Shape(NamedTuple, Generic[_Array]):
     def of(cls, af: _Array, ag: _Array, root: _Array | None = None) -> _Shape[_Array]:
         """The coefficients; ``root = sqrt(1 - af^2 - ag^2)`` if already known."""
         if root is None:
-            root = np.sqrt(1.0 - af * af - ag * ag)
-        b = 1.0 / (1.0 + root)
-        return cls(1.0 - ag * ag * b, 1.0 - af * af * b, af * ag * b)
+            root = np.sqrt(1.0 - af * af - ag * ag)  # pyright: ignore[reportAssignmentType]
+        b = 1.0 / (1.0 + root)  # pyright: ignore[reportOperatorIssue]
+        return cls(1.0 - ag * ag * b, 1.0 - af * af * b, af * ag * b)  # pyright: ignore[reportArgumentType]
 
 
 class _Apse(NamedTuple):
@@ -311,7 +316,7 @@ def _state(
     big_yd = rate * (shape.c_af * cos_f - shape.cross * sin_f)
     position = big_x[..., None] * f + big_y[..., None] * g
     velocity = big_xd[..., None] * f + big_yd[..., None] * g
-    return np.concatenate([position, velocity], -1)
+    return np.concatenate([position, velocity], -1)  # pyright: ignore[reportReturnType]
 
 
 class Orbits:
@@ -375,7 +380,7 @@ def propagate(elements: _Array, dt: npt.ArrayLike) -> _Array:
     """
     propagated = np.array(elements, dtype=np.result_type(np.asarray(elements), float))
     propagated[..., 5] = propagated[..., 5] + propagated[..., 0] * np.asarray(dt)
-    return propagated
+    return propagated  # pyright: ignore[reportReturnType]
 
 
 def wrap_angle(angle: _Real) -> _Real:

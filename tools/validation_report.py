@@ -366,7 +366,8 @@ def _suite_table(members: Sequence[Row]) -> list[str]:
                 ],
             )
         )
-    columns += [_method_columns(m) for m in dict.fromkeys(r.method for r in members)]
+    methods: dict[Method, None] = dict.fromkeys(r.method for r in members)
+    columns += [_method_columns(m) for m in methods]
     if any(c.paper is not None for c in every):
         columns.append(_Columns(("Alfano paper", "vs paper"), _paper_cells))
     informative = next((c.informative[0] for c in every if c.informative), None)

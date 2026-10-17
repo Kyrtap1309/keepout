@@ -78,6 +78,7 @@ nav:
       - Propagation: reference/propagation.md
       - CARA reference data: reference/cara.md
       - Kelvins data: reference/kelvins.md
+      - GP catalog: reference/catalog.md
       - CelesTrak data: reference/celestrak.md
       - Space-Track data: reference/spacetrack.md
       - Data cache: reference/cache.md

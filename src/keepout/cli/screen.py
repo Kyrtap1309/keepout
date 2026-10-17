@@ -5,13 +5,11 @@ from __future__ import annotations
 import time
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Annotated, TypeAlias
+from typing import TYPE_CHECKING, Annotated, TypeAlias
 
 import typer
-from astropy.time import Time
 
 from keepout._units import DAY
-from keepout.cdm import kvn
 from keepout.cli.events import (
     AssessedEvent,
     event_json,
@@ -27,11 +25,14 @@ from keepout.cli.options import (
     positive,
 )
 from keepout.cli.output import JsonValue, isot, plural, show, utc
-from keepout.omm import load
-from keepout.risk import Action
-from keepout.screening import ScreeningRole, SkippedObject
-from keepout.synthetic import Fleet, OperatorEvent, load_fleet
-from keepout.synthetic.operator import run
+
+# The library is imported in the command: keepout --help need not load the
+# numerical libraries.
+if TYPE_CHECKING:
+    from astropy.time import Time
+
+    from keepout.screening import SkippedObject
+    from keepout.synthetic import Fleet, OperatorEvent
 
 __all__ = ["parse_time", "screen_command"]
 
@@ -45,6 +46,8 @@ def parse_time(text: str) -> Time:
     ValueError
         If ``text`` is not such a time (Typer makes it a usage error).
     """
+    from astropy.time import Time
+
     try:
         return Time(text, scale="utc")
     except ValueError as exc:
@@ -68,11 +71,28 @@ Days: TypeAlias = Annotated[
 ]
 """``--days``: the length of the screening window."""
 
+
+def _checked_time(text: str | None) -> str | None:
+    """``--start`` as given, once :func:`parse_time` reads it.
+
+    Raises
+    ------
+    typer.BadParameter
+        If it does not: a usage error.
+    """
+    if text is not None:
+        try:
+            parse_time(text)
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc)) from exc
+    return text
+
+
 Start: TypeAlias = Annotated[
-    Time | None,
+    str | None,
     typer.Option(
         "--start",
-        parser=parse_time,
+        callback=_checked_time,
         metavar="TIME",
         help="Start of the window, ISO 8601 UTC (default: now).",
     ),
@@ -142,6 +162,15 @@ def screen_command(
         raise typer.BadParameter(
             "give either --catalog or --source, not both", param_hint="--source"
         )
+    from astropy.time import Time
+
+    from keepout.cdm import kvn
+    from keepout.omm import load
+    from keepout.risk import Action
+    from keepout.screening import ScreeningRole
+    from keepout.synthetic import load_fleet
+    from keepout.synthetic.operator import run
+
     satellites = load_fleet(fleet)
     if catalog is not None:
         omms = load(catalog)
@@ -150,7 +179,11 @@ def screen_command(
         chosen = source or CatalogSource.CELESTRAK
         omms = load_catalog(chosen, cache_dir).omms
         described = SOURCE_NAMES[chosen]
-    began = start or Time(int(time.time()), format="unix", scale="utc")
+    began = (
+        parse_time(start)
+        if start is not None
+        else Time(int(time.time()), format="unix", scale="utc")
+    )
     result = run(
         satellites,
         omms,

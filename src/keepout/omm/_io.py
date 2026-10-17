@@ -86,6 +86,7 @@ def parse_record(
     record: int | None = None,
     line: int | None = None,
     path: str | None = None,
+    epoch: Time | None = None,
 ) -> Omm:
     """The elements of one object from its keyword values (message text).
 
@@ -104,6 +105,11 @@ def parse_record(
         without a line of its own.
     path
         Element path of the object, likewise.
+    epoch
+        The ``EPOCH`` value, if the caller has parsed its text already (with
+        :func:`~keepout.ccsds.keywords.preparse_epochs`, as
+        :func:`~keepout.ccsds.keywords.parse_epoch` parses it); used when
+        the value has no unit.
 
     Raises
     ------
@@ -131,6 +137,9 @@ def parse_record(
         if keyword not in values:
             raise error("missing keyword", keyword)
         value = text_of(keyword)
+        if keyword == "EPOCH" and epoch is not None and value.unit is None:
+            parsed[keyword] = epoch
+            continue
         try:
             parsed[keyword] = parse_value(spec, value.text, value.unit)
         except ValueError as exc:

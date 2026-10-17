@@ -1,4 +1,5 @@
 import email
+import gzip
 import http.client
 import io
 import json
@@ -37,11 +38,10 @@ from keepout.errors import (
     SourceUnavailable,
 )
 from keepout.omm import deduplicate
-from keepout.sources.cache import read_copy
+from keepout.sources.cache import read_copy, save_copy
 from keepout.sources.spacetrack import (
     CATALOG,
     CLASS_INTERVALS,
-    GROUP,
     HIDDEN,
     IDENTITY_VARIABLE,
     LOGIN_URL,
@@ -310,15 +310,15 @@ def test_the_catalog_is_downloaded_read_and_cached(
     kept, dropped = deduplicate(SAMPLE)
     assert catalog.omms == tuple(sorted(kept, key=lambda omm: omm.catalog_number))
     assert catalog.duplicates == dropped
-    (group,) = catalog.groups
-    assert group.name == GROUP == "space-track"
-    assert group.omms == SAMPLE
-    path = tmp_path / "spacetrack" / "gp" / "catalog.json"
-    assert group.retrieval.path == path
-    assert group.retrieval.url == CATALOG.url
-    assert group.retrieval.retrieved.unix == START
-    assert group.retrieval.checked.unix == START
-    assert path.read_bytes() == GP
+    (part,) = catalog.parts
+    assert part.name == "gp"
+    assert part.omms == SAMPLE
+    path = tmp_path / "spacetrack" / "gp" / "catalog.json.gz"
+    assert part.retrieval.path == path
+    assert part.retrieval.url == CATALOG.url
+    assert part.retrieval.retrieved.unix == START
+    assert part.retrieval.checked.unix == START
+    assert gzip.decompress(path.read_bytes()) == GP
     cached = read_copy(path, CATALOG.url)
     assert cached is not None
     assert cached.meta.retrieved == START
@@ -362,7 +362,7 @@ def test_an_old_copy_is_downloaded_again(tmp_path: Path, clock: Clock) -> None:
         clock.now += HOUR
         catalog = client.fetch_catalog()
     assert server.calls == ["login", CATALOG.url, CATALOG.url, "logout"]
-    assert catalog.groups[0].omms == SAMPLE[:2]
+    assert catalog.parts[0].omms == SAMPLE[:2]
     assert ledger(tmp_path) == {"format": 1, "queried": {"gp": START + HOUR}}
 
 
@@ -371,7 +371,7 @@ def test_a_class_asked_for_within_its_interval_is_refused_offline(
 ) -> None:
     server = FakeSpaceTrack({CATALOG.url: GP})
     fetch_catalog(cache=tmp_path, credentials=CREDENTIALS, transport=server, now=clock)
-    (tmp_path / "spacetrack" / "gp" / "catalog.json").unlink()
+    (tmp_path / "spacetrack" / "gp" / "catalog.json.gz").unlink()
     clock.now += 20 * 60.0
     with pytest.raises(RateLimited) as caught:
         fetch_catalog(
@@ -469,7 +469,7 @@ def test_an_expired_session_is_renewed_once(tmp_path: Path, clock: Clock) -> Non
         cache=tmp_path, credentials=CREDENTIALS, transport=server, now=clock
     )
     assert server.calls == ["login", CATALOG.url, "login", CATALOG.url, "logout"]
-    assert catalog.groups[0].omms == SAMPLE
+    assert catalog.parts[0].omms == SAMPLE
 
 
 def test_a_second_401_is_an_auth_error(tmp_path: Path, clock: Clock) -> None:
@@ -571,7 +571,7 @@ def test_a_cached_copy_that_cannot_be_read_is_downloaded_again(
         clock.now += HOUR
         catalog = client.fetch_catalog(max_age=2 * HOUR)
     assert server.calls == ["login", CATALOG.url, CATALOG.url, "logout"]
-    assert catalog.groups[0].omms == SAMPLE
+    assert catalog.parts[0].omms == SAMPLE
 
 
 @pytest.mark.parametrize(
@@ -746,7 +746,7 @@ def test_a_record_written_during_the_login_is_kept(
         "format": 1,
         "queried": {"cdm_public": other, "gp": START + 30.0},
     }
-    assert catalog.groups[0].retrieval.retrieved.unix == START + 30.0
+    assert catalog.parts[0].retrieval.retrieved.unix == START + 30.0
 
 
 def test_a_query_of_the_class_recorded_during_the_login_is_refused(
@@ -870,6 +870,45 @@ def test_a_transport_failure_is_source_unavailable(failure: Exception) -> None:
     transport = UrllibTransport(handlers=[FakeHttps({CATALOG.url: failure})])
     with pytest.raises(SourceUnavailable, match=f"cannot reach {CATALOG.url}: "):
         transport(Request("GET", CATALOG.url))
+
+
+def test_a_cached_copy_that_is_not_gzip_is_downloaded_again(
+    tmp_path: Path, clock: Clock
+) -> None:
+    # E.g. a copy an older keepout kept uncompressed under this name.
+    target = tmp_path / "spacetrack" / "gp" / "catalog.json.gz"
+    save_copy(target, CATALOG.url, GP, clock.now)
+    server = FakeSpaceTrack({CATALOG.url: GP})
+    catalog = fetch_catalog(
+        cache=tmp_path, credentials=CREDENTIALS, transport=server, now=clock
+    )
+    assert server.calls == ["login", CATALOG.url, "logout"]
+    assert catalog.parts[0].omms == SAMPLE
+    assert gzip.decompress(target.read_bytes()) == GP
+
+
+@pytest.mark.parametrize("status", [200, 500])
+def test_the_transport_asks_for_gzip_and_decompresses_it(status: int) -> None:
+    body = gzip.compress(GP, mtime=0)
+    handler = FakeHttps({CATALOG.url: (status, body, "Content-Encoding: gzip\n")})
+    transport = UrllibTransport(handlers=[handler])
+    assert transport(Request("GET", CATALOG.url)) == Response(status, GP)
+    ((_, _, _, headers),) = handler.sent
+    assert headers["Accept-encoding"] == "gzip"
+
+
+def test_an_answer_sent_plain_is_kept_as_it_is() -> None:
+    handler = FakeHttps({CATALOG.url: (200, GP, "")})
+    assert UrllibTransport(handlers=[handler])(Request("GET", CATALOG.url)) == (
+        Response(200, GP)
+    )
+
+
+def test_a_gzipped_answer_cut_off_is_source_unavailable() -> None:
+    cut = gzip.compress(GP, mtime=0)[:20]
+    handler = FakeHttps({CATALOG.url: (200, cut, "Content-Encoding: gzip\n")})
+    with pytest.raises(SourceUnavailable, match="does not decompress"):
+        UrllibTransport(handlers=[handler])(Request("GET", CATALOG.url))
 
 
 def test_the_transport_sends_only_https() -> None:

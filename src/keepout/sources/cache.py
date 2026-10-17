@@ -58,6 +58,7 @@ __all__ = [
     "meta_path",
     "network_errors",
     "read_copy",
+    "save_copy",
     "store",
     "store_bytes",
     "write_meta",
@@ -420,6 +421,31 @@ def read_copy(target: Path, url: str) -> CachedCopy | None:
 def _is_time(value: object) -> TypeGuard[float]:
     """Whether ``value`` is a Unix time as :func:`write_meta` writes one."""
     return isinstance(value, float) and math.isfinite(value)
+
+
+def save_copy(target: Path, url: str, data: bytes, now: float) -> CopyMeta:
+    """Store a download at ``target`` with its metadata, both atomically.
+
+    Parameters
+    ----------
+    target
+        The cached copy.
+    url
+        Where ``data`` was downloaded from.
+    data
+        The body.
+    now
+        When it was received, Unix time [s]: its retrieval and check time.
+
+    Returns
+    -------
+    CopyMeta
+        The metadata written beside it.
+    """
+    digest = store_bytes(target, data)
+    meta = CopyMeta(url=url, sha256=digest, retrieved=now, checked=now)
+    write_meta(target, meta)
+    return meta
 
 
 def write_meta(target: Path, meta: CopyMeta) -> None:

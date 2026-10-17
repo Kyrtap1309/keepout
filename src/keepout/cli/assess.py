@@ -5,11 +5,10 @@ from __future__ import annotations
 import enum
 from collections import Counter
 from pathlib import Path
-from typing import Annotated, TypeAlias, TypeGuard, get_args
+from typing import TYPE_CHECKING, Annotated, TypeAlias, TypeGuard, get_args
 
 import typer
 
-from keepout import cdm
 from keepout.cli.events import (
     AssessedEvent,
     event_json,
@@ -19,8 +18,11 @@ from keepout.cli.events import (
 from keepout.cli.options import JsonFlag, positive
 from keepout.cli.output import ExitCode, JsonValue, fail, plural, show
 from keepout.errors import KeepoutError
-from keepout.pc import Method, MethodChoice
-from keepout.risk import Action, assess, group_events
+
+# The library is imported where it is used: keepout --help need not load the
+# numerical libraries.
+if TYPE_CHECKING:
+    from keepout.pc import MethodChoice
 
 __all__ = ["PcMethod", "assess_command", "method_choice"]
 
@@ -39,6 +41,8 @@ class PcMethod(enum.StrEnum):
 
 
 def _is_method(name: str) -> TypeGuard[MethodChoice]:
+    from keepout.pc import Method
+
     return name == "auto" or name in get_args(Method)
 
 
@@ -102,6 +106,9 @@ def assess_command(
     days of TCA). Exits with status 3 if at least one event's action is to
     manoeuvre.
     """
+    from keepout import cdm
+    from keepout.risk import Action, assess, group_events
+
     messages = []
     for path in files:
         try:

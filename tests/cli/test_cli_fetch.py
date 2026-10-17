@@ -173,7 +173,7 @@ def test_fetch_catalog_downloads_every_celestrak_group(
     assert "CelesTrak public GP groups" in result.stdout
     assert result.stdout.endswith(
         f"{FIXTURE_OBJECTS} objects, one element set each (0 older sets of "
-        "objects in several groups left out); cached in "
+        "the same objects left out); cached in "
         f"{tmp_path / 'celestrak' / 'gp'}\n"
     )
 
@@ -200,7 +200,7 @@ def test_fetch_catalog_as_json_lists_each_group_and_its_copy(
     assert payload["source"] == "celestrak"
     assert payload["objects"] == FIXTURE_OBJECTS
     assert payload["duplicates"] == 0
-    groups = {group["name"]: group for group in payload["groups"]}
+    groups = {part["name"]: part for part in payload["parts"]}
     assert list(groups) == list(celestrak.PUBLIC_GROUPS)
     active = groups["active"]
     assert active["objects"] == FIXTURE_OBJECTS
@@ -233,9 +233,9 @@ def test_fetch_catalog_from_space_track(
     payload = json.loads(result.stdout)
     assert payload["source"] == "spacetrack"
     assert payload["objects"] == FIXTURE_OBJECTS
-    (group,) = payload["groups"]
-    assert group["name"] == spacetrack.GROUP
-    assert group["path"] == str(tmp_path / "spacetrack" / "gp" / "catalog.json")
+    (part,) = payload["parts"]
+    assert part["name"] == "gp"
+    assert part["path"] == str(tmp_path / "spacetrack" / "gp" / "catalog.json.gz")
     again = keepout(*args, env=NO_SPACE_TRACK_ENV)
     assert again.exit_code == ExitCode.OK
     assert "Space-Track full GP catalog" in again.stdout

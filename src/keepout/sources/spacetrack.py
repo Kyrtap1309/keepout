@@ -7,7 +7,7 @@ CelesTrak's public groups (:mod:`keepout.sources.celestrak`). It needs a
 free account. :func:`fetch_catalog` downloads the catalog with the query
 Space-Track recommends for it (:data:`CATALOG`: element sets of objects not
 decayed, with an epoch in the last 10 days, as OMM JSON) and gives the same
-:class:`~keepout.sources.celestrak.Catalog` as CelesTrak's client.
+:class:`~keepout.sources.catalog.Catalog` as CelesTrak's client.
 :func:`fetch_public_cdms` downloads the public summaries of the conjunction
 data messages of approaches still to come (``cdm_public``, :data:`PUBLIC_CDMS`)
 as :class:`PublicCdm` rows. :class:`SpaceTrackClient` is the session
@@ -52,8 +52,10 @@ the client enforces the published limits itself:
 Space-Track asks that the hourly ``gp`` query is sent at a random minute,
 not at the top or bottom of the hour; a scheduled job should pick one.
 
-Cached copies live under ``<cache>/spacetrack/<class>/`` (the catalog in
-``gp/catalog.json``), each with a ``.meta.json`` file as CelesTrak's
+Answers are asked for gzipped (``Accept-Encoding: gzip``) and cached
+gzipped under ``<cache>/spacetrack/<class>/`` (the catalog in
+``gp/catalog.json.gz``: about 5 MB instead of 36 MB of JSON), each with a
+``.meta.json`` file as CelesTrak's
 (:func:`~keepout.sources.cache.read_copy`).
 
 GP element sets are basic space situational awareness data of USSPACECOM
@@ -65,6 +67,8 @@ allows to redistribute with citation; cite them as such. Other classes
 from __future__ import annotations
 
 import contextlib
+import email.message
+import gzip
 import http.client
 import http.cookiejar
 import json
@@ -75,6 +79,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zlib
 from collections import deque
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
@@ -95,24 +100,22 @@ from keepout.errors import (
     SourceUnavailable,
 )
 from keepout.omm.celestrak import loads_json
-from keepout.omm.model import Omm, deduplicate
+from keepout.omm.model import Omm
 from keepout.sources.cache import (
     DOWNLOAD_TIMEOUT,
-    CopyMeta,
     cache_dir,
     http_request,
     network_errors,
     read_copy,
+    save_copy,
     store_bytes,
-    write_meta,
 )
-from keepout.sources.celestrak import Catalog, GpGroup, Retrieval
+from keepout.sources.catalog import Catalog, CatalogPart, Retrieval
 
 __all__ = [
     "BASE_URL",
     "CATALOG",
     "CLASS_INTERVALS",
-    "GROUP",
     "HIDDEN",
     "IDENTITY_VARIABLE",
     "LOGIN_URL",
@@ -175,10 +178,6 @@ CLASS_INTERVALS: Final[Mapping[RequestClass, float]] = MappingProxyType(
 """Least seconds between two queries of each request class, as Space-Track
 publishes them: ``gp`` once an hour, ``cdm_public`` (every public CDM) once
 every 8 hours. Only these classes can be queried."""
-
-GROUP: Final = "space-track"
-"""The name of the one :class:`~keepout.sources.celestrak.GpGroup` of a
-catalog from Space-Track."""
 
 HIDDEN: Final = "<hidden>"
 """What stands for a credential in text shown to the user."""
@@ -405,6 +404,7 @@ class Transport(Protocol):
 
     def __call__(self, request: Request, /) -> Response:
         """Send ``request`` and return the answer."""
+        ...
 
 
 class UrllibTransport:
@@ -443,22 +443,24 @@ class UrllibTransport:
         SourceUnavailable
             If no answer comes (network or protocol error, timeout).
         """
-        form = request.form is not None
+        headers = {"Accept-Encoding": "gzip"}
+        if request.form is not None:
+            headers["Content-Type"] = "application/x-www-form-urlencoded"
         prepared = http_request(
             request.url,
             schemes=("https",),
             data=request.form,
             method=request.method,
-            headers=(
-                {"Content-Type": "application/x-www-form-urlencoded"} if form else None
-            ),
+            headers=headers,
         )
         with network_errors(f"cannot reach {request.url}"):
             try:
                 with self._opener.open(prepared, timeout=self.timeout) as answer:
-                    return Response(answer.status, answer.read())
+                    body = _decoded(request.url, answer.read(), answer.headers)
+                    return Response(answer.status, body)
             except urllib.error.HTTPError as exc:
-                return Response(exc.code, _error_body(exc))
+                body = _decoded(request.url, _error_body(exc), exc.headers)
+                return Response(exc.code, body)
 
 
 class Throttle:
@@ -634,14 +636,14 @@ class SpaceTrackClient:
                 f"one {query.request_class} query per {interval:g} s), got {max_age}"
             )
         url = query.url
-        target = self._root / query.request_class / f"{query.name}.json"
+        target = self._root / query.request_class / f"{query.name}.json.gz"
         now = self._now()
         cached = read_copy(target, url)
         if cached is not None and 0.0 <= now - cached.meta.retrieved < max_age:
-            try:
-                return read(cached.data), _retrieval(target, cached.meta)
-            except SourceFormatError:
-                pass
+            data = _gunzip(cached.data)
+            if data is not None:
+                with contextlib.suppress(SourceFormatError):
+                    return read(data), Retrieval.of(target, cached.meta)
         self._check_interval(query, self._read_ledger(), now)
         self._check_running()
         if not self._logged_in:
@@ -654,10 +656,9 @@ class SpaceTrackClient:
         self._write_ledger({**ledger, query.request_class: now})
         data = self._query(url)
         value = read(data)
-        digest = store_bytes(target, data)
-        meta = CopyMeta(url=url, sha256=digest, retrieved=now, checked=now)
-        write_meta(target, meta)
-        return value, _retrieval(target, meta)
+        # Kept compressed: the full catalog is 36 MB of JSON, 5 MB gzipped.
+        stored = gzip.compress(data, compresslevel=6, mtime=0)
+        return value, Retrieval.of(target, save_copy(target, url, stored, now))
 
     def fetch_catalog(self, *, max_age: float | None = None) -> Catalog:
         """The full GP catalog (:data:`CATALOG`), from the cache or Space-Track.
@@ -671,8 +672,8 @@ class SpaceTrackClient:
         Returns
         -------
         Catalog
-            The newest element set of each object, by catalog number, in one
-            group named :data:`GROUP`.
+            The newest element set of each object, by catalog number, from
+            one part named after the query class (``gp``).
 
         Raises
         ------
@@ -680,9 +681,7 @@ class SpaceTrackClient:
             As :meth:`fetch`.
         """
         omms, retrieval = self.fetch(CATALOG, read_catalog, max_age=max_age)
-        kept, dropped = deduplicate(omms)
-        ordered = tuple(sorted(kept, key=lambda omm: omm.catalog_number))
-        return Catalog(ordered, dropped, (GpGroup(GROUP, omms, retrieval),))
+        return Catalog.of((CatalogPart(CATALOG.request_class, omms, retrieval),))
 
     def fetch_public_cdms(self, *, max_age: float | None = None) -> PublicCdms:
         """The public CDM summaries of the approaches still to come
@@ -1201,13 +1200,29 @@ def _login_refusal(body: bytes) -> str | None:
     return None
 
 
-def _retrieval(target: Path, meta: CopyMeta) -> Retrieval:
-    return Retrieval(
-        url=meta.url,
-        path=target,
-        retrieved=Time(meta.retrieved, format="unix", scale="utc"),
-        checked=Time(meta.checked, format="unix", scale="utc"),
-    )
+def _gunzip(data: bytes) -> bytes | None:
+    """``data`` decompressed, or ``None`` if it is not gzip."""
+    try:
+        return gzip.decompress(data)
+    except (OSError, EOFError, zlib.error):
+        return None
+
+
+def _decoded(url: str, body: bytes, headers: email.message.Message) -> bytes:
+    """``body`` as sent: decompressed if the server gzipped it
+    (``Content-Encoding: gzip``, asked for by ``Accept-Encoding``).
+
+    Raises
+    ------
+    SourceUnavailable
+        If a gzipped body does not decompress (cut off on the way).
+    """
+    if headers.get("Content-Encoding", "").strip().lower() != "gzip":
+        return body
+    data = _gunzip(body)
+    if data is None:
+        raise SourceUnavailable(f"{url}: the gzipped answer does not decompress")
+    return data
 
 
 def _error_body(error: urllib.error.HTTPError) -> bytes:

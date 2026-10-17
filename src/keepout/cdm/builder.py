@@ -176,14 +176,17 @@ class RtnSemiAxes(Protocol):
     @property
     def radial(self) -> float:
         """Semi-axis along R [m]."""
+        ...
 
     @property
     def transverse(self) -> float:
         """Semi-axis along T [m]."""
+        ...
 
     @property
     def normal(self) -> float:
         """Semi-axis along N [m]."""
+        ...
 
 
 def _with_precision(time: Time, precision: int) -> Time:

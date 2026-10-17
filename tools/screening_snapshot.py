@@ -94,11 +94,11 @@ from keepout.omm import Omm, load
 from keepout.omm.celestrak import dumps_csv, loads_csv
 from keepout.screening.volume import SFS_DEEP_SPACE_PERIOD, SFS_ECCENTRICITY
 from keepout.sources.cache import http_download, store_bytes
+from keepout.sources.catalog import Catalog
 from keepout.sources.celestrak import (
     GP_URL,
     PUBLIC_GROUPS,
     SOCRATES_URL,
-    Catalog,
     Downloader,
     SocratesReport,
     fetch_catalog,
@@ -623,7 +623,7 @@ def inputs_from_raw(raw: Path) -> Inputs:
         raise ValueError("the catalog does not read back unchanged from CSV")
     return Inputs(
         downloads=tuple(RawBodies(raw, None).bodies.values()),
-        group_rows={group.name: len(group.omms) for group in catalog.groups},
+        group_rows={part.name: len(part.omms) for part in catalog.parts},
         duplicates=len(catalog.duplicates),
         omms=catalog.omms,
         socrates=report.text,
@@ -774,7 +774,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "download":
         catalog, report = fetch(args.raw, http_download)
         print(
-            f"saved {len(catalog.groups) + 1} bodies in {args.raw}: "
+            f"saved {len(catalog.parts) + 1} bodies in {args.raw}: "
             f"{len(catalog.omms)} objects, "
             f"{len(report.approaches())} SOCRATES approaches"
         )

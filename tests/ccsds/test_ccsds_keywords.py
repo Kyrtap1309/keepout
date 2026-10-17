@@ -14,7 +14,9 @@ from keepout.ccsds.keywords import (
     format_value,
     normalize_unit,
     parse_epoch,
+    parse_epochs,
     parse_value,
+    preparse_epochs,
 )
 from keepout.cdm.keywords import SEGMENT
 
@@ -201,7 +203,9 @@ def test_a_time_rounded_past_the_end_of_a_step_day_is_the_next_day(
 
 
 _STEPS = "0.005 -0.05 0.1 0.1 0.1 0.1 0.1 0.1 0.1 -0.1 0.107758"
-UTC_STEPS = dict(zip(UTC_STEP_DAYS, map(Decimal, _STEPS.split()), strict=True))
+UTC_STEPS: dict[str, Decimal] = dict(
+    zip(UTC_STEP_DAYS, map(Decimal, _STEPS.split()), strict=True)
+)
 """Each step [s], from the TAI-UTC table (USNO tai-utc.dat), as ERFA has it."""
 
 
@@ -326,3 +330,121 @@ def test_format_value_refuses_a_value_of_another_kind(keyword: str, value: str) 
 )
 def test_ccsds_real_forms_are_accepted(text: str, value: float) -> None:
     assert parse_value(SEGMENT["WEIGHTED_RMS"], text, None) == value
+
+
+def _epoch_outcome(text: str) -> tuple[object, ...]:
+    """What parse_epoch makes of a text: the exact Time, or its error."""
+    try:
+        epoch = parse_epoch(text)
+    except ValueError as exc:
+        return ("error", str(exc))
+    return _time_state(epoch)
+
+
+def _time_state(epoch: Time) -> tuple[object, ...]:
+    return (
+        float(epoch.jd1),
+        float(epoch.jd2),
+        epoch.scale,
+        epoch.format,
+        epoch.precision,
+        epoch.isscalar,
+    )
+
+
+_LEAP_SECOND_DAYS = ("2016-12-31", "2016-366", "2015-06-30", "1972-06-30", "1990-365")
+_STEP_DAYS = ("1964-12-31", "1968-01-31", "1961-07-31", "1971-12-31", "1959-12-31")
+
+
+@st.composite
+def _epoch_texts(draw: st.DrawFn) -> str:
+    """CCSDS-like epochs, valid and not: any field may be out of range."""
+    if draw(st.integers(0, 9)) == 0:
+        return draw(st.text(max_size=30))
+    if draw(st.booleans()):
+        date = draw(st.sampled_from(_LEAP_SECOND_DAYS + _STEP_DAYS))
+    else:
+        year = draw(
+            st.one_of(
+                st.integers(1957, 2040),
+                st.sampled_from([0, 999, 1000, 2100, 9999]),
+            )
+        )
+        if draw(st.booleans()):
+            date = f"{year:04d}-{draw(st.integers(0, 367)):03d}"
+        else:
+            month, day = draw(st.integers(0, 13)), draw(st.integers(0, 32))
+            date = f"{year:04d}-{month:02d}-{day:02d}"
+    hour = draw(st.one_of(st.integers(0, 23), st.just(24)))
+    minute = draw(st.one_of(st.integers(0, 59), st.just(60)))
+    second = draw(st.one_of(st.integers(0, 59), st.sampled_from([59, 60, 61])))
+    fraction = draw(st.text("0123456789", max_size=12))
+    if draw(st.integers(0, 3)) == 0:
+        fraction = draw(st.sampled_from(["9" * 10, "9" * 9, "0" * 9, "5"]))
+    text = f"{date}T{hour:02d}:{minute:02d}:{second:02d}"
+    text += f".{fraction}" if fraction else ""
+    text += draw(st.sampled_from(["", "Z", " ", "z"]))
+    return draw(st.sampled_from(["", " "])) + text
+
+
+@settings(deadline=None, max_examples=300)
+@given(st.lists(_epoch_texts(), max_size=40))
+def test_epochs_parsed_together_are_those_parsed_one_by_one(texts: list[str]) -> None:
+    expected = [_epoch_outcome(text) for text in texts]
+    for text, epoch, outcome in zip(
+        texts, preparse_epochs(texts), expected, strict=True
+    ):
+        if epoch is not None:
+            assert _time_state(epoch) == outcome, text
+    errors = [outcome for outcome in expected if outcome[0] == "error"]
+    if errors:
+        with pytest.raises(ValueError, match="invalid CCSDS epoch") as caught:
+            parse_epochs(texts)
+        assert ("error", str(caught.value)) == errors[0]
+    else:
+        assert [_time_state(epoch) for epoch in parse_epochs(texts)] == expected
+
+
+@pytest.mark.parametrize(
+    "texts",
+    [
+        # Leap seconds, day of year, Z, and every number of fraction digits.
+        ["2016-12-31T23:59:60.5", "2016-366T23:59:60Z", "2016-366T12:00:00"]
+        + [f"2026-02-28T23:59:59{'.' + '7' * n if n else ''}" for n in range(10)],
+        # A day 30 of February among valid epochs of the same form.
+        ["2026-02-27T00:00:00.123456", "2026-02-30T00:00:00.123456"],
+        # Rounded past the end of its minute; non-ASCII digits.
+        ["2026-01-01T00:00:59.9999999999", "\u0662026-01-01T00:00:00"],
+        # Years outside ERFA's leap-second table, and before 1972.
+        ["1955-01-01T00:00:00.5", "2035-06-30T12:00:00", "1964-12-31T23:59:60.05"],
+    ],
+)
+def test_unusual_epochs_parsed_together_are_those_parsed_one_by_one(
+    texts: list[str],
+) -> None:
+    for text, epoch in zip(texts, preparse_epochs(texts), strict=True):
+        if epoch is not None:
+            assert _time_state(epoch) == _epoch_outcome(text), text
+
+
+def test_common_epochs_are_parsed_together_as_separate_times() -> None:
+    texts = ["2026-10-17T12:00:00.123456", "2026-290T12:00:00.123", "2026-10-17T00:00"]
+    first, second, third = preparse_epochs(texts)
+    assert first is not None
+    assert second is not None
+    assert third is None
+    assert (first.isscalar, first.precision, first.format) == (True, 6, "isot")
+    assert (second.isscalar, second.precision, second.format) == (True, 3, "yday")
+
+
+def test_epochs_parsed_together_are_independent_times() -> None:
+    first, second = preparse_epochs(["2026-01-01T00:00:00.5", "2026-01-02T00:00:00.5"])
+    assert first is not None
+    assert second is not None
+    first.precision = 3
+    assert second.precision == 1
+
+
+def test_parse_epochs_raises_the_first_invalid_epochs_error() -> None:
+    with pytest.raises(ValueError, match="'2026-02-30T00:00:00'"):
+        parse_epochs(["2026-01-01T00:00:00", "2026-02-30T00:00:00", "never"])

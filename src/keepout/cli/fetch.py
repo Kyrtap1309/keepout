@@ -6,15 +6,18 @@ import dataclasses
 from collections.abc import Mapping
 from pathlib import Path
 from types import MappingProxyType
-from typing import Annotated, Final, TypeAlias
+from typing import TYPE_CHECKING, Annotated, Final, TypeAlias
 
 import typer
 
 from keepout.cli.options import CacheDir, CatalogSource, JsonFlag
 from keepout.cli.output import JsonValue, isot, minute, pc_text, show, table, utc
-from keepout.sources import cara, celestrak, kelvins, spacetrack
-from keepout.sources.celestrak import Catalog, GpGroup, Retrieval
-from keepout.sources.spacetrack import PublicCdm, PublicCdmObject
+
+# The sources are imported in the commands: keepout --help need not load
+# the numerical libraries.
+if TYPE_CHECKING:
+    from keepout.sources.catalog import Catalog, CatalogPart, Retrieval
+    from keepout.sources.spacetrack import PublicCdm, PublicCdmObject
 
 __all__ = [
     "SOURCE_NAMES",
@@ -32,6 +35,11 @@ SOURCE_NAMES: Final[Mapping[CatalogSource, str]] = MappingProxyType(
     }
 )
 """Each catalog source as the commands name it."""
+
+PART_TITLES: Final[Mapping[CatalogSource, str]] = MappingProxyType(
+    {CatalogSource.CELESTRAK: "Group", CatalogSource.SPACETRACK: "Query"}
+)
+"""What one download of each source's catalog is (a table column)."""
 
 SourceOption: TypeAlias = Annotated[
     CatalogSource,
@@ -56,6 +64,8 @@ def load_catalog(source: CatalogSource, cache: Path | None) -> Catalog:
         As :func:`keepout.sources.celestrak.fetch_catalog` or
         :func:`keepout.sources.spacetrack.fetch_catalog`.
     """
+    from keepout.sources import celestrak, spacetrack
+
     if source is CatalogSource.SPACETRACK:
         return spacetrack.fetch_catalog(cache=cache)
     return celestrak.fetch_catalog(cache=cache)
@@ -67,6 +77,8 @@ def fetch_cara(*, cache_dir: CacheDir = None, as_json: JsonFlag = False) -> None
     Files already in the cache with the right digest are not downloaded
     again. keepout validate uses them.
     """
+    from keepout.sources import cara
+
     cara.prefetch(cara.MANIFEST, cache=cache_dir)
     folder = cara.commit_dir(cache_dir)
     payload: dict[str, JsonValue] = {
@@ -89,6 +101,8 @@ def fetch_kelvins(*, cache_dir: CacheDir = None, as_json: JsonFlag = False) -> N
     Keeps only the raw table, verified by SHA-256; nothing is downloaded if
     it is already in the cache.
     """
+    from keepout.sources import kelvins
+
     path = kelvins.fetch_raw(cache=cache_dir)
     payload: dict[str, JsonValue] = {
         "source": "kelvins",
@@ -123,20 +137,20 @@ def fetch_catalog(
         "source": str(source),
         "objects": len(catalog.omms),
         "duplicates": len(catalog.duplicates),
-        "groups": [_group_json(group) for group in catalog.groups],
+        "parts": [_part_json(part) for part in catalog.parts],
     }
-    groups = table(SOURCE_NAMES[source])
-    groups.add_column("Group")
-    groups.add_column("Objects", justify="right")
-    groups.add_column("Retrieved (UTC)")
-    for group in catalog.groups:
-        groups.add_row(group.name, str(len(group.omms)), utc(group.retrieval.retrieved))
+    parts = table(SOURCE_NAMES[source])
+    parts.add_column(PART_TITLES[source])
+    parts.add_column("Objects", justify="right")
+    parts.add_column("Retrieved (UTC)")
+    for part in catalog.parts:
+        parts.add_row(part.name, str(len(part.omms)), utc(part.retrieval.retrieved))
     show(
         payload,
-        groups,
+        parts,
         f"{len(catalog.omms)} objects, one element set each "
-        f"({len(catalog.duplicates)} older sets of objects in several groups "
-        f"left out); cached in {catalog.groups[0].retrieval.path.parent}",
+        f"({len(catalog.duplicates)} older sets of the same objects left out); "
+        f"cached in {catalog.parts[0].retrieval.path.parent}",
         as_json=as_json,
     )
 
@@ -150,6 +164,8 @@ def fetch_cdm(*, cache_dir: CacheDir = None, as_json: JsonFlag = False) -> None:
     but no states or covariances, so keepout assess cannot read them. They
     may not be redistributed without Space-Track's approval.
     """
+    from keepout.sources import spacetrack
+
     public = spacetrack.fetch_public_cdms(cache=cache_dir)
     rows = sorted(public.cdms, key=lambda cdm: (cdm.tca.jd1, cdm.tca.jd2, cdm.cdm_id))
     payload: dict[str, JsonValue] = {
@@ -189,11 +205,11 @@ def _retrieval_json(retrieval: Retrieval) -> dict[str, JsonValue]:
     }
 
 
-def _group_json(group: GpGroup) -> dict[str, JsonValue]:
+def _part_json(part: CatalogPart) -> dict[str, JsonValue]:
     return {
-        "name": group.name,
-        "objects": len(group.omms),
-        **_retrieval_json(group.retrieval),
+        "name": part.name,
+        "objects": len(part.omms),
+        **_retrieval_json(part.retrieval),
     }
 
 

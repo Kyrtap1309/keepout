@@ -76,7 +76,7 @@ from keepout.omm.celestrak import dumps_csv, loads_csv
 from keepout.screening import ScreeningVolume, screen
 from keepout.screening.result import CloseApproach
 from keepout.sources.cache import store_bytes
-from keepout.sources.celestrak import Catalog
+from keepout.sources.catalog import Catalog
 from keepout.sources.spacetrack import (
     CATALOG,
     HIDDEN,
@@ -514,7 +514,7 @@ def inputs_from_raw(raw: Path) -> Inputs:
     (gp,) = (saved for saved in read_index(raw) if saved.url == CATALOG.url)
     return Inputs(
         download=gp,
-        rows=len(catalog.groups[0].omms),
+        rows=len(catalog.parts[0].omms),
         duplicates=len(catalog.duplicates),
         omms=catalog.omms,
     )

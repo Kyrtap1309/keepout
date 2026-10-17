@@ -109,7 +109,9 @@ def evaluate(
         If ``workers`` is below 1.
     """
     count = resolve_workers(workers)
-    tasks = [(case, method) for case in cases for method in case.methods]
+    tasks: list[tuple[ValidationCase, Method]] = [
+        (case, method) for case in cases for method in case.methods
+    ]
     if count == 1 or len(tasks) < 2:
         return [_outcome(task) for task in tasks]
     with process_pool(count) as pool:

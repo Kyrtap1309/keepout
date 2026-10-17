@@ -7,7 +7,8 @@ from astropy.time import Time
 from celestrak_builders import SAMPLE, SOCRATES_HEADER, socrates_row
 
 from keepout.errors import SourceFormatError
-from keepout.sources.celestrak import Retrieval, SocratesReport
+from keepout.sources.catalog import Retrieval
+from keepout.sources.celestrak import SocratesReport
 from keepout.sources.socrates import COLUMNS, epoch_matches, read_socrates
 
 CALSPHERE, ISS, _, _, _, _, STARLINK, DRAGON = SAMPLE

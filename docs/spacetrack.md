@@ -46,6 +46,19 @@ with `$`, `` ` ``, `#`, quotes or spaces arrives unchanged. Do not load the
 file with `.` or `source`: the shell would read it as code, change or cut
 such a password (the login is then refused) and even run a `$(...)` in it.
 
+In the repository, `uv` can load them from a `.env` file instead (git
+ignores it; `.env.example` is the template):
+
+```bash
+cp .env.example .env && chmod 600 .env && "$EDITOR" .env
+uv run --env-file .env keepout fetch catalog --source spacetrack
+```
+
+There the values must be in single quotes (`SPACETRACK_PASSWORD='...'`):
+unquoted or in double quotes, `uv` expands `$NAME` in them, which changes a
+password holding a `$`. A password with a `'` cannot be written that way;
+use the file and loop above.
+
 keepout never writes the credentials anywhere and never shows them: they
 are hidden in `repr`, and any text from the server quoted in an error has
 both replaced by `<hidden>`. A missing variable is an `AuthError` naming
@@ -67,7 +80,7 @@ classes and logs out when closed:
 from keepout.sources.spacetrack import SpaceTrackClient
 
 with SpaceTrackClient() as client:  # credentials from the environment
-    catalog = client.fetch_catalog()  # a keepout.sources.celestrak.Catalog
+    catalog = client.fetch_catalog()  # a keepout.sources.catalog.Catalog
     upcoming = client.fetch_public_cdms()
 print(len(catalog.omms), "element sets")
 for row in upcoming.cdms[:5]:  # by TCA
@@ -82,7 +95,7 @@ for row in upcoming.cdms[:5]:  # by TCA
 
 `keepout.sources.spacetrack.fetch_catalog()` and `fetch_public_cdms()` do
 the same with a client of their own. The catalog is a `Catalog` with one
-group, `space-track`: the element sets of the objects not decayed with an
+part, `gp` (the query): the element sets of the objects not decayed with an
 epoch in the last 10 days (the query Space-Track recommends), newest per
 object.
 
@@ -100,8 +113,10 @@ keepout's client enforces the published limits itself, and never retries:
 | Rate-limit answer | | HTTP 500 "violated your query rate limit" (or 429) raises `RateLimited` and stops the client: it sends nothing more, not even the logout |
 | Expired session | | after HTTP 401, one new login and the same query once more |
 
-Every answer is cached (`<cache>/spacetrack/gp/catalog.json`,
-`<cache>/spacetrack/cdm_public/upcoming.json`, each with a `.meta.json`), and
+Every answer is asked for gzipped and cached gzipped
+(`<cache>/spacetrack/gp/catalog.json.gz`, about 5 MB instead of 36 MB of JSON,
+and `<cache>/spacetrack/cdm_public/upcoming.json.gz`, each with a
+`.meta.json`), and
 the time of each class's last query is recorded in a ledger,
 `<cache>/spacetrack/requests.json`, before the query is sent, so a query
 that fails still counts. Within a class's interval the cached copy is

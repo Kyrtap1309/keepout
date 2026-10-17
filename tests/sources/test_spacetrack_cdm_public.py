@@ -1,3 +1,4 @@
+import gzip
 import json
 from pathlib import Path
 
@@ -173,11 +174,11 @@ def test_the_client_fetches_and_caches_the_rows(tmp_path: Path) -> None:
     assert server.calls == ["login", PUBLIC_CDMS.url, "logout"]
     assert first.cdms == again.cdms == read_public_cdms(ANSWER)
     assert all(isinstance(cdm, PublicCdm) for cdm in first.cdms)
-    assert first.retrieval.path == tmp_path / "spacetrack/cdm_public/upcoming.json"
+    assert first.retrieval.path == tmp_path / "spacetrack/cdm_public/upcoming.json.gz"
     assert first.retrieval.url == PUBLIC_CDMS.url
     copy = read_copy(first.retrieval.path, PUBLIC_CDMS.url)
     assert copy is not None
-    assert copy.data == ANSWER
+    assert gzip.decompress(copy.data) == ANSWER
 
 
 def test_fetch_public_cdms_waits_eight_hours(tmp_path: Path) -> None:
@@ -202,4 +203,4 @@ def test_an_unreadable_answer_is_not_cached(tmp_path: Path) -> None:
         fetch_public_cdms(
             cache=tmp_path, credentials=CREDENTIALS, transport=server, now=Clock()
         )
-    assert not (tmp_path / "spacetrack/cdm_public/upcoming.json").exists()
+    assert not (tmp_path / "spacetrack/cdm_public/upcoming.json.gz").exists()

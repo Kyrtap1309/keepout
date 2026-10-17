@@ -386,7 +386,7 @@ def test_the_catalog_keeps_the_newest_set_of_each_object(
     )
     catalog = fetch_catalog(cache=tmp_path, download=server, now=clock)
     assert server.urls == [group_url(name) for name in PUBLIC_GROUPS]
-    assert [group.name for group in catalog.groups] == list(PUBLIC_GROUPS)
+    assert [part.name for part in catalog.parts] == list(PUBLIC_GROUPS)
     assert catalog.omms == (calsphere, newer_iss, themis, SAMPLE[4], goes, *SAMPLE[5:7])
     assert [omm.catalog_number for omm in catalog.omms] == sorted(
         omm.catalog_number for omm in catalog.omms

@@ -15,7 +15,7 @@ import contextlib
 import math
 import re
 import warnings
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from typing import Final, Literal, TypeAlias, assert_never
 
@@ -33,7 +33,9 @@ __all__ = [
     "format_value",
     "normalize_unit",
     "parse_epoch",
+    "parse_epochs",
     "parse_value",
+    "preparse_epochs",
 ]
 
 ValueKind: TypeAlias = Literal["str", "int", "float", "time"]
@@ -131,31 +133,138 @@ def parse_epoch(text: str) -> Time:
     match = _EPOCH.match(text.strip())
     if match is None:
         raise ValueError(f"invalid CCSDS epoch {text!r}")
-    year, month, day, doy, hour, minute, second, fraction = match.groups()
-    clock = f"{hour}:{minute}:{second}" + (f".{fraction}" if fraction else "")
-    if doy is None:
-        body, time_format = f"{year}-{month}-{day}T{clock}", "isot"
-    else:
-        body, time_format = f"{year}:{doy}:{clock}", "yday"
+    body, time_format, precision = _epoch_body(match)
     with _dubious_years_allowed():
         try:
             # ERFA warns about a second 60 outside a leap second.
-            epoch = Time(
-                body,
-                format=time_format,
-                scale="utc",
-                precision=min(len(fraction or ""), 9),
-            )
+            epoch = Time(body, format=time_format, scale="utc", precision=precision)
         except (ValueError, ErfaWarning) as exc:
             raise ValueError(f"invalid CCSDS epoch {text!r}: {exc}") from exc
         # astropy rolls some out-of-range fields over (day 366 of a common
         # year becomes 1 January): the parsed fields must survive unchanged.
-        date = f"{year}:{doy}" if doy else f"{year}-{month}-{day}"
-        isot = _utc_isot(epoch)
-        parsed = _day_of_year(isot) if doy else isot[:10]
-        if parsed != date or isot[11:19] != f"{hour}:{minute}:{second}":
+        if not _fields_kept(match, _utc_isot(epoch)):
             raise ValueError(f"invalid CCSDS epoch {text!r}: a field is out of range")
     return epoch
+
+
+def parse_epochs(texts: Iterable[str]) -> list[Time]:
+    """Parse many CCSDS UTC epochs at once, as :func:`parse_epoch` parses each.
+
+    The result is ``[parse_epoch(text) for text in texts]``, each epoch a
+    separate scalar Time, but most epochs are parsed together, which is
+    many times faster for a large catalog.
+
+    Parameters
+    ----------
+    texts
+        Epochs as written in a message.
+
+    Raises
+    ------
+    ValueError
+        If a text is not a valid CCSDS epoch: the error :func:`parse_epoch`
+        raises for the first such text.
+    """
+    texts = list(texts)
+    return [
+        parse_epoch(text) if epoch is None else epoch
+        for text, epoch in zip(texts, preparse_epochs(texts), strict=True)
+    ]
+
+
+_DAYS_IN_MONTH: Final = (31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
+
+
+def preparse_epochs(texts: Sequence[str]) -> list[Time | None]:
+    """The common epochs of ``texts`` parsed together, None for the others.
+
+    Each Time is the one :func:`parse_epoch` returns for its text. None is
+    left where the text is invalid or unusual: not ASCII, a field out of
+    range, a leap second, or a year before 1972 near UTC's fractional steps,
+    where :func:`parse_epoch` reads it (and raises its error).
+
+    The texts are parsed by format and number of fractional digits in one
+    astropy call each. Only texts whose fields are all in range go in, so
+    astropy's fast parser reads every one of them, as it reads a single
+    text; and each result is kept only if it passes :func:`parse_epoch`'s
+    check that the fields survive unchanged.
+
+    Parameters
+    ----------
+    texts
+        Epochs as written in a message.
+    """
+    epochs: list[Time | None] = [None] * len(texts)
+    groups: dict[tuple[str, int], list[tuple[int, re.Match[str], str]]] = {}
+    for index, text in enumerate(texts):
+        match = _EPOCH.match(text.strip())
+        if match is None or not _batchable(match):
+            continue
+        body, time_format, _ = _epoch_body(match)
+        digits = len(match["fraction"] or "")
+        groups.setdefault((time_format, digits), []).append((index, match, body))
+    for (time_format, digits), members in groups.items():
+        with _dubious_years_allowed():
+            try:
+                batch = Time(
+                    [body for _, _, body in members],
+                    format=time_format,
+                    scale="utc",
+                    precision=min(digits, 9),
+                )
+                isots = batch.isot
+                years = erfa.jd2cal(batch.jd1, batch.jd2)[0]
+            except (ValueError, ErfaWarning):
+                continue  # parse_epoch reads them one by one
+        for position, (index, match, _) in enumerate(members):
+            # _utc_isot is isot except on the days before 1972.
+            if 1960 <= years[position] < 1972:
+                continue
+            if _fields_kept(match, str(isots[position])):
+                epochs[index] = batch[position]
+    return epochs
+
+
+def _batchable(match: re.Match[str]) -> bool:
+    """Whether an epoch's fields are ASCII and in range, without leap second.
+
+    astropy's fast parser reads such an epoch without falling back to its
+    Python parser, alone as in an array; the year is clear of the days
+    before 1972 that end in a UTC step.
+    """
+    year = int(match["year"])
+    clock = int(match["hour"]) <= 23 and int(match["minute"]) <= 59
+    if not (match.group().isascii() and clock and int(match["second"]) <= 59):
+        return False
+    leap = year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
+    if match["doy"] is not None:
+        days = 1 <= int(match["doy"]) <= 365 + leap
+    else:
+        month, day = int(match["month"]), int(match["day"])
+        days = 1 <= month <= 12 and 1 <= day <= _days_in_month(month, leap=leap)
+    return days and not 1959 <= year <= 1972
+
+
+def _days_in_month(month: int, *, leap: bool) -> int:
+    return _DAYS_IN_MONTH[month - 1] + (leap and month == 2)
+
+
+def _epoch_body(match: re.Match[str]) -> tuple[str, str, int]:
+    """Text, format and precision of a matched CCSDS epoch for astropy."""
+    year, month, day, doy, hour, minute, second, fraction = match.groups()
+    clock = f"{hour}:{minute}:{second}" + (f".{fraction}" if fraction else "")
+    precision = min(len(fraction or ""), 9)
+    if doy is None:
+        return f"{year}-{month}-{day}T{clock}", "isot", precision
+    return f"{year}:{doy}:{clock}", "yday", precision
+
+
+def _fields_kept(match: re.Match[str], isot: str) -> bool:
+    """Whether the parsed epoch (``isot``) has the date and clock as written."""
+    year, month, day, doy, hour, minute, second, _ = match.groups()
+    date = f"{year}:{doy}" if doy else f"{year}-{month}-{day}"
+    parsed = _day_of_year(isot) if doy else isot[:10]
+    return parsed == date and isot[11:19] == f"{hour}:{minute}:{second}"
 
 
 def format_epoch(epoch: Time) -> str:

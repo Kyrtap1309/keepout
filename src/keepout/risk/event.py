@@ -234,15 +234,16 @@ class ConjunctionEvent:
                     f"no HBR for both objects in {', '.join(missing)}: pass "
                     "hard_body_radius= (combined, in metres)"
                 )
+        compute: PcComputation
         if callable(method):
             compute, source = method, "keepout"
         else:
             choice = method
 
-            def compute(conjunction: Conjunction) -> PcResult:
+            def by_name(conjunction: Conjunction) -> PcResult:
                 return compute_pc(conjunction, choice)
 
-            source = f"keepout ({method})"
+            compute, source = by_name, f"keepout ({method})"
         return tuple(
             _observe(cdm, compute, source, policy, hard_body_radius)
             for cdm in self.cdms

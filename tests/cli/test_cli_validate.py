@@ -7,10 +7,11 @@ from builders import case_with_reference
 from cli_builders import keepout
 from inline_snapshot import snapshot
 
-from keepout.cli import validate
 from keepout.cli.output import ExitCode
 from keepout.pc.result import PcResult
 from keepout.sources.cara import CARA_COMMIT
+from keepout.validation import cases as loading
+from keepout.validation import evaluation
 from keepout.validation.cases import ValidationCase
 from keepout.validation.criteria import Criterion
 from keepout.validation.evaluation import Outcome
@@ -36,7 +37,7 @@ def use(
 ) -> Loader:
     loader = Loader(*cases)
     name = "load_monte_carlo_cases" if monte_carlo else "load_all"
-    monkeypatch.setattr(validate, name, loader)
+    monkeypatch.setattr(loading, name, loader)
     return loader
 
 
@@ -135,7 +136,7 @@ def test_validate_reports_the_interval_of_monte_carlo_results(
         result = PcResult(1e-3, "montecarlo", (), {"ci_low": 5e-4, "ci_high": 2e-3})
         return [Outcome(cases[0], result)]
 
-    monkeypatch.setattr(validate, "evaluate", evaluate)
+    monkeypatch.setattr(evaluation, "evaluate", evaluate)
     data = json.loads(keepout("validate", "--json").stdout)
     assert data["outcomes"][0]["ci"] == [5e-4, 2e-3]
 
@@ -154,7 +155,7 @@ def test_validate_workers_and_cache(
         seen.append(workers)
         return []
 
-    monkeypatch.setattr(validate, "evaluate", evaluate)
+    monkeypatch.setattr(evaluation, "evaluate", evaluate)
     result = keepout("validate", *args, "--cache-dir", str(tmp_path))
     assert result.exit_code == ExitCode.OK
     assert seen == [workers]

@@ -26,6 +26,7 @@ import json
 from collections.abc import Iterable
 from pathlib import Path
 
+from keepout.ccsds.keywords import preparse_epochs
 from keepout.errors import OmmParseError
 from keepout.omm._io import load_file, parse_record
 from keepout.omm.keywords import KEYWORDS
@@ -70,24 +71,38 @@ def loads_csv(text: str) -> tuple[Omm, ...]:
     )
     try:
         header = next(reader, None)
-        if header is None:
-            raise OmmParseError("no CSV header", line=1)
-        _check_header(header)
-        omms: list[Omm] = []
-        for row in reader:
-            if not row:
-                continue
-            record, line = len(omms) + 1, reader.line_num
-            if len(row) != len(header):
-                raise OmmParseError(
-                    f"{len(row)} values for {len(header)} columns",
-                    record=record,
-                    line=line,
-                )
-            values = dict(zip(header, row, strict=True))
-            omms.append(parse_record(values, record=record, line=line))
     except csv.Error as exc:
         raise OmmParseError(f"invalid CSV: {exc}", line=reader.line_num) from exc
+    if header is None:
+        raise OmmParseError("no CSV header", line=1)
+    _check_header(header)
+    # All rows first, to parse their epochs together; a CSV error is raised
+    # where reading stopped, after the rows before it.
+    rows: list[tuple[int, list[str]]] = []
+    broken: tuple[csv.Error, int] | None = None
+    try:
+        # The rows read before an error are kept.
+        rows.extend((reader.line_num, row) for row in reader if row)
+    except csv.Error as exc:
+        broken = exc, reader.line_num
+    column = header.index("EPOCH")
+    epochs = preparse_epochs(
+        [row[column] if len(row) == len(header) else "" for _, row in rows]
+    )
+    omms: list[Omm] = []
+    for (line, row), epoch in zip(rows, epochs, strict=True):
+        record = len(omms) + 1
+        if len(row) != len(header):
+            raise OmmParseError(
+                f"{len(row)} values for {len(header)} columns",
+                record=record,
+                line=line,
+            )
+        values = dict(zip(header, row, strict=True))
+        omms.append(parse_record(values, record=record, line=line, epoch=epoch))
+    if broken is not None:
+        error, line = broken
+        raise OmmParseError(f"invalid CSV: {error}", line=line) from error
     return tuple(omms)
 
 
@@ -136,12 +151,19 @@ def loads_json(text: str) -> tuple[Omm, ...]:
         raise OmmParseError(f"invalid JSON: {exc.msg}", line=exc.lineno) from exc
     if not isinstance(data, list):
         raise OmmParseError("JSON must be an array of OMM objects")
+    epochs = preparse_epochs([_epoch_text(item) for item in data])
     omms: list[Omm] = []
-    for record, item in enumerate(data, start=1):
+    for record, (item, epoch) in enumerate(zip(data, epochs, strict=True), start=1):
         if not isinstance(item, dict):
             raise OmmParseError("not a JSON object", record=record)
-        omms.append(parse_record(item, record=record))
+        omms.append(parse_record(item, record=record, epoch=epoch))
     return tuple(omms)
+
+
+def _epoch_text(item: object) -> str:
+    """The ``EPOCH`` text of a JSON element, or "" (left to :func:`parse_record`)."""
+    epoch = item.get("EPOCH") if isinstance(item, dict) else None
+    return epoch if isinstance(epoch, str) else ""
 
 
 def load_csv(path: str | Path) -> tuple[Omm, ...]:

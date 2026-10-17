@@ -4,21 +4,17 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Sequence
-from typing import Annotated, TypeAlias
+from typing import TYPE_CHECKING, Annotated, TypeAlias
 
 import typer
-from rich.table import Table
 
 from keepout.cli.options import CacheDir, JsonFlag, Workers
 from keepout.cli.output import JsonValue, fail, show, table
-from keepout.sources.cara import CARA_COMMIT
-from keepout.validation.cases import load_all, load_monte_carlo_cases
-from keepout.validation.evaluation import (
-    MethodSummary,
-    Outcome,
-    evaluate,
-    summarise,
-)
+
+if TYPE_CHECKING:
+    from rich.table import Table
+
+    from keepout.validation.evaluation import MethodSummary, Outcome
 
 __all__ = ["validate_command"]
 
@@ -48,6 +44,11 @@ def validate_command(
     tools/validation_report.py publishes the same comparison as
     docs/validation.md.
     """
+    # Imported here: keepout --help need not load the numerical libraries.
+    from keepout.sources.cara import CARA_COMMIT
+    from keepout.validation.cases import load_all, load_monte_carlo_cases
+    from keepout.validation.evaluation import evaluate, summarise
+
     cases = (load_monte_carlo_cases if monte_carlo else load_all)(cache_dir)
     outcomes = evaluate(cases, workers=workers)
     summary = summarise(outcomes)

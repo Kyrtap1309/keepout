@@ -1,5 +1,7 @@
 """TEME (the SGP4 output frame) to GCRF."""
 
+from typing import cast
+
 import astropy.units as u
 import numpy as np
 import pytest
@@ -43,14 +45,17 @@ def astropy_teme_to_gcrs(
     representation = CartesianRepresentation(
         r.T * u.m, differentials=CartesianDifferential(v.T * u.m / u.s)
     )
-    cartesian = (
+    # astropy's inferred types are a union; both are Cartesian here.
+    cartesian = cast(
+        CartesianRepresentation,
         TEME(representation, obstime=epochs)
         .transform_to(GCRS(obstime=epochs))
-        .cartesian
+        .cartesian,
     )
+    velocity = cast(CartesianDifferential, cartesian.differentials["s"])
     return (
         cartesian.xyz.to_value(u.m).T,
-        cartesian.differentials["s"].d_xyz.to_value(u.m / u.s).T,
+        velocity.d_xyz.to_value(u.m / u.s).T,
     )
 
 

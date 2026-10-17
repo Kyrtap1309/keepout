@@ -16,7 +16,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Final
+from typing import Final, cast
 
 import astropy.units as u
 import erfa
@@ -225,13 +225,17 @@ def _itrf_to_gcrf(states: Sequence[StateVector]) -> list[StateVector]:
             np.stack([state.v for state in states], axis=1) * u.m / u.s
         ),
     )
-    cartesian = (
+    # astropy's inferred types are a union of representations; ``.cartesian``
+    # is Cartesian, and so is its differential (converted with it).
+    cartesian = cast(
+        "CartesianRepresentation",
         ITRS(representation, obstime=epochs)
         .transform_to(GCRS(obstime=epochs))
-        .cartesian
+        .cartesian,
     )
+    velocity = cast("CartesianDifferential", cartesian.differentials["s"])
     positions = cartesian.xyz.to_value(u.m)
-    velocities = cartesian.differentials["s"].d_xyz.to_value(u.m / u.s)
+    velocities = velocity.d_xyz.to_value(u.m / u.s)
     return [
         StateVector(state.epoch, positions[:, i], velocities[:, i], "GCRF")
         for i, state in enumerate(states)

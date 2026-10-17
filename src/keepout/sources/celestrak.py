@@ -48,8 +48,6 @@ from http import HTTPStatus
 from pathlib import Path
 from typing import Final, TypeAlias, TypeVar
 
-from astropy.time import Time
-
 from keepout.errors import (
     HttpStatusError,
     OmmParseError,
@@ -57,16 +55,16 @@ from keepout.errors import (
     SourceUnavailable,
 )
 from keepout.omm.celestrak import loads_csv
-from keepout.omm.model import Omm, deduplicate
+from keepout.omm.model import Omm
 from keepout.sources.cache import (
     CachedCopy,
-    CopyMeta,
     cache_dir,
     http_download,
     read_copy,
-    store_bytes,
+    save_copy,
     write_meta,
 )
+from keepout.sources.catalog import Catalog, CatalogPart, Retrieval
 from keepout.sources.socrates import COLUMNS, SocratesApproach, read_socrates
 
 __all__ = [
@@ -74,10 +72,7 @@ __all__ = [
     "PUBLIC_GROUPS",
     "SOCRATES_URL",
     "TTL",
-    "Catalog",
     "Downloader",
-    "GpGroup",
-    "Retrieval",
     "SocratesReport",
     "fetch_catalog",
     "fetch_group",
@@ -127,70 +122,6 @@ _T = TypeVar("_T")
 
 
 @dataclass(frozen=True, slots=True)
-class Retrieval:
-    """Where and when a cached download (CelesTrak, Space-Track) came from.
-
-    Parameters
-    ----------
-    url
-        The URL it was downloaded from.
-    path
-        The cached copy.
-    retrieved
-        When the source sent this copy (UTC).
-    checked
-        When the source last confirmed it current: the download, or a later
-        CelesTrak HTTP 403 for unchanged data (UTC).
-    """
-
-    url: str
-    path: Path
-    retrieved: Time
-    checked: Time
-
-
-@dataclass(frozen=True, slots=True)
-class GpGroup:
-    """The element sets of one CelesTrak GP group, or of Space-Track's catalog.
-
-    Parameters
-    ----------
-    name
-        The group, e.g. ``active``; ``space-track`` for Space-Track's full
-        catalog (:func:`keepout.sources.spacetrack.fetch_catalog`).
-    omms
-        Its element sets, in CelesTrak's order.
-    retrieval
-        Where and when they were downloaded.
-    """
-
-    name: str
-    omms: tuple[Omm, ...]
-    retrieval: Retrieval
-
-
-@dataclass(frozen=True, slots=True)
-class Catalog:
-    """Element sets of several GP groups (or Space-Track's), one per object.
-
-    Parameters
-    ----------
-    omms
-        The newest element set of each object, by catalog number.
-    duplicates
-        Element sets of objects that were in more than one group, left out
-        because another set of the object is newer (see
-        :func:`keepout.omm.deduplicate`); exact copies are not listed.
-    groups
-        The groups, in the order they were fetched.
-    """
-
-    omms: tuple[Omm, ...]
-    duplicates: tuple[Omm, ...]
-    groups: tuple[GpGroup, ...]
-
-
-@dataclass(frozen=True, slots=True)
 class SocratesReport:
     """A SOCRATES Plus report as CelesTrak publishes it (CSV text).
 
@@ -235,7 +166,7 @@ def fetch_group(
     max_age: float = TTL,
     download: Downloader = http_download,
     now: Callable[[], float] = time.time,
-) -> GpGroup:
+) -> CatalogPart:
     """The element sets of one GP group, from the cache or CelesTrak.
 
     A cached copy last checked less than ``max_age`` ago is used as is.
@@ -271,7 +202,7 @@ def fetch_group(
     url = group_url(group)
     target = _root(cache) / "gp" / f"{group}.csv"
     omms, retrieval = _fetch(url, target, _gp_reader(url), max_age, download, now)
-    return GpGroup(group, omms, retrieval)
+    return CatalogPart(group, omms, retrieval)
 
 
 def fetch_catalog(
@@ -322,9 +253,7 @@ def fetch_catalog(
         fetch_group(name, cache=cache, max_age=max_age, download=download, now=now)
         for name in names
     )
-    kept, dropped = deduplicate(omm for group in fetched for omm in group.omms)
-    ordered = tuple(sorted(kept, key=lambda omm: omm.catalog_number))
-    return Catalog(ordered, dropped, fetched)
+    return Catalog.of(fetched)
 
 
 def fetch_socrates(
@@ -412,15 +341,6 @@ def _read_socrates(data: bytes) -> str:
     return text
 
 
-def _retrieval(target: Path, meta: CopyMeta) -> Retrieval:
-    return Retrieval(
-        url=meta.url,
-        path=target,
-        retrieved=Time(meta.retrieved, format="unix", scale="utc"),
-        checked=Time(meta.checked, format="unix", scale="utc"),
-    )
-
-
 def _parsed(read: Callable[[bytes], _T], cached: CachedCopy | None) -> _T | None:
     """The cached copy read, or ``None`` if there is none or it cannot be read."""
     if cached is None:
@@ -456,7 +376,7 @@ def _fetch(
     if cached is not None and 0.0 <= now - cached.meta.checked < max_age:
         value = _parsed(read, cached)
         if value is not None:
-            return value, _retrieval(target, cached.meta)
+            return value, Retrieval.of(target, cached.meta)
     try:
         data = download(url)
     except HttpStatusError as exc:
@@ -472,9 +392,6 @@ def _fetch(
             ) from exc
         meta = dataclasses.replace(cached.meta, checked=now)
         write_meta(target, meta)
-        return value, _retrieval(target, meta)
+        return value, Retrieval.of(target, meta)
     value = read(data)
-    digest = store_bytes(target, data)
-    meta = CopyMeta(url=url, sha256=digest, retrieved=now, checked=now)
-    write_meta(target, meta)
-    return value, _retrieval(target, meta)
+    return value, Retrieval.of(target, save_copy(target, url, data, now))

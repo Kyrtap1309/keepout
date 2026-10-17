@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 from rich.table import Table
 
-from keepout.cdm import CdmObject
 from keepout.cli.output import JsonValue, isot, minute, pc_text, table
-from keepout.risk import Action, Assessment, ConjunctionEvent, PcObservation
+
+if TYPE_CHECKING:
+    from keepout.cdm import CdmObject
+    from keepout.risk import Action, Assessment, ConjunctionEvent, PcObservation
 
 __all__ = [
     "AssessedEvent",

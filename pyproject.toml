@@ -147,6 +147,7 @@ show_missing = true
 
 [dependency-groups]
 dev = [
+    "basedpyright>=1.40.2",
     "codespell>=2.4.3",
     "deptry>=0.25.1",
     "hypothesis>=6.168.1",
@@ -169,6 +170,14 @@ dev = [
     "types-openpyxl>=3.1.5.20260827",
     "xmlschema>=4.3.2",
 ]
+
+[tool.basedpyright]
+# A second type checker beside mypy (strict above): it finds other mistakes.
+include = ["src", "tests", "tools"]
+extraPaths = ["tests", "tools"]
+stubPath = "stubs"
+pythonVersion = "3.11"
+typeCheckingMode = "standard"
 
 [tool.deptry]
 # The tools and tests are not shipped: only the package's imports are checked.

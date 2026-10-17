@@ -223,7 +223,7 @@ def test_alfano_3d_cases_use_the_supplementary_windows(
     assert ninth.methods == ("hall3d",)
     assert ninth.criterion is HALL
     assert ninth.reference == pytest.approx(9e-3)
-    assert ninth.options["window"] == (-900.0, 900.0)
+    assert ninth.options.get("window") == (-900.0, 900.0)
 
 
 def test_alfano_monte_carlo_cases_carry_the_cara_interval(
@@ -234,8 +234,8 @@ def test_alfano_monte_carlo_cases_carry_the_cara_interval(
     assert first.methods == ("montecarlo",)
     assert first.criterion is MONTE_CARLO
     assert first.interval == (1e-3, 3e-3)
-    assert first.options["window"] == (-100.0, 100.0)
-    assert first.options["samples"] == 200_000  # 400 / 2e-3
+    assert first.options.get("window") == (-100.0, 100.0)
+    assert first.options.get("samples") == 200_000  # 400 / 2e-3
 
 
 def test_monte_carlo_options_are_bounded_and_reproducible() -> None:
@@ -367,4 +367,6 @@ def test_monte_carlo_intervals_share_the_suite_false_failure_chance(
     monkeypatch.setattr(cases_module, "alfano_monte_carlo_cases", lambda *_: [case] * 3)
     monkeypatch.setattr(cases_module, "pc_method_monte_carlo_cases", lambda _: [case])
     loaded = cases_module.load_monte_carlo_cases()
-    assert [c.options["confidence"] for c in loaded] == [1.0 - MC_SUITE_ALPHA / 4] * 4
+    assert [c.options.get("confidence") for c in loaded] == [
+        1.0 - MC_SUITE_ALPHA / 4
+    ] * 4

@@ -112,7 +112,7 @@ def _parse_manifest(text: str) -> dict[str, str]:
 
 
 _SHA256: Final[Mapping[str, str]] = _parse_manifest(
-    resources.files(__package__).joinpath(MANIFEST_FILE).read_text("utf-8")
+    resources.files("keepout.sources").joinpath(MANIFEST_FILE).read_text("utf-8")
 )
 
 
@@ -313,9 +313,10 @@ def load_xls_rows(path: Path) -> list[list[Cell]]:
         If the file is not a readable .xls workbook.
     """
     import xlrd  # optional dependency (validation extra)
+    from xlrd.biffh import XLRDError
 
     try:
         sheet = xlrd.open_workbook(str(path)).sheet_by_index(0)
-    except (OSError, xlrd.XLRDError, ValueError) as exc:
+    except (OSError, XLRDError, ValueError) as exc:
         raise CaraFormatError(f"{path}: not a readable .xls workbook ({exc})") from exc
     return [list(sheet.row_values(index)) for index in range(sheet.nrows)]

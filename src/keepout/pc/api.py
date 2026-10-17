@@ -133,14 +133,23 @@ def _on_plane(method: Callable[..., PcResult]) -> _Runner:
     return run
 
 
+def _on_conjunction(method: Callable[..., PcResult]) -> _Runner:
+    """A 3-D method ``f(conjunction, **options)`` as a runner.
+
+    The runners take untyped options: :func:`compute_pc`'s overloads type
+    them for each method, and the method rejects one it does not take.
+    """
+    return method
+
+
 _METHODS: Final[Mapping[Method, _Runner]] = {
     "foster": _on_plane(foster),
     "elrod": _on_plane(elrod),
     "frisbee": _on_plane(frisbee),
     "dilution": _on_plane(dilution),
     "alfano": _on_plane(alfano),
-    "hall3d": hall3d,
-    "montecarlo": montecarlo,
+    "hall3d": _on_conjunction(hall3d),
+    "montecarlo": _on_conjunction(montecarlo),
 }
 
 

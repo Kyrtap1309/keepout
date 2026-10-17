@@ -10,3 +10,6 @@ coverage.xml
 htmlcov/
 dist/
 site/
+
+# Local secrets (Space-Track credentials): uv run --env-file .env
+.env

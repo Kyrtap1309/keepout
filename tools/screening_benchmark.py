@@ -458,6 +458,7 @@ def benchmark_main(args: argparse.Namespace) -> int:
         workers=args.workers,
         repeat=1 if args.check else args.repeat,
     )
+    timings: Timings | None
     if args.check:
         timings = read_timings(args.results)
     else:
