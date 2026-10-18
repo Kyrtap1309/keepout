@@ -26,7 +26,13 @@ from screening_data import (
 from screening_oracle import brute_force, positions, refine, states
 
 from keepout.orbits import EARTH_MU
-from keepout.propagation import Ephemeris, RadiusBounds, Sgp4Propagator, time_offsets
+from keepout.propagation import (
+    Ephemeris,
+    Propagator,
+    RadiusBounds,
+    Sgp4Propagator,
+    time_offsets,
+)
 from keepout.screening import (
     DEFAULT_VOLUME,
     ScreeningVolume,
@@ -607,13 +613,6 @@ def test_a_result_pickles_with_its_failures() -> None:
     assert summary(copy) == summary(result)
 
 
-def test_the_search_keeps_its_arguments() -> None:
-    found = search(MISSES, 600.0, step=200.0)
-    assert (found.start, found.duration) == (REFERENCE, 600.0)
-    assert len(found.primaries) == 1
-    assert len(found.catalog) == 5
-
-
 def test_nothing_to_search_finds_nothing() -> None:
     empty = SearchResult((), {}, {})
     nothing = np.zeros((1, 5), dtype=bool)
@@ -946,6 +945,60 @@ def test_sgp4_results_do_not_depend_on_the_chunks() -> None:
     assert len(whole.minima) > 50
     for max_states in (5000, 1):
         assert summary(search_.run(max_states=max_states)) == summary(whole)
+
+
+@dataclass(frozen=True)
+class Wrapped:
+    """An SGP4 propagator behind the protocol only: the search takes the
+    path of any propagator, not SGP4's own."""
+
+    inner: Sgp4Propagator
+
+    @property
+    def frame(self) -> RefFrame:
+        return self.inner.frame
+
+    def __len__(self) -> int:
+        return len(self.inner)
+
+    def subset(self, indices: npt.ArrayLike) -> Self:
+        return type(self)(self.inner.subset(indices))
+
+    def propagate(self, epoch: Time, offsets: npt.ArrayLike) -> Ephemeris:
+        return self.inner.propagate(epoch, offsets)
+
+    def radius_bounds(self, start: Time, duration: float) -> RadiusBounds:
+        return self.inner.radius_bounds(start, duration)
+
+
+def test_sgp4s_own_path_finds_what_any_propagator_finds() -> None:
+    # Formation flyers, fast passes and objects that fail SGP4 in the week.
+    primaries = [68377, 56156, 58199, *(omm.catalog_number for omm in PRIMARIES[:3])]
+    own = Sgp4Propagator([BY_NUMBER[number] for number in primaries])
+    catalog = Sgp4Propagator(FIXTURE)
+    pairs = np.ones((len(own), len(catalog)), dtype=bool)
+    for row, number in enumerate(primaries):
+        pairs[row, COLUMN[number]] = False
+    duration = 7 * 86400.0
+    own_bounds = own.radius_bounds(WEEK_START, duration)
+    catalog_bounds = catalog.radius_bounds(WEEK_START, duration)
+
+    def run(primaries: Propagator, others: Propagator) -> SearchResult:
+        return ApproachSearch(
+            primaries,
+            others,
+            WEEK_START,
+            duration,
+            DEFAULT_VOLUME,
+            pairs,
+            primary_bounds=own_bounds,
+            catalog_bounds=catalog_bounds,
+        ).run()
+
+    sgp4 = run(own, catalog)
+    assert len(sgp4.minima) > 50
+    assert sgp4.catalog_failures
+    assert summary(run(Wrapped(own), Wrapped(catalog))) == summary(sgp4)
 
 
 @pytest.mark.validation

@@ -83,8 +83,11 @@ class Time:
     scale: str
     format: str
     precision: int
+    out_subfmt: str
     @property
     def isscalar(self) -> bool: ...
+    @property
+    def masked(self) -> bool: ...
     @property
     def shape(self) -> tuple[int, ...]: ...
     @property

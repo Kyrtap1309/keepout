@@ -7,7 +7,7 @@ from scipy.integrate import lebedev_rule, quad
 from scipy.stats import multivariate_normal
 
 from keepout._types import FloatArray
-from keepout.pc._sphere import sphere_rule_principal
+from keepout.pc._sphere import sphere_grids, sphere_rule_principal
 
 
 def sphere_rule(
@@ -121,3 +121,22 @@ def test_density_integral_matches_a_reference(
         # principal frame, which shares nothing with the rule.
         expected = principal_surface_mass(sigmas, mean, radius)
     assert got == approx(expected, rel=1e-9)
+
+
+def test_batched_rules_are_the_rules_of_each_gaussian() -> None:
+    # Smooth, thin band, band clipped at a pole (fewer panels), wide in phi.
+    values = np.array(
+        [
+            [2500.0, 6400.0, 4e4],
+            [0.01, 0.09, 1.5e4],
+            [4e-4, 0.25, 900.0],
+            [1.0, 4.0, 9.0],
+        ]
+    )
+    along = np.array([30.0, 5.0, 9.9999, 0.0])
+    batched = sphere_grids(values, along, 10.0)
+    assert len({grid.cos_theta.size for grid in batched}) > 1
+    for k, grid in enumerate(batched):
+        (single,) = sphere_grids(values[k : k + 1], along[k : k + 1], 10.0)
+        for got, expected in zip(grid, single, strict=True):
+            np.testing.assert_array_equal(got, expected)

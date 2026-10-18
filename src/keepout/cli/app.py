@@ -14,7 +14,7 @@ from typing import Annotated
 
 import typer
 
-from keepout import __version__
+import keepout
 from keepout.cli.assess import assess_command
 from keepout.cli.fetch import fetch_cara, fetch_catalog, fetch_cdm, fetch_kelvins
 from keepout.cli.output import reported
@@ -44,7 +44,7 @@ app.add_typer(fetch_app)
 
 def _print_version(*, value: bool) -> None:
     if value:
-        typer.echo(f"keepout {__version__}")
+        typer.echo(f"keepout {keepout.__version__}")
         raise typer.Exit
 
 

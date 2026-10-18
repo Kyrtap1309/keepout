@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from typing import Final, Literal, TypeAlias, assert_never
 
 import erfa
+import erfa.ufunc
 from astropy.time import Time
 from erfa import ErfaWarning
 
@@ -31,11 +32,13 @@ __all__ = [
     "ValueKind",
     "format_epoch",
     "format_value",
+    "message_number",
     "normalize_unit",
     "parse_epoch",
     "parse_epochs",
     "parse_value",
     "preparse_epochs",
+    "utc_fields",
 ]
 
 ValueKind: TypeAlias = Literal["str", "int", "float", "time"]
@@ -285,6 +288,41 @@ def format_epoch(epoch: Time) -> str:
         return _utc_isot(epoch)
 
 
+def utc_fields(
+    epoch: Time, digits: int
+) -> tuple[int, int, int, int, int, int, int] | None:
+    """The fields :func:`format_epoch` writes for an epoch, read without text.
+
+    Year, month, day, hour, minute, second and fraction of a second (in
+    units of ``10**-digits`` s) of ``format_epoch(Time(epoch,
+    precision=digits))``, many times faster. None where that text is not
+    plain ``YYYY-MM-DDThh:mm:ss[.f]`` from ERFA alone: a year outside 1000
+    to 9999, the years about the days before 1972 that end in a UTC step
+    (see ``_utc_isot``), a masked, non-scalar or invalid epoch or one with
+    another ``out_subfmt``. A leap second is given as second 60.
+
+    Parameters
+    ----------
+    epoch
+        A scalar epoch.
+    digits
+        Number of fractional-second digits, 0 to 9.
+    """
+    utc = epoch.utc
+    if utc.masked or not utc.isscalar or utc.out_subfmt != "*":
+        return None
+    # The raw ufunc: a dubious year (status 1) is as good as any other.
+    year, month, day, clock, status = erfa.ufunc.d2dtf(b"UTC", digits, utc.jd1, utc.jd2)
+    if status < 0:
+        return None
+    # d2dtf rounds forward only, by at most one year: a year past 1972 or
+    # before 1960 here is one in the calendar too.
+    if not 1000 <= year <= 9999 or 1960 <= year <= 1972:
+        return None
+    hour, minute, second, fraction = clock.item()
+    return int(year), int(month), int(day), hour, minute, second, fraction
+
+
 _UTC_STEP_FLOOR: Final = 1e-6
 """Smallest step [s] taken for one: ERFA's drift arithmetic leaves about
 1e-16 s on the other days before 1972; the smallest step is 5 ms."""
@@ -455,16 +493,36 @@ def format_value(keyword: Keyword, value: FieldValue) -> tuple[str, str | None]:
 
 
 def _shortest(value: float, scale: float) -> str:
-    """Shortest number text that :func:`parse_value` turns back into ``value``.
+    """Shortest number text that :func:`parse_value` turns back into ``value``."""
+    return repr(message_number(value, scale))
 
-    ``value / scale`` itself may print with spurious digits: 6535.677249 km
-    is 6535677.249 m, and dividing by 1000 gives the neighbouring double
-    6535.677248999999. The shortest decimal that scales back exactly is the
-    one the message had.
+
+def message_number(value: float, scale: float) -> float:
+    """The number :func:`format_value` writes for a stored value, in message units.
+
+    It is the shortest decimal that :func:`parse_value` scales back to
+    ``value`` exactly: ``value / scale`` itself may have spurious digits
+    (6535.677249 km is 6535677.249 m, and dividing by 1000 gives the
+    neighbouring double 6535.677248999999); the shortest decimal is the one
+    the message had. Reading the written text gives this number back.
+
+    Parameters
+    ----------
+    value
+        Stored (SI) value.
+    scale
+        Factor converting the message value to SI (:attr:`Keyword.scale`).
     """
+    if scale == 1.0:
+        # The shortest decimal that reads back as ``value`` is its repr.
+        return value
     quotient = value / scale
-    for digits in range(1, 18):
-        candidate = float(f"{quotient:.{digits}g}")
+    for spec in _SIGNIFICANT:
+        candidate = float(format(quotient, spec))
         if candidate * scale == value:
-            return repr(candidate)
-    return repr(quotient)
+            return candidate
+    return quotient
+
+
+_SIGNIFICANT: Final = tuple(f".{digits}g" for digits in range(1, 18))
+"""Formats of 1 to 17 significant digits, enough for any double."""

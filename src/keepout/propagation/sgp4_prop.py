@@ -3,8 +3,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
-from typing import Final, Literal, Self
+from collections.abc import Callable, Iterable, Sequence
+from typing import Final, Literal, Self, TypeAlias
 
 import erfa
 import numpy as np
@@ -16,12 +16,22 @@ from keepout._types import FloatArray, IndexArray, override, require_non_negativ
 from keepout.errors import UnsupportedElements
 from keepout.omm.model import Omm
 from keepout.propagation._sgp4_radius import radius_bounds
-from keepout.propagation.base import Ephemeris, RadiusBounds, time_offsets
+from keepout.propagation.base import (
+    Ephemeris,
+    ErrorArray,
+    RadiusBounds,
+    time_offsets,
+)
 from keepout.units import DAY, KM, MINUTE
 
-__all__ = ["Sgp4Propagator"]
+__all__ = ["Sgp4Propagator", "Sgp4Sampler", "States"]
 
 _MINUTES_PER_DAY: Final = DAY / MINUTE
+
+States: TypeAlias = Callable[[FloatArray], tuple[ErrorArray, FloatArray, FloatArray]]
+"""States of some objects at offsets [s] from an epoch: error codes ``(N,
+T)``, positions [m] and velocities [m/s] ``(N, T, 3)``, as the arrays of an
+:class:`~keepout.propagation.base.Ephemeris`."""
 
 
 def _utc_dates(epoch: Time, seconds: FloatArray) -> tuple[FloatArray, FloatArray]:
@@ -32,10 +42,17 @@ def _utc_dates(epoch: Time, seconds: FloatArray) -> tuple[FloatArray, FloatArray
     days go to the first part, so the fraction keeps ~10 ps resolution.
     """
     tai = epoch.tai
+    return _tai_to_utc(tai.jd1, tai.jd2, seconds)
+
+
+def _tai_to_utc(
+    jd1: FloatArray, jd2: FloatArray, seconds: FloatArray
+) -> tuple[FloatArray, FloatArray]:
+    """:func:`_utc_dates` from the two-part TAI Julian date of the epoch."""
     days, rest = np.divmod(seconds, DAY)
-    fraction = tai.jd2 + rest / DAY
+    fraction = jd2 + rest / DAY
     carry = np.round(fraction)
-    utc1, utc2 = erfa.taiutc(tai.jd1 + days + carry, fraction - carry)
+    utc1, utc2 = erfa.taiutc(jd1 + days + carry, fraction - carry)
     return np.asarray(utc1, dtype=np.float64), np.asarray(utc2, dtype=np.float64)
 
 
@@ -287,3 +304,58 @@ class Sgp4Propagator:
             fraction[1] - epoch_fraction
         ) * _MINUTES_PER_DAY
         return RadiusBounds(*radius_bounds(self._satrecs, first, last))
+
+
+class Sgp4Sampler:
+    """SGP4 states of chosen objects at many offsets from one epoch, fast.
+
+    The path for a caller that evaluates a few objects at a few times very
+    often, as screening refines a pair: the epoch is converted to TAI once,
+    and the offsets are taken as given, with neither the checks of
+    :meth:`Sgp4Propagator.propagate` nor its :class:`Ephemeris`. Every state
+    is the one :meth:`Sgp4Propagator.propagate` gives, bit for bit.
+
+    Parameters
+    ----------
+    epoch
+        Reference epoch; one time, in any time scale.
+    propagators
+        The objects, numbered in order across the propagators.
+    """
+
+    __slots__ = ("_jd1", "_jd2", "_satrecs")
+
+    def __init__(self, epoch: Time, propagators: Iterable[Sgp4Propagator]) -> None:
+        tai = epoch.tai
+        self._jd1 = tai.jd1
+        self._jd2 = tai.jd2
+        self._satrecs = tuple(
+            satrec
+            for propagator in propagators
+            for satrec in propagator._satrecs  # noqa: SLF001
+        )
+
+    def states(self, indices: Sequence[int]) -> States:
+        """The states of some of the objects, in the order wanted.
+
+        Parameters
+        ----------
+        indices
+            Numbers of the objects (across the propagators).
+
+        Returns
+        -------
+        States
+            Their states at offsets [s] from the epoch, which must be finite
+            float64 numbers in one dimension (not checked).
+        """
+        array = SatrecArray([self._satrecs[index] for index in indices])
+        jd1, jd2 = self._jd1, self._jd2
+
+        def states(seconds: FloatArray) -> tuple[ErrorArray, FloatArray, FloatArray]:
+            errors, r, v = array.sgp4(*_tai_to_utc(jd1, jd2, seconds))
+            r *= KM
+            v *= KM
+            return errors, r, v
+
+        return states

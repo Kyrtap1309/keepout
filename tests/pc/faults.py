@@ -8,8 +8,8 @@ The main seams are :func:`keepout.pc._rate._iterate_overlap`, the batched
 peak-overlap iteration (the code under test, ``_peak_overlap``, keeps its own
 error isolation and fallback logic), the automatic window search
 :func:`keepout.pc._timeline.locate_auto` as :mod:`keepout.pc._rate` calls it,
-the rate of one time (``CollisionRate._rate``), the Clenshaw-Curtis orders of
-the time integral, the Monte Carlo batch size and the methods
+the rate of a batch of times (``CollisionRate._rates``), the Clenshaw-Curtis
+orders of the time integral, the Monte Carlo batch size and the methods
 :func:`keepout.pc.compute_pc` falls back between.
 """
 
@@ -191,16 +191,37 @@ def straight_line_closest_at(monkeypatch: pytest.MonkeyPatch, time: float) -> No
 
 def rate_returning(monkeypatch: pytest.MonkeyPatch, value: float) -> None:
     """The collision rate is ``value`` wherever it is computed (not screened out)."""
-    monkeypatch.setattr(rate_module.CollisionRate, "_rate", lambda *_: value)
+
+    def constant(_: object, gaussians: Gaussians) -> FloatArray:
+        return np.full(gaussians.x1.shape[0], value)
+
+    monkeypatch.setattr(rate_module.CollisionRate, "_rates", constant)
 
 
 def rate_raising(monkeypatch: pytest.MonkeyPatch, error: Exception) -> None:
     """Computing the collision rate at any time raises ``error``."""
 
-    def broken(*_: object) -> float:
+    def broken(*_: object) -> FloatArray:
         raise error
 
-    monkeypatch.setattr(rate_module.CollisionRate, "_rate", broken)
+    monkeypatch.setattr(rate_module.CollisionRate, "_rates", broken)
+
+
+def rate_raising_for(
+    monkeypatch: pytest.MonkeyPatch,
+    when: Callable[[Gaussians], BoolArray],
+    error: Exception,
+) -> None:
+    """Computing the collision rate raises ``error`` for any batch holding a
+    Gaussian ``when`` selects, and is computed as usual otherwise."""
+    real = rate_module.CollisionRate._rates
+
+    def broken(self: rate_module.CollisionRate, gaussians: Gaussians) -> FloatArray:
+        if np.any(when(gaussians)):
+            raise error
+        return real(self, gaussians)
+
+    monkeypatch.setattr(rate_module.CollisionRate, "_rates", broken)
 
 
 def time_integral_orders(

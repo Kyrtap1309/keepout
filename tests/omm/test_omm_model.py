@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 from astropy.time import Time
 from omm_builders import ISS, assert_same_satrec, omm_from, sgp4_record
+from screening_data import load_fixture
 
 from keepout.ccsds.keywords import parse_epoch
 from keepout.errors import UnsupportedElements
@@ -14,6 +15,7 @@ from keepout.omm.model import (
     MAX_CATALOG_NUMBER,
     MAX_ELEMENT_SET_NO,
     MAX_SATREC_NUMBER,
+    SGP4_EPOCH_DIGITS,
     InvalidElement,
 )
 
@@ -126,11 +128,22 @@ def test_satrec_rounds_the_epoch_to_microseconds() -> None:
     )
 
 
-def test_satrec_refuses_an_epoch_in_a_leap_second() -> None:
-    leap = dataclasses.replace(
-        ISS_OMM, epoch=Time("2016-12-31T23:59:60.5", scale="utc")
-    )
-    with pytest.raises(UnsupportedElements, match="leap second"):
+def test_satrec_is_the_record_sgp4_makes_from_the_keywords() -> None:
+    for omm in load_fixture():
+        values = omm.keywords(epoch_digits=SGP4_EPOCH_DIGITS)
+        assert_same_satrec(omm.satrec(), sgp4_record(values))
+
+
+@pytest.mark.parametrize(
+    ("epoch", "text"),
+    [
+        ("2016-12-31T23:59:60.5", "2016-12-31T23:59:60.500000"),
+        ("2016-12-31T23:59:59.9999996", "2016-12-31T23:59:60.000000"),
+    ],
+)
+def test_satrec_refuses_an_epoch_in_a_leap_second(epoch: str, text: str) -> None:
+    leap = dataclasses.replace(ISS_OMM, epoch=parse_epoch(epoch))
+    with pytest.raises(UnsupportedElements, match=f"epoch {text} falls in a leap"):
         leap.satrec()
 
 

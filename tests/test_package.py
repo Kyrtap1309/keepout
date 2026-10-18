@@ -88,6 +88,19 @@ def test_importing_loads_no_numerical_library(module: str) -> None:
     assert loaded.stdout == "[]\n"
 
 
+def test_importing_reads_no_metadata() -> None:
+    # importlib.metadata is most of the import time: __version__ is lazy.
+    code = (
+        "import sys, keepout; print('importlib.metadata' in sys.modules); "
+        "print(keepout.__version__ == __import__('importlib.metadata').metadata"
+        ".version('keepout'), '__version__' in dir(keepout))"
+    )
+    loaded = subprocess.run(  # noqa: S603 (this interpreter, fixed code)
+        [sys.executable, "-c", code], capture_output=True, text=True, check=True
+    )
+    assert loaded.stdout == "False\nTrue True\n"
+
+
 def test_a_lazy_name_is_the_defining_modules() -> None:
     from keepout.pc import compute_pc
 

@@ -24,7 +24,7 @@ from keepout.propagation import (
 )
 
 # Whitebox: the dates keepout hands SGP4, for the tests named so.
-from keepout.propagation.sgp4_prop import _utc_dates
+from keepout.propagation.sgp4_prop import Sgp4Sampler, _utc_dates
 
 OMMS = load_fixture()
 """222 objects of the frozen public catalog (LEO to HEO, 6-digit numbers, and
@@ -84,6 +84,18 @@ def test_whitebox_keepouts_dates_are_astropys_to_100_ps(epoch: Time) -> None:
     assert np.max(np.abs(difference)) < 1e-10
     # Whole days are kept out of the fraction (its resolution is ~10 ps).
     assert np.all(np.abs(fraction) < 0.51)
+
+
+@pytest.mark.parametrize("scale", ["utc", "tdb"])
+def test_the_sampler_gives_propagates_states_bit_for_bit(scale: str) -> None:
+    epoch = getattr(FIXTURE_START, scale)
+    first, second = PROPAGATOR.subset(np.arange(5)), PROPAGATOR.subset([7, 1])
+    chosen = [6, 0, 3, 6]
+    errors, r, v = Sgp4Sampler(epoch, (first, second)).states(chosen)(OFFSETS)
+    rows = [1, 0, 3, 1]
+    np.testing.assert_array_equal(errors, WHOLE.errors[rows])
+    assert r.tobytes() == WHOLE.r[rows].tobytes()
+    assert v.tobytes() == WHOLE.v[rows].tobytes()
 
 
 def test_offsets_count_the_leap_second() -> None:

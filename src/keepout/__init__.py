@@ -16,7 +16,6 @@ Kelvins) in :mod:`keepout.sources`. The ``keepout`` command
 from __future__ import annotations
 
 import importlib
-from importlib.metadata import version
 from typing import TYPE_CHECKING, Final
 
 from keepout.errors import (
@@ -58,6 +57,9 @@ if TYPE_CHECKING:
     )
     from keepout.state import RefFrame, StateVector
 
+    __version__: str
+    """keepout's version, from its distribution's metadata."""
+
 _LAZY: Final = {
     "Conjunction": "keepout.conjunction",
     "Covariance": "keepout.covariance",
@@ -87,13 +89,21 @@ need them)."""
 if not TYPE_CHECKING:
 
     def __getattr__(name: str) -> object:
-        """A name of :data:`_LAZY`, imported on first use (PEP 562).
+        """A name of :data:`_LAZY`, imported on first use (PEP 562), or
+        ``__version__``, read from the metadata on first use.
 
         Raises
         ------
         AttributeError
             If the package has no such name.
         """
+        if name == "__version__":
+            # importlib.metadata takes most of the time of import keepout.
+            from importlib.metadata import version
+
+            value = version("keepout")
+            globals()[name] = value
+            return value
         module = _LAZY.get(name)
         if module is None:
             raise AttributeError(f"module 'keepout' has no attribute {name!r}")
@@ -102,10 +112,8 @@ if not TYPE_CHECKING:
         return value
 
     def __dir__() -> list[str]:
-        return sorted({*globals(), *_LAZY})
+        return sorted({*globals(), *_LAZY, "__version__"})
 
-
-__version__ = version("keepout")
 
 __all__ = [
     "AuthError",

@@ -25,6 +25,7 @@ from faults import (
     overlap_failing_where,
     raising,
     rate_raising,
+    rate_raising_for,
     rate_returning,
     straight_line_closest_at,
     time_integral_orders,
@@ -303,6 +304,24 @@ def test_failing_fallback_raises_a_convergence_error(
     rate_raising(monkeypatch, np.linalg.LinAlgError("Singular matrix"))
     with pytest.raises(PcConvergenceError, match="cannot be computed"):
         hall3d(TYPICAL_HEAD_ON)
+
+
+def test_a_rate_failure_names_a_failing_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The rates are computed in batches; the error names a time whose rate
+    # fails on its own, not merely the first of its batch. The secondary
+    # closes along -y at ~15 km/s, so these are the times after 0.1 ms.
+    rate_raising_for(
+        monkeypatch,
+        lambda gaussians: gaussians.relative_position[:, 1] < -1.5,
+        np.linalg.LinAlgError("Singular matrix"),
+    )
+    with pytest.raises(PcConvergenceError, match="cannot be computed") as raised:
+        hall3d(TYPICAL_HEAD_ON)
+    named = re.search(r"rate at t = (\S+) s", str(raised.value))
+    assert named is not None
+    assert float(named.group(1)) > 0.9e-4
 
 
 def test_non_finite_rate_raises_a_convergence_error(

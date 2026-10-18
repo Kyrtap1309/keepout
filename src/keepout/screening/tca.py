@@ -121,6 +121,7 @@ from keepout.propagation.base import (
     RadiusBounds,
     propagate_in_chunks,
 )
+from keepout.propagation.sgp4_prop import Sgp4Propagator, Sgp4Sampler, States
 from keepout.screening.volume import ScreeningVolume, per_primary
 
 __all__ = [
@@ -458,24 +459,41 @@ def _stencil_sum(rho: FloatArray, weights: FloatArray) -> FloatArray:
     return total
 
 
-class _Pair:
-    """One primary and one catalog object, evaluated at any times."""
+def _propagated(primary: Propagator, secondary: Propagator, start: Time) -> States:
+    """The states of a pair, from any propagators: rows 0 and 1."""
 
-    def __init__(self, search: ApproachSearch, primary: int, secondary: int) -> None:
-        self.start = search.start
-        self.duration = search.duration
-        self.primary = search.primaries.subset(np.array([primary]))
-        self.secondary = search.catalog.subset(np.array([secondary]))
+    def states(stamps: FloatArray) -> tuple[ErrorArray, FloatArray, FloatArray]:
+        own = primary.propagate(start, stamps)
+        other = secondary.propagate(start, stamps)
+        return (
+            np.concatenate((own.errors, other.errors)),
+            np.concatenate((own.r, other.r)),
+            np.concatenate((own.v, other.v)),
+        )
+
+    return states
+
+
+class _Pair:
+    """One primary and one catalog object, evaluated at any times.
+
+    ``sample`` gives the states of both (rows 0 and 1) at offsets from the
+    start of the window, which is ``duration`` long.
+    """
+
+    def __init__(self, sample: States, duration: float) -> None:
+        self.sample = sample
+        self.duration = duration
         self.known: dict[float, float] = {}
 
     def states(
         self, stamps: FloatArray
     ) -> tuple[FloatArray, FloatArray, FloatArray, FloatArray]:
         """Positions and velocities of both at ``stamps``, ``(n, 3)`` each."""
-        own = self.primary.propagate(self.start, stamps)
-        other = self.secondary.propagate(self.start, stamps)
-        _check(own.errors[0], other.errors[0], stamps)
-        return own.r[0], own.v[0], other.r[0], other.v[0]
+        errors, r, v = self.sample(stamps)
+        if errors.any():
+            _check(errors[0], errors[1], stamps)
+        return r[0], v[0], r[1], v[1]
 
     def derivative(self, times: FloatArray) -> FloatArray:
         """``rho . drho/dt`` at ``times`` (in the window) from positions only.
@@ -485,13 +503,14 @@ class _Pair:
         takes the one-sided difference inside it.
         """
         stamps = (times[:, None] + _STENCIL).reshape(-1)
-        own = self.primary.propagate(self.start, stamps)
-        other = self.secondary.propagate(self.start, stamps)
+        errors, r, _ = self.sample(stamps)
+        if not errors.any():
+            return _stencil_sum(r[1] - r[0], _WEIGHTS)
         outside = (stamps < 0.0) | (stamps > self.duration)
         inside = ~outside
-        _check(own.errors[0][inside], other.errors[0][inside], stamps[inside])
-        derivative = _stencil_sum(other.r[0] - own.r[0], _WEIGHTS)
-        failed = (own.errors[0] != NO_ERROR) | (other.errors[0] != NO_ERROR)
+        _check(errors[0][inside], errors[1][inside], stamps[inside])
+        derivative = _stencil_sum(r[1] - r[0], _WEIGHTS)
+        failed = (errors[0] != NO_ERROR) | (errors[1] != NO_ERROR)
         reaching = (failed & outside).reshape(-1, len(_STENCIL))
         edge = np.flatnonzero(np.any(reaching, axis=1))
         if edge.size > 0:
@@ -646,26 +665,6 @@ class ApproachSearch:
         self._lowest_catalog = np.maximum(catalog_bounds.lowest, MIN_RADIUS)
         self._reach = np.array([volume.bounding_radius for volume in self._volumes])
 
-    @property
-    def primaries(self) -> Propagator:
-        """The primaries."""
-        return self._primaries
-
-    @property
-    def catalog(self) -> Propagator:
-        """The catalog."""
-        return self._catalog
-
-    @property
-    def start(self) -> Time:
-        """Start of the window."""
-        return self._start
-
-    @property
-    def duration(self) -> float:
-        """Length of the window [s]."""
-        return self._duration
-
     def run(self, *, max_states: int = CHUNK_STATES) -> SearchResult:
         """Search the whole grid.
 
@@ -692,10 +691,20 @@ class ApproachSearch:
             return SearchResult((), {}, {})
         failures = _Failures()
         candidates = self._candidates(rows, max_states, failures)
+        sampler = self._sampler_for()
         minima: list[RangeMinimum] = []
         for (primary, secondary), found in sorted(candidates.items()):
-            minima.extend(self._refine(primary, secondary, found, failures))
+            minima.extend(self._refine(sampler, primary, secondary, found, failures))
         return SearchResult(tuple(minima), failures.primary, failures.catalog)
+
+    def _sampler_for(self) -> Sgp4Sampler | None:
+        """The fast path of SGP4 for the pairs' states, when both propagators
+        are SGP4 (primaries numbered first, then the catalog)."""
+        if isinstance(self._primaries, Sgp4Propagator) and isinstance(
+            self._catalog, Sgp4Propagator
+        ):
+            return Sgp4Sampler(self._start, (self._primaries, self._catalog))
+        return None
 
     def _candidates(
         self, rows: IndexArray, max_states: int, failures: _Failures
@@ -802,6 +811,7 @@ class ApproachSearch:
 
     def _refine(
         self,
+        sampler: Sgp4Sampler | None,
         primary: int,
         secondary: int,
         found: list[_Interval],
@@ -812,41 +822,102 @@ class ApproachSearch:
         A failure while refining an interval is recorded in ``failures`` and
         loses that interval's minima only.
         """
-        pair = _Pair(self, primary, secondary)
+        if sampler is None:
+            sample = _propagated(
+                self._primaries.subset(np.array([primary])),
+                self._catalog.subset(np.array([secondary])),
+                self._start,
+            )
+        else:
+            sample = sampler.states((primary, len(self._primaries) + secondary))
+        pair = _Pair(sample, self._duration)
         brackets = [_samples(interval) for interval in found]
         # Every interval's samples in one evaluation, kept by the pair; after a
         # failure, each interval is evaluated, and its failure found, on its own.
         with contextlib.suppress(_Failed):
             pair.values(np.unique(np.concatenate(brackets)))
+        roots = [_roots(pair, samples) for samples in brackets]
+        tcas = np.array([tca for found_roots, _ in roots for tca in found_roots])
+        if tcas.size == 0:
+            states = (np.empty((0, 3)),) * 4
+            errors = np.zeros((2, 0), dtype=np.uint8)
+        else:
+            errors, r, v = pair.sample(tcas)
+            states = r[0], v[0], r[1], v[1]
         minima: list[RangeMinimum] = []
-        for samples in brackets:
+        first = 0
+        for found_roots, failed in roots:
+            rows = slice(first, first + len(found_roots))
+            first = rows.stop
             try:
-                minima.extend(self._bracket(pair, primary, secondary, samples))
-            except _Failed as failed:
-                failures.note(primary, secondary, failed)
-        return minima
-
-    def _bracket(
-        self, pair: _Pair, primary: int, secondary: int, samples: FloatArray
-    ) -> list[RangeMinimum]:
-        """The minima of a pair in one interval, sampled at ``samples``."""
-        values = pair.values(samples)
-        minima: list[RangeMinimum] = []
-        for j in np.flatnonzero((values[:-1] < 0.0) & (values[1:] >= 0.0)):
-            tca = brentq(pair.at, samples[j], samples[j + 1], xtol=TCA_TOLERANCE)
-            minimum = self._inside(pair, primary, secondary, float(tca))
-            if minimum is not None:
-                minima.append(minimum)
+                minima.extend(
+                    self._inside(
+                        primary,
+                        secondary,
+                        tcas[rows],
+                        errors[:, rows],
+                        tuple(state[rows] for state in states),
+                        failed,
+                    )
+                )
+            except _Failed as failure:
+                failures.note(primary, secondary, failure)
         return minima
 
     def _inside(
-        self, pair: _Pair, primary: int, secondary: int, tca: float
-    ) -> RangeMinimum | None:
-        """The minimum at ``tca`` if the other object is inside the volume."""
-        r_p, v_p, r_s, v_s = (state[0] for state in pair.states(np.array([tca])))
-        if not self._volumes[primary].contains_position(r_p, v_p, r_s):
-            return None
+        self,
+        primary: int,
+        secondary: int,
+        tcas: FloatArray,
+        errors: ErrorArray,
+        states: tuple[FloatArray, ...],
+        failed: _Failed | None,
+    ) -> list[RangeMinimum]:
+        """The minima of a pair in one interval: those of its TCAs (states at
+        each given) at which the other object is inside the volume.
+
+        Raises, as if each TCA's state were propagated after its root was
+        found, :class:`_Failed` for the first TCA whose state failed, else
+        the failure that stopped the search for roots (``failed``).
+        """
+        bad = np.flatnonzero(np.any(errors != NO_ERROR, axis=0))
+        count = int(bad[0]) if bad.size > 0 else len(tcas)
+        r_p, v_p, r_s, v_s = (state[:count] for state in states)
+        inside = self._volumes[primary].contains_position(r_p, v_p, r_s)
+        if count < len(tcas):
+            rows = slice(count, count + 1)
+            _check(errors[0, rows], errors[1, rows], tcas[rows])
+        if failed is not None:
+            raise failed
         rho = r_s - r_p
-        return RangeMinimum(
-            primary, secondary, tca, float(np.sqrt(_dot(rho, rho))), r_p, v_p, r_s, v_s
-        )
+        distance = np.sqrt(_dot(rho, rho))
+        return [
+            RangeMinimum(
+                primary,
+                secondary,
+                float(tcas[k]),
+                float(distance[k]),
+                r_p[k],
+                v_p[k],
+                r_s[k],
+                v_s[k],
+            )
+            for k in np.flatnonzero(inside)
+        ]
+
+
+def _roots(pair: _Pair, samples: FloatArray) -> tuple[list[float], _Failed | None]:
+    """The TCAs of a pair in one interval, sampled at ``samples``, in order,
+    and the failure that stopped the search, if one did."""
+    try:
+        values = pair.values(samples)
+    except _Failed as failed:
+        return [], failed
+    tcas: list[float] = []
+    for j in np.flatnonzero((values[:-1] < 0.0) & (values[1:] >= 0.0)):
+        try:
+            tca = brentq(pair.at, samples[j], samples[j + 1], xtol=TCA_TOLERANCE)
+        except _Failed as failed:
+            return tcas, failed
+        tcas.append(float(tca))
+    return tcas, None

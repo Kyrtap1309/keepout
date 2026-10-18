@@ -49,6 +49,22 @@ class Satrec:
     am: float
     em: float
     def __init__(self) -> None: ...
+    def sgp4init(
+        self,
+        whichconst: int,
+        opsmode: str,
+        satnum: int,
+        epoch: float,
+        bstar: float,
+        ndot: float,
+        nddot: float,
+        ecco: float,
+        argpo: float,
+        inclo: float,
+        mo: float,
+        no_kozai: float,
+        nodeo: float,
+    ) -> None: ...
     @classmethod
     def twoline2rv(cls, line1: str, line2: str, whichconst: int = ...) -> Self: ...
     def sgp4(self, jd: float, fr: float) -> tuple[int, _Vector, _Vector]: ...

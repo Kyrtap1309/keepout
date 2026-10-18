@@ -1,6 +1,7 @@
 """CCSDS keyword values: units, numbers and UTC epochs (on CDM keywords)."""
 
 import datetime
+import warnings
 from decimal import Decimal
 
 import pytest
@@ -12,11 +13,13 @@ from keepout.ccsds.keywords import (
     Keyword,
     format_epoch,
     format_value,
+    message_number,
     normalize_unit,
     parse_epoch,
     parse_epochs,
     parse_value,
     preparse_epochs,
+    utc_fields,
 )
 from keepout.cdm.keywords import SEGMENT
 
@@ -300,6 +303,77 @@ def test_writing_a_value_loses_nothing(
     written, _ = format_value(entry, value)
     assert parse_value(entry, written, entry.unit) == value
     assert float(written) == float(text)
+
+
+@given(
+    st.sampled_from(["X", "X_DOT", "RECOMMENDED_OD_SPAN", "CR_R"]),
+    st.floats(allow_nan=False, allow_infinity=False),
+)
+def test_the_message_number_is_the_written_text_read_back(
+    keyword: str, value: float
+) -> None:
+    entry = SEGMENT[keyword]
+    written, _ = format_value(entry, value)
+    assert message_number(value, entry.scale) == float(written)
+    assert repr(message_number(value, entry.scale)).upper() == written
+
+
+def test_the_message_number_of_an_unscaled_value_is_the_value() -> None:
+    assert message_number(4.835e-05, 1.0) == 4.835e-05
+    assert str(message_number(-0.0, 1.0)) == "-0.0"
+    assert message_number(6535677.249, 1000.0) == 6535.677249
+
+
+def _fields_text(fields: tuple[int, ...], digits: int) -> str:
+    year, month, day, hour, minute, second, fraction = fields
+    text = f"{year}-{month:02d}-{day:02d}T{hour:02d}:{minute:02d}:{second:02d}"
+    return text + (f".{fraction:0{digits}d}" if digits else "")
+
+
+@settings(deadline=None, max_examples=300)
+@given(
+    st.floats(min_value=2086308.0, max_value=5373484.0),
+    st.integers(min_value=0, max_value=9),
+)
+def test_utc_fields_are_those_format_epoch_writes(jd: float, digits: int) -> None:
+    epoch = Time(jd, format="jd", scale="utc")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")  # dubious years
+        expected = format_epoch(Time(epoch, precision=digits))
+    fields = utc_fields(epoch, digits)
+    if fields is not None:
+        assert _fields_text(fields, digits) == expected
+
+
+@pytest.mark.parametrize(
+    ("text", "digits", "isot"),
+    [
+        ("2016-12-31T23:59:60.5", 6, "2016-12-31T23:59:60.500000"),
+        ("2016-12-31T23:59:59.9999996", 6, "2016-12-31T23:59:60.000000"),
+        ("2026-12-31T23:59:59.9999996", 6, "2027-01-01T00:00:00.000000"),
+        ("2100-02-28T23:59:59.5", 0, "2100-03-01T00:00:00"),
+        ("1958-03-17T12:00:00.25", 3, "1958-03-17T12:00:00.250"),
+    ],
+)
+def test_utc_fields_round_as_format_epoch(text: str, digits: int, isot: str) -> None:
+    fields = utc_fields(parse_epoch(text), digits)
+    assert fields is not None
+    assert _fields_text(fields, digits) == isot
+
+
+@pytest.mark.parametrize("text", ["1965-06-01T00:00:00", "1972-12-31T23:59:59.9999999"])
+def test_utc_fields_are_none_for_unusual_years(text: str) -> None:
+    assert utc_fields(parse_epoch(text), 6) is None
+
+
+def test_utc_fields_are_none_for_unusual_epochs() -> None:
+    date_only = Time("2026-10-06T00:20:47", scale="utc", out_subfmt="date")
+    assert utc_fields(date_only, 6) is None
+    assert utc_fields(Time(["2026-10-06T00:20:47"], scale="utc"), 6) is None
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")  # dubious year
+        year_999 = Time(2086300.0, format="jd", scale="utc")
+    assert utc_fields(year_999, 6) is None
 
 
 def test_format_value() -> None:
