@@ -28,6 +28,11 @@ from hypothesis import settings
 
 from keepout.sources import cache
 
+# The CLI tests read plain text: Typer (on import) and Rich take these to
+# mean a colour terminal, and GitHub Actions sets GITHUB_ACTIONS.
+for _name in ("GITHUB_ACTIONS", "FORCE_COLOR", "PY_COLORS"):
+    os.environ.pop(_name, None)
+
 settings.register_profile("default")
 settings.register_profile("ci", derandomize=True, print_blob=True, deadline=None)
 settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE", "default"))
