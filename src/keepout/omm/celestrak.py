@@ -44,7 +44,7 @@ __all__ = [
 
 
 def loads_csv(text: str) -> tuple[Omm, ...]:
-    """Parse CelesTrak CSV: a header row of keywords, then one row per object.
+    """The OMMs in CelesTrak CSV: a header row of keywords, then one row per object.
 
     Columns may come in any order; columns other than the keywords of
     :data:`~keepout.omm.keywords.KEYWORDS` are ignored, and blank lines are
@@ -119,7 +119,7 @@ def _check_header(header: list[str]) -> None:
 
 
 def loads_json(text: str) -> tuple[Omm, ...]:
-    """Parse CelesTrak JSON: an array with one object per element set.
+    """The OMMs in CelesTrak JSON: an array with one object per element set.
 
     Values may be JSON numbers or strings (Space-Track writes every value as
     a string); a number keeps its exact text, so it reads like the same
@@ -168,7 +168,7 @@ def _epoch_text(item: object) -> str:
 
 
 def load_csv(path: str | Path) -> tuple[Omm, ...]:
-    """Read a CelesTrak CSV file (UTF-8); see :func:`loads_csv`.
+    """The OMMs in a CelesTrak CSV file (UTF-8); see :func:`loads_csv`.
 
     Parameters
     ----------
@@ -179,7 +179,7 @@ def load_csv(path: str | Path) -> tuple[Omm, ...]:
 
 
 def load_json(path: str | Path) -> tuple[Omm, ...]:
-    """Read a CelesTrak JSON file (UTF-8); see :func:`loads_json`.
+    """The OMMs in a CelesTrak JSON file (UTF-8); see :func:`loads_json`.
 
     Parameters
     ----------
@@ -190,7 +190,7 @@ def load_json(path: str | Path) -> tuple[Omm, ...]:
 
 
 def dumps_csv(omms: Iterable[Omm]) -> str:
-    """Write CelesTrak CSV: the header, then one row per object.
+    """OMMs as CelesTrak CSV: the header, then one row per object.
 
     Epochs are written to the microsecond (see the module notes).
 
@@ -207,7 +207,7 @@ def dumps_csv(omms: Iterable[Omm]) -> str:
 
 
 def dumps_json(omms: Iterable[Omm]) -> str:
-    """Write CelesTrak JSON: an array of objects, numbers as JSON numbers.
+    """OMMs as CelesTrak JSON: an array of objects, numbers as JSON numbers.
 
     Epochs are written to the microsecond (see the module notes).
 

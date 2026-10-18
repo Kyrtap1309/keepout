@@ -274,7 +274,7 @@ def _observe(
 def group_events(
     cdms: Iterable[Cdm], *, tca_tolerance: float = DEFAULT_TCA_TOLERANCE
 ) -> list[ConjunctionEvent]:
-    """Group CDMs into events: same objects, TCAs within ``tca_tolerance``.
+    """CDMs grouped into events: same objects, TCAs within ``tca_tolerance``.
 
     CDMs of one pair of objects are taken in TCA order; a CDM whose TCA is
     more than ``tca_tolerance`` after the first TCA of the current event

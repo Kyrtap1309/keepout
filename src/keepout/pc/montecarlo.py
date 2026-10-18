@@ -18,6 +18,9 @@ approach is refined by Newton's method on ``r.v = 0`` (slope
 
 from __future__ import annotations
 
+import itertools
+from collections.abc import Iterator
+from dataclasses import dataclass
 from typing import Final
 
 import numpy as np
@@ -44,7 +47,7 @@ __all__ = [
     "MC_MAX_SAMPLES",
     "MC_RTOL",
     "NEWTON_STEPS",
-    "SPEED_MARGIN",
+    "SPEED_BOUND_FACTOR",
     "montecarlo",
     "sample",
 ]
@@ -56,13 +59,18 @@ MC_MAX_SAMPLES: Final = 10_000_000
 """Default budget of trials when stopping on ``rtol``."""
 
 MC_CONFIDENCE: Final = 0.99
+"""Default confidence level of the Clopper-Pearson interval."""
 
 MC_BATCH: Final = 50_000
 """Trials per batch: memory stays O(batch) whatever the sample count."""
 
 NEWTON_STEPS: Final = 12
+"""Newton iterations refining a closest approach between two grid points.
 
-SPEED_MARGIN: Final = 1.5
+The distance is tested at every iterate (see ``_Trials.closest_below``), so
+the count bounds the work rather than setting a convergence tolerance."""
+
+SPEED_BOUND_FACTOR: Final = 1.5
 """Factor on the larger grid-point relative speed bounding the speed in between."""
 
 
@@ -132,32 +140,61 @@ class _Trials:
         return below
 
 
+@dataclass(frozen=True, eq=False, slots=True)
+class _GridPoint:
+    """Every trial's relative distance and speed at one time of the scan grid."""
+
+    t: float
+    distance: FloatArray
+    speed: FloatArray
+
+
+def _grid(trials: _Trials, times: FloatArray) -> Iterator[_GridPoint]:
+    """The trials at each of ``times``, one grid point at a time."""
+    for t in times:
+        r, v = trials.motion(float(t))
+        yield _GridPoint(float(t), np.linalg.norm(r, axis=1), np.linalg.norm(v, axis=1))
+
+
+def _entries_between(
+    trials: _Trials,
+    earlier: _GridPoint,
+    later: _GridPoint,
+    radius: float,
+    candidates: BoolArray,
+) -> IndexArray:
+    """The ``candidates`` that get within ``radius`` between two grid points.
+
+    Only trials whose distance may drop below ``radius`` in between are
+    refined. The distance in between is at least half of the two distances'
+    sum less the distance covered over the gap at the bounding speed,
+    :data:`SPEED_BOUND_FACTOR` times the larger of the two speeds.
+    """
+    gap = later.t - earlier.t
+    bound = 0.5 * (
+        earlier.distance
+        + later.distance
+        - SPEED_BOUND_FACTOR * np.maximum(earlier.speed, later.speed) * gap
+    )
+    rows = np.flatnonzero((bound < radius) & candidates)
+    if not rows.size:
+        return rows
+    return rows[trials.closest_below(rows, earlier.t, later.t, radius)]
+
+
 def _collisions(trials: _Trials, found: RateScan, radius: float) -> tuple[int, int]:
     """Collisions (entries) and trials already inside at the window start."""
     r, _ = trials.motion(found.times[0])
     inside = np.linalg.norm(r, axis=1) < radius
     hit = np.zeros_like(inside)
     for lo, hi in found.segments:
-        previous: tuple[FloatArray, FloatArray] | None = None
-        for k in range(lo, hi + 1):
-            t = float(found.times[k])
-            r, v = trials.motion(t)
-            distance, speed = np.linalg.norm(r, axis=1), np.linalg.norm(v, axis=1)
-            hit |= distance < radius
-            if previous is not None:
-                gap = t - float(found.times[k - 1])
-                bound = 0.5 * (
-                    previous[0]
-                    + distance
-                    - SPEED_MARGIN * np.maximum(previous[1], speed) * gap
-                )
-                rows = np.flatnonzero((bound < radius) & ~hit)
-                if rows.size:
-                    below = trials.closest_below(
-                        rows, float(found.times[k - 1]), t, radius
-                    )
-                    hit[rows[below]] = True
-            previous = (distance, speed)
+        # A segment has at least two grid points (it is padded by one step).
+        points = _grid(trials, found.times[lo : hi + 1])
+        for earlier, later in itertools.pairwise(points):
+            # Marking the earlier point again is harmless and covers the
+            # segment's first point.
+            hit |= (earlier.distance < radius) | (later.distance < radius)
+            hit[_entries_between(trials, earlier, later, radius, ~hit)] = True
     return int(np.count_nonzero(hit & ~inside)), int(np.count_nonzero(inside))
 
 

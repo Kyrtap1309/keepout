@@ -1,4 +1,4 @@
-"""Run keepout's example synthetic operator on the frozen catalog and write the report.
+"""The report of keepout's example synthetic operator run on the frozen catalog.
 
 Usage: ``uv run python tools/synthetic_operator_report.py [--check] [--workers N]``.
 Screens the example fleet (``examples/synthetic-operator/fleet.toml``)
@@ -604,7 +604,7 @@ def render_page(summary: Summary, cdm: str | None) -> str:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Write (or with ``--check`` verify) the synthetic operator report.
+    """The entry point writing (or with ``--check`` verifying) the synthetic report.
 
     Returns
     -------

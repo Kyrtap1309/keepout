@@ -127,13 +127,13 @@ _FEATURE_INDEX: Final = {name: index for index, name in enumerate(FEATURES)}
 _FEATURE_COLUMNS: Final = tuple(_INDEX[name] for name in FEATURES)
 
 StreamDownloader: TypeAlias = Callable[[str, Sink], None]
-"""Downloads a URL into a sink, like :func:`keepout.sources.cache.http_stream`."""
+"""A download of a URL into a sink, like :func:`keepout.sources.cache.http_stream`."""
 
 
 def fetch_raw(
     *, cache: Path | None = None, download: StreamDownloader = http_stream
 ) -> Path:
-    """Return a local, verified copy of the raw table, downloading it if needed.
+    """A local, verified copy of the raw table, downloaded if needed.
 
     The archive is downloaded to the cache, verified, the raw table extracted
     and verified, and the archive deleted (also an archive left behind by an
@@ -342,7 +342,7 @@ def _parsed(source: Path) -> Iterator[_Row]:
 
 
 def load(path: Path | None = None) -> tuple[KelvinsEvent, ...]:
-    """Read the raw table into events.
+    """The events of the raw table.
 
     Parameters
     ----------

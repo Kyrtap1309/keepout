@@ -187,7 +187,7 @@ _FIELDS: Final[Mapping[str, Mapping[str, Callable[[str], str]]]] = {
 
 
 def loads(text: str) -> tuple[Omm, ...]:
-    """Parse TLEs: two lines each, optionally after a name line.
+    """The OMMs of TLEs: two lines each, optionally after a name line.
 
     Blank lines are skipped and trailing blanks ignored. A name line may start
     with ``0`` and a blank (Space-Track's 3LE form), which is not part of the
@@ -292,7 +292,7 @@ def _fields(lines: list[tuple[int, str]], index: int, digit: str, record: int) -
 
 
 def load(path: str | Path) -> tuple[Omm, ...]:
-    """Read a TLE file (UTF-8, or gzip-compressed UTF-8); see :func:`loads`.
+    """The OMMs in a TLE file (UTF-8, or gzip-compressed UTF-8); see :func:`loads`.
 
     Parameters
     ----------

@@ -21,7 +21,8 @@ EXTRA_MODULES: Final = frozenset({"typer", "rich"})
 
 
 def main() -> None:
-    """Run ``keepout`` on the command line arguments; exits with the status.
+    """The ``keepout`` command, run on the command line arguments; exits with
+    the status.
 
     Raises
     ------

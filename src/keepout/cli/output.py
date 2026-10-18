@@ -62,7 +62,7 @@ JsonValue: TypeAlias = (
 def show(
     payload: Mapping[str, JsonValue], *text: RenderableType, as_json: bool
 ) -> None:
-    """Print a command's result.
+    """The output of a command: its result as JSON or as text for people.
 
     Parameters
     ----------
@@ -89,7 +89,8 @@ def show(
 
 
 def fail(message: str, status: ExitCode = ExitCode.ERROR) -> NoReturn:
-    """Print ``Error: message`` to standard error and exit with ``status``.
+    """The end of a failed command: ``Error: message`` on standard error, then
+    an exit with ``status``.
 
     Raises
     ------

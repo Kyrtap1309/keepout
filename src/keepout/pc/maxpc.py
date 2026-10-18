@@ -86,7 +86,7 @@ def _pc(miss_vector: FloatArray, covariance: FloatArray, radius: float) -> float
 
 
 def _search_log_max(pc: Callable[[float], float], centre: float) -> tuple[float, float]:
-    """Maximise ``pc(10**x)`` over ``x`` in ``centre +- SEARCH_DECADES``.
+    """The maximum of ``pc(10**x)`` over ``x`` in ``centre +- SEARCH_DECADES``.
 
     Returns the maximising argument ``10**x`` and the maximum.
     """
@@ -102,7 +102,7 @@ def _search_log_max(pc: Callable[[float], float], centre: float) -> tuple[float,
 def _prefer(
     seed: tuple[float, float], other: tuple[float, float]
 ) -> tuple[float, float]:
-    """Keep ``seed`` (argument, Pc) unless ``other`` beats its Pc by more than
+    """``seed`` (argument, Pc), or ``other`` if it beats that Pc by more than
     :data:`SEARCH_GAIN_RTOL`."""
     return other if other[1] > seed[1] * (1.0 + SEARCH_GAIN_RTOL) else seed
 

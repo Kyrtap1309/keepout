@@ -212,7 +212,7 @@ def test_store_removes_the_partial_file_when_writing_fails(tmp_path: Path) -> No
 
 
 def refuse_hashing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Fail the test if a file is hashed from disk."""
+    """A guard that fails the test if a file is hashed from disk."""
 
     def refuse(*args: object) -> object:
         raise AssertionError("hashed from disk")

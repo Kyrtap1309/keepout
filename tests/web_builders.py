@@ -83,7 +83,7 @@ def zipped(members: Mapping[str, bytes]) -> bytes:
 
 
 def pin_kelvins(monkeypatch: pytest.MonkeyPatch, archive: bytes, table: bytes) -> None:
-    """Make ``archive`` and ``table`` the Kelvins archive and raw table
-    whose digests :mod:`keepout.sources.kelvins` pins."""
+    """``archive`` and ``table`` made the Kelvins archive and raw table whose
+    digests :mod:`keepout.sources.kelvins` pins."""
     monkeypatch.setattr(kelvins, "ARCHIVE_SHA256", digest(archive))
     monkeypatch.setattr(kelvins, "RAW_SHA256", digest(table))

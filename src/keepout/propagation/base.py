@@ -84,7 +84,7 @@ def describe_error(code: int) -> str:
 
 
 def time_offsets(epoch: Time, offsets: npt.ArrayLike) -> FloatArray:
-    """Check a time grid and return its offsets as a read-only array.
+    """The offsets of a time grid, checked, as a read-only array.
 
     Parameters
     ----------
@@ -320,9 +320,10 @@ def propagate_in_chunks(
     offsets: npt.ArrayLike,
     *,
     max_states: int = CHUNK_STATES,
-    overlap: bool = False,
+    shared_times: int = 0,
 ) -> Iterator[tuple[Ephemeris, ...]]:
-    """Propagate on a time grid one chunk of consecutive times at a time.
+    """The states on a time grid, propagated one chunk of consecutive times
+    at a time.
 
     Memory stays bounded by ``max_states`` whatever the grid, and the chunks
     together hold exactly the states of one call on the whole grid.
@@ -338,10 +339,11 @@ def propagate_in_chunks(
         Seconds elapsed since ``epoch``; see :func:`time_offsets`.
     max_states
         Most states (objects of all the propagators x times) in one chunk; a
-        chunk always has at least one time (two with ``overlap``).
-    overlap
-        Whether each chunk after the first starts at the last time of the one
-        before (propagated again), so that every two consecutive times of the
+        chunk always has at least ``shared_times + 1`` times (or the whole
+        grid, if shorter).
+    shared_times
+        How many of the last times of each chunk the next one starts with
+        (propagated again), >= 0: with 1, every two consecutive times of the
         grid lie in one chunk.
 
     Returns
@@ -354,16 +356,18 @@ def propagate_in_chunks(
     Raises
     ------
     ValueError
-        If ``max_states`` is below 1 or the time grid is invalid (checked at
-        the call, before any chunk).
+        If ``max_states`` is below 1, ``shared_times`` below 0 or the time
+        grid is invalid (checked at the call, before any chunk).
     """
     require_at_least(max_states, 1, "max_states")
+    require_at_least(shared_times, 0, "shared_times")
     seconds = time_offsets(epoch, offsets)
     objects = sum(len(propagator) for propagator in propagators)
-    size = max(2 if overlap else 1, max_states // max(1, objects))
-    advance = size - 1 if overlap else size
-    # With overlap, the last time starts no chunk: the one before holds it.
-    end = len(seconds) - 1 if overlap and len(seconds) > 1 else len(seconds)
+    size = max(shared_times + 1, max_states // max(1, objects))
+    advance = size - shared_times
+    # The last shared_times times start no chunk, the one before holds them;
+    # a grid of at most shared_times times is one chunk.
+    end = max(len(seconds) - shared_times, min(len(seconds), 1))
     return (
         tuple(
             propagator.propagate(epoch, seconds[start : start + size])

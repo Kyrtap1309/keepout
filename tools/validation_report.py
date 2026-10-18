@@ -1,4 +1,4 @@
-"""Regenerate the validation reports and the README summaries from CARA cases.
+"""The validation reports and the README summaries, generated from CARA cases.
 
 Usage: ``uv run python tools/validation_report.py [--monte-carlo] [--check]``.
 Downloads the pinned CARA files, runs every case, and writes the results, the
@@ -518,7 +518,7 @@ def render_page(record: Record, report: Report = MAIN) -> str:
 
 
 def replace_summary(readme: str, summary: str, report: Report = MAIN) -> str:
-    """Put ``summary`` between the README's markers of ``report``.
+    """``readme`` with ``summary`` between the markers of ``report``.
 
     Raises
     ------
@@ -553,7 +553,7 @@ def rendered_files(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Write (or with ``--check`` verify) a validation page and README summary.
+    """The entry point writing (or with ``--check`` verifying) a page and summary.
 
     Returns
     -------

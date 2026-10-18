@@ -103,7 +103,7 @@ class _Inspection(NamedTuple):
 
 
 def to_correlation(matrix: FloatArray) -> tuple[FloatArray, FloatArray]:
-    """Scale a square matrix ``C`` to correlation units ``D^-1 C D^-1``.
+    """A square matrix ``C`` scaled to correlation units ``D^-1 C D^-1``.
 
     ``D = diag(sqrt|C[i, i]|)``, with 1 where a variance is negligible (see
     :data:`NEGLIGIBLE_VARIANCE`), so that row and column are left as they are
@@ -144,7 +144,7 @@ def _problems(array: FloatArray) -> tuple[str, ...]:
 
 
 def problems(matrix: npt.ArrayLike) -> tuple[str, ...]:
-    """Describe why a matrix is not a valid covariance.
+    """Why a matrix is not a valid covariance, in words.
 
     Parameters
     ----------
@@ -190,7 +190,7 @@ class _Clipped(NamedTuple):
 
 
 def _repaired_correlation(scaled: FloatArray) -> tuple[FloatArray, list[str]]:
-    """Make a symmetric correlation matrix positive semi-definite, minimally.
+    """A symmetric correlation matrix made positive semi-definite, minimally.
 
     The position block ``P`` is repaired only if it is itself invalid. The
     velocity block is then rebuilt from the conditional velocity covariance
@@ -244,7 +244,7 @@ def _structured_repair(
 
 
 def repair(matrix: npt.ArrayLike) -> tuple[FloatArray, tuple[str, ...]]:
-    """Symmetrise a matrix and make it positive semi-definite.
+    """A matrix symmetrised and made positive semi-definite.
 
     Both are judged on the correlation matrix (see :data:`PSD_RTOL`), so a
     small block is repaired at its own scale. A negative eigenvalue is
@@ -360,7 +360,7 @@ class Covariance:
         epoch: Time,
         repairs: tuple[str, ...] = (),
     ) -> Covariance:
-        """Wrap a matrix already known to be valid, skipping its checks."""
+        """A matrix already known to be valid, wrapped without its checks."""
         _require_frame(frame)
         covariance = object.__new__(cls)
         for name, value in (
@@ -411,7 +411,7 @@ class Covariance:
         return not np.any(self.matrix[3:])
 
     def in_gcrf(self, state: StateVector) -> Covariance:
-        """Return this covariance in GCRF.
+        """The covariance in GCRF.
 
         Parameters
         ----------
@@ -421,7 +421,7 @@ class Covariance:
         return self._in_frame("GCRF", state, rtn_to_inertial_covariance)
 
     def in_rtn(self, state: StateVector) -> Covariance:
-        """Return this covariance in the object's RTN frame.
+        """The covariance in the object's RTN frame.
 
         Parameters
         ----------
@@ -450,7 +450,7 @@ def make_covariance(
     *,
     policy: Policy = "repair",
 ) -> Covariance:
-    """Build a :class:`Covariance`, repairing it if the policy allows.
+    """A :class:`Covariance`, repaired if the policy allows.
 
     Parameters
     ----------

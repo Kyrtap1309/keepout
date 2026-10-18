@@ -35,7 +35,7 @@ OMM: Final = Family(
 
 
 def load_file(path: str | Path, loads: Callable[[str], _T]) -> _T:
-    """Parse a file with ``loads``; see :func:`keepout.ccsds.files.read_file`.
+    """A file parsed by ``loads``; see :func:`keepout.ccsds.files.read_file`.
 
     Raises
     ------
@@ -47,7 +47,7 @@ def load_file(path: str | Path, loads: Callable[[str], _T]) -> _T:
 
 @dataclass(frozen=True, slots=True)
 class _Errors:
-    """Makes the parse errors of one object, placed at the keyword's value."""
+    """The maker of one object's parse errors, placed at the keyword's value."""
 
     values: Mapping[str, object]
     record: int | None
@@ -151,7 +151,7 @@ def check_version(
     line: int | None = None,
     path: str | None = None,
 ) -> None:
-    """Check that a message's ``CCSDS_OMM_VERS`` is one keepout reads.
+    """A check that a message's ``CCSDS_OMM_VERS`` is one keepout reads.
 
     Raises
     ------

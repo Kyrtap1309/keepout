@@ -18,7 +18,7 @@ CDM: Final = Family("CDM", CdmParseError, CdmWriteError, keyword_width=30)
 
 
 def load_file(path: str | Path, loads: Callable[[str], Cdm]) -> Cdm:
-    """Parse a message file with ``loads``; see :func:`keepout.ccsds.files.read_file`.
+    """A message file parsed by ``loads``; see :func:`keepout.ccsds.files.read_file`.
 
     Raises
     ------
@@ -29,7 +29,7 @@ def load_file(path: str | Path, loads: Callable[[str], Cdm]) -> Cdm:
 
 
 def dump_file(cdm: Cdm, path: str | Path, dumps: Callable[[Cdm], str]) -> None:
-    """Write a message formatted by ``dumps`` as UTF-8."""
+    """A message formatted by ``dumps``, written as UTF-8."""
     Path(path).write_text(dumps(cdm), encoding="utf-8")
 
 

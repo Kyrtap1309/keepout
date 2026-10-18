@@ -20,7 +20,7 @@ __all__ = ["Conjunction", "combined_hard_body_radius"]
 def combined_hard_body_radius(
     primary: ObjectState, secondary: ObjectState, explicit: float | None = None
 ) -> float:
-    """Pick the combined hard-body radius for a conjunction.
+    """The combined hard-body radius for a conjunction.
 
     Parameters
     ----------

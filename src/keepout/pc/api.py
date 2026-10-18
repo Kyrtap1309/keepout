@@ -209,7 +209,7 @@ def _spec(method: str) -> MethodSpec:
 
 
 def _require_options(method: MethodChoice, options: Mapping[str, object]) -> None:
-    """Raise unless ``method`` is known and takes every option in ``options``.
+    """A check that ``method`` is known and takes every option in ``options``.
 
     Raises
     ------
@@ -247,7 +247,7 @@ def _bound(conjunction: Conjunction) -> bool:
 
 
 def _auto(conjunction: Conjunction) -> _Choice:
-    """Pick and run a method; return its result, applicability notes and details.
+    """The automatic choice: a method's result, applicability notes and details.
 
     Raises
     ------

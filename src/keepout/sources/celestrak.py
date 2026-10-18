@@ -109,7 +109,7 @@ _SOCRATES_COLUMN: Final = COLUMNS[0]
 """A column of the SOCRATES CSV header, to recognise the report."""
 
 Downloader: TypeAlias = Callable[[str], bytes]
-"""Downloads a URL and returns the body, raising
+"""A download of a URL's body, raising
 :class:`~keepout.errors.HttpStatusError` for an HTTP status other than 200
 and :class:`~keepout.errors.SourceUnavailable` for other failures, like
 :func:`~keepout.sources.cache.http_download`."""

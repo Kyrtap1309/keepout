@@ -19,7 +19,7 @@ else:
     _Function = TypeVar("_Function")
 
     def override(method: _Function) -> _Function:
-        """Mark a method as overriding one of its base class (checked statically)."""
+        """The marker of a method overriding its base class's (checked statically)."""
         return method
 
 
@@ -81,7 +81,7 @@ class OrderedEnum(enum.Enum):
 
 
 def read_only(*arrays: npt.NDArray[Any]) -> None:
-    """Mark arrays read-only in place."""
+    """The ``arrays``, made read-only in place."""
     for array in arrays:
         array.flags.writeable = False
 
@@ -112,7 +112,7 @@ def from_eigen(values: FloatArray, vectors: FloatArray) -> FloatArray:
 
 
 def as_vector(value: npt.ArrayLike, name: str) -> FloatArray:
-    """Return a read-only, finite float64 copy of a 3-vector.
+    """A read-only, finite float64 copy of a 3-vector.
 
     Parameters
     ----------
@@ -136,7 +136,7 @@ def as_vector(value: npt.ArrayLike, name: str) -> FloatArray:
 
 
 def require_positive(value: float, name: str) -> None:
-    """Raise ``ValueError`` unless ``value`` is finite and positive.
+    """A check that ``value`` is finite and positive (``ValueError`` if not).
 
     Raises
     ------
@@ -148,7 +148,7 @@ def require_positive(value: float, name: str) -> None:
 
 
 def require_non_negative(value: float, name: str) -> None:
-    """Raise ``ValueError`` unless ``value`` is finite and non-negative.
+    """A check that ``value`` is finite and non-negative (``ValueError`` if not).
 
     Raises
     ------
@@ -165,7 +165,7 @@ def is_probability(value: float) -> bool:
 
 
 def require_probability(value: float, name: str) -> None:
-    """Raise ``ValueError`` unless ``value`` is a probability.
+    """A check that ``value`` is a probability (``ValueError`` if not).
 
     Raises
     ------
@@ -177,7 +177,7 @@ def require_probability(value: float, name: str) -> None:
 
 
 def require_at_least(value: int, minimum: int, name: str) -> None:
-    """Raise ``ValueError`` unless the count ``value`` is at least ``minimum``.
+    """A check that the count ``value`` is at least ``minimum`` (``ValueError`` if not).
 
     Raises
     ------

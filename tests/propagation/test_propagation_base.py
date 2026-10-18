@@ -236,34 +236,38 @@ def test_a_propagator_is_anything_with_the_protocol() -> None:
     counts=st.lists(st.integers(min_value=0, max_value=5), min_size=1, max_size=3),
     times=st.integers(min_value=0, max_value=30),
     max_states=st.integers(min_value=1, max_value=50),
-    overlap=st.booleans(),
+    shared_times=st.integers(min_value=0, max_value=3),
 )
 def test_chunks_hold_the_whole_grid(
-    counts: list[int], times: int, max_states: int, overlap: bool
+    counts: list[int], times: int, max_states: int, shared_times: int
 ) -> None:
     propagators = [linear(count) for count in counts]
     offsets = np.arange(times) * 37.0 - 100.0
     chunks = list(
         propagate_in_chunks(
-            propagators, EPOCH, offsets, max_states=max_states, overlap=overlap
+            propagators,
+            EPOCH,
+            offsets,
+            max_states=max_states,
+            shared_times=shared_times,
         )
     )
     assert all(len(chunk) == len(propagators) for chunk in chunks)
-    size = max(2 if overlap else 1, max_states // max(1, sum(counts)))
+    size = max(shared_times + 1, max_states // max(1, sum(counts)))
     lengths = [len(chunk[0].offsets) for chunk in chunks]
     assert all(length <= size for length in lengths)
     if not chunks:
         assert times == 0
         return
-    # Every chunk after the first starts at the last time of the one before
-    # with overlap: dropped, the chunks hold the grid once.
-    skip = 1 if overlap else 0
+    # Every chunk after the first starts at the last shared_times times of
+    # the one before: dropped, the chunks hold the grid once.
+    skip = shared_times
     assert sum(lengths) - skip * (len(chunks) - 1) == times
     for which, propagator in enumerate(propagators):
         parts = [chunk[which] for chunk in chunks]
-        if overlap:
+        if skip:
             for before, after in itertools.pairwise(parts):
-                assert before.offsets[-1] == after.offsets[0]
+                assert before.offsets[-skip:].tolist() == after.offsets[:skip].tolist()
         whole = propagator.propagate(EPOCH, offsets)
         np.testing.assert_array_equal(
             np.concatenate([parts[0].offsets, *(p.offsets[skip:] for p in parts[1:])]),
@@ -280,7 +284,7 @@ def test_chunks_hold_the_whole_grid(
 
 def test_overlapping_chunks_hold_every_interval() -> None:
     (first, second, third) = propagate_in_chunks(
-        [linear(1)], EPOCH, np.arange(7.0), max_states=3, overlap=True
+        [linear(1)], EPOCH, np.arange(7.0), max_states=3, shared_times=1
     )
     assert [chunk.offsets.tolist() for (chunk,) in (first, second, third)] == [
         [0.0, 1.0, 2.0],
@@ -289,10 +293,10 @@ def test_overlapping_chunks_hold_every_interval() -> None:
     ]
     # Two times at least, even above max_states; a grid of one time is one chunk.
     pairs = propagate_in_chunks(
-        [linear(3)], EPOCH, np.arange(3.0), max_states=1, overlap=True
+        [linear(3)], EPOCH, np.arange(3.0), max_states=1, shared_times=1
     )
     assert [chunk.offsets.tolist() for (chunk,) in pairs] == [[0.0, 1.0], [1.0, 2.0]]
-    (alone,) = propagate_in_chunks([linear(1)], EPOCH, [5.0], overlap=True)
+    (alone,) = propagate_in_chunks([linear(1)], EPOCH, [5.0], shared_times=1)
     assert alone[0].offsets.tolist() == [5.0]
 
 
@@ -315,6 +319,8 @@ def test_the_default_chunk_bounds_memory() -> None:
 def test_chunk_size_is_checked_at_the_call() -> None:
     with pytest.raises(ValueError, match="max_states must be at least 1, got 0"):
         propagate_in_chunks([linear(1)], EPOCH, [0.0], max_states=0)
+    with pytest.raises(ValueError, match="shared_times must be at least 0, got -1"):
+        propagate_in_chunks([linear(1)], EPOCH, [0.0], shared_times=-1)
 
 
 def test_chunk_offsets_are_checked_at_the_call() -> None:

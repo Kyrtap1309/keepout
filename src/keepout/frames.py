@@ -171,7 +171,7 @@ def _rotate_covariance(covariance: npt.ArrayLike, rotation: FloatArray) -> Float
 def rtn_to_inertial_covariance(
     covariance: npt.ArrayLike, r: npt.ArrayLike, v: npt.ArrayLike
 ) -> FloatArray:
-    """Rotate a 6x6 position-velocity covariance from RTN to the inertial frame.
+    """A 6x6 position-velocity covariance rotated from RTN to the inertial frame.
 
     Position and velocity blocks are rotated with the same matrix; the rotation
     rate of the RTN frame is neglected (standard conjunction-assessment
@@ -194,7 +194,7 @@ def rtn_to_inertial_covariance(
 def inertial_to_rtn_covariance(
     covariance: npt.ArrayLike, r: npt.ArrayLike, v: npt.ArrayLike
 ) -> FloatArray:
-    """Rotate a 6x6 position-velocity covariance from the inertial frame to RTN.
+    """A 6x6 position-velocity covariance rotated from the inertial frame to RTN.
 
     Parameters
     ----------
@@ -209,7 +209,7 @@ def inertial_to_rtn_covariance(
 
 
 def _itrf_to_gcrf(states: Sequence[StateVector]) -> list[StateVector]:
-    """Convert ITRF states with one astropy transformation for all of them."""
+    """ITRF states in GCRF, by one astropy transformation for all of them."""
     # Imported here: astropy.coordinates is slow to import and only ITRF needs it.
     from astropy.coordinates import (
         GCRS,
@@ -298,7 +298,7 @@ def _broadcast(
 def teme_to_gcrf(
     epochs: Time, r: npt.ArrayLike, v: npt.ArrayLike
 ) -> tuple[FloatArray, FloatArray]:
-    """Convert TEME positions and velocities to GCRF, many at once.
+    """TEME positions and velocities in GCRF, many at once.
 
     TEME (true equator, mean equinox of date) is the frame of SGP4 output.
     Following Vallado et al. (2006), TEME is turned to the pseudo-Earth-fixed
@@ -362,7 +362,7 @@ def teme_to_gcrf(
 
 
 def _teme_states_to_gcrf(states: Sequence[StateVector]) -> list[StateVector]:
-    """Convert TEME states with one :func:`teme_to_gcrf` call for all of them."""
+    """TEME states in GCRF, by one :func:`teme_to_gcrf` call for all of them."""
     positions, velocities = teme_to_gcrf(
         Time([state.epoch for state in states]),
         np.stack([state.r for state in states]),
@@ -375,7 +375,7 @@ def _teme_states_to_gcrf(states: Sequence[StateVector]) -> list[StateVector]:
 
 
 def to_gcrf_all(states: Sequence[StateVector]) -> list[StateVector]:
-    """Express several state vectors in GCRF, converting ITRF and TEME together.
+    """Several state vectors in GCRF, ITRF and TEME ones converted together.
 
     Parameters
     ----------
@@ -407,7 +407,7 @@ def to_gcrf_all(states: Sequence[StateVector]) -> list[StateVector]:
 def frame_to_gcrf(
     frame: RefFrame, epochs: Time, r: npt.ArrayLike, v: npt.ArrayLike
 ) -> tuple[FloatArray, FloatArray]:
-    """Convert positions and velocities in one frame to GCRF, many at once.
+    """Positions and velocities in one frame, in GCRF, many at once.
 
     TEME states go through :func:`teme_to_gcrf` in one call; EME2000 and
     ITRF states as :class:`~keepout.state.StateVector` through
@@ -465,7 +465,7 @@ def frame_to_gcrf(
 
 
 def to_gcrf(state: StateVector) -> StateVector:
-    """Express a state vector in GCRF.
+    """A state vector in GCRF.
 
     Parameters
     ----------

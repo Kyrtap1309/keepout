@@ -110,7 +110,7 @@ class Sink(Protocol):
     """Where streamed bytes go: anything with a binary ``write``."""
 
     def write(self, data: bytes, /) -> object:
-        """Take the next chunk."""
+        """The next chunk, taken."""
 
 
 def cache_dir(given: Path | None = None) -> Path:
@@ -130,7 +130,7 @@ def cache_dir(given: Path | None = None) -> Path:
 
 
 def http_download(url: str, *, retry_delays: Sequence[float] = RETRY_DELAYS) -> bytes:
-    """Download ``url`` and return the body, as :func:`http_stream` does.
+    """The body at ``url``, downloaded as :func:`http_stream` does.
 
     A download that fails on the network or with a server error is tried
     again (:func:`retrying`).
@@ -226,7 +226,7 @@ def http_request(
 
 @contextlib.contextmanager
 def network_errors(message: str) -> Generator[None]:
-    """Turn a network or protocol error inside into
+    """A context in which a network or protocol error becomes
     :class:`~keepout.errors.SourceUnavailable`, ``<message>: <error>``.
 
     Raises
@@ -241,7 +241,7 @@ def network_errors(message: str) -> Generator[None]:
 
 
 def http_stream(url: str, sink: Sink) -> None:
-    """Download ``url`` into ``sink`` in chunks of :data:`CHUNK_SIZE` bytes.
+    """The download of ``url`` into ``sink``, in chunks of :data:`CHUNK_SIZE` bytes.
 
     For files too large to hold in memory at once. The request names keepout
     in the ``User-Agent`` (:data:`USER_AGENT`). Redirects are followed; any
@@ -306,14 +306,15 @@ def _signature(path: Path) -> _Signature | None:
 
 
 def _remember(path: Path, sha256: str, signature: _Signature | None) -> None:
-    """Record that ``path``, with ``signature``, has digest ``sha256``."""
+    """The record that ``path``, with ``signature``, has digest ``sha256``."""
     if signature is not None:
         with _verified_lock:
             _verified[path] = (sha256, signature)
 
 
 def forget_verified() -> None:
-    """Forget which cached files this process has verified (or written).
+    """The end of this process's record of the cached files it has verified
+    (or written).
 
     The next :func:`has_digest` of each file hashes it again, even if its
     inode, size and modification time are unchanged: for a file changed
@@ -358,7 +359,7 @@ class _Hashing:
 def store(
     target: Path, write: Callable[[Sink], object], sha256: str, source: str
 ) -> None:
-    """Write ``target`` atomically, keeping it only if its digest is ``sha256``.
+    """The atomic write of ``target``, kept only if its digest is ``sha256``.
 
     Parameters
     ----------
@@ -386,7 +387,7 @@ def store(
 
 
 def store_bytes(target: Path, data: bytes) -> str:
-    """Write ``data`` to ``target`` atomically, as :func:`store` does.
+    """The atomic write of ``data`` to ``target``, as :func:`store` does it.
 
     For contents already in memory, so there is no digest to check them
     against; the one computed while writing is returned.
@@ -407,7 +408,7 @@ def store_bytes(target: Path, data: bytes) -> str:
 
 
 def store_json(target: Path, record: Mapping[str, object]) -> str:
-    """Write ``record`` to ``target`` as indented JSON text, atomically.
+    """The atomic write of ``record`` to ``target`` as indented JSON text.
 
     Returns
     -------
@@ -430,7 +431,7 @@ def _write(
     write: Callable[[Sink], object],
     check: Callable[[str], None] | None = None,
 ) -> str:
-    """Write ``target`` atomically; ``check`` may refuse the contents' digest.
+    """The atomic write of ``target``; ``check`` may refuse the contents' digest.
 
     Returns the SHA-256 hex digest of what was written. If ``write`` or
     ``check`` raises, ``target`` is left as it was.
@@ -528,7 +529,7 @@ def _is_time(value: object) -> TypeIs[float]:
 
 
 def save_copy(target: Path, url: str, data: bytes, now: float) -> CopyMeta:
-    """Store a download at ``target`` with its metadata, both atomically.
+    """The storing of a download at ``target`` with its metadata, both atomic.
 
     Parameters
     ----------
@@ -553,7 +554,7 @@ def save_copy(target: Path, url: str, data: bytes, now: float) -> CopyMeta:
 
 
 def write_meta(target: Path, meta: CopyMeta) -> None:
-    """Write the ``.meta.json`` file of the download at ``target`` atomically.
+    """The atomic write of the ``.meta.json`` file of the download at ``target``.
 
     Times must be floats (``time.time()``); :func:`read_copy` refuses others.
     """
@@ -573,8 +574,8 @@ class Unchanged(SourceUnavailable):
 
 
 def require_max_age(max_age: float, interval: float, reason: str) -> None:
-    """Refuse a ``max_age`` below a source's least ``interval`` between two
-    downloads.
+    """The refusal of a ``max_age`` below a source's least ``interval``
+    between two downloads.
 
     Raises
     ------

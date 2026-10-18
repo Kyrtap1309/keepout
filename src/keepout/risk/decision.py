@@ -247,7 +247,7 @@ def assess(
     trend_config: TrendConfig | None = None,
     decision_config: DecisionConfig | None = None,
 ) -> Assessment:
-    """Assess an event from its observations, in any order.
+    """The assessment of an event from its observations, in any order.
 
     Parameters
     ----------

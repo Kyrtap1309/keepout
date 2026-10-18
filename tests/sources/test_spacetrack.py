@@ -783,8 +783,8 @@ class BrokenBody(io.BytesIO):
 
 
 class FakeHttps(urllib.request.BaseHandler):
-    """Answers HTTPS requests from ``answers`` (status, body, headers) and
-    records what was sent: method, URL, body and headers.
+    """A handler answering HTTPS requests from ``answers`` (status, body,
+    headers) and recording what was sent: method, URL, body and headers.
 
     It comes before urllib's own HTTPS handler, so that is never asked.
     """

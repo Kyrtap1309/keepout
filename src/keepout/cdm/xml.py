@@ -72,7 +72,7 @@ def _section(
 
 
 def loads(text: str) -> Cdm:
-    """Parse a CDM in NDM/XML.
+    """The CDM in NDM/XML ``text``.
 
     Parameters
     ----------
@@ -149,7 +149,7 @@ def _groups(
 
 
 def _insert_comment(element: ElementTree.Element, text: str) -> None:
-    """Add a comment after the element's leading comments: NDM/XML allows
+    """A comment inserted after the element's leading comments: NDM/XML allows
     ``COMMENT`` only at the start of an element."""
     position = next(
         (i for i, child in enumerate(element) if child.tag != COMMENT), len(element)
@@ -196,7 +196,7 @@ def _write(
 
 
 def dumps(cdm: Cdm) -> str:
-    """Write a CDM as NDM/XML (elements not namespace-qualified).
+    """A CDM as NDM/XML text (elements not namespace-qualified).
 
     Version 1.0 messages use the CCSDS 508.0-B-1 groups and schema location;
     version 2.0 messages use ``physicalParameters`` and
@@ -231,7 +231,7 @@ def dumps(cdm: Cdm) -> str:
 
 
 def load(path: str | Path) -> Cdm:
-    """Read an XML CDM file (UTF-8, gzip-compressed or not; a
+    """The CDM in an XML file (UTF-8, gzip-compressed or not; a
     byte-order mark is ignored).
 
     Parameters
@@ -243,7 +243,7 @@ def load(path: str | Path) -> Cdm:
 
 
 def dump(cdm: Cdm, path: str | Path) -> None:
-    """Write a CDM to an XML file (UTF-8).
+    """A CDM written to an XML file (UTF-8).
 
     Parameters
     ----------

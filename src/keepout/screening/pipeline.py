@@ -131,7 +131,7 @@ def screen(
     step: float = DEFAULT_STEP,
     max_states: int = CHUNK_STATES,
 ) -> ScreeningResult:
-    """Find every close approach of the primaries with the catalog in a window.
+    """Every close approach of the primaries with the catalog in a window.
 
     See the module's description for the method.
 
@@ -194,66 +194,19 @@ def screen(
     processes = resolve_workers(workers)
     require_at_least(max_states, 1, "max_states")
     window = _Window(start, float(duration), float(step), max_states)
-    own, dropped_primaries = _current(
+    current_primaries, dropped_primaries = _current(
         primaries, ScreeningRole.PRIMARY, window, max_age, max_lead
     )
-    others, dropped_catalog = _current(
+    current_catalog, dropped_catalog = _current(
         catalog, ScreeningRole.CATALOG, window, max_age, max_lead
     )
-    propagator, volumes, unusable_primaries = _primaries(own, volume)
-    bounds = propagator.radius_bounds(start, window.duration)
-    numbers = np.array([omm.catalog_number for omm in propagator.omms], dtype=np.int64)
-    count = min(processes, len(others))
-    parts = [
-        _Part(
-            window=window,
-            primaries=propagator,
-            primary_numbers=numbers,
-            primary_bounds=bounds,
-            volumes=tuple(volumes),
-            catalog=others[part::count],
-            columns=np.arange(part, len(others), count),
-        )
-        for part in range(count)
-    ]
-    results = _run(parts)
-    lost = [
-        (others[index], message)
-        for result in results
-        for index, message in result.unsupported
-    ]
-    found = SearchResult.merge(result.search for result in results)
-    primary_omms = propagator.omms
-    skipped = [
-        *dropped_primaries,
-        *dropped_catalog,
-        *unusable_primaries,
-        *_unsupported(lost, ScreeningRole.CATALOG),
-        *_failed(found.primary_failures, primary_omms, ScreeningRole.PRIMARY, window),
-        *_failed(found.catalog_failures, others, ScreeningRole.CATALOG, window),
-    ]
-    gone_primaries = set(found.primary_failures)
-    gone = set(found.catalog_failures)
-    minima = [
-        minimum
-        for minimum in found.minima
-        if minimum.primary_index not in gone_primaries
-        and minimum.secondary_index not in gone
-    ]
-    screened_volumes = {
-        omm.catalog_number: volumes[index]
-        for index, omm in enumerate(primary_omms)
-        if index not in gone_primaries
-    }
-    return ScreeningResult(
-        approaches=tuple(
-            _approaches(minima, primary_omms, others, start, propagator.frame)
-        ),
-        skipped=tuple(skipped),
-        start=start,
-        duration=window.duration,
-        volumes=screened_volumes,
-        catalog_count=len(others) - len(lost) - len(gone),
+    primary_propagator, volumes, unusable_primaries = _primaries(
+        current_primaries, volume
+    )
+    parts = _parts(primary_propagator, volumes, current_catalog, window, processes)
+    left_out = [*dropped_primaries, *dropped_catalog, *unusable_primaries]
+    return _collect(
+        _run(parts), primary_propagator, volumes, current_catalog, window, left_out
     )
 
 
@@ -362,6 +315,85 @@ def _primaries(
     return subset, volumes, skipped
 
 
+def _parts(
+    primaries: Sgp4Propagator,
+    volumes: Sequence[ScreeningVolume],
+    catalog: tuple[Omm, ...],
+    window: _Window,
+    processes: int,
+) -> list[_Part]:
+    """The primaries with the catalog dealt into at most ``processes`` parts:
+    object ``i`` to part ``i mod count``, none for an empty catalog."""
+    bounds = primaries.radius_bounds(window.start, window.duration)
+    numbers = np.array([omm.catalog_number for omm in primaries.omms], dtype=np.int64)
+    count = min(processes, len(catalog))
+    return [
+        _Part(
+            window=window,
+            primaries=primaries,
+            primary_numbers=numbers,
+            primary_bounds=bounds,
+            volumes=tuple(volumes),
+            catalog=catalog[part::count],
+            columns=np.arange(part, len(catalog), count),
+        )
+        for part in range(count)
+    ]
+
+
+def _collect(
+    results: Sequence[_PartResult],
+    primaries: Sgp4Propagator,
+    volumes: Sequence[ScreeningVolume],
+    catalog: Sequence[Omm],
+    window: _Window,
+    left_out: Sequence[SkippedObject],
+) -> ScreeningResult:
+    """The parts' results merged into the screening's result.
+
+    ``left_out`` are the element sets left out before the search; to them
+    are added the catalog's element sets SGP4 cannot be initialised with and
+    the objects SGP4 failed for, whose minima are dropped.
+    """
+    unsupported_catalog = [
+        (catalog[index], message)
+        for result in results
+        for index, message in result.unsupported
+    ]
+    search = SearchResult.merge(result.search for result in results)
+    primary_omms = primaries.omms
+    skipped = [
+        *left_out,
+        *_unsupported(unsupported_catalog, ScreeningRole.CATALOG),
+        *_failed(search.primary_failures, primary_omms, ScreeningRole.PRIMARY, window),
+        *_failed(search.catalog_failures, catalog, ScreeningRole.CATALOG, window),
+    ]
+    failed_primaries = set(search.primary_failures)
+    failed_catalog = set(search.catalog_failures)
+    minima = [
+        minimum
+        for minimum in search.minima
+        if minimum.primary_index not in failed_primaries
+        and minimum.secondary_index not in failed_catalog
+    ]
+    screened_volumes = {
+        omm.catalog_number: volumes[index]
+        for index, omm in enumerate(primary_omms)
+        if index not in failed_primaries
+    }
+    approaches = _approaches(
+        minima, primary_omms, catalog, window.start, primaries.frame
+    )
+    return ScreeningResult(
+        approaches=tuple(approaches),
+        skipped=tuple(skipped),
+        start=window.start,
+        duration=window.duration,
+        volumes=screened_volumes,
+        catalog_count=len(catalog) - len(unsupported_catalog) - len(failed_catalog),
+    )
+
+
 def _unsupported(
     unsupported: Iterable[tuple[Omm, str]], role: ScreeningRole
 ) -> list[SkippedObject]:
@@ -389,7 +421,8 @@ def _failed(
 
 
 def _run(parts: Sequence[_Part]) -> list[_PartResult]:
-    """Screen the parts, in this process or in a process each."""
+    """The results of the parts, screened in this process or in a process
+    each."""
     if len(parts) < 2:
         return [_screen_part(part) for part in parts]
     with process_pool(len(parts)) as pool:
@@ -397,13 +430,15 @@ def _run(parts: Sequence[_Part]) -> list[_PartResult]:
 
 
 def _screen_part(part: _Part) -> _PartResult:
-    """Initialise, filter and search one part of the catalog."""
+    """What one part finds: its catalog initialised, filtered and searched."""
     catalog, kept, rejected = Sgp4Propagator.from_omms(part.catalog)
     columns = part.columns[kept]
-    lost = tuple((int(part.columns[index]), str(error)) for index, error in rejected)
+    unsupported = tuple(
+        (int(part.columns[index]), str(error)) for index, error in rejected
+    )
     window = part.window
     if len(part.primaries) == 0 or len(catalog) == 0:
-        return _PartResult(SearchResult((), {}, {}), lost)
+        return _PartResult(SearchResult((), {}, {}), unsupported)
     bounds = catalog.radius_bounds(window.start, window.duration)
     pairs = apogee_perigee_filter(part.primary_bounds, bounds, part.volumes)
     numbers = np.array([omm.catalog_number for omm in catalog.omms])
@@ -419,17 +454,18 @@ def _screen_part(part: _Part) -> _PartResult:
         primary_bounds=part.primary_bounds,
         catalog_bounds=bounds,
     )
-    found = search.run(max_states=window.max_states)
+    search_result = search.run(max_states=window.max_states)
     minima = [
         replace(minimum, secondary_index=int(columns[minimum.secondary_index]))
-        for minimum in found.minima
+        for minimum in search_result.minima
     ]
     failures = {
         int(columns[index]): failure
-        for index, failure in found.catalog_failures.items()
+        for index, failure in search_result.catalog_failures.items()
     }
     return _PartResult(
-        SearchResult(tuple(minima), found.primary_failures, failures), lost
+        SearchResult(tuple(minima), search_result.primary_failures, failures),
+        unsupported,
     )
 
 

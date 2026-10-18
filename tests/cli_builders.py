@@ -19,7 +19,8 @@ from keepout.sources import celestrak, spacetrack
 
 
 def keepout(*args: str, env: Mapping[str, str | None] | None = None) -> Result:
-    """Run ``keepout ARGS`` in-process; standard output and error kept apart.
+    """The result of ``keepout ARGS`` run in-process, standard output and
+    error kept apart.
 
     A bug (any exception but :class:`SystemExit`) is raised, not hidden in
     the result. ``env`` sets (or, with ``None``, unsets) environment
@@ -32,9 +33,9 @@ def keepout(*args: str, env: Mapping[str, str | None] | None = None) -> Result:
 
 
 class FakeWeb:
-    """Serves fixed bodies by URL in place of ``urllib.request.urlopen``.
+    """A web of fixed bodies by URL, in place of ``urllib.request.urlopen``.
 
-    Records the URLs asked for, and the waits before a download is tried
+    It records the URLs asked for, and the waits before a download is tried
     again (``time.sleep`` passes no time); a URL it does not serve fails as
     an unreachable server does.
     """

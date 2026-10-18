@@ -123,7 +123,7 @@ def _perpendicular(unit: FloatArray) -> FloatArray:
 
 
 def encounter_plane(conjunction: Conjunction) -> EncounterPlane:
-    """Project a conjunction onto the encounter plane.
+    """A conjunction projected onto the encounter plane.
 
     Use :attr:`Conjunction.plane <keepout.conjunction.Conjunction.plane>`,
     which caches the result.

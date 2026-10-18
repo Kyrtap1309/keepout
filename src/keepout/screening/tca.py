@@ -17,7 +17,7 @@ no point of the volume is farther):
 
 1. *Speed sieve.* Each object's speed is below :func:`speed_bounds` (the
    speed at perigee of the most eccentric orbit inside the object's radius
-   bounds, plus :data:`SPEED_MARGIN`), so the relative speed is below ``V =
+   bounds, plus :data:`SPEED_BOUND_MARGIN`), so the relative speed is below ``V =
    v_p + v_s`` and every point of the interval is within ``V (t - ta)`` of
    ``rho_a`` and ``V (tb - t)`` of ``rho_b``. A point inside ``R`` needs
    ``|rho_a| + |rho_b| <= 2 R + V h``, and the range never exceeds
@@ -131,7 +131,7 @@ __all__ = [
     "MIN_RADIUS",
     "PERTURBATION",
     "SLOW_STEP",
-    "SPEED_MARGIN",
+    "SPEED_BOUND_MARGIN",
     "TCA_TOLERANCE",
     "ApproachSearch",
     "ObjectFailure",
@@ -156,7 +156,7 @@ m^2/s, mostly SGP4's own rounding."""
 TCA_TOLERANCE: Final = 1e-6
 """Absolute tolerance of the TCA [s] given to Brent's method."""
 
-SPEED_MARGIN: Final = 0.05
+SPEED_BOUND_MARGIN: Final = 0.05
 """Relative margin on :func:`speed_bounds`. SGP4's speed exceeds the
 two-body bound by 0.034 % at most on the public catalog (its short-period
 terms move the osculating semi-major axis)."""
@@ -225,7 +225,7 @@ def speed_bounds(bounds: RadiusBounds) -> FloatArray:
     ``highest``: ``sqrt(2 mu highest / (lowest (lowest + highest)))`` (vis
     viva), the escape speed at ``lowest`` when ``highest`` is infinite. The
     lowest radius is taken at least :data:`MIN_RADIUS`, and the result is
-    widened by :data:`SPEED_MARGIN` and :data:`GRAVITY_MARGIN`.
+    widened by :data:`SPEED_BOUND_MARGIN` and :data:`GRAVITY_MARGIN`.
 
     Parameters
     ----------
@@ -242,7 +242,7 @@ def speed_bounds(bounds: RadiusBounds) -> FloatArray:
     # highest / (lowest + highest), written to give 1 for an infinite highest.
     share = 1.0 / (1.0 + lowest / highest)
     speeds: FloatArray = np.sqrt(2.0 * EARTH_MU * GRAVITY_MARGIN * share / lowest)
-    return speeds * (1.0 + SPEED_MARGIN)
+    return speeds * (1.0 + SPEED_BOUND_MARGIN)
 
 
 @dataclass(frozen=True, slots=True)
@@ -308,7 +308,8 @@ def _order(minimum: RangeMinimum) -> tuple[int, int, float]:
 def _earliest(
     failures: dict[int, ObjectFailure], index: int, failure: ObjectFailure
 ) -> None:
-    """Keep the earlier of an object's recorded failure and a new one."""
+    """The earlier of an object's recorded failure and a new one, kept in
+    ``failures``."""
     known = failures.get(index)
     if known is None or (failure.offset, failure.code) < (known.offset, known.code):
         failures[index] = failure
@@ -370,33 +371,61 @@ def _dot(a: FloatArray, b: FloatArray) -> FloatArray:
 
 
 def _acceleration(
-    largest: FloatArray, farthest: FloatArray, lowest: FloatArray, length: FloatArray
+    end_range: FloatArray,
+    speed_range_bound: FloatArray,
+    lowest_radius: FloatArray,
+    interval: FloatArray,
 ) -> tuple[FloatArray, FloatArray]:
     """Bounds on the relative acceleration and the range over intervals.
 
-    ``largest`` is the larger range at the two ends of each interval,
-    ``farthest`` the speed sieve's bound on the range over it, ``lowest``
-    the lowest radius of either object and ``length`` the interval's
-    length. Returns the bound ``A`` on the relative acceleration and a bound
-    on the range: the range stays within ``A h^2 / 8`` of the chord, so it
-    is at most ``largest + A h^2 / 8``, with ``A`` itself growing with it.
+    The range stays within ``A h^2 / 8`` of the chord, so it is at most
+    ``end_range + A h^2 / 8``, with ``A`` itself growing with the range: the
+    bound on the range solves that inequality, capped by the speed sieve's.
+
+    Parameters
+    ----------
+    end_range
+        The larger range at the two ends of each interval [m].
+    speed_range_bound
+        The speed sieve's bound on the range over each interval (``rho_up``)
+        [m].
+    lowest_radius
+        The lowest distance of either object from the Earth's centre [m].
+    interval
+        The length of each interval (``h``) [s].
+
+    Returns
+    -------
+    tuple[FloatArray, FloatArray]
+        The bound ``A`` on the relative acceleration [m/s^2] and the bound
+        on the range over each interval [m].
     """
     mu = EARTH_MU * GRAVITY_MARGIN
-    both = 2.0 * mu / (lowest * lowest)
-    inner = lowest * lowest - 0.25 * farthest * farthest
-    gradient = np.full_like(farthest, np.inf)
-    segment = inner > 0.0
-    gradient[segment] = 2.0 * mu / inner[segment] ** 1.5
-    widest = farthest.copy()
-    shrink = 1.0 - gradient * length * length / 8.0
-    solvable = shrink > 0.0
-    widest[solvable] = np.minimum(
-        farthest[solvable],
-        (largest[solvable] + PERTURBATION * length[solvable] ** 2 / 4.0)
-        / shrink[solvable],
+    # Both objects' gravity added: a bound whatever their separation [m/s^2].
+    gravity_sum = 2.0 * mu / (lowest_radius * lowest_radius)
+    # The squared lowest radius on the segment joining the objects [m^2].
+    segment_radius_squared = (
+        lowest_radius * lowest_radius - 0.25 * speed_range_bound * speed_range_bound
     )
-    acceleration: FloatArray = np.minimum(both, gradient * widest) + 2.0 * PERTURBATION
-    return acceleration, widest
+    # The gravity gradient there [1/s^2], infinite when the segment may pass
+    # through the centre.
+    gradient = np.full_like(speed_range_bound, np.inf)
+    segment = segment_radius_squared > 0.0
+    gradient[segment] = 2.0 * mu / segment_radius_squared[segment] ** 1.5
+    range_bound = speed_range_bound.copy()
+    # range <= end_range + (gradient range + 2 PERTURBATION) h^2 / 8 gives
+    # range (1 - gradient h^2 / 8) <= end_range + PERTURBATION h^2 / 4.
+    range_factor = 1.0 - gradient * interval * interval / 8.0
+    solvable = range_factor > 0.0
+    range_bound[solvable] = np.minimum(
+        speed_range_bound[solvable],
+        (end_range[solvable] + PERTURBATION * interval[solvable] ** 2 / 4.0)
+        / range_factor[solvable],
+    )
+    acceleration: FloatArray = (
+        np.minimum(gravity_sum, gradient * range_bound) + 2.0 * PERTURBATION
+    )
+    return acceleration, range_bound
 
 
 class _Failed(Exception):
@@ -419,7 +448,7 @@ def _first_failure(errors: ErrorArray, stamps: FloatArray) -> ObjectFailure | No
 
 
 def _check(own: ErrorArray, other: ErrorArray, stamps: FloatArray) -> None:
-    """Raise :class:`_Failed` if either object failed at some of ``stamps``.
+    """A check that neither object failed at any of ``stamps``.
 
     Raises
     ------
@@ -441,7 +470,8 @@ class _Failures:
     catalog: dict[int, ObjectFailure] = field(default_factory=dict)
 
     def note(self, primary: int, secondary: int, failed: _Failed) -> None:
-        """Record a pair's failure found while refining it."""
+        """A pair's failure found while refining it, kept as each failed
+        object's earliest."""
         if failed.primary is not None:
             _earliest(self.primary, primary, failed.primary)
         if failed.secondary is not None:
@@ -576,8 +606,8 @@ def _record(
     errors: ErrorArray,
     times: FloatArray,
 ) -> None:
-    """Record the first failed state of each object of a chunk (in time
-    order)."""
+    """The first failed state of each object of a chunk (in time order),
+    kept as its earliest failure."""
     failed = errors != NO_ERROR
     for row in np.flatnonzero(np.any(failed, axis=1)):
         first = int(np.argmax(failed[row]))
@@ -666,7 +696,7 @@ class ApproachSearch:
         self._reach = np.array([volume.bounding_radius for volume in self._volumes])
 
     def run(self, *, max_states: int = CHUNK_STATES) -> SearchResult:
-        """Search the whole grid.
+        """The search over the whole grid.
 
         Parameters
         ----------
@@ -709,9 +739,10 @@ class ApproachSearch:
     def _candidates(
         self, rows: IndexArray, max_states: int, failures: _Failures
     ) -> dict[tuple[int, int], list[_Interval]]:
-        """Propagate the grid in chunks and sieve every pair's intervals.
+        """The intervals of each pair that pass the sieves, in time order.
 
-        Returns the intervals of each pair that pass, in time order.
+        The grid is propagated in chunks; the failures seen are noted in
+        ``failures``.
         """
         columns = np.flatnonzero(self._pairs.any(axis=0))
         own = [
@@ -722,7 +753,7 @@ class ApproachSearch:
             self._start,
             self._offsets,
             max_states=max_states,
-            overlap=True,
+            shared_times=1,
         )
         found: dict[tuple[int, int], list[_Interval]] = {}
         for primaries, catalog in chunks:
@@ -748,8 +779,8 @@ class ApproachSearch:
         others: IndexArray,
         times: FloatArray,
     ) -> None:
-        """Sieve one primary's pairs over a chunk; add the intervals that
-        pass to ``found``."""
+        """The intervals of one primary's pairs over a chunk that pass the
+        sieves, added to ``found``."""
         secondaries, intervals, quick = self._sieve(
             row, r_primary, r_others, others, times
         )
@@ -799,14 +830,14 @@ class ApproachSearch:
         lowest = np.minimum(
             self._lowest_primary[row], self._lowest_catalog[others[pair]]
         )
-        acceleration, widest = _acceleration(
+        acceleration, range_bound = _acceleration(
             np.maximum(ends[0], ends[1]), farthest, lowest, h
         )
         pad = acceleration * h * h / 8.0
         same = np.all(a == 0.0, axis=1) & np.all(b == 0.0, axis=1)
         keep = (nearest - pad <= reach) & ~same
         sweep = np.sqrt(squared) / h - 0.5 * acceleration * h
-        quick = (sweep > 0.0) & (sweep * sweep > widest * acceleration)
+        quick = (sweep > 0.0) & (sweep * sweep > range_bound * acceleration)
         return others[pair[keep]], interval[keep], quick[keep]
 
     def _refine(

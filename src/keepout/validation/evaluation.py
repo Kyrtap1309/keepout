@@ -1,4 +1,4 @@
-"""Run validation cases and judge them against their criteria."""
+"""Validation cases run and judged against their criteria."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ __all__ = [
 
 
 def judge(case: ValidationCase, result: PcResult) -> Verdict:
-    """Compare a result with the case's reference under the case's criterion."""
+    """The verdict on a result against the case's reference, by the case's criterion."""
     return case.criterion.judge(result.value, case.reference, result.interval)
 
 
@@ -77,7 +77,7 @@ def run(case: ValidationCase, method: Method) -> PcResult:
 def evaluate(
     cases: Iterable[ValidationCase], *, workers: int | None = 1
 ) -> list[Outcome]:
-    """Run each case's methods on it, in order.
+    """The outcomes of each case's methods run on it, in order.
 
     Parameters
     ----------

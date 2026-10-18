@@ -197,7 +197,7 @@ def run(
     thresholds: Thresholds | None = None,
     decision_config: DecisionConfig | None = None,
 ) -> OperatorResult:
-    """Screen a fleet against a catalog, issue a CDM per approach, assess each.
+    """A fleet screened against a catalog, a CDM issued per approach, each assessed.
 
     See the module's description for the steps.
 

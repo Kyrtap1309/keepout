@@ -47,7 +47,8 @@ one per CPU, at most 4)."""
 
 
 def positive(value: float | None) -> float | None:
-    """Check an option's number is finite and above zero (``None`` passes).
+    """An option's number, checked to be finite and above zero (``None``
+    passes).
 
     Raises
     ------

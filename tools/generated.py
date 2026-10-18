@@ -75,7 +75,7 @@ def read_json(path: Path, shape: type[_T]) -> _T:
 
 
 def replace_block(text: str, start: str, end: str, block: str) -> str:
-    """Put ``block`` between the ``start`` and ``end`` markers of ``text``.
+    """``text`` with ``block`` between its ``start`` and ``end`` markers.
 
     Raises
     ------
@@ -131,7 +131,7 @@ def pc_text(pc: float | None) -> str:
 
 
 def write_or_check(files: Mapping[Path, str | bytes], *, check: bool, tool: str) -> int:
-    """Write the files whose contents differ, or with ``check`` report them.
+    """The files whose contents differ, written, or with ``check`` reported.
 
     Text is written as UTF-8, bytes as they are.
 

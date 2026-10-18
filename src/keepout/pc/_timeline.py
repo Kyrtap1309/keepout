@@ -275,7 +275,7 @@ def _refine(
     values: FloatArray,
     fine: FloatArray,
 ) -> tuple[FloatArray, FloatArray]:
-    """Refine the grid around its significant nodes.
+    """The grid, refined around its significant nodes.
 
     Every gap next to a node above :data:`RATE_FLOOR` of the peak that is
     wider than the node's refinement spacing ``fine`` is filled uniformly.
@@ -364,7 +364,7 @@ def _segments(
     values: FloatArray,
     fine: FloatArray,
 ) -> RateScan:
-    """Refine a detection scan around its significant nodes; find segments."""
+    """A detection scan refined around its significant nodes, with its segments."""
     if float(values.max()) <= 0.0:
         return RateScan(times, values, ())
     times, values = _refine(rate, times, values, fine)
@@ -378,7 +378,7 @@ def _segments(
 
 
 def locate(rate: Rate, window: tuple[float, float], screen: Screen) -> RateScan:
-    """Scan ``rate`` over the screen's candidates in ``window``; find segments.
+    """The scan of ``rate`` over the screen's candidates in ``window``, with segments.
 
     A detection grid (see :data:`DETECTION_SIGMAS`) over the candidates finds
     every encounter; the grid is then refined to an eighth of a crossing time
@@ -401,7 +401,7 @@ def locate_auto(
     screen: Screen,
     centre: tuple[float, float] = (0.0, 0.0),
 ) -> RateScan:
-    """Scan a window that grows until the rate at its edges vanishes.
+    """The scan of a window grown until the rate at its edges vanishes.
 
     The window is ``centre`` widened by ``half`` on both sides; ``half``
     starts at ``half_width`` and doubles, up to ``limit``, while the rate at
@@ -510,7 +510,7 @@ def _nested_integral(
 
 
 def integrate_segments(rate: Rate, found: RateScan, *, rtol: float) -> RateIntegral:
-    """Integrate ``rate`` over the segments of a scan.
+    """The integral of ``rate`` over the segments of a scan.
 
     Each segment is split at the local maxima of the scan and every piece is
     integrated by nested Clenshaw-Curtis rules of doubling order until two

@@ -185,6 +185,44 @@ class Trend:
         return before[-1] if before else None
 
 
+def _points(
+    ordered: Sequence[PcObservation], limits: Thresholds
+) -> tuple[list[TrendPoint], list[str]]:
+    """The points of ``ordered`` observations, and notes on those left out."""
+    notes: list[str] = []
+    after_tca = 0
+    points: list[TrendPoint] = []
+    for observation in ordered:
+        if observation.time_to_tca < 0.0:
+            after_tca += 1
+        elif observation.pc is None:
+            notes.append(f"no Pc for {_label(observation)}: {observation.error}")
+        else:
+            value = limits.value_of(observation)
+            points.append(TrendPoint(observation, value, limits.level(value)))
+    if after_tca:
+        notes.insert(0, f"{after_tca} observation(s) issued after TCA left out")
+    return points, notes
+
+
+def _direction(
+    fitted: Sequence[TrendPoint], settings: TrendConfig
+) -> tuple[Direction, float | None, str | None]:
+    """The direction and slope of the ``fitted`` points; a note if undetermined."""
+    if len(fitted) < 2:
+        note = "fewer than 2 observations with a Pc before TCA"
+        return Direction.UNDETERMINED, None, f"{note}: direction undetermined"
+    slope = _slope(fitted)
+    if slope is None:
+        note = "observations at one time"
+        return Direction.UNDETERMINED, None, f"{note}: direction undetermined"
+    if slope > settings.steady_within:
+        return Direction.RISING, slope, None
+    if slope < -settings.steady_within:
+        return Direction.FALLING, slope, None
+    return Direction.STEADY, slope, None
+
+
 def analyse_trend(
     observations: Iterable[PcObservation],
     *,
@@ -217,37 +255,11 @@ def analyse_trend(
     ordered = _chronological(observations)
     if not ordered:
         raise ValueError("a trend needs at least one observation")
-    notes: list[str] = []
-    after = 0
-    points: list[TrendPoint] = []
-    for observation in ordered:
-        if observation.time_to_tca < 0.0:
-            after += 1
-            continue
-        if observation.pc is None:
-            notes.append(f"no Pc for {_label(observation)}: {observation.error}")
-            continue
-        value = limits.value_of(observation)
-        points.append(TrendPoint(observation, value, limits.level(value)))
-    if after:
-        notes.insert(0, f"{after} observation(s) issued after TCA left out")
+    points, notes = _points(ordered, limits)
     fitted = points[-settings.window :]
     if any(point.value < PC_FLOOR for point in fitted):
         notes.append(f"Pc below {PC_FLOOR:g} fitted at {PC_FLOOR:g}")
-    direction = Direction.UNDETERMINED
-    slope = None
-    if len(fitted) < 2:
-        notes.append(
-            "fewer than 2 observations with a Pc before TCA: direction undetermined"
-        )
-    else:
-        slope = _slope(fitted)
-        if slope is None:
-            notes.append("observations at one time: direction undetermined")
-        elif slope > settings.steady_within:
-            direction = Direction.RISING
-        elif slope < -settings.steady_within:
-            direction = Direction.FALLING
-        else:
-            direction = Direction.STEADY
+    direction, slope, note = _direction(fitted, settings)
+    if note is not None:
+        notes.append(note)
     return Trend(ordered, tuple(points), direction, slope, tuple(notes), limits)

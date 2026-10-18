@@ -79,7 +79,7 @@ class Criterion:
         reference: float,
         interval: tuple[float, float] | None = None,
     ) -> Verdict:
-        """Compare ``value`` with ``reference``.
+        """The verdict on ``value`` against ``reference``.
 
         ``interval`` is the result's confidence interval, required by an
         interval criterion. A relative criterion falls back to the absolute

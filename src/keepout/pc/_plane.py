@@ -140,7 +140,7 @@ class MissingCovariance(CovarianceError):
 def require_known_covariance(
     unknown: tuple[Role, ...], method: Method | None = None
 ) -> None:
-    """Raise :class:`MissingCovariance` if a covariance is unknown.
+    """A check that no covariance is unknown (:class:`MissingCovariance` if one is).
 
     Parameters
     ----------
@@ -161,7 +161,7 @@ def require_known_covariance(
 def plane_gaussian(
     miss_vector: FloatArray, covariance: FloatArray, radius: float
 ) -> PlaneGaussian:
-    """Rotate an encounter-plane miss vector and covariance to principal axes.
+    """An encounter-plane miss vector and covariance in principal axes.
 
     Parameters
     ----------

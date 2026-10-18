@@ -1,4 +1,4 @@
-"""Time one screening: the measurement behind the screening benchmark.
+"""One timed screening: the measurement behind the screening benchmark.
 
 Usage::
 
@@ -105,7 +105,7 @@ def timed(
     *,
     workers: int,
 ) -> tuple[ScreeningResult, Timing]:
-    """Screen with :func:`keepout.screening.screen` and time it.
+    """A screening by :func:`keepout.screening.screen`, and its timing.
 
     The CPU time counts the worker processes, which ``screen`` has waited
     for when it returns.
@@ -127,7 +127,7 @@ def timed(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Time one screening and print the measurement as JSON.
+    """The entry point timing one screening and printing the measurement as JSON.
 
     Returns
     -------

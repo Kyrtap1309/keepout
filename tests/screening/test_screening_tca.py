@@ -45,7 +45,7 @@ from keepout.screening.tca import (
     GRAVITY_MARGIN,
     MIN_RADIUS,
     PERTURBATION,
-    SPEED_MARGIN,
+    SPEED_BOUND_MARGIN,
     ApproachSearch,
     ObjectFailure,
     RangeMinimum,
@@ -283,7 +283,7 @@ def test_speed_bounds_are_the_fastest_orbit_within_the_radii() -> None:
     floored = math.sqrt(2 * mu * 7000 * KM / (MIN_RADIUS * (MIN_RADIUS + 7000 * KM)))
     np.testing.assert_allclose(
         speed_bounds(bounds),
-        np.array([circular, eccentric, escape, floored]) * (1 + SPEED_MARGIN),
+        np.array([circular, eccentric, escape, floored]) * (1 + SPEED_BOUND_MARGIN),
         rtol=1e-15,
     )
 

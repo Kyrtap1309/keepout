@@ -144,7 +144,8 @@ TABLE = b"raw table bytes"
 
 
 class FakeZenodo:
-    """Serves ``body`` for the archive URL and counts the downloads."""
+    """A fake Zenodo serving ``body`` for the archive URL and counting the
+    downloads."""
 
     def __init__(self, body: bytes) -> None:
         self.body = body

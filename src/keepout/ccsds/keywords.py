@@ -110,7 +110,7 @@ def _dubious_years_allowed() -> Generator[None]:
 
 
 def parse_epoch(text: str) -> Time:
-    """Parse a CCSDS UTC epoch.
+    """The time of a CCSDS UTC epoch.
 
     Accepts ``YYYY-MM-DDThh:mm:ss[.f]`` and ``YYYY-DDDThh:mm:ss[.f]`` with an
     optional trailing ``Z``. The returned Time keeps the number of fractional
@@ -151,7 +151,7 @@ def parse_epoch(text: str) -> Time:
 
 
 def parse_epochs(texts: Iterable[str]) -> list[Time]:
-    """Parse many CCSDS UTC epochs at once, as :func:`parse_epoch` parses each.
+    """The times of many CCSDS UTC epochs at once, each as :func:`parse_epoch` reads it.
 
     The result is ``[parse_epoch(text) for text in texts]``, each epoch a
     separate scalar Time, but most epochs are parsed together, which is
@@ -271,7 +271,7 @@ def _fields_kept(match: re.Match[str], isot: str) -> bool:
 
 
 def format_epoch(epoch: Time) -> str:
-    """Write an epoch in CCSDS calendar format, UTC.
+    """An epoch in CCSDS calendar format, UTC.
 
     Years outside ERFA's leap-second table are written without a warning
     (see :func:`parse_epoch`). On the eleven days before 1972 that end in a
@@ -409,7 +409,7 @@ def _utc_step(year: int, month: int, day: int) -> float:
 
 
 def parse_value(keyword: Keyword, text: str, unit: str | None) -> FieldValue:
-    """Convert a value from a message into its Python value, in SI.
+    """The Python value, in SI, of a value from a message.
 
     Parameters
     ----------
@@ -450,7 +450,7 @@ def parse_value(keyword: Keyword, text: str, unit: str | None) -> FieldValue:
 
 
 def _check_unit(keyword: Keyword, unit: str | None) -> None:
-    """Raise :class:`ValueError` if ``unit`` is given and is not the keyword's.
+    """A check that ``unit``, if given, is the keyword's (:class:`ValueError` if not).
 
     Raises
     ------
@@ -468,7 +468,7 @@ def _check_unit(keyword: Keyword, unit: str | None) -> None:
 
 
 def format_value(keyword: Keyword, value: FieldValue) -> tuple[str, str | None]:
-    """Convert a stored value back to message text and unit.
+    """The message text and unit of a stored value.
 
     Parameters
     ----------

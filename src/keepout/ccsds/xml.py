@@ -221,7 +221,7 @@ def add_leaf(
     keyword: str | None = None,
     attributes: dict[str, str] | None = None,
 ) -> ElementTree.Element:
-    """Append an element holding ``text``, with a ``units`` attribute if
+    """A new last child holding ``text``, with a ``units`` attribute if
     ``unit`` is given.
 
     Parameters

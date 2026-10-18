@@ -101,7 +101,7 @@ def space_track_cdm_public(*rows: Mapping[str, object]) -> bytes:
 
 
 class FakeSpaceTrack:
-    """Answers like Space-Track: a login with :data:`CREDENTIALS` opens a
+    """A fake Space-Track: a login with :data:`CREDENTIALS` opens a
     session, a query without one gets :data:`LOGGED_OUT`, a logout ends it.
 
     ``answers`` maps each query URL to one answer, or a list of answers

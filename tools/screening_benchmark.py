@@ -1,4 +1,4 @@
-"""Benchmark screening on the frozen public catalog, and compare two trees.
+"""A benchmark of screening on the frozen public catalog, and of two trees.
 
 Usage::
 
@@ -352,8 +352,8 @@ def benchmark(
     repeat: int,
     volumes: Mapping[str, ScreeningVolume | VolumeRule] = VOLUMES,
 ) -> tuple[list[Found], list[Measured]]:
-    """Screen with each volume ``repeat`` times; what each found, median
-    times to the millisecond.
+    """What each volume found, and its median times to the millisecond over
+    ``repeat`` screenings.
 
     Raises
     ------
@@ -455,7 +455,7 @@ def render_summary(summary: Summary) -> str:
 
 
 def benchmark_main(args: argparse.Namespace) -> int:
-    """Run the benchmark (or with ``--check`` verify its data).
+    """The benchmark command (or with ``--check`` the verification of its data).
 
     Returns
     -------
@@ -542,7 +542,7 @@ class TimingFailed(Exception):
 
 
 def run_timing(command: Sequence[str]) -> Run:
-    """Run a measurement process and read its result.
+    """The result read from a measurement process run as ``command``.
 
     Raises
     ------
@@ -603,7 +603,7 @@ def compare(
     repeat: int,
     run: Callable[[Sequence[str]], Run] = run_timing,
 ) -> Comparison:
-    """Time ``head`` and ``base`` commands ``repeat`` times each, alternately.
+    """Timings of ``head`` and ``base`` commands, ``repeat`` times each, alternately.
 
     The order alternates (head, base, base, head, ...) so drift of the
     machine's speed affects both alike. This tree runs first, and its
@@ -671,7 +671,7 @@ def render_comparison(
 
 
 def compare_main(args: argparse.Namespace) -> int:
-    """Compare this tree's screening speed with another tree's.
+    """The comparison of this tree's screening speed with another tree's.
 
     Returns
     -------
@@ -718,7 +718,7 @@ def compare_main(args: argparse.Namespace) -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run the benchmark, or ``compare`` if that is the command.
+    """The entry point: the benchmark, or ``compare`` if that is the command.
 
     Returns
     -------

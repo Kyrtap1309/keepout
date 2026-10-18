@@ -291,7 +291,7 @@ class Deduplicated(NamedTuple):
 
 
 def deduplicate(omms: Iterable[Omm]) -> Deduplicated:
-    """Keep one element set per catalog number: the one with the newest epoch.
+    """One element set per catalog number: the one with the newest epoch.
 
     Catalogs put together from several sources (e.g. CelesTrak groups) hold
     some objects more than once. Of two different sets with the same epoch,

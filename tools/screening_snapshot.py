@@ -1,4 +1,4 @@
-"""Download and freeze the screening data: the public catalog and SOCRATES.
+"""The frozen screening data: the public catalog and SOCRATES, downloaded.
 
 Usage::
 
@@ -704,7 +704,7 @@ def stored_files(data: Path, inputs: Inputs) -> dict[str, bytes]:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Download the bodies, build the data from them, or verify the data.
+    """The entry point: downloading the bodies, building the data, or verifying it.
 
     Returns
     -------

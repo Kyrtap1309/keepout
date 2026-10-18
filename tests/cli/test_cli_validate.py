@@ -21,7 +21,7 @@ FAILING = case_with_reference(0.5, case_id="half")
 
 
 class Loader:
-    """Stands in for a case loader: returns ``cases``, records the cache."""
+    """A stand-in for a case loader: returns ``cases``, records the cache."""
 
     def __init__(self, *cases: ValidationCase) -> None:
         self.cases = list(cases)

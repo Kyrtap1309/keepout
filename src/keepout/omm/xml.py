@@ -95,7 +95,7 @@ def _record(element: ElementTree.Element, path: str, record: int) -> Omm:
 
 
 def loads(text: str) -> tuple[Omm, ...]:
-    """Parse an OMM, or an NDM of OMMs, in XML.
+    """The OMMs of an OMM, or of an NDM of OMMs, in XML.
 
     Parameters
     ----------
@@ -126,7 +126,7 @@ def loads(text: str) -> tuple[Omm, ...]:
 
 
 def load(path: str | Path) -> tuple[Omm, ...]:
-    """Read an XML OMM file (UTF-8, or gzip-compressed UTF-8); see :func:`loads`.
+    """The OMMs in an XML file (UTF-8, or gzip-compressed UTF-8); see :func:`loads`.
 
     Parameters
     ----------
@@ -142,7 +142,7 @@ def dumps(
     originator: str = "UNKNOWN",
     creation_date: Time | None = None,
 ) -> str:
-    """Write OMMs as an NDM/XML ``<ndm>`` of version 3.0 ``<omm>`` elements.
+    """OMMs as an NDM/XML ``<ndm>`` of version 3.0 ``<omm>`` elements.
 
     Values carry their units. The messages are valid against the NDM/XML
     4.0.0 schema (:data:`SCHEMA_LOCATION`), and reading the text gives the

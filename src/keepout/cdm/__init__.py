@@ -37,7 +37,7 @@ __all__ = [
 
 
 def loads(text: str) -> Cdm:
-    """Parse a CDM in KVN or XML, chosen by the first non-blank character.
+    """The CDM in KVN or XML ``text``, told apart by the first non-blank character.
 
     Parameters
     ----------
@@ -49,7 +49,7 @@ def loads(text: str) -> Cdm:
 
 
 def load(path: str | Path) -> Cdm:
-    """Read a CDM file in KVN or XML.
+    """The CDM in a KVN or XML file.
 
     Parameters
     ----------

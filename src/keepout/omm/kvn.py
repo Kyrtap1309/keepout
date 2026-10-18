@@ -51,7 +51,7 @@ def _value(keyword: str, text: str, line: int) -> Located:
 
 
 def loads(text: str) -> tuple[Omm, ...]:
-    """Parse one or more OMMs in KVN.
+    """The one or more OMMs in KVN ``text``.
 
     Parameters
     ----------
@@ -106,7 +106,7 @@ def loads(text: str) -> tuple[Omm, ...]:
 
 
 def load(path: str | Path) -> tuple[Omm, ...]:
-    """Read a KVN OMM file (UTF-8, or gzip-compressed UTF-8); see :func:`loads`.
+    """The OMMs in a KVN file (UTF-8, or gzip-compressed UTF-8); see :func:`loads`.
 
     Parameters
     ----------
@@ -122,7 +122,7 @@ def dumps(
     originator: str = "UNKNOWN",
     creation_date: Time | None = None,
 ) -> str:
-    """Write OMMs in KVN (version 3.0), one message per object, with units.
+    """OMMs as KVN (version 3.0), one message per object, with units.
 
     Messages are separated by a blank line. Reading the text gives the same
     elements back.

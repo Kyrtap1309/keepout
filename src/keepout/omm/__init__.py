@@ -30,7 +30,7 @@ __all__ = [
 
 
 def loads(text: str) -> tuple[Omm, ...]:
-    """Parse OMM data in any format keepout reads, recognised by its content.
+    """The OMMs in ``text`` in any format keepout reads, recognised by its content.
 
     Leading blanks aside, the text is XML if it starts with ``<``, CelesTrak
     JSON if with ``[`` or ``{``, KVN if with ``CCSDS_OMM_VERS``, CelesTrak CSV
@@ -75,7 +75,7 @@ def loads(text: str) -> tuple[Omm, ...]:
 
 
 def load(path: str | Path) -> tuple[Omm, ...]:
-    """Read a file of OMM data in any format keepout reads; see :func:`loads`.
+    """The OMMs in a file in any format keepout reads; see :func:`loads`.
 
     Parameters
     ----------

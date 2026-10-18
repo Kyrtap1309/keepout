@@ -255,7 +255,7 @@ class _Apse(NamedTuple):
 def _eccentric_longitude(
     lam: _Array, af: _Array, ag: _Array, apse: _Apse | None = None
 ) -> _Array:
-    """Solve Kepler's equation for the eccentric longitude ``F``.
+    """The eccentric longitude ``F``: the solution of Kepler's equation.
 
     ``apse`` is ``_Apse.of(af, ag)`` if already known.
 

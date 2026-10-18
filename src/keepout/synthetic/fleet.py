@@ -156,7 +156,7 @@ class Fleet:
 
 
 def _keys(table: Mapping[str, object], allowed: frozenset[str], where: str) -> None:
-    """Raise unless ``table`` has every required key of ``allowed`` and no other.
+    """A check that ``table`` has every required key of ``allowed`` and no other.
 
     Raises
     ------

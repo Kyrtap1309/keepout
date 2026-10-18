@@ -79,5 +79,6 @@ _add(app, "validate", validate_command)
 
 
 def run() -> None:
-    """Run ``keepout`` on the command line arguments; exits with the status."""
+    """The ``keepout`` command, run on the command line arguments; exits with
+    the status."""
     app(prog_name="keepout")

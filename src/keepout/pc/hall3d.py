@@ -193,7 +193,7 @@ class Encounters:
         conjunction: Conjunction,
         window: tuple[float, float] | None,
     ) -> Encounters:
-        """Scan the rate over ``window``, or an automatic one if ``None``.
+        """The encounters found by scanning ``window``, or an automatic one if ``None``.
 
         Raises
         ------

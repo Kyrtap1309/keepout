@@ -97,7 +97,7 @@ class KeywordValues:
         return dict(self._values)
 
     def add(self, keyword: str, value: Located) -> None:
-        """Record ``keyword``'s ``value``; comments are not recorded.
+        """``keyword``'s ``value``, recorded; comments are not recorded.
 
         Raises
         ------

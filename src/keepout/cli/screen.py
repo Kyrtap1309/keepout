@@ -25,9 +25,11 @@ from keepout.units import DAY
 # numerical libraries.
 if TYPE_CHECKING:
     from astropy.time import Time
+    from rich.console import RenderableType
 
+    from keepout.omm import Omm
     from keepout.screening import SkippedObject
-    from keepout.synthetic import Fleet, OperatorEvent
+    from keepout.synthetic import Fleet, OperatorEvent, OperatorResult
 
 __all__ = ["parse_time", "screen_command"]
 
@@ -66,33 +68,16 @@ Days: TypeAlias = Annotated[
 ]
 """``--days``: the length of the screening window."""
 
-
-def _checked_time(text: str | None) -> str | None:
-    """``--start`` as given, once :func:`parse_time` reads it.
-
-    Raises
-    ------
-    typer.BadParameter
-        If it does not: a usage error.
-    """
-    if text is not None:
-        try:
-            parse_time(text)
-        except ValueError as exc:
-            raise typer.BadParameter(str(exc)) from exc
-    return text
-
-
 Start: TypeAlias = Annotated[
     str | None,
     typer.Option(
         "--start",
-        callback=_checked_time,
         metavar="TIME",
         help="Start of the window, ISO 8601 UTC (default: now).",
     ),
 ]
-"""``--start``: the start of the window and the CDMs' creation date."""
+"""``--start``: the start of the window and the CDMs' creation date, read by
+:func:`parse_time` in the command."""
 
 CatalogFile: TypeAlias = Annotated[
     Path | None,
@@ -153,49 +138,80 @@ def screen_command(
     is the cached copy of keepout fetch catalog while it is current, else a
     new download; --catalog reads a file instead.
     """
+    given_start = None if start is None else _start_time(start)
     if catalog is not None and source is not None:
         raise typer.BadParameter(
             "give either --catalog or --source, not both", param_hint="--source"
         )
-    from astropy.time import Time
-
-    from keepout.cdm import kvn
-    from keepout.omm import load
-    from keepout.risk import Action
-    from keepout.screening import ScreeningRole
     from keepout.synthetic import load_fleet
     from keepout.synthetic.operator import run
 
     satellites = load_fleet(fleet)
+    omms, described = _catalog_input(catalog, source, cache_dir)
+    began = given_start if given_start is not None else _now()
+    result = run(satellites, omms, began, days * DAY, workers=workers)
+    files = {} if cdm_dir is None else _write_cdms(result, cdm_dir)
+    payload = _payload(result, described, files, cdm_dir)
+    show(payload, *_summary(result, described, files, cdm_dir), as_json=as_json)
+
+
+def _start_time(start: str) -> Time:
+    """The time ``--start`` gives.
+
+    Raises
+    ------
+    typer.BadParameter
+        If :func:`parse_time` cannot read it: a usage error.
+    """
+    try:
+        return parse_time(start)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc), param_hint="'--start'") from exc
+
+
+def _now() -> Time:
+    """The current time in UTC, to the second: the default start."""
+    from astropy.time import Time
+
+    return Time(int(time.time()), format="unix", scale="utc")
+
+
+def _catalog_input(
+    catalog: Path | None, source: CatalogSourceName | None, cache_dir: Path | None
+) -> tuple[tuple[Omm, ...], str]:
+    """The element sets to screen against, from ``--catalog`` or a source,
+    and how the summary names them."""
     if catalog is not None:
-        omms = load(catalog)
-        described = str(catalog)
-    else:
-        chosen = source or DEFAULT_SOURCE
-        omms = load_catalog(chosen, cache_dir).omms
-        described = CATALOG_SOURCES[chosen].title
-    began = (
-        parse_time(start)
-        if start is not None
-        else Time(int(time.time()), format="unix", scale="utc")
-    )
-    result = run(
-        satellites,
-        omms,
-        began,
-        days * DAY,
-        workers=workers,
-    )
+        from keepout.omm import load
+
+        return load(catalog), str(catalog)
+    chosen = source or DEFAULT_SOURCE
+    return load_catalog(chosen, cache_dir).omms, CATALOG_SOURCES[chosen].title
+
+
+def _write_cdms(result: OperatorResult, cdm_dir: Path) -> dict[str, Path]:
+    """The file written for each CDM, ``<MESSAGE_ID>.kvn`` in ``cdm_dir``, by
+    message ID."""
+    from keepout.cdm import kvn
+
+    cdm_dir.mkdir(parents=True, exist_ok=True)
     files: dict[str, Path] = {}
-    if cdm_dir is not None:
-        cdm_dir.mkdir(parents=True, exist_ok=True)
-        for cdm in result.cdms:
-            files[cdm.message_id] = path = cdm_dir / f"{cdm.message_id}.kvn"
-            kvn.dump(cdm, path)
+    for cdm in result.cdms:
+        files[cdm.message_id] = path = cdm_dir / f"{cdm.message_id}.kvn"
+        kvn.dump(cdm, path)
+    return files
+
+
+def _payload(
+    result: OperatorResult,
+    described: str,
+    files: Mapping[str, Path],
+    cdm_dir: Path | None,
+) -> dict[str, JsonValue]:
+    """The result as JSON values, for ``--json``."""
     screening = result.screening
-    assessed = [AssessedEvent(e.event, e.assessment) for e in result.events]
-    payload: dict[str, JsonValue] = {
-        "fleet": list(satellites.catalog_numbers),
+    return {
+        "fleet": list(result.fleet.catalog_numbers),
         "catalog": described,
         "catalog_objects": screening.catalog_count,
         "start": isot(screening.start),
@@ -205,8 +221,24 @@ def screen_command(
         "skipped": [_skipped_json(s) for s in screening.skipped],
         "cdm_dir": None if cdm_dir is None else str(cdm_dir),
     }
+
+
+def _summary(
+    result: OperatorResult,
+    described: str,
+    files: Mapping[str, Path],
+    cdm_dir: Path | None,
+) -> list[RenderableType]:
+    """The result for people: what was screened, the fleet satellites left
+    out, the table of approaches and the notes after it."""
+    from keepout.risk import Action
+    from keepout.screening import ScreeningRole
+
+    screening = result.screening
+    fleet = result.fleet
+    assessed = [AssessedEvent(e.event, e.assessment) for e in result.events]
     unscreened = [s for s in screening.skipped if s.role is ScreeningRole.PRIMARY]
-    count = len(satellites.satellites)
+    count = len(fleet.satellites)
     screened = (
         plural(count, "fleet satellite")
         if not unscreened
@@ -219,7 +251,7 @@ def screen_command(
             f"from {utc(screening.start)} to {utc(screening.end)} UTC: "
             f"{plural(len(result.events), 'close approach', 'close approaches')}."
         ),
-        *(_not_screened(skipped, satellites) for skipped in unscreened),
+        *(_not_screened(skipped, fleet) for skipped in unscreened),
     ]
     tail: list[str] = []
     if screening.skipped:
@@ -235,7 +267,7 @@ def screen_command(
     if cdm_dir is not None:
         tail.append(f"{plural(len(files), 'CDM')} written to {cdm_dir}")
     table = [events_table(assessed, "Close approaches")] if assessed else []
-    show(payload, *head, *table, *tail, as_json=as_json)
+    return [*head, *table, *tail]
 
 
 def _not_screened(skipped: SkippedObject, fleet: Fleet) -> str:

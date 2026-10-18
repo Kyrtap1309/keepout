@@ -107,7 +107,7 @@ class Field:
 
 
 def parse_field(kind: SectionKind, keyword: str, text: str, unit: str | None) -> Field:
-    """Build a field from message text: typed SI value if known, raw text if not.
+    """A field from message text: typed SI value if known, raw text if not.
 
     Parameters
     ----------

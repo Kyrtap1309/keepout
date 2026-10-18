@@ -190,7 +190,7 @@ def fetch(
     cache: Path | None = None,
     download: Downloader = http_download,
 ) -> Path:
-    """Return a local, verified copy of ``file``, downloading it if needed.
+    """A local, verified copy of ``file``, downloaded if needed.
 
     A cached copy is reused only if its SHA-256 matches; otherwise it is
     re-downloaded. The download is written atomically. A copy this process
@@ -224,7 +224,7 @@ def prefetch(
     cache: Path | None = None,
     download: Downloader = http_download,
 ) -> None:
-    """Make sure every file is cached, downloading missing ones concurrently.
+    """The download of every file not cached yet, concurrently.
 
     Raises
     ------
@@ -242,7 +242,7 @@ Cell: TypeAlias = object
 
 
 def load_csv(path: Path) -> list[dict[str, str]]:
-    """Read a CSV file with a header row into one dict per row.
+    """The rows of a CSV file with a header row, one dict per row.
 
     Raises
     ------
@@ -262,7 +262,8 @@ def _blank(value: object) -> bool:
 
 
 def load_xlsx(path: Path) -> list[dict[str, Cell]]:
-    """Read the first sheet of an Excel 2007+ workbook, header in row 1.
+    """The rows of the first sheet of an Excel 2007+ workbook, one dict per row,
+    header in row 1.
 
     Empty cells after the last header name, and rows with no value, are
     ignored. Needs the ``validation`` extra (``openpyxl``).
@@ -303,7 +304,7 @@ def load_xlsx(path: Path) -> list[dict[str, Cell]]:
 
 
 def load_xls_rows(path: Path) -> list[list[Cell]]:
-    """Read the first sheet of a legacy Excel (.xls) workbook as rows.
+    """The rows of the first sheet of a legacy Excel (.xls) workbook.
 
     Needs the ``validation`` extra (``xlrd``). Empty cells are ``""``.
 

@@ -1,4 +1,4 @@
-"""Download Space-Track's GP catalog and public CDMs once; freeze the catalog.
+"""Space-Track's GP catalog and public CDMs, downloaded once; the frozen catalog.
 
 Usage::
 
@@ -235,7 +235,7 @@ class Recorder:
         self.sent: set[str] = set()
 
     def __call__(self, request: Request, /) -> Response:
-        """Send ``request`` once and save its answer.
+        """The answer to ``request``, sent once and saved.
 
         Raises
         ------
@@ -305,7 +305,7 @@ def download(
     transport: Transport | None = None,
     clock: Callable[[], float] = time.time,
 ) -> tuple[Saved, ...]:
-    """Send the four requests of :data:`RAW_FILES` once, saving the answers.
+    """The answers to the four requests of :data:`RAW_FILES`, sent once and saved.
 
     Parameters
     ----------
@@ -613,7 +613,7 @@ class Comparison:
 def compare(
     cdms: Sequence[PublicCdm], omms: Sequence[Omm], *, workers: int = 1
 ) -> Comparison:
-    """Screen the two objects of every public CDM with the catalog's
+    """The screening of the two objects of every public CDM with the catalog's
     element sets around its TCA (:class:`Match`).
 
     Parameters
@@ -701,7 +701,7 @@ def summarise(comparison: Comparison) -> ComparisonSummary:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Download the answers, build the data from them, verify it, or compare.
+    """The entry point: downloading, building the data, verifying it, or comparing.
 
     Returns
     -------

@@ -65,7 +65,7 @@ def test_fetch_replaces_corrupted_cache(tmp_path: Path) -> None:
 
 
 class DigestCounter:
-    """Counts the files :func:`hashlib.file_digest` hashes."""
+    """A count of the files :func:`hashlib.file_digest` hashes."""
 
     def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self.calls = 0

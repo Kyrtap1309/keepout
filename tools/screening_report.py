@@ -1,4 +1,4 @@
-"""Compare keepout's screening with CelesTrak's SOCRATES and write the report.
+"""The report comparing keepout's screening with CelesTrak's SOCRATES.
 
 Usage: ``uv run python tools/screening_report.py [--check] [--workers N]``.
 Screens the objects of the committed SOCRATES excerpt (``tests/screening/data/``,
@@ -272,7 +272,7 @@ def compare(
     *,
     workers: int = 1,
 ) -> Comparison:
-    """Screen the objects of ``approaches`` for SOCRATES's week and match.
+    """The objects of ``approaches`` screened for SOCRATES's week, and matched.
 
     SOCRATES's first objects are the primaries, every object of
     ``approaches`` the catalog. Each SOCRATES approach takes keepout's
@@ -964,7 +964,7 @@ def render_page(summary: Summary, known: Mapping[int, str] = KNOWN_DIFFERENCES) 
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Write (or with ``--check`` verify) the SOCRATES screening report.
+    """The entry point writing (or with ``--check`` verifying) the SOCRATES report.
 
     Returns
     -------

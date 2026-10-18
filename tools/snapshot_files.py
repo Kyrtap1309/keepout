@@ -136,7 +136,7 @@ class RawIndex(Generic[_Entry]):
         return self.entry(**item)
 
     def write(self, raw: Path, entries: Sequence[_Entry]) -> None:
-        """Write the index of ``entries`` in ``raw`` atomically."""
+        """The index of ``entries``, written in ``raw`` atomically."""
         listed = [dataclasses.asdict(entry) for entry in entries]
         store_json(raw / RAW_INDEX, {"format": RAW_FORMAT, self.key: listed})
 
@@ -167,7 +167,7 @@ def read_manifest(data: Path, shape: type[_T]) -> _T:
 
 
 def check_round_trip(omms: Sequence[Omm]) -> None:
-    """Check that CelesTrak CSV holds the element sets ``omms`` unchanged.
+    """A check that CelesTrak CSV holds the element sets ``omms`` unchanged.
 
     Raises
     ------
@@ -241,7 +241,7 @@ def stored_files(
 def add_data_commands(
     add_parser: Callable[..., argparse.ArgumentParser], data: Path, saved: str
 ) -> None:
-    """Add a snapshot tool's ``build`` and ``verify`` commands.
+    """A snapshot tool's ``build`` and ``verify`` commands, added to its parser.
 
     Parameters
     ----------
@@ -269,7 +269,7 @@ def build_or_verify(
     files: Callable[[Path, _Inputs], Mapping[str, bytes]],
     tool: str,
 ) -> int:
-    """Run ``build`` (or with ``--check`` verify it) or ``verify``.
+    """The ``build`` command (or with ``--check`` its verification) or ``verify``.
 
     ``build`` makes the inputs of the files ``from_raw`` (the ``RAW``
     directory), ``verify`` ``from_data`` (the committed data), and ``files``

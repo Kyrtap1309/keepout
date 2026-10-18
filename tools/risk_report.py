@@ -1,4 +1,4 @@
-"""Assess every event of ESA's Kelvins data and write the risk report.
+"""The risk report: every event of ESA's Kelvins data, assessed.
 
 Usage: ``uv run python tools/risk_report.py [--check] [--table PATH]``.
 Downloads the Kelvins raw table (221 MB, once), assesses each of its 15 321
@@ -125,8 +125,9 @@ class Summary(TypedDict):
 
 
 def assess_with_settings(observations: Iterable[PcObservation]) -> Assessment:
-    """Assess observations with the report's :data:`THRESHOLDS`, :data:`TREND`
-    and :data:`DECISION`, so the page, the numbers and the plots agree."""
+    """The assessment of observations with the report's :data:`THRESHOLDS`,
+    :data:`TREND` and :data:`DECISION`, so the page, the numbers and the plots
+    agree."""
     return assess(
         observations,
         thresholds=THRESHOLDS,
@@ -367,7 +368,7 @@ def render_page(summary: Summary, images: str) -> str:
 
 
 def plot(event: KelvinsEvent, assessment: Assessment, path: Path) -> None:
-    """Draw an event's Pc against the time to TCA as a reproducible SVG."""
+    """An event's Pc against the time to TCA, drawn as a reproducible SVG."""
     with mpl.rc_context({"svg.hashsalt": "keepout", "svg.fonttype": "none"}):
         figure = Figure(figsize=(8.5, 3.6))
         axes = figure.subplots()
@@ -421,7 +422,7 @@ def plot(event: KelvinsEvent, assessment: Assessment, path: Path) -> None:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Write (or with ``--check`` verify) the Kelvins risk report.
+    """The entry point writing (or with ``--check`` verifying) the Kelvins risk report.
 
     Returns
     -------

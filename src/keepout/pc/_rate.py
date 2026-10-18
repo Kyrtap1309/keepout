@@ -643,7 +643,7 @@ def collision_rate(conjunction: Conjunction) -> CollisionRate:
 def encounter_scan(
     conjunction: Conjunction, rate: CollisionRate, window: tuple[float, float] | None
 ) -> RateScan:
-    """Scan the rate over ``window`` or an automatically sized one.
+    """The rate's scan over ``window`` or an automatically sized one.
 
     The automatic window covers TCA (t = 0) and the straight-line closest
     approach of the states, ``t* = -(r . v) / |v|^2``, widened on both sides
@@ -693,7 +693,7 @@ def straight_line_closest_time(conjunction: Conjunction) -> float:
 
 
 def check_fallbacks(fallbacks: Sequence[tuple[float, float]], found: RateScan) -> None:
-    """Raise if the peak-overlap iteration failed where the rate may matter.
+    """A check that the peak-overlap iteration did not fail where the rate may matter.
 
     A failure inside an encounter segment, or within one grid step of it, is
     fatal whatever the mean-centred rate there (that rate is what the

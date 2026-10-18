@@ -48,5 +48,5 @@ def read_file(path: str | Path, family: Family) -> str:
 
 
 def load_file(path: str | Path, loads: Callable[[str], _T], family: Family) -> _T:
-    """Parse a file with ``loads``; see :func:`read_file`."""
+    """A file parsed by ``loads``; see :func:`read_file`."""
     return loads(read_file(path, family))

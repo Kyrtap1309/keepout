@@ -82,7 +82,7 @@ def _opened(kinds: list[SectionKind], keyword: str, line: int) -> SectionKind | 
 
 
 def loads(text: str) -> Cdm:
-    """Parse a CDM in KVN.
+    """The CDM in KVN ``text``.
 
     Comments go to the section of the keyword that follows them, so comments
     just before ``TCA`` or ``OBJECT`` open the new section.
@@ -137,7 +137,7 @@ def loads(text: str) -> Cdm:
 
 
 def dumps(cdm: Cdm) -> str:
-    """Write a CDM as KVN, with CCSDS units.
+    """A CDM as KVN text, with CCSDS units.
 
     A multi-line comment is written as one ``COMMENT`` line per line.
 
@@ -167,7 +167,7 @@ def dumps(cdm: Cdm) -> str:
 
 
 def load(path: str | Path) -> Cdm:
-    """Read a KVN CDM file (UTF-8, gzip-compressed or not; a
+    """The CDM in a KVN file (UTF-8, gzip-compressed or not; a
     byte-order mark is ignored).
 
     Parameters
@@ -179,7 +179,7 @@ def load(path: str | Path) -> Cdm:
 
 
 def dump(cdm: Cdm, path: str | Path) -> None:
-    """Write a CDM to a KVN file (UTF-8).
+    """A CDM written to a KVN file (UTF-8).
 
     Parameters
     ----------

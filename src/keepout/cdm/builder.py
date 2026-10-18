@@ -1,4 +1,4 @@
-"""Build a CDM from a conjunction: the message keepout itself issues.
+"""A CDM built from a conjunction: the message keepout itself issues.
 
 :func:`make_cdm` writes a :class:`~keepout.Conjunction` and what a CDM says
 about each object (:class:`ObjectMetadata`: name, designators, type,
