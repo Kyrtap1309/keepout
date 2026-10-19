@@ -1,17 +1,17 @@
 """Monte Carlo Pc with a Clopper-Pearson confidence interval.
 
-Each trial draws both objects' TCA states from their Gaussians in equinoctial
+Each sample draws both objects' TCA states from their Gaussians in equinoctial
 elements (see :mod:`keepout.pc._orbit`), moves them by two-body motion and
 counts a collision when the relative distance first drops below the combined
-hard-body radius inside the window. Trials already overlapping at the window
+hard-body radius inside the window. Samples already overlapping at the window
 start are not collisions in the window (only entries count, as in Hall 2021
-and CARA's two-body Monte Carlo); such a trial is not counted even if it
+and CARA's two-body Monte Carlo); such a sample is not counted even if it
 leaves and enters again later. Their fraction is reported.
 
 Time is only searched inside the encounter segments of the 3D-Nc rate scan:
 outside them the collision rate is below 1e-16 of its peak. Within a segment
 the distance is checked on the scan grid, and wherever a lower bound on a
-trial's distance between two grid points is below the radius, its closest
+sample's distance between two grid points is below the radius, its closest
 approach is refined by Newton's method on ``r.v = 0`` (slope
 ``d(r.v)/dt = v.v + r.a``, ``a`` the two-body relative acceleration).
 """
@@ -56,13 +56,13 @@ MC_RTOL: Final = 0.1
 """Default target: half-width of the confidence interval relative to Pc."""
 
 MC_MAX_SAMPLES: Final = 10_000_000
-"""Default budget of trials when stopping on ``rtol``."""
+"""Default budget of samples when stopping on ``rtol``."""
 
 MC_CONFIDENCE: Final = 0.99
 """Default confidence level of the Clopper-Pearson interval."""
 
 MC_BATCH: Final = 50_000
-"""Trials per batch: memory stays O(batch) whatever the sample count."""
+"""Samples per batch: memory stays O(batch) whatever the sample count."""
 
 NEWTON_STEPS: Final = 12
 """Newton iterations refining a closest approach between two grid points.
@@ -74,9 +74,9 @@ SPEED_BOUND_FACTOR: Final = 1.5
 """Factor on the larger grid-point relative speed bounding the speed in between."""
 
 
-def _converged(hits: int, trials: int, low: float, high: float, rtol: float) -> bool:
+def _converged(hits: int, samples: int, low: float, high: float, rtol: float) -> bool:
     """Whether the interval's half-width is at most ``rtol`` of the estimate."""
-    return hits > 0 and 0.5 * (high - low) <= rtol * hits / trials
+    return hits > 0 and 0.5 * (high - low) <= rtol * hits / samples
 
 
 def _gravity(states: FloatArray) -> FloatArray:
@@ -117,7 +117,7 @@ class _Trials:
     def closest_below(
         self, rows: IndexArray, start: float, end: float, radius: float
     ) -> BoolArray:
-        """Whether each trial in ``rows`` gets within ``radius`` in the interval.
+        """Whether each sample in ``rows`` gets within ``radius`` in the interval.
 
         The distance is tested at every Newton iterate, not only the last, so
         an iteration that has not converged cannot lose a hit it passed.
@@ -142,22 +142,22 @@ class _Trials:
 
 @dataclass(frozen=True, eq=False, slots=True)
 class _GridPoint:
-    """Every trial's relative distance and speed at one time of the scan grid."""
+    """Every sample's relative distance and speed at one time of the scan grid."""
 
     t: float
     distance: FloatArray
     speed: FloatArray
 
 
-def _grid(trials: _Trials, times: FloatArray) -> Iterator[_GridPoint]:
-    """The trials at each of ``times``, one grid point at a time."""
+def _grid(batch: _Trials, times: FloatArray) -> Iterator[_GridPoint]:
+    """The batch at each of ``times``, one grid point at a time."""
     for t in times:
-        r, v = trials.motion(float(t))
+        r, v = batch.motion(float(t))
         yield _GridPoint(float(t), np.linalg.norm(r, axis=1), np.linalg.norm(v, axis=1))
 
 
 def _entries_between(
-    trials: _Trials,
+    batch: _Trials,
     earlier: _GridPoint,
     later: _GridPoint,
     radius: float,
@@ -165,7 +165,7 @@ def _entries_between(
 ) -> IndexArray:
     """The ``candidates`` that get within ``radius`` between two grid points.
 
-    Only trials whose distance may drop below ``radius`` in between are
+    Only samples whose distance may drop below ``radius`` in between are
     refined. The distance in between is at least half of the two distances'
     sum less the distance covered over the gap at the bounding speed,
     :data:`SPEED_BOUND_FACTOR` times the larger of the two speeds.
@@ -179,22 +179,22 @@ def _entries_between(
     rows = np.flatnonzero((bound < radius) & candidates)
     if not rows.size:
         return rows
-    return rows[trials.closest_below(rows, earlier.t, later.t, radius)]
+    return rows[batch.closest_below(rows, earlier.t, later.t, radius)]
 
 
-def _collisions(trials: _Trials, found: RateScan, radius: float) -> tuple[int, int]:
-    """Collisions (entries) and trials already inside at the window start."""
-    r, _ = trials.motion(found.times[0])
+def _collisions(batch: _Trials, found: RateScan, radius: float) -> tuple[int, int]:
+    """Collisions (entries) and samples already inside at the window start."""
+    r, _ = batch.motion(found.times[0])
     inside = np.linalg.norm(r, axis=1) < radius
     hit = np.zeros_like(inside)
     for lo, hi in found.segments:
         # A segment has at least two grid points (it is padded by one step).
-        points = _grid(trials, found.times[lo : hi + 1])
+        points = _grid(batch, found.times[lo : hi + 1])
         for earlier, later in itertools.pairwise(points):
             # Marking the earlier point again is harmless and covers the
             # segment's first point.
             hit |= (earlier.distance < radius) | (later.distance < radius)
-            hit[_entries_between(trials, earlier, later, radius, ~hit)] = True
+            hit[_entries_between(batch, earlier, later, radius, ~hit)] = True
     return int(np.count_nonzero(hit & ~inside)), int(np.count_nonzero(inside))
 
 
@@ -206,23 +206,23 @@ def _percent(fraction: float) -> str:
 def _details(
     found: RateScan,
     confidence: float,
-    trials: int,
+    samples: int,
     hits: int,
     inside: int,
 ) -> dict[str, float]:
     """The ``details`` of a Monte Carlo result."""
     return {
         "confidence": confidence,
-        "samples": float(trials),
+        "samples": float(samples),
         "hits": float(hits),
-        "inside_at_start": inside / trials if trials else 0.0,
+        "inside_at_start": inside / samples if samples else 0.0,
         "window_start_s": found.window[0],
         "window_end_s": found.window[1],
     }
 
 
 def _no_encounter(found: RateScan, confidence: float) -> PcResult:
-    """The result when the rate scan finds no encounter: no trial is run."""
+    """The result when the rate scan finds no encounter: no sample is drawn."""
     note = (
         f"no encounter: {negligible_note(found)}, so no trial can collide there; "
         "no trials were run"
@@ -252,13 +252,13 @@ def montecarlo(
         Window ``(start, end)`` [s from TCA]; ``None`` sizes it as
         :func:`~keepout.pc.hall3d.hall3d` does.
     samples
-        Exact number of trials. ``None`` (default) runs batches until the
+        Exact number of samples. ``None`` (default) runs batches until the
         confidence interval's half-width is at most ``rtol`` times the
         estimate, or ``max_samples`` is reached.
     rtol
         Target relative half-width of the confidence interval.
     max_samples
-        Budget of trials when stopping on ``rtol``.
+        Budget of samples when stopping on ``rtol``.
     confidence
         Confidence level of the Clopper-Pearson interval.
     seed
@@ -267,12 +267,12 @@ def montecarlo(
     Returns
     -------
     PcResult
-        ``value`` = collisions / trials, with the Clopper-Pearson
+        ``value`` = collisions / samples, with the Clopper-Pearson
         ``interval``. ``details``: ``"confidence"`` (the interval's level),
-        ``"samples"``, ``"hits"``, ``"inside_at_start"`` (fraction of trials
+        ``"samples"``, ``"hits"``, ``"inside_at_start"`` (fraction of samples
         overlapping at the window start, not counted), ``"window_start_s"``,
         ``"window_end_s"``. If the rate scan finds no encounter in the
-        window, no trial is run: ``value``, ``"samples"`` and the interval
+        window, no sample is drawn: ``value``, ``"samples"`` and the interval
         are 0, with a diagnostic.
 
     Raises
@@ -283,9 +283,10 @@ def montecarlo(
         If an orbit is not elliptic.
     PcConvergenceError
         If the 3D-Nc rate that locates the encounters cannot be computed or
-        scanned (see :func:`~keepout.pc._rate.encounter_scan`), or its
-        peak-overlap iteration failed inside an encounter segment (see
-        :func:`~keepout.pc._rate.check_fallbacks`).
+        scanned (its encounters need more detection points than allowed, the
+        rate is significant where the screen ruled it negligible, or the rate
+        cannot be computed on the scan grid), or its peak-overlap iteration
+        failed inside an encounter segment.
     ValueError
         If an argument is out of range.
     """
@@ -341,11 +342,11 @@ def sample(
     converged = False
     while done < budget:
         count = min(MC_BATCH, budget - done)
-        trials = _Trials(
+        batch = _Trials(
             Orbits(rate.primary.sample(rng, count), rate.primary.fr),
             Orbits(rate.secondary.sample(rng, count), rate.secondary.fr),
         )
-        new_hits, new_inside = _collisions(trials, found, conjunction.hard_body_radius)
+        new_hits, new_inside = _collisions(batch, found, conjunction.hard_body_radius)
         hits, inside, done = hits + new_hits, inside + new_inside, done + count
         interval = stats.binomtest(hits, done).proportion_ci(confidence, "exact")
         low, high = float(interval.low), float(interval.high)

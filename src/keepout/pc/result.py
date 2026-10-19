@@ -8,6 +8,7 @@ from types import MappingProxyType
 from typing import Final, Literal, Self, TypeAlias, get_args
 
 from keepout._methods import Method
+from keepout._pickling import reduce_with_mappings
 from keepout._types import override, require_probability
 
 __all__ = ["RESULT_KINDS", "Method", "PcResult", "ResultKind"]
@@ -80,16 +81,7 @@ class PcResult:
 
     @override
     def __reduce__(self) -> tuple[type[Self], tuple[object, ...]]:
-        # A mapping proxy does not pickle: pickle the plain mapping.
-        return type(self), (
-            self.value,
-            self.method,
-            self.diagnostics,
-            dict(self.details),
-            self.kind,
-            self.interval,
-            self.diluted,
-        )
+        return reduce_with_mappings(self)
 
     @classmethod
     def clamped(

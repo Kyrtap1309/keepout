@@ -40,24 +40,24 @@ class Outcome:
 
     Attributes
     ----------
-    ci
-        keepout's confidence interval, if the method gives one
-        (:attr:`~keepout.pc.PcResult.interval`).
     verdict
         Error against the reference and pass/fail.
     """
 
     case: ValidationCase
     result: PcResult
-    ci: tuple[float, float] | None = field(init=False)
     verdict: Verdict = field(init=False)
 
     def __post_init__(self) -> None:
-        ci = self.result.interval
-        case = self.case
-        verdict = case.criterion.judge(self.result.value, case.reference, ci)
-        object.__setattr__(self, "ci", ci)
-        object.__setattr__(self, "verdict", verdict)
+        object.__setattr__(self, "verdict", judge(self.case, self.result))
+
+    @property
+    def ci(self) -> tuple[float, float] | None:
+        """Keepout's confidence interval, if the method gives one.
+
+        The result's :attr:`~keepout.pc.PcResult.interval`.
+        """
+        return self.result.interval
 
     @property
     def passed(self) -> bool:

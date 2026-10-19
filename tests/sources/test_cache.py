@@ -542,6 +542,31 @@ def test_unchanged_without_a_readable_copy_is_raised(
         fetch(target, Server(cache.Unchanged("no copy")), 5000.0)
 
 
+def test_unchanged_over_a_fresh_unreadable_copy_reads_it_once(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "data.csv"
+    cache.save_copy(target, URL, b"garbage", 1000.0)
+    reads: list[bytes] = []
+
+    def counted(data: bytes) -> bytes:
+        reads.append(data)
+        return strict(data)
+
+    with pytest.raises(cache.Unchanged, match="no copy"):
+        cache.cached_fetch(
+            target,
+            URL,
+            counted,
+            Server(cache.Unchanged("no copy")),
+            max_age=100.0,
+            interval=100.0,
+            reason="the source updates every 100 s",
+            now=lambda: 1001.0,
+        )
+    assert reads == [b"garbage"]
+
+
 def test_cached_fetch_refuses_a_max_age_below_the_interval(tmp_path: Path) -> None:
     with pytest.raises(
         ValueError,

@@ -33,6 +33,7 @@ from generated import (
     README,
     REPO,
     json_text,
+    minute_text,
     plural,
     positive,
     readme_with,
@@ -830,7 +831,7 @@ def _introduction(summary: Summary) -> list[str]:
             "on the GP element sets of its time. keepout screened the same element "
             "sets with `keepout.screening.screen` and its defaults: the "
             f"{settings['volume']}, {settings['days']:g} days from "
-            f"{settings['start'][:16].replace('T', ' ')} UTC (SOCRATES's window), "
+            f"{minute_text(settings['start'])} UTC (SOCRATES's window), "
             f"element sets at most {settings['max_age_days']:g} days older than the "
             f"window's end and {settings['max_lead_days']:g} days newer than its "
             "start."
@@ -840,8 +841,8 @@ def _introduction(summary: Summary) -> list[str]:
             "SOCRATES gives each object's epoch only as days from it to TCA (DSE, "
             "three decimals: 43 s), and CelesTrak serves only the latest element "
             f"sets. Of the {socrates['approaches']} approaches of SOCRATES's report "
-            f"(TCA {socrates['first_tca'][:16].replace('T', ' ')} to "
-            f"{socrates['last_tca'][:16].replace('T', ' ')} UTC), "
+            f"(TCA {minute_text(socrates['first_tca'])} to "
+            f"{minute_text(socrates['last_tca'])} UTC), "
             f"{socrates['comparable']} have both objects in the public catalog with "
             "the epochs SOCRATES used; these are compared. SOCRATES's "
             f"{settings['primaries']} first objects are the primaries, its "

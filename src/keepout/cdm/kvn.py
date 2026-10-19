@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
-from keepout.ccsds.kvn import assignment, comment, format_line, split_unit
+from keepout.ccsds.kvn import assignment, comment, format_line, located_value
 from keepout.ccsds.message import COMMENT, KeywordValues, Located
 from keepout.cdm._io import (
     CDM,
@@ -24,12 +24,6 @@ from keepout.errors import CdmParseError
 __all__ = ["dump", "dumps", "load", "loads"]
 
 _LAYOUT: Final[tuple[SectionKind, ...]] = ("header", "relative", "segment", "segment")
-
-
-def _value(kind: SectionKind, keyword: str, text: str, line: int) -> Located:
-    spec = KEYWORDS[kind].get(keyword)
-    value, unit = (text, None) if spec and spec.kind == "str" else split_unit(text)
-    return Located(value, unit, line)
 
 
 @dataclass
@@ -124,7 +118,8 @@ def loads(text: str) -> Cdm:
         for held in pending:
             current.add(COMMENT, held)
         pending.clear()
-        current.add(keyword, _value(current.kind, keyword, value, number))
+        spec = KEYWORDS[current.kind].get(keyword)
+        current.add(keyword, located_value(spec, value, number, unknown_is_text=False))
     for held in pending:
         building[-1].add(COMMENT, held)
     if tuple(b.kind for b in building) != _LAYOUT:

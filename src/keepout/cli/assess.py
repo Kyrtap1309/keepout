@@ -151,7 +151,10 @@ def assess_command(
         )
     text += reasons(assessed, Action.MONITOR)
     if manoeuvre:
-        text.append("At least one event needs a manoeuvre (exit status 3).")
+        text.append(
+            "At least one event needs a manoeuvre "
+            f"(exit status {int(ExitCode.MANOEUVRE)})."
+        )
     show(
         payload,
         events_table(assessed, "Conjunction events"),

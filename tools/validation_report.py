@@ -27,7 +27,7 @@ from generated import (
     REPO,
     parse_json,
     positive,
-    replace_block,
+    readme_with,
     table,
     write_or_check,
 )
@@ -517,17 +517,6 @@ def render_page(record: Record, report: Report = MAIN) -> str:
     return "\n".join(parts)
 
 
-def replace_summary(readme: str, summary: str, report: Report = MAIN) -> str:
-    """``readme`` with ``summary`` between the markers of ``report``.
-
-    Raises
-    ------
-    ValueError
-        If the markers are missing or out of order.
-    """
-    return replace_block(readme, report.start, report.end, summary)
-
-
 def published(fresh: Record, data: Path) -> tuple[Record, list[str]]:
     """The record to publish, and why ``fresh`` replaces the one at ``data``.
 
@@ -548,7 +537,7 @@ def rendered_files(
     return {
         data: record.dumps(),
         page: render_page(record, report),
-        readme: replace_summary(readme.read_text(encoding="utf-8"), summary, report),
+        readme: readme_with(readme, report.start, report.end, summary),
     }
 
 

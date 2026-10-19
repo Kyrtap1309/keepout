@@ -1,7 +1,6 @@
 import copy
 import dataclasses
 import gzip
-import json
 import shutil
 from pathlib import Path
 
@@ -10,7 +9,8 @@ import screening_snapshot as snapshot
 import snapshot_files
 import synthetic_operator_report as report
 from astropy.time import Time
-from cli_builders import FLEET_TOML
+from cli_builders import write_fleet
+from generated import read_json
 from screening_data import FIXTURE_START, load_fixture
 
 from keepout.cdm import kvn
@@ -27,8 +27,7 @@ def arguments(tmp_path: Path) -> list[str]:
     csv = dumps_csv(load_fixture()).encode()
     (data / snapshot.SNAPSHOT).write_bytes(gzip.compress(csv))
     shutil.copy(snapshot.DATA / snapshot_files.MANIFEST, data / snapshot_files.MANIFEST)
-    fleet = tmp_path / "fleet.toml"
-    fleet.write_text(FLEET_TOML, encoding="utf-8")
+    fleet = write_fleet(tmp_path)
     page = tmp_path / "docs" / "synthetic-operator.md"
     return [
         "--data",
@@ -43,9 +42,7 @@ def arguments(tmp_path: Path) -> list[str]:
 
 
 def written(tmp_path: Path) -> report.Summary:
-    path = tmp_path / "docs" / "synthetic-operator.json"
-    summary: report.Summary = json.loads(path.read_text(encoding="utf-8"))
-    return summary
+    return read_json(tmp_path / "docs" / "synthetic-operator.json", report.Summary)
 
 
 def page(tmp_path: Path) -> str:

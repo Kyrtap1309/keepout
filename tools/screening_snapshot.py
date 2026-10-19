@@ -77,7 +77,7 @@ from urllib.parse import parse_qs, urlsplit
 import astropy.units as u
 import snapshot_files
 from astropy.time import Time
-from generated import REPO, json_text
+from generated import REPO, json_text, second_text
 from snapshot_files import (
     MANIFEST,
     MANIFEST_FORMAT,
@@ -629,7 +629,7 @@ def retrieved_span(inputs: Inputs) -> tuple[str, str]:
 
 def render_notice(inputs: Inputs) -> str:
     """The NOTICE: the data's source, retrieval time, files and licence."""
-    first, last = (text[:19].replace("T", " ") for text in retrieved_span(inputs))
+    first, last = (second_text(text) for text in retrieved_span(inputs))
     until = last[11:] if last[:10] == first[:10] else last
     groups = textwrap.fill(
         f"- {SNAPSHOT}: the GP element sets of CelesTrak's groups "

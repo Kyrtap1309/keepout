@@ -18,7 +18,7 @@ import numpy as np
 
 from keepout._types import FloatArray
 from keepout.ccsds.keywords import Keyword, ValueKind
-from keepout.units import DAY
+from keepout.units import DAY, KM
 
 __all__ = [
     "COVARIANCE_AXES",
@@ -204,8 +204,8 @@ SEGMENT: Final = _table(
     _many("THRUST_ACCELERATION", "float", "m/s**2", group=_ADDITIONAL),
     _many("SEDR", "float", "W/kg", group=_ADDITIONAL),
     _many("HBR", "float", "m", group=_ADDITIONAL),
-    _many("X Y Z", "float", "km", 1000.0, _STATE),
-    _many("X_DOT Y_DOT Z_DOT", "float", "km/s", 1000.0, _STATE),
+    _many("X Y Z", "float", "km", KM, _STATE),
+    _many("X_DOT Y_DOT Z_DOT", "float", "km/s", KM, _STATE),
     _COVARIANCE,
 )
 

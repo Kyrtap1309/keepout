@@ -98,6 +98,12 @@ def test_an_estimate_from_a_keepout_result() -> None:
     assert seen.result is result
 
 
+def test_the_message_notes_follow_the_result_diagnostics() -> None:
+    result = PcResult(3e-5, "foster", ("primary (1): covariance repaired",))
+    seen = PcObservation.from_result(result, time_to_tca=DAY, notes=("odd Pc",))
+    assert seen.diagnostics == (*result.diagnostics, "odd Pc")
+
+
 def test_a_maximum_pc_is_an_upper_bound() -> None:
     # The result says what its value is; the observation keeps it.
     bound = PcResult(1e-3, "frisbee", kind="upper_bound")

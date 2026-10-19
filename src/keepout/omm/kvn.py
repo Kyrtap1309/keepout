@@ -22,8 +22,8 @@ from typing import Final
 
 from astropy.time import Time
 
-from keepout.ccsds.kvn import assignment, comment, format_line, split_unit
-from keepout.ccsds.message import KeywordValues, Located
+from keepout.ccsds.kvn import assignment, comment, format_line, located_value
+from keepout.ccsds.message import KeywordValues
 from keepout.errors import OmmParseError
 from keepout.omm._io import (
     OMM,
@@ -39,15 +39,6 @@ from keepout.omm.model import Omm
 __all__ = ["dumps", "load", "loads"]
 
 VERSION_KEYWORD: Final = "CCSDS_OMM_VERS"
-
-
-def _value(keyword: str, text: str, line: int) -> Located:
-    spec = KEYWORDS.get(keyword)
-    if spec is None or spec.kind == "str":
-        # Text values keep brackets: "GOES 9 [P]" is a name, not a unit.
-        return Located(text, line=line)
-    value, unit = split_unit(text)
-    return Located(value, unit, line)
 
 
 def loads(text: str) -> tuple[Omm, ...]:
@@ -98,7 +89,10 @@ def loads(text: str) -> tuple[Omm, ...]:
                 f"expected 'KEYWORD = value', got {line!r}", record=current, line=number
             )
         keyword, value = assigned
-        messages[-1][1].add(keyword, _value(keyword, value, number))
+        spec = KEYWORDS.get(keyword)
+        messages[-1][1].add(
+            keyword, located_value(spec, value, number, unknown_is_text=True)
+        )
     return tuple(
         parse_record({**DEFAULTS, **found.values}, record=record, line=start)
         for record, (start, found) in enumerate(messages, start=1)

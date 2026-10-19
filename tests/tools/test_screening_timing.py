@@ -6,14 +6,13 @@ import sys
 import pytest
 import screening_snapshot as snapshot
 import screening_timing as timing
-from astropy.time import Time
+from screening_data import FIXTURE_START, fixture_by_number, load_fixture
 
-from keepout.omm import load
 from keepout.screening import DEFAULT_VOLUME, screen
 from keepout.units import DAY
 
 CATALOG = snapshot.DATA / snapshot.FIXTURE
-START = "2026-10-06T00:00:00"
+START = FIXTURE_START.isot
 
 
 def test_main_prints_the_measurement(capsys: pytest.CaptureFixture[str]) -> None:
@@ -23,12 +22,12 @@ def test_main_prints_the_measurement(capsys: pytest.CaptureFixture[str]) -> None
     assert set(printed) == {"wall", "cpu", "approaches", "screened", "objects"}
     assert printed["wall"] > 0.0
     assert printed["cpu"] > 0.0
-    catalog = load(CATALOG)
-    by_number = {omm.catalog_number: omm for omm in catalog}
+    catalog = load_fixture()
+    by_number = fixture_by_number()
     expected = screen(
         [by_number[63216], by_number[58509]],
         catalog,
-        Time(START, scale="utc"),
+        FIXTURE_START,
         DAY,
         DEFAULT_VOLUME,
     )
@@ -47,7 +46,7 @@ def test_main_refuses_primaries_outside_the_catalog(
 
 
 def test_select_refuses_missing_primaries() -> None:
-    catalog = load(CATALOG)
+    catalog = load_fixture()
     assert timing.select(catalog, [63216]) == [
         omm for omm in catalog if omm.catalog_number == 63216
     ]
@@ -72,12 +71,11 @@ def test_cpu_time_counts_finished_children() -> None:
 
 
 def test_timed_returns_the_screening() -> None:
-    catalog = load(CATALOG)
-    start = Time(START, scale="utc")
+    catalog = load_fixture()
     result, measured = timing.timed(
-        catalog[:2], catalog, start, 3600.0, DEFAULT_VOLUME, workers=1
+        catalog[:2], catalog, FIXTURE_START, 3600.0, DEFAULT_VOLUME, workers=1
     )
-    assert result.start == start
+    assert result.start == FIXTURE_START
     assert result.duration == 3600.0
     assert measured.wall > 0.0
     assert measured.cpu >= 0.0

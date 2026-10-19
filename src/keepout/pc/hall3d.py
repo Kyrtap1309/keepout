@@ -206,8 +206,10 @@ class Encounters:
         ValueError
             If ``window`` is not finite with ``start < end``.
         PcConvergenceError
-            If the encounters cannot be resolved (see
-            :func:`~keepout.pc._rate.encounter_scan`).
+            If the encounters cannot be resolved (they need more detection
+            points than allowed, the rate is significant where the screen
+            ruled it negligible, or the rate cannot be computed on the scan
+            grid).
         """
         rate = collision_rate(conjunction)
         found = encounter_scan(conjunction, rate, window)
@@ -232,16 +234,17 @@ def integrate(
     """Hall's 3D-Nc over an encounter scan.
 
     The core of :func:`hall3d`, without its argument checks: for
-    :func:`~keepout.pc.compute_pc`, which has already scanned the rate or
-    already scanned the rate. A long encounter (:func:`is_long`) only adds
-    the note that Nc counts repeated entries (the duration itself is in
-    ``compute_pc``'s applicability warning).
+    :func:`~keepout.pc.compute_pc`, which has already scanned the rate. A
+    long encounter (:func:`is_long`) only adds the note that Nc counts
+    repeated entries (the duration itself is in ``compute_pc``'s
+    applicability warning).
 
     Raises
     ------
     PcConvergenceError
         If the peak-overlap iteration failed where the rate may matter
-        (:func:`~keepout.pc._rate.check_fallbacks`), or Nc is not finite.
+        (within a grid step of an encounter segment, or where the rate is
+        not negligible), or Nc is not finite.
     """
     rate, found = encounters.rate, encounters.found
     integral = integrate_segments(rate, found, rtol=rtol)

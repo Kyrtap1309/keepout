@@ -1,7 +1,6 @@
 import copy
 import dataclasses
 import gzip
-import json
 import math
 import shutil
 from collections.abc import Sequence
@@ -12,6 +11,7 @@ import pytest
 import screening_report as report
 import screening_snapshot as snapshot
 import snapshot_files
+from generated import read_json
 from screening_data import FIXTURE_START, fixture_by_number, socrates_text
 
 from keepout.omm import Omm
@@ -83,9 +83,7 @@ def arguments(tmp_path: Path, data: Path) -> list[str]:
 
 
 def written(tmp_path: Path) -> report.Summary:
-    path = tmp_path / "docs" / "screening-socrates.json"
-    summary: report.Summary = json.loads(path.read_text(encoding="utf-8"))
-    return summary
+    return read_json(tmp_path / "docs" / "screening-socrates.json", report.Summary)
 
 
 def test_main_writes_then_checks(tmp_path: Path) -> None:

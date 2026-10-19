@@ -7,16 +7,19 @@ from scipy.integrate import lebedev_rule, quad
 from scipy.stats import multivariate_normal
 
 from keepout._types import FloatArray
-from keepout.pc._sphere import sphere_grids, sphere_rule_principal
+from keepout.pc._sphere import sphere_grids
 
 
 def sphere_rule(
     covariance: FloatArray, mean: FloatArray, radius: float
 ) -> tuple[FloatArray, FloatArray]:
-    """:func:`sphere_rule_principal` of a covariance, decomposed as
-    :class:`~keepout.pc._rate.CollisionRate` does it."""
+    """Unit vectors ``(k, 3)`` and weights ``(k,)`` (solid angle, summing to
+    ``4 pi``) of the :func:`sphere_grids` rule for ``N(radius * x; mean, A)``,
+    ``A = covariance`` decomposed as :class:`~keepout.pc._rate.CollisionRate`
+    does it."""
     values, axes = np.linalg.eigh(covariance)
-    return sphere_rule_principal(values, axes, mean, radius)
+    (grid,) = sphere_grids(values[None], np.array([float(axes[:, 0] @ mean)]), radius)
+    return grid.cartesian(axes)
 
 
 def test_weights_cover_the_sphere() -> None:

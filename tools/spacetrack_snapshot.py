@@ -53,7 +53,6 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import functools
-import json
 import statistics
 import sys
 import tempfile
@@ -64,7 +63,7 @@ from pathlib import Path
 from typing import Final, Literal, TypedDict, cast
 
 import snapshot_files
-from generated import REPO, json_text, positive
+from generated import REPO, json_text, positive, second_text
 from screening_snapshot import REGIMES, nearest_approach, regime, utc_text
 from snapshot_files import (
     MANIFEST,
@@ -493,7 +492,7 @@ def inputs_from_data(data: Path) -> Inputs:
 
 def render_notice(inputs: Inputs) -> str:
     """The NOTICE: the data's source, citation, retrieval time and licence."""
-    retrieved = inputs.download.retrieved[:19].replace("T", " ")
+    retrieved = second_text(inputs.download.retrieved)
     return (
         "Data: USSPACECOM/18 SDS via Space-Track.org (www.space-track.org),\n"
         f"retrieved on {retrieved[:10]}.\n"
@@ -731,7 +730,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             replay_catalog(args.raw).omms,
             workers=args.workers,
         )
-        print(json.dumps(summarise(comparison), indent=2))
+        print(json_text(summarise(comparison)), end="")
         return 0
     return snapshot_files.build_or_verify(
         args, inputs_from_raw, inputs_from_data, stored_files, TOOL

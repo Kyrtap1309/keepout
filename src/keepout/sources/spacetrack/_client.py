@@ -459,27 +459,21 @@ class SpaceTrackClient:
             raise SourceFormatError(
                 f"cannot read the Space-Track request record {self.ledger}: {exc}"
             ) from exc
-        queried = record.get("queried") if isinstance(record, dict) else None
-        sent = (
-            {
-                query: time
-                for query, time in queried.items()
-                if isinstance(time, float) and math.isfinite(time)
-            }
-            if isinstance(queried, dict)
-            else {}
+        invalid = (
+            f"{self.ledger} is not a Space-Track request record of this "
+            "keepout version; delete it only if no query was sent in the "
+            "last 8 hours"
         )
-        if (
-            not isinstance(record, dict)
-            or not isinstance(queried, dict)
-            or record.get("format") != _LEDGER_FORMAT
-            or len(sent) != len(queried)
-        ):
-            raise SourceFormatError(
-                f"{self.ledger} is not a Space-Track request record of this "
-                "keepout version; delete it only if no query was sent in the "
-                "last 8 hours"
-            )
+        if not isinstance(record, dict) or record.get("format") != _LEDGER_FORMAT:
+            raise SourceFormatError(invalid)
+        queried = record.get("queried")
+        if not isinstance(queried, dict):
+            raise SourceFormatError(invalid)
+        sent: dict[str, float] = {}
+        for query, sent_at in queried.items():
+            if not isinstance(sent_at, float) or not math.isfinite(sent_at):
+                raise SourceFormatError(invalid)
+            sent[query] = sent_at
         return sent
 
     def _write_ledger(self, queried: Mapping[str, float]) -> None:
@@ -608,8 +602,8 @@ def _utc(unix: float) -> str:
 def _duration(seconds: float) -> str:
     """A wait for a message, rounded up: ``1 h 05 min``, ``12 min``, ``40 s``."""
     whole = math.ceil(seconds)
-    hours, rest = divmod(whole, 3600)
-    minutes, secs = divmod(rest, 60)
+    hours, rest = divmod(whole, int(HOUR))
+    minutes, secs = divmod(rest, int(MINUTE))
     if hours:
         return f"{hours} h {minutes:02d} min"
     if minutes:

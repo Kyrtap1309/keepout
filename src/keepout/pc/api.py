@@ -7,11 +7,12 @@ import inspect
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Final, Literal, NamedTuple, Self, TypeAlias, overload
+from typing import Final, Literal, NamedTuple, Self, TypeAlias, cast, overload
 
 import numpy as np
 
 from keepout._methods import MethodChoice
+from keepout._pickling import reduce_with_mappings
 from keepout._types import override
 from keepout.conjunction import Conjunction
 from keepout.encounter import Role
@@ -200,7 +201,8 @@ def _spec(method: str) -> MethodSpec:
     ValueError
         If ``method`` names no method (nor does ``"auto"``: it is a choice).
     """
-    spec = next((s for name, s in METHODS.items() if name == method), None)
+    # A name that is no method is only looked up: it finds nothing.
+    spec = METHODS.get(cast(Method, method))
     if spec is None:
         raise ValueError(
             f"unknown Pc method {method!r}; expected 'auto' or one of {tuple(METHODS)}"
@@ -239,7 +241,9 @@ _NO_PLANE: Final = (
 zero relative velocity, cannot run."""
 
 
-def _bound(conjunction: Conjunction) -> bool:
+def _both_orbits_elliptic(conjunction: Conjunction) -> bool:
+    """Whether both objects are on elliptic (bound) orbits, as the 3-D
+    methods need."""
     return all(
         orbital_period(item.state) is not None
         for item in (conjunction.primary, conjunction.secondary)
@@ -257,50 +261,53 @@ def _auto(conjunction: Conjunction) -> _Choice:
     if conjunction.relative_speed == 0.0:
         try:
             encounters = Encounters.scan(conjunction, None)
-        except MissingCovariance as error:
-            labels = [conjunction.label(role) for role in error.roles]
-            whose = "covariances of" if len(labels) == 2 else "covariance of"
-            verb = "are" if len(labels) == 2 else "is"
+        except MissingCovariance as exc:
             raise GeometryError(
-                f"{_NO_PLANE} and the {whose} {' and '.join(labels)} {verb} unknown"
-            ) from error
-        except UnusableOrbit as error:
+                f"{_NO_PLANE} and {_covariances_of(conjunction, exc.roles)} unknown"
+            ) from exc
+        except UnusableOrbit as exc:
             raise GeometryError(
                 f"{_NO_PLANE} and the 3-D methods cannot use the orbit of "
-                f"{conjunction.label(error.role)}: {error}"
-            ) from error
+                f"{conjunction.label(exc.role)}: {exc}"
+            ) from exc
         notes: tuple[str, ...] = ("relative velocity is zero: 2-D Pc is undefined",)
         return _three_d(conjunction, encounters, notes, {})
     unknown = conjunction.unknown_covariance
     notes, details = _assess(conjunction)
+    plane, hbr = conjunction.plane, conjunction.hard_body_radius
     if len(unknown) == 2:
-        return alfano(conjunction.plane, conjunction.hard_body_radius), notes, details
+        return alfano(plane, hbr), notes, details
     if unknown:
-        return frisbee(conjunction.plane, conjunction.hard_body_radius), notes, details
-    if not notes or not _bound(conjunction):
-        return foster(conjunction.plane, conjunction.hard_body_radius), notes, details
+        return frisbee(plane, hbr), notes, details
+    if not notes or not _both_orbits_elliptic(conjunction):
+        return foster(plane, hbr), notes, details
     position_only = conjunction.position_only_covariance
     if position_only:
         note = (
             f"{_known_only_in_position(conjunction, position_only)}: the 3-D "
             "methods need the velocity uncertainty, so the 2-D Pc is used"
         )
-        return (
-            foster(conjunction.plane, conjunction.hard_body_radius),
-            (*notes, note),
-            details,
-        )
-    two_d = foster(conjunction.plane, conjunction.hard_body_radius).value
+        return foster(plane, hbr), (*notes, note), details
+    pc_2d = foster(plane, hbr).value
     encounters = Encounters.scan(conjunction, None)
-    return _three_d(conjunction, encounters, notes, {**details, "pc_2d": two_d})
+    return _three_d(conjunction, encounters, notes, {**details, "pc_2d": pc_2d})
+
+
+def _covariances_of(conjunction: Conjunction, roles: tuple[Role, ...]) -> str:
+    """``the covariance of <object> is`` or ``the covariances of <object> and
+    <object> are``."""
+    labels = " and ".join(conjunction.label(role) for role in roles)
+    if len(roles) == 2:
+        return f"the covariances of {labels} are"
+    return f"the covariance of {labels} is"
 
 
 def _known_only_in_position(conjunction: Conjunction, roles: tuple[Role, ...]) -> str:
     """``the covariance of <object> is known only in position (...)``."""
-    labels = " and ".join(conjunction.label(role) for role in roles)
-    whose = "covariances of" if len(roles) == 2 else "covariance of"
-    verb = "are" if len(roles) == 2 else "is"
-    return f"the {whose} {labels} {verb} known only in position (zero velocity block)"
+    return (
+        f"{_covariances_of(conjunction, roles)} known only in position "
+        "(zero velocity block)"
+    )
 
 
 def _velocity_notes(conjunction: Conjunction, method: Method) -> tuple[str, ...]:
@@ -327,9 +334,9 @@ def _three_d(
     """Hall's 3D-Nc over an encounter scan, or Monte Carlo over it if Hall fails."""
     try:
         return integrate(conjunction, encounters), notes, details
-    except PcConvergenceError as error:
+    except PcConvergenceError as exc:
         fallback = (
-            f"{error}; Monte Carlo used instead (seed {AUTO_MC_SEED}, at most "
+            f"{exc}; Monte Carlo used instead (seed {AUTO_MC_SEED}, at most "
             f"{AUTO_MC_SAMPLES:,} trials)"
         )
         result = sample(
@@ -437,8 +444,8 @@ def compute_pc(
         not finite), ``"auto"`` falls back to ``"montecarlo"`` with at most
         ``AUTO_MC_SAMPLES`` trials and the seed ``AUTO_MC_SEED``, so
         ``"auto"`` is reproducible. A failure of the encounter scan itself
-        is not covered: Monte Carlo reuses that scan
-        (:func:`~keepout.pc._rate.encounter_scan`), so its error propagates.
+        is not covered: Monte Carlo reuses that scan, so its error
+        propagates.
         The 2-D and maximum-Pc methods take milliseconds; ``"hall3d"`` about
         1-60 s and the Monte Carlo fallback up to about a minute.
     **options
@@ -515,8 +522,7 @@ class PcComputation:
 
     @override
     def __reduce__(self) -> tuple[type[Self], tuple[object, ...]]:
-        # A mapping proxy does not pickle: pickle the plain mapping.
-        return type(self), (self.method, dict(self.options))
+        return reduce_with_mappings(self)
 
     @property
     def label(self) -> str:

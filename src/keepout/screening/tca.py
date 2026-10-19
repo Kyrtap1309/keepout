@@ -301,15 +301,16 @@ class RangeMinimum:
             object.__setattr__(self, name, as_vector(getattr(self, name), name))
 
 
-def _order(minimum: RangeMinimum) -> tuple[int, int, float]:
+def _minimum_sort_key(minimum: RangeMinimum) -> tuple[int, int, float]:
+    """The order of minima in a result: by primary, secondary, then offset."""
     return minimum.primary_index, minimum.secondary_index, minimum.offset
 
 
-def _earliest(
+def _keep_earliest(
     failures: dict[int, ObjectFailure], index: int, failure: ObjectFailure
 ) -> None:
-    """The earlier of an object's recorded failure and a new one, kept in
-    ``failures``."""
+    """An object's new failure, stored in ``failures`` in place of the one
+    recorded unless that one is earlier (by offset, then code)."""
     known = failures.get(index)
     if known is None or (failure.offset, failure.code) < (known.offset, known.code):
         failures[index] = failure
@@ -336,7 +337,9 @@ class SearchResult:
     catalog_failures: Mapping[int, ObjectFailure]
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "minima", tuple(sorted(self.minima, key=_order)))
+        object.__setattr__(
+            self, "minima", tuple(sorted(self.minima, key=_minimum_sort_key))
+        )
         primary = dict(sorted(self.primary_failures.items()))
         catalog = dict(sorted(self.catalog_failures.items()))
         object.__setattr__(self, "primary_failures", primary)
@@ -355,9 +358,9 @@ class SearchResult:
         for result in results:
             minima.extend(result.minima)
             for index, failure in result.primary_failures.items():
-                _earliest(primary, index, failure)
+                _keep_earliest(primary, index, failure)
             for index, failure in result.catalog_failures.items():
-                _earliest(catalog, index, failure)
+                _keep_earliest(catalog, index, failure)
         return cls(tuple(minima), primary, catalog)
 
 
@@ -370,7 +373,7 @@ def _dot(a: FloatArray, b: FloatArray) -> FloatArray:
     return product
 
 
-def _acceleration(
+def _acceleration_and_range_bounds(
     end_range: FloatArray,
     speed_range_bound: FloatArray,
     lowest_radius: FloatArray,
@@ -440,6 +443,8 @@ class _Failed(Exception):
 
 
 def _first_failure(errors: ErrorArray, stamps: FloatArray) -> ObjectFailure | None:
+    """The earliest failed state among ``errors`` at ``stamps``, or None when
+    none failed."""
     bad = np.flatnonzero(errors != NO_ERROR)
     if bad.size == 0:
         return None
@@ -447,16 +452,21 @@ def _first_failure(errors: ErrorArray, stamps: FloatArray) -> ObjectFailure | No
     return ObjectFailure(float(stamps[first]), int(errors[first]))
 
 
-def _check(own: ErrorArray, other: ErrorArray, stamps: FloatArray) -> None:
-    """A check that neither object failed at any of ``stamps``.
+def _require_no_failure(
+    primary_errors: ErrorArray, secondary_errors: ErrorArray, stamps: FloatArray
+) -> None:
+    """A check that neither object of a pair failed at any of ``stamps``.
 
     Raises
     ------
     _Failed
-        If ``own`` or ``other`` holds an SGP4 error code; it carries the
-        earliest failure of each.
+        If ``primary_errors`` or ``secondary_errors`` holds an SGP4 error
+        code; it carries the earliest failure of each.
     """
-    failed = _first_failure(own, stamps), _first_failure(other, stamps)
+    failed = (
+        _first_failure(primary_errors, stamps),
+        _first_failure(secondary_errors, stamps),
+    )
     if failed != (None, None):
         raise _Failed(*failed)
 
@@ -473,9 +483,9 @@ class _Failures:
         """A pair's failure found while refining it, kept as each failed
         object's earliest."""
         if failed.primary is not None:
-            _earliest(self.primary, primary, failed.primary)
+            _keep_earliest(self.primary, primary, failed.primary)
         if failed.secondary is not None:
-            _earliest(self.catalog, secondary, failed.secondary)
+            _keep_earliest(self.catalog, secondary, failed.secondary)
 
 
 def _stencil_sum(rho: FloatArray, weights: FloatArray) -> FloatArray:
@@ -489,16 +499,16 @@ def _stencil_sum(rho: FloatArray, weights: FloatArray) -> FloatArray:
     return total
 
 
-def _propagated(primary: Propagator, secondary: Propagator, start: Time) -> States:
-    """The states of a pair, from any propagators: rows 0 and 1."""
+def _pair_sampler(primary: Propagator, secondary: Propagator, start: Time) -> States:
+    """The sampler of a pair's states, from any propagators: rows 0 and 1."""
 
     def states(stamps: FloatArray) -> tuple[ErrorArray, FloatArray, FloatArray]:
-        own = primary.propagate(start, stamps)
-        other = secondary.propagate(start, stamps)
+        primary_states = primary.propagate(start, stamps)
+        secondary_states = secondary.propagate(start, stamps)
         return (
-            np.concatenate((own.errors, other.errors)),
-            np.concatenate((own.r, other.r)),
-            np.concatenate((own.v, other.v)),
+            np.concatenate((primary_states.errors, secondary_states.errors)),
+            np.concatenate((primary_states.r, secondary_states.r)),
+            np.concatenate((primary_states.v, secondary_states.v)),
         )
 
     return states
@@ -522,7 +532,7 @@ class _Pair:
         """Positions and velocities of both at ``stamps``, ``(n, 3)`` each."""
         errors, r, v = self.sample(stamps)
         if errors.any():
-            _check(errors[0], errors[1], stamps)
+            _require_no_failure(errors[0], errors[1], stamps)
         return r[0], v[0], r[1], v[1]
 
     def derivative(self, times: FloatArray) -> FloatArray:
@@ -538,7 +548,7 @@ class _Pair:
             return _stencil_sum(r[1] - r[0], _WEIGHTS)
         outside = (stamps < 0.0) | (stamps > self.duration)
         inside = ~outside
-        _check(errors[0][inside], errors[1][inside], stamps[inside])
+        _require_no_failure(errors[0][inside], errors[1][inside], stamps[inside])
         derivative = _stencil_sum(r[1] - r[0], _WEIGHTS)
         failed = (errors[0] != NO_ERROR) | (errors[1] != NO_ERROR)
         reaching = (failed & outside).reshape(-1, len(_STENCIL))
@@ -557,8 +567,10 @@ class _Pair:
         spacing = np.minimum(DERIVATIVE_STEP, room / 4.0) * np.where(forward, 1.0, -1.0)
         nodes = times[:, None] + spacing[:, None] * np.arange(len(_ONE_SIDED))
         stamps = np.clip(nodes, 0.0, self.duration).reshape(-1)
-        r_own, _, r_other, _ = self.states(stamps)
-        derivative: FloatArray = _stencil_sum(r_other - r_own, _ONE_SIDED) / spacing
+        r_primary, _, r_secondary, _ = self.states(stamps)
+        derivative: FloatArray = (
+            _stencil_sum(r_secondary - r_primary, _ONE_SIDED) / spacing
+        )
         return derivative
 
     def values(self, times: FloatArray) -> FloatArray:
@@ -585,14 +597,14 @@ class _Interval(NamedTuple):
 
     first: float
     last: float
-    quick: bool
+    monotone: bool
     """Whether ``f`` is monotone over it: its sign at the ends decides."""
 
 
 def _samples(interval: _Interval) -> FloatArray:
     """Where ``f`` is evaluated in an interval: its ends, or every SLOW_STEP."""
     first, last = interval.first, interval.last
-    if interval.quick:
+    if interval.monotone:
         return np.array([first, last])
     count = math.ceil((last - first) / SLOW_STEP)
     samples = first + (last - first) * (np.arange(count + 1) / count)
@@ -600,7 +612,7 @@ def _samples(interval: _Interval) -> FloatArray:
     return samples
 
 
-def _record(
+def _record_first_failures(
     failures: dict[int, ObjectFailure],
     positions: IndexArray,
     errors: ErrorArray,
@@ -612,7 +624,7 @@ def _record(
     for row in np.flatnonzero(np.any(failed, axis=1)):
         first = int(np.argmax(failed[row]))
         failure = ObjectFailure(float(times[first]), int(errors[row, first]))
-        _earliest(failures, int(positions[row]), failure)
+        _keep_earliest(failures, int(positions[row]), failure)
 
 
 class ApproachSearch:
@@ -723,8 +735,10 @@ class ApproachSearch:
         candidates = self._candidates(rows, max_states, failures)
         sampler = self._sampler_for()
         minima: list[RangeMinimum] = []
-        for (primary, secondary), found in sorted(candidates.items()):
-            minima.extend(self._refine(sampler, primary, secondary, found, failures))
+        for (primary, secondary), intervals in sorted(candidates.items()):
+            minima.extend(
+                self._refine(sampler, primary, secondary, intervals, failures)
+            )
         return SearchResult(tuple(minima), failures.primary, failures.catalog)
 
     def _sampler_for(self) -> Sgp4Sampler | None:
@@ -755,24 +769,28 @@ class ApproachSearch:
             max_states=max_states,
             shared_times=1,
         )
-        found: dict[tuple[int, int], list[_Interval]] = {}
+        intervals_by_pair: dict[tuple[int, int], list[_Interval]] = {}
         for primaries, catalog in chunks:
-            _record(failures.primary, rows, primaries.errors, primaries.offsets)
-            _record(failures.catalog, columns, catalog.errors, catalog.offsets)
+            _record_first_failures(
+                failures.primary, rows, primaries.errors, primaries.offsets
+            )
+            _record_first_failures(
+                failures.catalog, columns, catalog.errors, catalog.offsets
+            )
             for i, row in enumerate(rows):
                 self._collect(
-                    found,
+                    intervals_by_pair,
                     int(row),
                     primaries.r[i],
                     catalog.r[own[i]],
                     columns[own[i]],
                     primaries.offsets,
                 )
-        return found
+        return intervals_by_pair
 
     def _collect(
         self,
-        found: dict[tuple[int, int], list[_Interval]],
+        intervals_by_pair: dict[tuple[int, int], list[_Interval]],
         row: int,
         r_primary: FloatArray,
         r_others: FloatArray,
@@ -780,18 +798,20 @@ class ApproachSearch:
         times: FloatArray,
     ) -> None:
         """The intervals of one primary's pairs over a chunk that pass the
-        sieves, added to ``found``."""
-        secondaries, intervals, quick = self._sieve(
+        sieves, added to ``intervals_by_pair``."""
+        secondaries, starts, monotone = self._sieve(
             row, r_primary, r_others, others, times
         )
-        for secondary, first, last, fast in zip(
+        for secondary, first, last, is_monotone in zip(
             secondaries.tolist(),
-            times[intervals].tolist(),
-            times[intervals + 1].tolist(),
-            quick.tolist(),
+            times[starts].tolist(),
+            times[starts + 1].tolist(),
+            monotone.tolist(),
             strict=True,
         ):
-            found.setdefault((row, secondary), []).append(_Interval(first, last, fast))
+            intervals_by_pair.setdefault((row, secondary), []).append(
+                _Interval(first, last, is_monotone)
+            )
 
     def _sieve(
         self,
@@ -810,42 +830,85 @@ class ApproachSearch:
         distance = np.sqrt(_dot(rho, rho))
         length = np.diff(times)
         speed = self._speed_primary[row] + self._speed_catalog[others]
+        pair, interval = self._speed_sieve(row, distance, length, speed)
+        keep, monotone = self._chord_sieve(
+            row,
+            others[pair],
+            rho[pair, interval],
+            rho[pair, interval + 1],
+            distance[pair, interval],
+            distance[pair, interval + 1],
+            length[interval],
+            speed[pair],
+        )
+        return others[pair[keep]], interval[keep], monotone[keep]
+
+    def _speed_sieve(
+        self,
+        row: int,
+        distance: FloatArray,
+        length: FloatArray,
+        speed: FloatArray,
+    ) -> tuple[IndexArray, IndexArray]:
+        """The pairs (rows of ``distance``) and intervals that pass the speed
+        sieve, from each pair's range on the grid, the intervals' lengths and
+        each pair's relative speed bound."""
         reach = self._reach[row]
         with np.errstate(invalid="ignore"):
             near = distance[:, :-1] + distance[:, 1:] <= 2.0 * reach + np.outer(
                 speed, length
             )
         pair, interval = np.nonzero(near)
-        a, b = rho[pair, interval], rho[pair, interval + 1]
-        h = length[interval]
-        chord = b - a
+        return pair, interval
+
+    def _chord_sieve(
+        self,
+        row: int,
+        secondaries: IndexArray,
+        rho_start: FloatArray,
+        rho_end: FloatArray,
+        range_start: FloatArray,
+        range_end: FloatArray,
+        interval_length: FloatArray,
+        speed: FloatArray,
+    ) -> tuple[BoolArray, BoolArray]:
+        """Which intervals pass the chord sieve, and whether ``f`` is
+        monotone over each.
+
+        Each entry is one interval of one pair that passed the speed sieve:
+        its catalog object, the relative positions and ranges at its ends,
+        its length and the pair's relative speed bound. A pair at exactly
+        the same position at both ends is taken as one object and fails.
+        """
+        chord = rho_end - rho_start
         squared = _dot(chord, chord)
         along = np.zeros_like(squared)
         moving = squared > 0.0
-        along[moving] = -_dot(a[moving], chord[moving]) / squared[moving]
-        closest = a + np.clip(along, 0.0, 1.0)[:, None] * chord
+        along[moving] = -_dot(rho_start[moving], chord[moving]) / squared[moving]
+        closest = rho_start + np.clip(along, 0.0, 1.0)[:, None] * chord
         nearest = np.sqrt(_dot(closest, closest))
-        ends = distance[pair, interval], distance[pair, interval + 1]
-        farthest = 0.5 * (ends[0] + ends[1] + speed[pair] * h)
+        farthest = 0.5 * (range_start + range_end + speed * interval_length)
         lowest = np.minimum(
-            self._lowest_primary[row], self._lowest_catalog[others[pair]]
+            self._lowest_primary[row], self._lowest_catalog[secondaries]
         )
-        acceleration, range_bound = _acceleration(
-            np.maximum(ends[0], ends[1]), farthest, lowest, h
+        acceleration, range_bound = _acceleration_and_range_bounds(
+            np.maximum(range_start, range_end), farthest, lowest, interval_length
         )
-        pad = acceleration * h * h / 8.0
-        same = np.all(a == 0.0, axis=1) & np.all(b == 0.0, axis=1)
-        keep = (nearest - pad <= reach) & ~same
-        sweep = np.sqrt(squared) / h - 0.5 * acceleration * h
-        quick = (sweep > 0.0) & (sweep * sweep > range_bound * acceleration)
-        return others[pair[keep]], interval[keep], quick[keep]
+        pad = acceleration * interval_length * interval_length / 8.0
+        same = np.all(rho_start == 0.0, axis=1) & np.all(rho_end == 0.0, axis=1)
+        keep = (nearest - pad <= self._reach[row]) & ~same
+        sweep = (
+            np.sqrt(squared) / interval_length - 0.5 * acceleration * interval_length
+        )
+        monotone = (sweep > 0.0) & (sweep * sweep > range_bound * acceleration)
+        return keep, monotone
 
     def _refine(
         self,
         sampler: Sgp4Sampler | None,
         primary: int,
         secondary: int,
-        found: list[_Interval],
+        intervals: list[_Interval],
         failures: _Failures,
     ) -> list[RangeMinimum]:
         """The minima of one pair in its intervals that passed the sieves.
@@ -854,7 +917,7 @@ class ApproachSearch:
         loses that interval's minima only.
         """
         if sampler is None:
-            sample = _propagated(
+            sample = _pair_sampler(
                 self._primaries.subset(np.array([primary])),
                 self._catalog.subset(np.array([secondary])),
                 self._start,
@@ -862,13 +925,13 @@ class ApproachSearch:
         else:
             sample = sampler.states((primary, len(self._primaries) + secondary))
         pair = _Pair(sample, self._duration)
-        brackets = [_samples(interval) for interval in found]
+        brackets = [_samples(interval) for interval in intervals]
         # Every interval's samples in one evaluation, kept by the pair; after a
         # failure, each interval is evaluated, and its failure found, on its own.
         with contextlib.suppress(_Failed):
             pair.values(np.unique(np.concatenate(brackets)))
         roots = [_roots(pair, samples) for samples in brackets]
-        tcas = np.array([tca for found_roots, _ in roots for tca in found_roots])
+        tcas = np.array([tca for interval_tcas, _ in roots for tca in interval_tcas])
         if tcas.size == 0:
             states = (np.empty((0, 3)),) * 4
             errors = np.zeros((2, 0), dtype=np.uint8)
@@ -877,12 +940,12 @@ class ApproachSearch:
             states = r[0], v[0], r[1], v[1]
         minima: list[RangeMinimum] = []
         first = 0
-        for found_roots, failed in roots:
-            rows = slice(first, first + len(found_roots))
+        for interval_tcas, failed in roots:
+            rows = slice(first, first + len(interval_tcas))
             first = rows.stop
             try:
                 minima.extend(
-                    self._inside(
+                    self._minima_inside_volume(
                         primary,
                         secondary,
                         tcas[rows],
@@ -891,11 +954,11 @@ class ApproachSearch:
                         failed,
                     )
                 )
-            except _Failed as failure:
-                failures.note(primary, secondary, failure)
+            except _Failed as exc:
+                failures.note(primary, secondary, exc)
         return minima
 
-    def _inside(
+    def _minima_inside_volume(
         self,
         primary: int,
         secondary: int,
@@ -913,14 +976,18 @@ class ApproachSearch:
         """
         bad = np.flatnonzero(np.any(errors != NO_ERROR, axis=0))
         count = int(bad[0]) if bad.size > 0 else len(tcas)
-        r_p, v_p, r_s, v_s = (state[:count] for state in states)
-        inside = self._volumes[primary].contains_position(r_p, v_p, r_s)
+        r_primary, v_primary, r_secondary, v_secondary = (
+            state[:count] for state in states
+        )
+        inside = self._volumes[primary].contains_position(
+            r_primary, v_primary, r_secondary
+        )
         if count < len(tcas):
             rows = slice(count, count + 1)
-            _check(errors[0, rows], errors[1, rows], tcas[rows])
+            _require_no_failure(errors[0, rows], errors[1, rows], tcas[rows])
         if failed is not None:
             raise failed
-        rho = r_s - r_p
+        rho = r_secondary - r_primary
         distance = np.sqrt(_dot(rho, rho))
         return [
             RangeMinimum(
@@ -928,10 +995,10 @@ class ApproachSearch:
                 secondary,
                 float(tcas[k]),
                 float(distance[k]),
-                r_p[k],
-                v_p[k],
-                r_s[k],
-                v_s[k],
+                r_primary[k],
+                v_primary[k],
+                r_secondary[k],
+                v_secondary[k],
             )
             for k in np.flatnonzero(inside)
         ]
@@ -942,13 +1009,13 @@ def _roots(pair: _Pair, samples: FloatArray) -> tuple[list[float], _Failed | Non
     and the failure that stopped the search, if one did."""
     try:
         values = pair.values(samples)
-    except _Failed as failed:
-        return [], failed
+    except _Failed as exc:
+        return [], exc
     tcas: list[float] = []
     for j in np.flatnonzero((values[:-1] < 0.0) & (values[1:] >= 0.0)):
         try:
             tca = brentq(pair.at, samples[j], samples[j + 1], xtol=TCA_TOLERANCE)
-        except _Failed as failed:
-            return tcas, failed
+        except _Failed as exc:
+            return tcas, exc
         tcas.append(float(tca))
     return tcas, None

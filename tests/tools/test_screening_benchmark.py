@@ -16,14 +16,15 @@ import screening_snapshot as snapshot
 import snapshot_files
 import spacetrack_snapshot
 from astropy.time import Time
-from generated import README
+from generated import README, json_text, read_json
+from screening_data import fixture_by_number, load_fixture
 from screening_timing import Timing, timed
 
-from keepout.omm import Omm, load
+from keepout.omm import Omm
 from keepout.omm.celestrak import dumps_csv
 from keepout.screening import DEFAULT_VOLUME, ScreeningResult
 
-FIXTURE = load(snapshot.DATA / snapshot.FIXTURE)
+FIXTURE = load_fixture()
 CELESTRAK = benchmark.SOURCES["celestrak"]
 SPACETRACK = benchmark.SOURCES["spacetrack"]
 PRIMARIES = ["63216", "58509", "44476"]
@@ -72,14 +73,13 @@ def arguments(tmp_path: Path) -> list[str]:
 
 def written(tmp_path: Path) -> benchmark.Summary:
     path = tmp_path / "docs" / "screening-benchmark.json"
-    summary: benchmark.Summary = json.loads(path.read_text(encoding="utf-8"))
-    return summary
+    return read_json(path, benchmark.Summary)
 
 
 def rewrite(tmp_path: Path, summary: benchmark.Summary) -> None:
     """Replace the results file and the README block by ``summary``'s."""
     path = tmp_path / "docs" / "screening-benchmark.json"
-    path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+    path.write_text(json_text(summary), encoding="utf-8")
     readme = tmp_path / "README.md"
     block = benchmark.render_summary(summary)
     readme.write_text(
@@ -90,9 +90,8 @@ def rewrite(tmp_path: Path, summary: benchmark.Summary) -> None:
 @pytest.fixture(scope="module")
 def benchmarked() -> tuple[list[benchmark.Found], list[benchmark.Measured]]:
     """One real benchmark of :data:`PRIMARIES` in the fixture, for ``main``."""
-    by_number = {omm.catalog_number: omm for omm in FIXTURE}
     return benchmark.benchmark(
-        [by_number[int(number)] for number in PRIMARIES],
+        [fixture_by_number()[int(number)] for number in PRIMARIES],
         FIXTURE,
         benchmark.window_start("2026-10-06"),
         workers=1,

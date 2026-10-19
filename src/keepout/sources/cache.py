@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import enum
 import gzip
 import hashlib
 import http.client
@@ -656,35 +657,47 @@ def cached_fetch(
     require_max_age(max_age, interval, reason)
     start = now()
     cached = read_copy(target, url)
+    # The cached copy is read at most once: gunzip and parse can take seconds.
+    value: _T | _Unread = _Unread.UNTRIED
     if cached is not None and 0.0 <= start - cached.meta.checked < max_age:
         value = _read_cached(read, cached, compressed=compressed)
-        if value is not None:
-            return value[0], cached.meta
+        if not isinstance(value, _Unread):
+            return value, cached.meta
     try:
         data = download()
     except Unchanged:
         if cached is None:
             raise
-        value = _read_cached(read, cached, compressed=compressed)
-        if value is None:
+        if value is _Unread.UNTRIED:
+            value = _read_cached(read, cached, compressed=compressed)
+        if isinstance(value, _Unread):
             raise
         meta = dataclasses.replace(cached.meta, checked=start)
         write_meta(target, meta)
-        return value[0], meta
+        return value, meta
     result = read(data)
     # The full Space-Track catalog is 36 MB of JSON, 5 MB gzipped.
     stored = gzip.compress(data, compresslevel=6, mtime=0) if compressed else data
     return result, save_copy(target, url, stored, now())
 
 
+class _Unread(enum.Enum):
+    """No value read from a cached copy (see :func:`cached_fetch`)."""
+
+    UNTRIED = enum.auto()
+    """The copy has not been read."""
+    UNREADABLE = enum.auto()
+    """The copy does not decompress, or ``read`` refused it."""
+
+
 def _read_cached(
     read: Callable[[bytes], _T], cached: CachedCopy, *, compressed: bool
-) -> tuple[_T] | None:
-    """``(read(body),)`` of a cached copy; ``None`` if it cannot be read."""
+) -> _T | _Unread:
+    """``read(body)`` of a cached copy; ``_Unread.UNREADABLE`` if it cannot."""
     data = gunzip(cached.data) if compressed else cached.data
     if data is None:
-        return None
+        return _Unread.UNREADABLE
     try:
-        return (read(data),)
+        return read(data)
     except SourceFormatError:
-        return None
+        return _Unread.UNREADABLE

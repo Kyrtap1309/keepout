@@ -27,6 +27,7 @@ import astropy.units as u
 import numpy as np
 from astropy.time import Time
 
+from keepout._pickling import reduce_with_mappings
 from keepout._types import FloatArray, override, read_only
 from keepout.conjunction import Conjunction, combined_hard_body_radius
 from keepout.covariance import Covariance
@@ -310,15 +311,7 @@ class ScreeningResult:
 
     @override
     def __reduce__(self) -> tuple[type[Self], tuple[object, ...]]:
-        # A mapping proxy does not pickle: pickle the plain mapping.
-        return type(self), (
-            self.approaches,
-            self.skipped,
-            self.start,
-            self.duration,
-            dict(self.volumes),
-            self.catalog_count,
-        )
+        return reduce_with_mappings(self)
 
     @property
     def end(self) -> Time:

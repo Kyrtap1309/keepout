@@ -29,10 +29,18 @@ from typing import Final, TypedDict
 
 import screening_snapshot as snapshot
 from astropy.time import Time
-from generated import REPO, json_text, pc_text, positive, table, write_or_check
+from generated import (
+    REPO,
+    json_text,
+    minute_text,
+    pc_text,
+    positive,
+    second_text,
+    table,
+    write_or_check,
+)
 
 from keepout.cdm import kvn
-from keepout.encounter import encounter_plane
 from keepout.omm import Omm, deduplicate
 from keepout.pc import dilution
 from keepout.risk import Action, DecisionConfig, Thresholds
@@ -203,7 +211,7 @@ def _event(
     diluted: bool | None = None
     if observation.pc is not None and observation.result is not None:
         conjunction = event.cdm.conjunction()
-        bound = dilution(encounter_plane(conjunction), conjunction.hard_body_radius)
+        bound = dilution(conjunction.plane, conjunction.hard_body_radius)
         pc = _significant(observation.pc)
         method = str(observation.result.method)
         max_pc = _significant(bound.value)
@@ -356,7 +364,7 @@ def _introduction(summary: Summary) -> list[str]:
             f"({catalog['screened']} screened, {catalog['skipped']} left out by "
             "screening's rules), "
             f"{settings['days']:g} days from "
-            f"{settings['start'][:16].replace('T', ' ')} UTC with the "
+            f"{minute_text(settings['start'])} UTC with the "
             f"{settings['volume']}, issued a CCSDS CDM for every close approach, "
             "computed the Pc from each CDM and assessed each event with keepout's "
             f"default thresholds (green below {settings['green_below']:.0e}, red "
@@ -407,7 +415,7 @@ def _fleet(summary: Summary) -> list[str]:
                     s["regime"],
                     f"{s['hard_body_radius']:g} m",
                     "yes" if s["maneuverable"] else "no",
-                    s["epoch"][:19].replace("T", " "),
+                    second_text(s["epoch"]),
                     s["approaches"],
                 )
                 for s in summary["fleet"]

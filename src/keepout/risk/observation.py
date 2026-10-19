@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from typing import Final, Literal, TypeAlias, get_args
 
 from keepout._types import require_probability
-from keepout.pc.api import PcComputation
 from keepout.pc.result import PcResult
 
 __all__ = ["PC_FLOOR", "PC_KINDS", "PcKind", "PcObservation"]
@@ -127,6 +126,7 @@ class PcObservation:
         message_id: str | None = None,
         reported_pc: float | None = None,
         assumed_covariance: bool = False,
+        notes: tuple[str, ...] = (),
     ) -> PcObservation:
         """The observation of a keepout result.
 
@@ -148,16 +148,18 @@ class PcObservation:
             The Pc the message's originator reported.
         assumed_covariance
             Whether the message gives an object's covariance as assumed.
+        notes
+            Diagnostics of the message, after the result's.
         """
         return cls(
             time_to_tca=time_to_tca,
-            source=PcComputation(result.method).label,
+            source=f"keepout ({result.method})",
             pc=result.value,
             kind=result.kind,
             ci_high=None if result.interval is None else result.interval[1],
             message_id=message_id,
             reported_pc=reported_pc,
-            diagnostics=result.diagnostics,
+            diagnostics=(*result.diagnostics, *notes),
             result=result,
             assumed_covariance=assumed_covariance,
         )

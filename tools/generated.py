@@ -130,6 +130,18 @@ def pc_text(pc: float | None) -> str:
     return "-" if pc is None else f"{pc:.2e}"
 
 
+def minute_text(iso: str) -> str:
+    """An ISO 8601 time to the minute, with a space for the ``T``:
+    ``2025-01-02 03:04``."""
+    return iso[:16].replace("T", " ")
+
+
+def second_text(iso: str) -> str:
+    """An ISO 8601 time to the second, with a space for the ``T``:
+    ``2025-01-02 03:04:05``."""
+    return iso[:19].replace("T", " ")
+
+
 def write_or_check(files: Mapping[Path, str | bytes], *, check: bool, tool: str) -> int:
     """The files whose contents differ, written, or with ``check`` reported.
 

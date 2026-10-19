@@ -30,18 +30,6 @@ def test_paper_values_are_compared_with_the_paper_method() -> None:
     assert "| 1.0000e-03 | 1.0e+00 **FAIL** |" in page
 
 
-def test_replace_summary_rewrites_only_the_marked_block() -> None:
-    readme = f"intro\n{report.MAIN.start}\nold\n{report.MAIN.end}\nrest\n"
-    assert report.replace_summary(readme, "new") == (
-        f"intro\n{report.MAIN.start}\nnew\n{report.MAIN.end}\nrest\n"
-    )
-
-
-def test_replace_summary_needs_the_markers() -> None:
-    with pytest.raises(ValueError, match="README needs"):
-        report.replace_summary("no markers", "new")
-
-
 def empty_readme(tmp_path: Path) -> Path:
     readme = tmp_path / "README.md"
     readme.write_text(f"{report.MAIN.start}\n{report.MAIN.end}\n", encoding="utf-8")

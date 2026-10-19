@@ -28,6 +28,7 @@ from keepout.ccsds.keywords import (
 )
 from keepout.errors import UnsupportedElements
 from keepout.omm.keywords import ATTRIBUTES, DEGREE, KEYWORDS, SGP4_EPHEMERIS_TYPE
+from keepout.units import DAY
 
 __all__ = [
     "MAX_CATALOG_NUMBER",
@@ -360,7 +361,7 @@ def _sgp4_epoch(epoch: Time) -> float:
             )
             raise UnsupportedElements(f"epoch {text} falls in a leap second")
         when = datetime(year, month, day, hour, minute, second, microsecond, UTC)
-    return (when - _SGP4_EPOCH0).total_seconds() / 86400.0
+    return (when - _SGP4_EPOCH0).total_seconds() / DAY
 
 
 def _epoch_text(epoch: Time, digits: int | None) -> str:

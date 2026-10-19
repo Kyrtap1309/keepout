@@ -9,12 +9,7 @@ from typing import TYPE_CHECKING, Annotated, TypeAlias
 
 import typer
 
-from keepout.cli.events import (
-    AssessedEvent,
-    event_json,
-    events_table,
-    reasons,
-)
+from keepout.cli.events import event_json, events_table, reasons
 from keepout.cli.fetch import load_catalog
 from keepout.cli.options import CacheDir, JsonFlag, Workers, positive
 from keepout.cli.output import JsonValue, isot, plural, show, utc
@@ -138,7 +133,7 @@ def screen_command(
     is the cached copy of keepout fetch catalog while it is current, else a
     new download; --catalog reads a file instead.
     """
-    given_start = None if start is None else _start_time(start)
+    window_start = None if start is None else _start_time(start)
     if catalog is not None and source is not None:
         raise typer.BadParameter(
             "give either --catalog or --source, not both", param_hint="--source"
@@ -147,12 +142,14 @@ def screen_command(
     from keepout.synthetic.operator import run
 
     satellites = load_fleet(fleet)
-    omms, described = _catalog_input(catalog, source, cache_dir)
-    began = given_start if given_start is not None else _now()
-    result = run(satellites, omms, began, days * DAY, workers=workers)
+    omms, catalog_label = _catalog_input(catalog, source, cache_dir)
+    if window_start is None:
+        window_start = _now()
+    result = run(satellites, omms, window_start, days * DAY, workers=workers)
     files = {} if cdm_dir is None else _write_cdms(result, cdm_dir)
-    payload = _payload(result, described, files, cdm_dir)
-    show(payload, *_summary(result, described, files, cdm_dir), as_json=as_json)
+    payload = _payload(result, catalog_label, files, cdm_dir)
+    summary = _summary(result, catalog_label, files, cdm_dir)
+    show(payload, *summary, as_json=as_json)
 
 
 def _start_time(start: str) -> Time:
@@ -197,14 +194,15 @@ def _write_cdms(result: OperatorResult, cdm_dir: Path) -> dict[str, Path]:
     cdm_dir.mkdir(parents=True, exist_ok=True)
     files: dict[str, Path] = {}
     for cdm in result.cdms:
-        files[cdm.message_id] = path = cdm_dir / f"{cdm.message_id}.kvn"
+        path = cdm_dir / f"{cdm.message_id}.kvn"
         kvn.dump(cdm, path)
+        files[cdm.message_id] = path
     return files
 
 
 def _payload(
     result: OperatorResult,
-    described: str,
+    catalog_label: str,
     files: Mapping[str, Path],
     cdm_dir: Path | None,
 ) -> dict[str, JsonValue]:
@@ -212,7 +210,7 @@ def _payload(
     screening = result.screening
     return {
         "fleet": list(result.fleet.catalog_numbers),
-        "catalog": described,
+        "catalog": catalog_label,
         "catalog_objects": screening.catalog_count,
         "start": isot(screening.start),
         "end": isot(screening.end),
@@ -225,7 +223,7 @@ def _payload(
 
 def _summary(
     result: OperatorResult,
-    described: str,
+    catalog_label: str,
     files: Mapping[str, Path],
     cdm_dir: Path | None,
 ) -> list[RenderableType]:
@@ -236,7 +234,6 @@ def _summary(
 
     screening = result.screening
     fleet = result.fleet
-    assessed = [AssessedEvent(e.event, e.assessment) for e in result.events]
     unscreened = [s for s in screening.skipped if s.role is ScreeningRole.PRIMARY]
     count = len(fleet.satellites)
     screened = (
@@ -247,7 +244,7 @@ def _summary(
     head = [
         (
             f"Screened {screened} "
-            f"against {plural(screening.catalog_count, 'object')} ({described}) "
+            f"against {plural(screening.catalog_count, 'object')} ({catalog_label}) "
             f"from {utc(screening.start)} to {utc(screening.end)} UTC: "
             f"{plural(len(result.events), 'close approach', 'close approaches')}."
         ),
@@ -259,14 +256,15 @@ def _summary(
             f"{plural(len(screening.skipped), 'element set')} left out (stale, "
             "future epochs, SGP4 failures; --json lists them)."
         )
-    tail += reasons(assessed, Action.MONITOR)
+    tail += reasons(result.events, Action.MONITOR)
     tail.append(
         "Covariances are assumed (keepout's model of GP element set errors), "
         "not orbit determination."
     )
     if cdm_dir is not None:
         tail.append(f"{plural(len(files), 'CDM')} written to {cdm_dir}")
-    table = [events_table(assessed, "Close approaches")] if assessed else []
+    events = result.events
+    table = [events_table(events, "Close approaches")] if events else []
     return [*head, *table, *tail]
 
 
@@ -286,7 +284,7 @@ def _event_json(
     event: OperatorEvent, files: Mapping[str, Path]
 ) -> dict[str, JsonValue]:
     path = files.get(event.cdm.message_id)
-    return event_json(AssessedEvent(event.event, event.assessment)) | {
+    return event_json(event) | {
         "relative_speed": event.approach.relative_speed,
         "cdm_file": None if path is None else str(path),
     }

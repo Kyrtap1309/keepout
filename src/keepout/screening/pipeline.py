@@ -200,13 +200,13 @@ def screen(
     current_catalog, dropped_catalog = _current(
         catalog, ScreeningRole.CATALOG, window, max_age, max_lead
     )
-    primary_propagator, volumes, unusable_primaries = _primaries(
+    primary_propagator, volumes, skipped_primaries = _primaries(
         current_primaries, volume
     )
     parts = _parts(primary_propagator, volumes, current_catalog, window, processes)
-    left_out = [*dropped_primaries, *dropped_catalog, *unusable_primaries]
+    skipped = [*dropped_primaries, *dropped_catalog, *skipped_primaries]
     return _collect(
-        _run(parts), primary_propagator, volumes, current_catalog, window, left_out
+        _run(parts), primary_propagator, volumes, current_catalog, window, skipped
     )
 
 

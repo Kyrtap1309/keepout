@@ -105,7 +105,7 @@ def parse_record(
         If a keyword is missing or has an invalid value or unit, the metadata
         are not those of SGP4 elements, or the elements are invalid.
     """
-    error = _Errors(values, record, line, path)
+    make_error = _Errors(values, record, line, path)
 
     def text_of(keyword: str) -> Located:
         match values[keyword]:
@@ -114,16 +114,18 @@ def parse_record(
             case str() as value:
                 return Located(value.strip())
             case value:
-                raise error(f"must be text, got {value!r}", keyword)
+                raise make_error(f"must be text, got {value!r}", keyword)
 
     for keyword, accepted in FIXED_METADATA.items():
         if keyword in values and (stated := text_of(keyword).text) not in accepted:
-            raise error(f"must be {' or '.join(accepted)}, got {stated!r}", keyword)
+            raise make_error(
+                f"must be {' or '.join(accepted)}, got {stated!r}", keyword
+            )
     # Typed by each keyword's kind; Omm checks the types again.
     parsed: dict[str, Any] = {}
     for keyword, spec in KEYWORDS.items():
         if keyword not in values:
-            raise error("missing keyword", keyword)
+            raise make_error("missing keyword", keyword)
         value = text_of(keyword)
         if keyword == "EPOCH" and epoch is not None and value.unit is None:
             parsed[keyword] = epoch
@@ -131,9 +133,9 @@ def parse_record(
         try:
             parsed[keyword] = parse_value(spec, value.text, value.unit)
         except ValueError as exc:
-            raise error(str(exc), keyword) from exc
+            raise make_error(str(exc), keyword) from exc
     if parsed["EPHEMERIS_TYPE"] != SGP4_EPHEMERIS_TYPE:
-        raise error(
+        raise make_error(
             f"ephemeris type {parsed['EPHEMERIS_TYPE']} is not SGP4 "
             f"({SGP4_EPHEMERIS_TYPE})",
             "EPHEMERIS_TYPE",
@@ -141,7 +143,7 @@ def parse_record(
     try:
         return Omm(**{ATTRIBUTES[key]: parsed[key] for key in ATTRIBUTES})
     except InvalidElement as exc:
-        raise error(str(exc), _KEYWORD_OF[exc.attribute]) from exc
+        raise make_error(str(exc), _KEYWORD_OF[exc.attribute]) from exc
 
 
 def check_version(

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Iterable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Final
 
 from astropy.time import Time
@@ -257,18 +257,14 @@ def _observe(
             diagnostics=notes,
             assumed_covariance=assumed,
         )
-    observation = PcObservation.from_result(
+    return PcObservation.from_result(
         result,
         time_to_tca=when,
         message_id=cdm.message_id,
         reported_pc=reported,
         assumed_covariance=assumed,
+        notes=notes,
     )
-    if notes:
-        observation = replace(
-            observation, diagnostics=(*observation.diagnostics, *notes)
-        )
-    return observation
 
 
 def group_events(

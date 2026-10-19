@@ -11,10 +11,13 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Final
 
+from keepout.ccsds.message import Located
+
 if TYPE_CHECKING:
+    from keepout.ccsds.keywords import Keyword
     from keepout.ccsds.message import Family
 
-__all__ = ["assignment", "comment", "format_line", "split_unit"]
+__all__ = ["assignment", "comment", "format_line", "located_value", "split_unit"]
 
 _ASSIGNMENT: Final = re.compile(r"^(?P<keyword>[A-Z][A-Z0-9_]*)\s*=\s*(?P<value>.*)$")
 _UNIT: Final = re.compile(r"^(?P<value>.*?)\s*\[(?P<unit>[^\[\]]*)\]$")
@@ -69,6 +72,30 @@ def split_unit(text: str) -> tuple[str, str | None]:
     if match is None:
         return text, None
     return match["value"].strip(), match["unit"].strip()
+
+
+def located_value(
+    spec: Keyword | None, text: str, line: int, *, unknown_is_text: bool
+) -> Located:
+    """The value of an assignment, split from its unit unless it is text.
+
+    Text values keep brackets: ``GOES 9 [P]`` is a name, not a unit.
+
+    Parameters
+    ----------
+    spec
+        Table entry of the keyword, or None if the table has none.
+    text
+        The value of the assignment (see :func:`assignment`).
+    line
+        Line number of the assignment.
+    unknown_is_text
+        Whether a keyword without a table entry has a text value.
+    """
+    if (spec is None and unknown_is_text) or (spec is not None and spec.kind == "str"):
+        return Located(text, None, line)
+    value, unit = split_unit(text)
+    return Located(value, unit, line)
 
 
 def format_line(keyword: str, value: str, unit: str | None, family: Family) -> str:

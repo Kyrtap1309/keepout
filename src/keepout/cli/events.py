@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, NamedTuple, Protocol
 
 from rich.table import Table
 
@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from keepout.risk import Action, Assessment, ConjunctionEvent, PcObservation
 
 __all__ = [
+    "Assessed",
     "AssessedEvent",
     "event_json",
     "events_table",
@@ -21,16 +22,26 @@ __all__ = [
 ]
 
 
+class Assessed(Protocol):
+    """Anything with a conjunction event and its risk assessment: an
+    :class:`AssessedEvent` or a :class:`~keepout.synthetic.OperatorEvent`."""
+
+    @property
+    def event(self) -> ConjunctionEvent:
+        """The event."""
+        ...
+
+    @property
+    def assessment(self) -> Assessment:
+        """Its risk assessment."""
+        ...
+
+
 class AssessedEvent(NamedTuple):
     """A conjunction event and its risk assessment."""
 
     event: ConjunctionEvent
     assessment: Assessment
-
-
-def _level(item: AssessedEvent) -> str | None:
-    level = item.assessment.level
-    return None if level is None else level.label
 
 
 def _pc(observation: PcObservation | None) -> str:
@@ -41,7 +52,7 @@ def _pc(observation: PcObservation | None) -> str:
     return pc_text(observation.pc)
 
 
-def events_table(events: Sequence[AssessedEvent], title: str) -> Table:
+def events_table(events: Sequence[Assessed], title: str) -> Table:
     """A table of the events: TCA, both objects' designators, miss distance,
     CDMs, the latest Pc before TCA, its risk level and the action."""
     rows = table(title)
@@ -53,19 +64,20 @@ def events_table(events: Sequence[AssessedEvent], title: str) -> Table:
     rows.add_column("Action")
     for item in events:
         latest = item.event.latest
+        level = item.assessment.level
         rows.add_row(
             minute(latest.tca),
             f"{latest.object1.designator} / {latest.object2.designator}",
             f"{latest.miss_distance:.0f}",
             str(len(item.event.cdms)),
             _pc(item.assessment.trend.latest_observation),
-            _level(item) or "-",
+            "-" if level is None else level.label,
             item.assessment.decision.action.label,
         )
     return rows
 
 
-def reasons(events: Sequence[AssessedEvent], least: Action) -> list[str]:
+def reasons(events: Sequence[Assessed], least: Action) -> list[str]:
     """Why each event with an action of at least ``least`` got it, a line
     per event."""
     return [
@@ -94,9 +106,9 @@ def _observation_json(observation: PcObservation) -> dict[str, JsonValue]:
     }
 
 
-def event_json(item: AssessedEvent) -> dict[str, JsonValue]:
+def event_json(item: Assessed) -> dict[str, JsonValue]:
     """The event, its CDMs' Pc and its assessment as JSON values."""
-    event, assessment = item
+    event, assessment = item.event, item.assessment
     latest = event.latest
     trend, decision = assessment.trend, assessment.decision
     observation = trend.latest_observation

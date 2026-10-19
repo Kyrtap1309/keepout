@@ -8,6 +8,7 @@ import pytest
 from generated import (
     REPO,
     json_text,
+    minute_text,
     parse_json,
     pc_text,
     plural,
@@ -15,6 +16,7 @@ from generated import (
     read_json,
     readme_with,
     replace_block,
+    second_text,
     write_or_check,
 )
 
@@ -162,3 +164,9 @@ def test_plural_names_one_or_many(count: int, nouns: str | None, text: str) -> N
 def test_pc_text_gives_three_digits_or_a_dash() -> None:
     assert pc_text(1.234e-5) == "1.23e-05"
     assert pc_text(None) == "-"
+
+
+def test_minute_and_second_text_cut_an_iso_time() -> None:
+    iso = "2026-10-06T12:34:56.789"
+    assert minute_text(iso) == "2026-10-06 12:34"
+    assert second_text(iso) == "2026-10-06 12:34:56"
