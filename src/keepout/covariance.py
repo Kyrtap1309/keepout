@@ -360,8 +360,8 @@ class Covariance:
         epoch: Time,
         repairs: tuple[str, ...] = (),
     ) -> Covariance:
-        """A matrix already known to be valid, wrapped without its checks."""
-        _require_frame(frame)
+        """A matrix and frame already known to be valid, wrapped without
+        their checks."""
         covariance = object.__new__(cls)
         for name, value in (
             ("matrix", _frozen(matrix)),

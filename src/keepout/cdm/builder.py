@@ -27,7 +27,13 @@ from typing import Final, Protocol
 import numpy as np
 from astropy.time import Time
 
-from keepout.cdm.keywords import covariance_entries
+from keepout.cdm.keywords import (
+    STATE_KEYWORDS,
+    VERSION_1_0,
+    VERSION_2_0,
+    VERSION_KEYWORD,
+    covariance_entries,
+)
 from keepout.cdm.model import COMMENT, Cdm, CovarianceMethod, Field, Section
 from keepout.conjunction import Conjunction
 from keepout.frames import rtn_rotation
@@ -319,9 +325,7 @@ def _segment(
     vector = (*state.r, *state.v)
     fields += [
         Field(name, float(value))
-        for name, value in zip(
-            ("X", "Y", "Z", "X_DOT", "Y_DOT", "Z_DOT"), vector, strict=True
-        )
+        for name, value in zip(STATE_KEYWORDS, vector, strict=True)
     ]
     fields += [Field(COMMENT, text) for text in metadata.covariance_comments]
     # An unknown covariance is written as zeros, as operators do.
@@ -413,7 +417,7 @@ def make_cdm(
             created,
         )
     header = [
-        Field("CCSDS_CDM_VERS", "1.0" if radii is None else "2.0"),
+        Field(VERSION_KEYWORD, VERSION_1_0 if radii is None else VERSION_2_0),
         *(Field(COMMENT, text) for text in _check_comments(comments, "header")),
         Field("CREATION_DATE", created),
         Field("ORIGINATOR", originator),

@@ -18,7 +18,7 @@ from typing import Final
 
 from astropy.time import Time
 
-from keepout.cdm.keywords import covariance_matrix
+from keepout.cdm.keywords import STATE_KEYWORDS, covariance_matrix
 from keepout.errors import CaraFormatError, UnsupportedFrame
 from keepout.objects import ObjectState, ReportedObject, gcrf_object_states
 from keepout.state import StateVector, as_ref_frame
@@ -30,7 +30,6 @@ _LINE: Final = re.compile(r"^\s*([A-Z][A-Z0-9_]*)\s*=\s*(\S+)")
 _OBJECT: Final = re.compile(r"^\s*OBJECT\s*=")
 _UNKNOWN_DESIGNATOR: Final = "?"
 """Object ID of a section without ``OBJECT_DESIGNATOR``."""
-_STATE: Final = ("X", "Y", "Z", "X_DOT", "Y_DOT", "Z_DOT")
 
 
 def _fields(lines: list[str]) -> dict[str, str]:
@@ -63,7 +62,7 @@ def _reported(
         frame = as_ref_frame(fields.get("REF_FRAME"))
     except UnsupportedFrame as exc:
         raise CaraFormatError(f"{path}: bad REF_FRAME ({exc})") from exc
-    values = [KM * _number(fields, k, path) for k in _STATE]  # km, km/s
+    values = [KM * _number(fields, k, path) for k in STATE_KEYWORDS]  # km, km/s
     return ReportedObject(
         fields.get("OBJECT_DESIGNATOR", _UNKNOWN_DESIGNATOR),
         StateVector(tca, values[:3], values[3:], frame),

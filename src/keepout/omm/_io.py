@@ -19,6 +19,7 @@ from keepout.omm.keywords import (
     FIXED_METADATA,
     KEYWORDS,
     SGP4_EPHEMERIS_TYPE,
+    VERSION_KEYWORD,
     VERSIONS,
 )
 from keepout.omm.model import InvalidElement, Omm
@@ -166,7 +167,7 @@ def check_version(
             record=record,
             line=line,
             path=path,
-            keyword="CCSDS_OMM_VERS",
+            keyword=VERSION_KEYWORD,
         )
 
 

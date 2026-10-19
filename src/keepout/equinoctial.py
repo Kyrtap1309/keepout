@@ -347,6 +347,18 @@ class Orbits:
         self._apse = _Apse.of(af, ag)
         self._f, self._g = _basis(chi, psi, fr)
 
+    def subset(self, rows: slice | IndexArray) -> Orbits:
+        """The orbits ``rows``, with their constants taken, not recomputed."""
+        orbits = object.__new__(Orbits)
+        for name in ("elements", "_n", "_af", "_ag", "_a", "_f", "_g"):
+            setattr(orbits, name, getattr(self, name)[rows])
+        for name, value in (
+            ("_shape", _Shape(*(c[rows] for c in self._shape))),
+            ("_apse", _Apse(*(c[rows] for c in self._apse))),
+        ):
+            setattr(orbits, name, value)
+        return orbits
+
     def cartesian(
         self, t: float | FloatArray, rows: slice | IndexArray = slice(None)
     ) -> FloatArray:

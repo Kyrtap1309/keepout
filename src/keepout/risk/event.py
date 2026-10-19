@@ -32,11 +32,12 @@ pair are at least a large fraction of an orbit apart."""
 
 def time_to_tca(cdm: Cdm) -> float:
     """Seconds from the CDM's creation to its TCA (negative after TCA)."""
-    return _seconds(cdm.tca, cdm.creation_date)
+    return _elapsed_s(cdm.creation_date, cdm.tca)
 
 
-def _seconds(later: Time, earlier: Time) -> float:
-    return float((later - earlier).to_value("s"))
+def _elapsed_s(start: Time, end: Time) -> float:
+    """Seconds from ``start`` to ``end``, leap seconds included."""
+    return float((end - start).to_value("s"))
 
 
 def _pair(cdm: Cdm) -> tuple[str, str]:
@@ -91,7 +92,7 @@ class ConjunctionEvent:
             sorted(
                 self.cdms,
                 key=lambda cdm: (
-                    _seconds(cdm.creation_date, first.creation_date),
+                    _elapsed_s(first.creation_date, cdm.creation_date),
                     cdm.message_id,
                 ),
             )
@@ -105,7 +106,7 @@ class ConjunctionEvent:
         if len(pairs) > 1:
             listed = ", ".join(f"{a}/{b}" for a, b in sorted(pairs))
             raise EventError(f"CDMs of one event must share both objects, got {listed}")
-        offsets = [_seconds(cdm.tca, first.tca) for cdm in ordered]
+        offsets = [_elapsed_s(first.tca, cdm.tca) for cdm in ordered]
         spread = max(offsets) - min(offsets)
         if spread > self.tca_tolerance:
             raise EventError(
@@ -154,7 +155,9 @@ class ConjunctionEvent:
             else:
                 oldest = min(
                     messages,
-                    key=lambda m: _seconds(m.creation_date, messages[0].creation_date),
+                    key=lambda m: _elapsed_s(
+                        messages[0].creation_date, m.creation_date
+                    ),
                 )
                 primary, secondary = _pair(oldest)
                 event_id = f"{primary}/{secondary}/{oldest.tca.utc.isot}"
@@ -308,7 +311,7 @@ def group_events(
     groups: list[tuple[float, tuple[str, str], list[Cdm]]] = []
     for pair, members in by_pair.items():
         timed = sorted(
-            ((_seconds(cdm.tca, reference), cdm) for cdm in members),
+            ((_elapsed_s(reference, cdm.tca), cdm) for cdm in members),
             key=lambda item: item[0],
         )
         start = timed[0][0]

@@ -30,8 +30,11 @@ BAND_WIDTHS: Final = (0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0)
 PHI_RESOLUTION: Final = 0.25
 """Trapezoid spacing in phi, as a fraction of (second sigma) / R."""
 
-MIN_PHI, MAX_PHI = 64, 16384
-"""Bounds on the number of phi nodes."""
+MIN_PHI: Final = 64
+"""Fewest phi nodes."""
+
+MAX_PHI: Final = 16384
+"""Most phi nodes."""
 
 _MIN_SIGMA: Final = 1e-12
 """Standard deviation [m] below which the phi spacing no longer shrinks (a
@@ -104,15 +107,15 @@ def sphere_grids(
     values: FloatArray,
     along: FloatArray,
     radius: float,
-    *,
-    order: int = PANEL_ORDER,
-    phi_resolution: float = PHI_RESOLUTION,
 ) -> list[SphereGrid]:
     """Product rules on the unit sphere for ``m`` Gaussians ``N(radius * x;
     mean, A)``, one per Gaussian.
 
-    Batched over the Gaussians; only the panels, whose number differs
-    between them, are split at the end.
+    Each theta panel has :data:`PANEL_ORDER` Gauss-Legendre nodes; the phi
+    spacing is :data:`PHI_RESOLUTION` of (second sigma) / radius, with
+    between :data:`MIN_PHI` and :data:`MAX_PHI` nodes. Batched over the
+    Gaussians; only the panels, whose number differs between them, are split
+    at the end.
 
     Parameters
     ----------
@@ -123,10 +126,6 @@ def sphere_grids(
         Components ``(m,)`` of the means along their narrowest axes [m].
     radius
         Sphere radius [m].
-    order
-        Gauss-Legendre nodes per theta panel.
-    phi_resolution
-        Trapezoid spacing in phi, as a fraction of (second sigma) / radius.
     """
     sigmas = np.sqrt(np.clip(values, 0.0, None))
     offsets = np.array([sign * width for width in BAND_WIDTHS for sign in (-1.0, 1.0)])
@@ -139,13 +138,13 @@ def sphere_grids(
     lower, upper = breaks[:, :-1], breaks[:, 1:]
     # Repeated breakpoints (clipped to a pole) give empty panels, left out.
     keep = upper > lower
-    x, w = gauss_legendre(order)
+    x, w = gauss_legendre(PANEL_ORDER)
     half = 0.5 * (upper - lower)[..., None]
     theta = half * x + 0.5 * (lower + upper)[..., None]
     sin_theta = np.sin(theta)
     cos_theta = np.cos(theta)
     theta_weight = half * w * sin_theta
-    spacing = phi_resolution * np.maximum(sigmas[:, 1], _MIN_SIGMA) / radius
+    spacing = PHI_RESOLUTION * np.maximum(sigmas[:, 1], _MIN_SIGMA) / radius
     counts = np.nan_to_num(
         np.clip(np.ceil(2.0 * math.pi / spacing), MIN_PHI, MAX_PHI), nan=MIN_PHI
     ).astype(np.intp)

@@ -179,26 +179,29 @@ class CloseApproach:
             radius is negative or not finite, or ``hard_body_radius`` is
             ``None`` and an object's radius is not given.
         """
-        objects = []
-        for number, state, covariance, radius in (
-            (
-                self.primary_number,
-                self.primary_state,
-                primary_covariance,
-                primary_radius,
-            ),
-            (
-                self.secondary_number,
-                self.secondary_state,
-                secondary_covariance,
-                secondary_radius,
-            ),
-        ):
-            gcrf = None if covariance is None else covariance.in_gcrf(state)
-            objects.append(ObjectState(str(number), state, gcrf, radius))
-        primary, secondary = objects
+        primary = _object_state(
+            self.primary_number, self.primary_state, primary_covariance, primary_radius
+        )
+        secondary = _object_state(
+            self.secondary_number,
+            self.secondary_state,
+            secondary_covariance,
+            secondary_radius,
+        )
         combined = combined_hard_body_radius(primary, secondary, hard_body_radius)
         return Conjunction(primary, secondary, combined)
+
+
+def _object_state(
+    number: int,
+    state: StateVector,
+    covariance: Covariance | None,
+    radius: float | None,
+) -> ObjectState:
+    """One object of an approach's conjunction, named by its catalog number,
+    with its covariance in GCRF."""
+    gcrf = None if covariance is None else covariance.in_gcrf(state)
+    return ObjectState(str(number), state, gcrf, radius)
 
 
 class SkipReason(enum.StrEnum):

@@ -23,7 +23,10 @@ from keepout.ccsds.keywords import FieldValue, ValueKind, format_value, parse_va
 from keepout.ccsds.message import COMMENT, USER_DEFINED_PREFIX
 from keepout.cdm.keywords import (
     KEYWORDS,
+    POSITION_KEYWORDS,
     REQUIRED,
+    VELOCITY_KEYWORDS,
+    VERSION_KEYWORD,
     SectionKind,
     covariance_matrix,
     covariance_names,
@@ -378,12 +381,12 @@ class CdmObject:
     @property
     def position(self) -> FloatArray:
         """Position in ``ref_frame`` [m]."""
-        return self._vector(("X", "Y", "Z"))
+        return self._vector(POSITION_KEYWORDS)
 
     @property
     def velocity(self) -> FloatArray:
         """Velocity in ``ref_frame`` [m/s]."""
-        return self._vector(("X_DOT", "Y_DOT", "Z_DOT"))
+        return self._vector(VELOCITY_KEYWORDS)
 
     @cached_property
     def covariance_rtn(self) -> FloatArray:
@@ -518,7 +521,7 @@ class Cdm:
     @property
     def version(self) -> str:
         """``CCSDS_CDM_VERS``, e.g. ``"1.0"`` or ``"2.0"``."""
-        return _text(self.header, "CCSDS_CDM_VERS")
+        return _text(self.header, VERSION_KEYWORD)
 
     @property
     def creation_date(self) -> Time:

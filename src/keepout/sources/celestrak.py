@@ -45,20 +45,21 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from http import HTTPStatus
 from pathlib import Path
-from typing import Final, TypeAlias, TypeVar
+from typing import Final, TypeVar
 
 from keepout.errors import HttpStatusError, OmmParseError, SourceFormatError
 from keepout.omm.celestrak import loads_csv
 from keepout.omm.model import Omm
 from keepout.sources.cache import (
+    Downloader,
     Unchanged,
     cache_dir,
     cached_fetch,
     http_download,
-    require_max_age,
 )
 from keepout.sources.catalog import Catalog, CatalogPart, Retrieval
 from keepout.sources.socrates import COLUMNS, SocratesApproach, read_socrates
+from keepout.units import HOUR
 
 __all__ = [
     "GP_URL",
@@ -79,7 +80,7 @@ GP_URL: Final = "https://celestrak.org/NORAD/elements/gp.php"
 SOCRATES_URL: Final = "https://celestrak.org/socrates/sort-minRange.csv"
 """The latest SOCRATES Plus report, sorted by miss distance (CSV)."""
 
-TTL: Final = 7200.0
+TTL: Final = 2 * HOUR
 """Seconds a download is used without asking CelesTrak again: CelesTrak's
 update interval of two hours. Also the least ``max_age`` allowed."""
 
@@ -108,11 +109,8 @@ _GROUP_NAME: Final = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 _SOCRATES_COLUMN: Final = COLUMNS[0]
 """A column of the SOCRATES CSV header, to recognise the report."""
 
-Downloader: TypeAlias = Callable[[str], bytes]
-"""A download of a URL's body, raising
-:class:`~keepout.errors.HttpStatusError` for an HTTP status other than 200
-and :class:`~keepout.errors.SourceUnavailable` for other failures, like
-:func:`~keepout.sources.cache.http_download`."""
+_EXCERPT: Final = 60
+"""Bytes of a download quoted when it is not what was expected."""
 
 _T = TypeVar("_T")
 
@@ -244,7 +242,6 @@ def fetch_catalog(
     names = tuple(dict.fromkeys(_group_name(name) for name in groups))
     if not names:
         raise ValueError("no groups to fetch")
-    require_max_age(max_age, TTL, _TTL_REASON)
     fetched = tuple(
         fetch_group(name, cache=cache, max_age=max_age, download=download, now=now)
         for name in names
@@ -309,7 +306,7 @@ def _gp_reader(url: str) -> Callable[[bytes], tuple[Omm, ...]]:
         except (UnicodeDecodeError, OmmParseError) as exc:
             raise SourceFormatError(
                 f"{url} did not send CelesTrak OMM CSV ({exc}); "
-                f"it starts with {data[:60]!r}"
+                f"it starts with {data[:_EXCERPT]!r}"
             ) from exc
 
     return read
@@ -324,7 +321,7 @@ def _read_socrates(data: bytes) -> str:
     if _SOCRATES_COLUMN not in header.split(","):
         raise SourceFormatError(
             f"{SOCRATES_URL} did not send a SOCRATES report (no "
-            f"{_SOCRATES_COLUMN} column); it starts with {data[:60]!r}"
+            f"{_SOCRATES_COLUMN} column); it starts with {data[:_EXCERPT]!r}"
         )
     return text
 

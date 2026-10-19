@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from typing import Final, Literal, Self, TypeAlias
 
 import erfa
@@ -81,6 +81,20 @@ def _indices(indices: npt.ArrayLike, size: int) -> IndexArray:
     return array.astype(np.intp)
 
 
+def _initialised(
+    omms: Iterable[Omm],
+) -> Iterator[tuple[int, Omm, Satrec | UnsupportedElements]]:
+    """Each element set with its position and its SGP4 record, or the error
+    :meth:`keepout.omm.Omm.satrec` raised for it; one at a time, in order."""
+    for index, omm in enumerate(omms):
+        try:
+            satrec = omm.satrec()
+        except UnsupportedElements as error:
+            yield index, omm, error
+        else:
+            yield index, omm, satrec
+
+
 class Sgp4Propagator:
     """SGP4 states of many objects at many times, in one vectorised call.
 
@@ -123,14 +137,13 @@ class Sgp4Propagator:
     def __init__(self, omms: Iterable[Omm]) -> None:
         elements = tuple(omms)
         satrecs = []
-        for index, omm in enumerate(elements):
-            try:
-                satrecs.append(omm.satrec())
-            except UnsupportedElements as error:
+        for index, omm, satrec in _initialised(elements):
+            if isinstance(satrec, UnsupportedElements):
                 raise UnsupportedElements(
                     f"element set {index} (catalog number {omm.catalog_number}) "
-                    f"cannot initialise SGP4: {error}"
-                ) from error
+                    f"cannot initialise SGP4: {satrec}"
+                ) from satrec
+            satrecs.append(satrec)
         self._set(elements, tuple(satrecs))
 
     @classmethod
@@ -162,11 +175,9 @@ class Sgp4Propagator:
         elements: list[Omm] = []
         satrecs: list[Satrec] = []
         rejected: list[tuple[int, UnsupportedElements]] = []
-        for index, omm in enumerate(omms):
-            try:
-                satrec = omm.satrec()
-            except UnsupportedElements as error:
-                rejected.append((index, error))
+        for index, omm, satrec in _initialised(omms):
+            if isinstance(satrec, UnsupportedElements):
+                rejected.append((index, satrec))
                 continue
             kept.append(index)
             elements.append(omm)

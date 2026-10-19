@@ -39,7 +39,7 @@ def test_an_encounter_down_to_the_detection_level_is_found(phase: float) -> None
     found = locate(
         lambda t: strong(t) + DETECTION_LEVEL * weak(t), WINDOW, whole_window()
     )
-    spans = [(found.times[lo], found.times[hi]) for lo, hi in found.segments]
+    spans = [(found.times[lo], found.times[hi]) for lo, hi in found.index_ranges]
     assert len(spans) == 2
     assert any(a <= weak_centre <= b for a, b in spans)
 
@@ -52,9 +52,9 @@ def test_an_encounter_anywhere_in_a_long_window_is_found_and_integrated(
 ) -> None:
     rate = bump(centre)
     found = locate(rate, WINDOW, whole_window())
-    assert len(found.segments) == 1
+    assert len(found.index_ranges) == 1
     assert found.times.size < 5000
-    lo, hi = found.segments[0]
+    lo, hi = found.index_ranges[0]
     assert np.max(np.diff(found.times[lo : hi + 1])) <= CROSSING / 8 * (1 + 1e-9)
     nc = integrate_segments(rate, found, rtol=1e-6).nc
     assert nc == pytest.approx(TAU * math.sqrt(2 * math.pi), rel=1e-9)
@@ -96,6 +96,6 @@ def test_candidates_outside_the_window_are_not_scanned() -> None:
     rate = bump(0.0)
     found = locate(rate, (-50.0, 50.0), screen)
     assert found.window == (-50.0, 50.0)
-    assert len(found.segments) == 1
+    assert len(found.index_ranges) == 1
     nc = integrate_segments(rate, found, rtol=1e-6).nc
     assert nc == pytest.approx(TAU * math.sqrt(2 * math.pi), rel=1e-9)

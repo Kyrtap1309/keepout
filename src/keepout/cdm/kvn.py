@@ -17,7 +17,7 @@ from keepout.cdm._io import (
     field_of,
     load_file,
 )
-from keepout.cdm.keywords import KEYWORDS, SectionKind
+from keepout.cdm.keywords import KEYWORDS, VERSION_KEYWORD, SectionKind
 from keepout.cdm.model import Cdm, Field, Section, format_field
 from keepout.errors import CdmParseError
 
@@ -32,10 +32,12 @@ class _Building:
 
     kind: SectionKind
     fields: list[Field] = dataclasses.field(default_factory=list)
-    found: KeywordValues = dataclasses.field(default_factory=lambda: KeywordValues(CDM))
+    seen_keywords: KeywordValues = dataclasses.field(
+        default_factory=lambda: KeywordValues(CDM)
+    )
 
     def add(self, keyword: str, value: Located) -> None:
-        self.found.add(keyword, value)
+        self.seen_keywords.add(keyword, value)
         self.fields.append(field_of(self.kind, keyword, value))
 
     def build(self) -> Section:
@@ -55,9 +57,11 @@ def _opened(kinds: list[SectionKind], keyword: str, line: int) -> SectionKind | 
         comes before the relative metadata, or a third object section opens.
     """
     if not kinds:
-        if keyword != "CCSDS_CDM_VERS":
+        if keyword != VERSION_KEYWORD:
             raise CdmParseError(
-                "CCSDS_CDM_VERS must be the first keyword", line=line, keyword=keyword
+                f"{VERSION_KEYWORD} must be the first keyword",
+                line=line,
+                keyword=keyword,
             )
         return "header"
     if keyword != "OBJECT":
@@ -101,7 +105,7 @@ def loads(text: str) -> Cdm:
         if remark is not None:
             if not building:
                 raise CdmParseError(
-                    "CCSDS_CDM_VERS must be the first keyword", line=number
+                    f"{VERSION_KEYWORD} must be the first keyword", line=number
                 )
             pending.append(Located(remark, line=number))
             continue

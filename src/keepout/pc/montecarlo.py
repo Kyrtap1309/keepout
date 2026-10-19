@@ -92,6 +92,10 @@ class _Trials:
     def __init__(self, first: Orbits, second: Orbits) -> None:
         self.first, self.second = first, second
 
+    def subset(self, rows: IndexArray) -> _Trials:
+        """The sample pairs ``rows``."""
+        return _Trials(self.first.subset(rows), self.second.subset(rows))
+
     def _states(
         self, t: float | FloatArray, rows: slice | IndexArray
     ) -> tuple[FloatArray, FloatArray]:
@@ -122,10 +126,12 @@ class _Trials:
         The distance is tested at every Newton iterate, not only the last, so
         an iteration that has not converged cannot lose a hit it passed.
         """
+        # Taken once: every Newton step evaluates the same rows.
+        trials = self.subset(rows)
         t = np.full(rows.size, 0.5 * (start + end))
         below: BoolArray = np.zeros(rows.size, dtype=bool)
         for _ in range(NEWTON_STEPS):
-            r, v, a = self.relative(t, rows)
+            r, v, a = trials.relative(t)
             below |= np.linalg.norm(r, axis=1) < radius
             f = np.einsum("ij,ij->i", r, v)
             slope = np.einsum("ij,ij->i", v, v) + np.einsum("ij,ij->i", r, a)
@@ -135,7 +141,7 @@ class _Trials:
                 np.where(f > 0.0, start - t, end - t) * 0.5,
             )
             t = np.clip(t + step, start, end)
-        r, _, _ = self.relative(t, rows)
+        r, _, _ = trials.relative(t)
         below |= np.linalg.norm(r, axis=1) < radius
         return below
 
@@ -187,9 +193,9 @@ def _collisions(batch: _Trials, found: RateScan, radius: float) -> tuple[int, in
     r, _ = batch.motion(found.times[0])
     inside = np.linalg.norm(r, axis=1) < radius
     hit = np.zeros_like(inside)
-    for lo, hi in found.segments:
+    for first, last in found.index_ranges:
         # A segment has at least two grid points (it is padded by one step).
-        points = _grid(batch, found.times[lo : hi + 1])
+        points = _grid(batch, found.times[first : last + 1])
         for earlier, later in itertools.pairwise(points):
             # Marking the earlier point again is harmless and covers the
             # segment's first point.
@@ -330,7 +336,7 @@ def sample(
     # sampling since no rate is evaluated after the scan (only the scan's
     # failures count: a reused rate also holds those at Hall's nodes).
     check_fallbacks(encounters.scan_fallbacks, found)
-    if not found.segments:
+    if not found.index_ranges:
         return _no_encounter(found, confidence)
     # Imported here: scipy.stats would add ~0.2 s to every `import keepout`.
     from scipy import stats

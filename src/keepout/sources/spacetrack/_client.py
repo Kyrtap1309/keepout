@@ -62,6 +62,9 @@ _RATE_LIMIT_TEXT: Final = b"violated your query rate limit"
 _EXCERPT: Final = 200
 """Characters of a server answer quoted in an error message."""
 
+_FORMAT_EXCERPT: Final = 60
+"""Bytes of an answer quoted when it is not the expected format."""
+
 _LEDGER: Final = "requests.json"
 """The file recording when each request class was last queried."""
 
@@ -494,7 +497,8 @@ def read_catalog(data: bytes) -> tuple[Omm, ...]:
         return loads_json(data.decode("utf-8"))
     except (UnicodeDecodeError, OmmParseError) as exc:
         raise SourceFormatError(
-            f"Space-Track did not send OMM JSON ({exc}); it starts with {data[:60]!r}"
+            f"Space-Track did not send OMM JSON ({exc}); "
+            f"it starts with {data[:_FORMAT_EXCERPT]!r}"
         ) from exc
 
 
@@ -531,10 +535,13 @@ def fetch_public_cdms(
     ValueError, RateLimited, AuthError, SourceUnavailable, SourceFormatError
         As :meth:`SpaceTrackClient.fetch`.
     """
-    with SpaceTrackClient(
-        credentials, cache=cache, transport=transport, now=now
-    ) as client:
-        return client.fetch_public_cdms(max_age=max_age)
+    return _in_session(
+        lambda client: client.fetch_public_cdms(max_age=max_age),
+        cache=cache,
+        credentials=credentials,
+        transport=transport,
+        now=now,
+    )
 
 
 def fetch_catalog(
@@ -568,10 +575,28 @@ def fetch_catalog(
     ValueError, RateLimited, AuthError, SourceUnavailable, SourceFormatError
         As :meth:`SpaceTrackClient.fetch`.
     """
+    return _in_session(
+        lambda client: client.fetch_catalog(max_age=max_age),
+        cache=cache,
+        credentials=credentials,
+        transport=transport,
+        now=now,
+    )
+
+
+def _in_session(
+    fetch: Callable[[SpaceTrackClient], _T],
+    *,
+    cache: Path | None,
+    credentials: Credentials | None,
+    transport: Transport | None,
+    now: Callable[[], float],
+) -> _T:
+    """``fetch`` on a new :class:`SpaceTrackClient`, closed (logged out) after."""
     with SpaceTrackClient(
         credentials, cache=cache, transport=transport, now=now
     ) as client:
-        return client.fetch_catalog(max_age=max_age)
+        return fetch(client)
 
 
 def _new_transport() -> Transport:

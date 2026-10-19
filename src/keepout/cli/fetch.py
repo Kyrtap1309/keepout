@@ -9,7 +9,16 @@ from typing import TYPE_CHECKING, Annotated, TypeAlias
 import typer
 
 from keepout.cli.options import CacheDir, JsonFlag
-from keepout.cli.output import JsonValue, isot, minute, pc_text, show, table, utc
+from keepout.cli.output import (
+    JsonValue,
+    isot,
+    minute,
+    pc_text,
+    plural,
+    show,
+    table,
+    utc,
+)
 from keepout.sources.catalog import CATALOG_SOURCES, DEFAULT_SOURCE, CatalogSourceName
 from keepout.units import HOUR
 
@@ -17,7 +26,7 @@ from keepout.units import HOUR
 # the numerical libraries.
 if TYPE_CHECKING:
     from keepout.sources.catalog import Catalog, CatalogPart, Retrieval
-    from keepout.sources.spacetrack import PublicCdm, PublicCdmObject
+    from keepout.sources.spacetrack import PublicCdm
 
 __all__ = [
     "fetch_cara",
@@ -183,8 +192,8 @@ def fetch_cdm(*, cache_dir: CacheDir = None, as_json: JsonFlag = False) -> None:
     show(
         payload,
         summaries,
-        f"{len(rows)} CDM summaries, retrieved {utc(public.retrieval.retrieved)} "
-        f"UTC; cached in {public.retrieval.path}",
+        f"{plural(len(rows), 'CDM summary', 'CDM summaries')}, retrieved "
+        f"{utc(public.retrieval.retrieved)} UTC; cached in {public.retrieval.path}",
         as_json=as_json,
     )
 
@@ -206,10 +215,6 @@ def _part_json(part: CatalogPart) -> dict[str, JsonValue]:
     }
 
 
-def _public_object_json(cdm_object: PublicCdmObject) -> dict[str, JsonValue]:
-    return dataclasses.asdict(cdm_object)
-
-
 def _public_cdm_json(cdm: PublicCdm) -> dict[str, JsonValue]:
     return {
         "cdm_id": cdm.cdm_id,
@@ -218,6 +223,6 @@ def _public_cdm_json(cdm: PublicCdm) -> dict[str, JsonValue]:
         "emergency_reportable": cdm.emergency_reportable,
         "min_range": cdm.min_range,
         "pc": cdm.probability,
-        "object1": _public_object_json(cdm.object1),
-        "object2": _public_object_json(cdm.object2),
+        "object1": dataclasses.asdict(cdm.object1),
+        "object2": dataclasses.asdict(cdm.object2),
     }

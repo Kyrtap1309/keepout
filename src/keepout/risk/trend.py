@@ -8,7 +8,7 @@ import statistics
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
-from keepout._types import require_positive
+from keepout._types import require_at_least, require_positive
 from keepout.risk.observation import PC_FLOOR, PcObservation
 from keepout.risk.thresholds import RiskLevel, Thresholds
 from keepout.units import DAY
@@ -59,8 +59,7 @@ class TrendConfig:
     steady_within: float = 0.5
 
     def __post_init__(self) -> None:
-        if self.window < 2:
-            raise ValueError(f"window must be at least 2, got {self.window}")
+        require_at_least(self.window, 2, "window")
         require_positive(self.steady_within, "steady_within")
 
 
@@ -122,8 +121,13 @@ def _chronological(
     return tuple(sorted(observations, key=_order))
 
 
+def _days(seconds: float) -> str:
+    """A duration in days, as keepout prints it: ``1.50 d``."""
+    return f"{seconds / DAY:.2f} d"
+
+
 def _label(observation: PcObservation) -> str:
-    when = f"{observation.time_to_tca / DAY:.2f} d before TCA"
+    when = f"{_days(observation.time_to_tca)} before TCA"
     if observation.message_id is None:
         return when
     return f"{observation.message_id} ({when})"

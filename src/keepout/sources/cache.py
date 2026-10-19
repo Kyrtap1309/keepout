@@ -65,6 +65,7 @@ __all__ = [
     "USER_AGENT",
     "CachedCopy",
     "CopyMeta",
+    "Downloader",
     "Sink",
     "Unchanged",
     "cache_dir",
@@ -128,6 +129,13 @@ def cache_dir(given: Path | None = None) -> Path:
     if override:
         return Path(override)
     return platformdirs.user_cache_path("keepout")
+
+
+Downloader: TypeAlias = Callable[[str], bytes]
+"""A download of a URL's body, raising
+:class:`~keepout.errors.HttpStatusError` for an HTTP status other than 200
+and :class:`~keepout.errors.SourceUnavailable` for other failures, like
+:func:`http_download`."""
 
 
 def http_download(url: str, *, retry_delays: Sequence[float] = RETRY_DELAYS) -> bytes:

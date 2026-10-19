@@ -32,18 +32,18 @@ from keepout.cdm._io import (
     field_of,
     load_file,
 )
-from keepout.cdm.keywords import KEYWORDS, SectionKind
+from keepout.cdm.keywords import KEYWORDS, VERSION_1_0, VERSION_KEYWORD, SectionKind
 from keepout.cdm.model import Cdm, Field, Section, format_field
 from keepout.errors import CdmParseError
 
 __all__ = ["NDM_NAMESPACE", "dump", "dumps", "load", "loads"]
 
 NDM_NAMESPACE: Final = "urn:ccsds:schema:ndmxml"
-# Schema of CDM 1.0 messages ("1.0" is the CDM version): the master schema of
-# the NDM/XML 2.0.0 suite, which includes CDM 1.0.
 _CDM_1_0_SCHEMA_LOCATION: Final = (
     "https://sanaregistry.org/r/ndmxml_unqualified/ndmxml-2.0.0-master-2.0.xsd"
 )
+"""Schema of CDM 1.0 messages ("1.0" is the CDM version): the master schema of
+the NDM/XML 2.0.0 suite, which includes CDM 1.0."""
 _USER_GROUP: Final = ("data", "userDefinedParameters")
 _GROUPS: Final = frozenset(
     {
@@ -63,10 +63,10 @@ def _section(
     path: str,
     leading: Sequence[tuple[str, Located]] = (),
 ) -> Section:
-    found = KeywordValues(CDM)
+    seen_keywords = KeywordValues(CDM)
     fields: list[Field] = []
     for keyword, value in (*leading, *values(element, path, CDM, _GROUPS)):
-        found.add(keyword, value)
+        seen_keywords.add(keyword, value)
         fields.append(field_of(kind, keyword, value))
     return build_section(kind, fields, Located("", path=path))
 
@@ -103,7 +103,7 @@ def loads(text: str) -> Cdm:
             "header",
             header,
             header_path,
-            [("CCSDS_CDM_VERS", Located(version, path=header_path))],
+            [(VERSION_KEYWORD, Located(version, path=header_path))],
         ),
         _section("relative", relative, relative_path),
         [
@@ -159,7 +159,7 @@ def _insert_comment(element: ElementTree.Element, text: str) -> None:
     element.insert(position, comment)
 
 
-def _write(
+def _write_section(
     parent: ElementTree.Element,
     fields: Sequence[Field],
     kind: SectionKind,
@@ -213,18 +213,20 @@ def dumps(cdm: Cdm) -> str:
     CdmWriteError
         If a value or comment contains a character XML 1.0 cannot hold.
     """
-    root = ElementTree.Element("cdm", {"id": "CCSDS_CDM_VERS", "version": cdm.version})
-    if cdm.version == "1.0":
+    root = ElementTree.Element("cdm", {"id": VERSION_KEYWORD, "version": cdm.version})
+    if cdm.version == VERSION_1_0:
         root.set("xmlns:xsi", XSI)
         root.set("xsi:noNamespaceSchemaLocation", _CDM_1_0_SCHEMA_LOCATION)
-    header_fields = [f for f in cdm.header.fields if f.keyword != "CCSDS_CDM_VERS"]
-    _write(ElementTree.SubElement(root, "header"), header_fields, "header", cdm.version)
+    header_fields = [f for f in cdm.header.fields if f.keyword != VERSION_KEYWORD]
+    _write_section(
+        ElementTree.SubElement(root, "header"), header_fields, "header", cdm.version
+    )
     body = ElementTree.SubElement(root, "body")
     for tag, section in (
         ("relativeMetadataData", cdm.relative),
         *(("segment", segment) for segment in cdm.segments),
     ):
-        _write(
+        _write_section(
             ElementTree.SubElement(body, tag), section.fields, section.kind, cdm.version
         )
     return tostring(root)

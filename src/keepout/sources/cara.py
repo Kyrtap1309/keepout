@@ -13,7 +13,7 @@ import re
 import urllib.parse
 import zipfile
 import zlib
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Iterable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from importlib import resources
@@ -21,7 +21,13 @@ from pathlib import Path, PurePosixPath
 from typing import Final, TypeAlias
 
 from keepout.errors import CaraFormatError
-from keepout.sources.cache import cache_dir, has_digest, http_download, store
+from keepout.sources.cache import (
+    Downloader,
+    cache_dir,
+    has_digest,
+    http_download,
+    store,
+)
 
 __all__ = [
     "ALFANO_2009_RESULTS",
@@ -51,8 +57,6 @@ __all__ = [
 
 CARA_REPO: Final = "nasa/CARA_Analysis_Tools"
 CARA_COMMIT: Final = "1c78beb1f7aefc384886c3be1d09e4681acb5d37"
-
-Downloader: TypeAlias = Callable[[str], bytes]
 
 
 @dataclass(frozen=True, slots=True)

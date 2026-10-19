@@ -15,7 +15,7 @@ orders of the time integral, the Monte Carlo batch size and the methods
 
 import importlib
 from collections.abc import Callable
-from typing import NamedTuple
+from typing import NamedTuple, Self
 
 import numpy as np
 import pytest
@@ -240,17 +240,18 @@ def monte_carlo_batches(monkeypatch: pytest.MonkeyPatch, size: int) -> None:
 
 
 Runner = Callable[..., PcResult]
-"""A fake for ``integrate`` or ``sample``: conjunction, encounters, options."""
+"""A fake for :func:`~keepout.pc.hall3d.integrate` or
+:func:`~keepout.pc.montecarlo.sample`: conjunction, encounters, options."""
 
 
 def auto_hall_integration(monkeypatch: pytest.MonkeyPatch, fake: Runner) -> None:
     """``compute_pc`` integrates Hall's rate over its scan with ``fake``."""
-    monkeypatch.setattr(api, "integrate", fake)
+    monkeypatch.setattr(api, "hall3d_over_scan", fake)
 
 
 def auto_monte_carlo(monkeypatch: pytest.MonkeyPatch, fake: Runner) -> None:
     """``compute_pc``'s Monte Carlo fallback samples Hall's scan with ``fake``."""
-    monkeypatch.setattr(api, "sample", fake)
+    monkeypatch.setattr(api, "montecarlo_over_scan", fake)
 
 
 def auto_monte_carlo_budget(monkeypatch: pytest.MonkeyPatch, trials: int) -> None:
@@ -269,6 +270,10 @@ class _MisleadingLine(_Trials):
 
     def __init__(self) -> None:
         pass
+
+    @override
+    def subset(self, rows: IndexArray) -> Self:
+        return self
 
     @override
     def relative(

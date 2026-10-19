@@ -28,9 +28,11 @@ from keepout.pc._plane import MissingCovariance
 from keepout.pc._rate import UnusableOrbit
 from keepout.pc.elrod import elrod
 from keepout.pc.foster import foster
-from keepout.pc.hall3d import Encounters, hall3d, integrate
+from keepout.pc.hall3d import Encounters, hall3d
+from keepout.pc.hall3d import integrate as hall3d_over_scan
 from keepout.pc.maxpc import alfano, dilution, frisbee
-from keepout.pc.montecarlo import montecarlo, sample
+from keepout.pc.montecarlo import montecarlo
+from keepout.pc.montecarlo import sample as montecarlo_over_scan
 from keepout.pc.result import Method, PcResult
 
 __all__ = [
@@ -231,8 +233,16 @@ def _require_options(method: MethodChoice, options: Mapping[str, object]) -> Non
         raise TypeError(f"{method} takes no option {refused}; it takes: {takes}")
 
 
-_Choice: TypeAlias = tuple[PcResult, tuple[str, ...], dict[str, float]]
-"""A method's result, applicability notes and extra details."""
+class _AutoResult(NamedTuple):
+    """A method's result as :func:`compute_pc` chose and ran it."""
+
+    result: PcResult
+    """The chosen method's result."""
+    notes: tuple[str, ...]
+    """Applicability warnings."""
+    details: dict[str, float]
+    """Extra details."""
+
 
 _NO_PLANE: Final = (
     "no Pc method applies: the relative velocity is zero (no encounter plane)"
@@ -250,7 +260,7 @@ def _both_orbits_elliptic(conjunction: Conjunction) -> bool:
     )
 
 
-def _auto(conjunction: Conjunction) -> _Choice:
+def _auto(conjunction: Conjunction) -> _AutoResult:
     """The automatic choice: a method's result, applicability notes and details.
 
     Raises
@@ -259,38 +269,49 @@ def _auto(conjunction: Conjunction) -> _Choice:
         If the relative velocity is zero and the 3-D methods cannot run.
     """
     if conjunction.relative_speed == 0.0:
-        try:
-            encounters = Encounters.scan(conjunction, None)
-        except MissingCovariance as exc:
-            raise GeometryError(
-                f"{_NO_PLANE} and {_covariances_of(conjunction, exc.roles)} unknown"
-            ) from exc
-        except UnusableOrbit as exc:
-            raise GeometryError(
-                f"{_NO_PLANE} and the 3-D methods cannot use the orbit of "
-                f"{conjunction.label(exc.role)}: {exc}"
-            ) from exc
-        notes: tuple[str, ...] = ("relative velocity is zero: 2-D Pc is undefined",)
-        return _three_d(conjunction, encounters, notes, {})
+        return _auto_without_plane(conjunction)
     unknown = conjunction.unknown_covariance
     notes, details = _assess(conjunction)
-    plane, hbr = conjunction.plane, conjunction.hard_body_radius
+    plane, hard_body_radius = conjunction.plane, conjunction.hard_body_radius
     if len(unknown) == 2:
-        return alfano(plane, hbr), notes, details
+        return _AutoResult(alfano(plane, hard_body_radius), notes, details)
     if unknown:
-        return frisbee(plane, hbr), notes, details
+        return _AutoResult(frisbee(plane, hard_body_radius), notes, details)
     if not notes or not _both_orbits_elliptic(conjunction):
-        return foster(plane, hbr), notes, details
+        return _AutoResult(foster(plane, hard_body_radius), notes, details)
     position_only = conjunction.position_only_covariance
     if position_only:
         note = (
             f"{_known_only_in_position(conjunction, position_only)}: the 3-D "
             "methods need the velocity uncertainty, so the 2-D Pc is used"
         )
-        return foster(plane, hbr), (*notes, note), details
-    pc_2d = foster(plane, hbr).value
+        return _AutoResult(foster(plane, hard_body_radius), (*notes, note), details)
+    pc_2d = foster(plane, hard_body_radius).value
     encounters = Encounters.scan(conjunction, None)
     return _three_d(conjunction, encounters, notes, {**details, "pc_2d": pc_2d})
+
+
+def _auto_without_plane(conjunction: Conjunction) -> _AutoResult:
+    """The automatic choice at zero relative velocity: a 3-D method.
+
+    Raises
+    ------
+    GeometryError
+        If the 3-D methods cannot run.
+    """
+    try:
+        encounters = Encounters.scan(conjunction, None)
+    except MissingCovariance as exc:
+        raise GeometryError(
+            f"{_NO_PLANE} and {_covariances_of(conjunction, exc.roles)} unknown"
+        ) from exc
+    except UnusableOrbit as exc:
+        raise GeometryError(
+            f"{_NO_PLANE} and the 3-D methods cannot use the orbit of "
+            f"{conjunction.label(exc.role)}: {exc}"
+        ) from exc
+    notes = ("relative velocity is zero: 2-D Pc is undefined",)
+    return _three_d(conjunction, encounters, notes, {})
 
 
 def _covariances_of(conjunction: Conjunction, roles: tuple[Role, ...]) -> str:
@@ -330,19 +351,19 @@ def _three_d(
     encounters: Encounters,
     notes: tuple[str, ...],
     details: dict[str, float],
-) -> _Choice:
+) -> _AutoResult:
     """Hall's 3D-Nc over an encounter scan, or Monte Carlo over it if Hall fails."""
     try:
-        return integrate(conjunction, encounters), notes, details
+        return _AutoResult(hall3d_over_scan(conjunction, encounters), notes, details)
     except PcConvergenceError as exc:
         fallback = (
             f"{exc}; Monte Carlo used instead (seed {AUTO_MC_SEED}, at most "
             f"{AUTO_MC_SAMPLES:,} trials)"
         )
-        result = sample(
+        result = montecarlo_over_scan(
             conjunction, encounters, max_samples=AUTO_MC_SAMPLES, seed=AUTO_MC_SEED
         )
-        return result, (*notes, fallback), details
+        return _AutoResult(result, (*notes, fallback), details)
 
 
 def _compute(

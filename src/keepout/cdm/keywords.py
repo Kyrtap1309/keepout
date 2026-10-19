@@ -24,9 +24,15 @@ __all__ = [
     "COVARIANCE_AXES",
     "HEADER",
     "KEYWORDS",
+    "POSITION_KEYWORDS",
     "RELATIVE",
     "REQUIRED",
     "SEGMENT",
+    "STATE_KEYWORDS",
+    "VELOCITY_KEYWORDS",
+    "VERSION_1_0",
+    "VERSION_2_0",
+    "VERSION_KEYWORD",
     "SectionKind",
     "covariance_entries",
     "covariance_matrix",
@@ -34,6 +40,24 @@ __all__ = [
 ]
 
 SectionKind: TypeAlias = Literal["header", "relative", "segment"]
+
+VERSION_KEYWORD: Final = "CCSDS_CDM_VERS"
+"""Keyword of the CDM version, the first of every message."""
+
+VERSION_1_0: Final = "1.0"
+"""``CCSDS_CDM_VERS`` of CCSDS 508.0-B-1 messages."""
+
+VERSION_2_0: Final = "2.0"
+"""``CCSDS_CDM_VERS`` of CDM 2.0 messages (TraCSS), the version with ``HBR``."""
+
+POSITION_KEYWORDS: Final[tuple[str, str, str]] = ("X", "Y", "Z")
+"""Position keywords of an object section, in order."""
+
+VELOCITY_KEYWORDS: Final[tuple[str, str, str]] = ("X_DOT", "Y_DOT", "Z_DOT")
+"""Velocity keywords of an object section, in order."""
+
+STATE_KEYWORDS: Final[tuple[str, ...]] = (*POSITION_KEYWORDS, *VELOCITY_KEYWORDS)
+"""State-vector keywords of an object section: position, then velocity."""
 
 
 def _many(
@@ -216,7 +240,7 @@ KEYWORDS: Final[Mapping[SectionKind, Mapping[str, Keyword]]] = {
 }
 
 REQUIRED: Final[Mapping[SectionKind, tuple[str, ...]]] = {
-    "header": ("CCSDS_CDM_VERS", "CREATION_DATE", "ORIGINATOR", "MESSAGE_ID"),
+    "header": (VERSION_KEYWORD, "CREATION_DATE", "ORIGINATOR", "MESSAGE_ID"),
     "relative": ("TCA", "MISS_DISTANCE"),
     "segment": (
         "OBJECT",
@@ -228,12 +252,7 @@ REQUIRED: Final[Mapping[SectionKind, tuple[str, ...]]] = {
         "COVARIANCE_METHOD",
         "MANEUVERABLE",
         "REF_FRAME",
-        "X",
-        "Y",
-        "Z",
-        "X_DOT",
-        "Y_DOT",
-        "Z_DOT",
+        *STATE_KEYWORDS,
         *covariance_names(6),
     ),
 }

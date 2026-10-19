@@ -12,6 +12,8 @@ import numpy as np
 import numpy.typing as npt
 
 if TYPE_CHECKING:
+    from astropy.time import Time
+
     # typing.override from Python 3.12, for the type checkers only, so
     # typing_extensions stays out of the dependencies.
     from typing_extensions import override
@@ -39,6 +41,7 @@ __all__ = [
     "require_non_negative",
     "require_positive",
     "require_probability",
+    "require_single_time",
     "symmetric_part",
 ]
 
@@ -186,3 +189,15 @@ def require_at_least(value: int, minimum: int, name: str) -> None:
     """
     if value < minimum:
         raise ValueError(f"{name} must be at least {minimum}, got {value}")
+
+
+def require_single_time(time: Time, name: str) -> None:
+    """A check that ``time`` is a single time, not an array (``ValueError`` if not).
+
+    Raises
+    ------
+    ValueError
+        If ``time`` is not scalar.
+    """
+    if not time.isscalar:
+        raise ValueError(f"{name} must be a single time, got shape {time.shape}")

@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 from typing import Final, NamedTuple
+
+from keepout._types import require_non_negative
 
 __all__ = [
     "HALL",
@@ -68,8 +69,13 @@ class Criterion:
             raise ValueError("an interval criterion takes no error bounds")
         if not self.interval and not bounds:
             raise ValueError("a criterion needs a relative or an absolute bound")
-        if not all(math.isfinite(b) and b >= 0.0 for b in [*bounds, self.small]):
-            raise ValueError("criterion bounds must be finite and >= 0")
+        for name, bound in (
+            ("relative", self.relative),
+            ("absolute", self.absolute),
+            ("small", self.small),
+        ):
+            if bound is not None:
+                require_non_negative(bound, name)
         if self.small > 0.0 and self.absolute is None:
             raise ValueError("small needs the absolute bound that applies below it")
 

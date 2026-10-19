@@ -37,7 +37,7 @@ from keepout.omm._io import (
     load_file,
     parse_record,
 )
-from keepout.omm.keywords import DEFAULTS, VERSION
+from keepout.omm.keywords import DEFAULTS, VERSION, VERSION_KEYWORD
 from keepout.omm.model import Omm
 
 __all__ = ["SCHEMA_LOCATION", "dumps", "load", "loads"]
@@ -169,7 +169,7 @@ def dumps(
     )
     for omm in omms:
         message = ElementTree.SubElement(
-            root, "omm", {"id": "CCSDS_OMM_VERS", "version": VERSION}
+            root, "omm", {"id": VERSION_KEYWORD, "version": VERSION}
         )
         header = ElementTree.SubElement(message, "header")
         _leaf(header, "CREATION_DATE", created, None)

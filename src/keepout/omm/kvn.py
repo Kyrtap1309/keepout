@@ -18,7 +18,6 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Final
 
 from astropy.time import Time
 
@@ -33,12 +32,10 @@ from keepout.omm._io import (
     load_file,
     parse_record,
 )
-from keepout.omm.keywords import DEFAULTS, KEYWORDS, VERSION
+from keepout.omm.keywords import DEFAULTS, KEYWORDS, VERSION, VERSION_KEYWORD
 from keepout.omm.model import Omm
 
 __all__ = ["dumps", "load", "loads"]
-
-VERSION_KEYWORD: Final = "CCSDS_OMM_VERS"
 
 
 def loads(text: str) -> tuple[Omm, ...]:
@@ -68,7 +65,6 @@ def loads(text: str) -> tuple[Omm, ...]:
         line = raw.strip()
         if not line:
             continue
-        current = len(messages) or None  # the message being read, 1-based
         assigned = assignment(line)
         keyword = assigned[0] if assigned else None
         if assigned and keyword == VERSION_KEYWORD:
@@ -76,7 +72,7 @@ def loads(text: str) -> tuple[Omm, ...]:
             check_version(assigned[1], record=record, line=number)
             messages.append((number, KeywordValues(OMM, record=record)))
             continue
-        if current is None:
+        if not messages:
             raise OmmParseError(
                 f"{VERSION_KEYWORD} must be the first keyword",
                 line=number,
@@ -86,7 +82,9 @@ def loads(text: str) -> tuple[Omm, ...]:
             continue
         if assigned is None:
             raise OmmParseError(
-                f"expected 'KEYWORD = value', got {line!r}", record=current, line=number
+                f"expected 'KEYWORD = value', got {line!r}",
+                record=len(messages),  # the message being read, 1-based
+                line=number,
             )
         keyword, value = assigned
         spec = KEYWORDS.get(keyword)

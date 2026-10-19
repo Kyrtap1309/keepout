@@ -59,7 +59,12 @@ def _terms(gaussian: PlaneGaussian, k: FloatArray, order: int) -> FloatArray:
     return terms
 
 
-def _sum(gaussian: PlaneGaussian, terms: FloatArray) -> float:
+def _all_terms(gaussian: PlaneGaussian, order: int) -> FloatArray:
+    """Terms at every node of the rule of order ``order``."""
+    return _terms(gaussian, np.arange(1.0, order + 1), order)
+
+
+def _rule_value(gaussian: PlaneGaussian, terms: FloatArray) -> float:
     """The rule of order ``terms.size`` from its terms (see the module docstring)."""
     return gaussian.radius * math.pi / (terms.size + 1) * float(np.sum(terms))
 
@@ -126,16 +131,16 @@ def elrod(
                 f"Elrod order {order} may be too low: about {resolving} nodes "
                 "are needed to resolve the covariance; use order=None"
             )
-        value = _sum(gaussian, _terms(gaussian, np.arange(1.0, order + 1), order))
+        value = _rule_value(gaussian, _all_terms(gaussian, order))
     else:
         # Start below MAX_ORDER so that at least two orders are compared.
         order = min(resolving, MAX_ORDER // 2)
-        terms = _terms(gaussian, np.arange(1.0, order + 1), order)
-        value = _sum(gaussian, terms)
+        terms = _all_terms(gaussian, order)
+        value = _rule_value(gaussian, terms)
         while order < MAX_ORDER:
             terms = _refined(gaussian, terms)
             order = terms.size
-            previous, value = value, _sum(gaussian, terms)
+            previous, value = value, _rule_value(gaussian, terms)
             if abs(value - previous) <= ELROD_RTOL * abs(value):
                 break
         else:

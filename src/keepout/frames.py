@@ -409,9 +409,10 @@ def frame_to_gcrf(
 ) -> tuple[FloatArray, FloatArray]:
     """Positions and velocities in one frame, in GCRF, many at once.
 
-    TEME states go through :func:`teme_to_gcrf` in one call; EME2000 and
-    ITRF states as :class:`~keepout.state.StateVector` through
-    :func:`to_gcrf_all`; GCRF states are copied.
+    TEME states go through :func:`teme_to_gcrf` in one call; EME2000 states
+    are rotated by :data:`FRAME_BIAS` in one call; ITRF states go as
+    :class:`~keepout.state.StateVector` through :func:`to_gcrf_all`; GCRF
+    states are copied.
 
     Parameters
     ----------
@@ -449,6 +450,8 @@ def frame_to_gcrf(
     velocity = np.broadcast_to(velocity, (*shape, 3))
     if frame == "GCRF":
         return position.copy(), velocity.copy()
+    if frame == "EME2000":
+        return _eme2000_to_gcrf(position, "r"), _eme2000_to_gcrf(velocity, "v")
     # Time broadcasts through numpy's __array_function__, unknown to its stubs.
     times = np.broadcast_to(epochs, shape).ravel()  # type: ignore[call-overload]
     states = to_gcrf_all(
@@ -462,6 +465,21 @@ def frame_to_gcrf(
     gcrf_r = np.array([state.r for state in states]).reshape(*shape, 3)
     gcrf_v = np.array([state.v for state in states]).reshape(*shape, 3)
     return gcrf_r, gcrf_v
+
+
+def _eme2000_to_gcrf(vectors: FloatArray, name: str) -> FloatArray:
+    """EME2000 vectors ``(..., 3)`` in GCRF, ``FRAME_BIAS.T @ x`` for each.
+
+    Raises
+    ------
+    ValueError
+        If a component is not finite.
+    """
+    if not np.all(np.isfinite(vectors)):
+        raise ValueError(f"{name} must be finite")
+    # The same sum, term by term, as FRAME_BIAS.T @ x on each vector.
+    gcrf: FloatArray = np.einsum("ji,...j->...i", FRAME_BIAS, vectors)
+    return gcrf
 
 
 def to_gcrf(state: StateVector) -> StateVector:

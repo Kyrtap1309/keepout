@@ -47,6 +47,7 @@ from typing import Final
 
 from astropy.time import Time
 
+from keepout._types import require_single_time
 from keepout.cdm import (
     Cdm,
     CovarianceMethod,
@@ -252,9 +253,8 @@ def run(
             "no element set in the catalog for fleet satellite(s) "
             f"{', '.join(map(str, missing))}"
         )
-    issued = start if created is None else created
-    if not issued.isscalar:
-        raise ValueError(f"created must be a single time, got shape {issued.shape}")
+    created = start if created is None else created
+    require_single_time(created, "created")
     primaries = [newest[number] for number in fleet.catalog_numbers]
     screening = screen(primaries, elements, start, duration, volume, workers=workers)
     settings = _Settings(
@@ -262,14 +262,14 @@ def run(
         elements=newest,
         screening=screening,
         model=model,
-        created=issued,
+        created=created,
         originator=originator,
         compute=compute,
         thresholds=thresholds,
         decision_config=decision_config,
     )
     events = tuple(_event(approach, settings) for approach in screening.approaches)
-    return OperatorResult(fleet, screening, events, model, issued)
+    return OperatorResult(fleet, screening, events, model, created)
 
 
 def _metadata(omm: Omm, settings: _Settings, tca: Time) -> tuple[ObjectMetadata, float]:

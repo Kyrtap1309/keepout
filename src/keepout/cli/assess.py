@@ -22,12 +22,11 @@ from keepout.errors import KeepoutError
 
 # The library is imported where it is used: keepout --help need not load the
 # numerical libraries (keepout._methods loads none).
-if TYPE_CHECKING:
-    from typing_extensions import TypeIs
 
 __all__ = ["AUTO_METHOD", "PcMethod", "assess_command", "method_choice"]
 
 if TYPE_CHECKING:
+    from typing_extensions import TypeIs
 
     class PcMethod(enum.StrEnum):
         """``--method``: the Pc methods of :func:`keepout.pc.compute_pc`."""
@@ -57,7 +56,7 @@ def method_choice(name: str) -> MethodChoice:
         If ``name`` names no Pc method.
     """
     if not _is_method(name):
-        raise ValueError(f"not a Pc method: {name!r}")
+        raise ValueError(f"unknown Pc method {name!r}")
     return name
 
 

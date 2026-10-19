@@ -77,10 +77,11 @@ from urllib.parse import parse_qs, urlsplit
 import astropy.units as u
 import snapshot_files
 from astropy.time import Time
-from generated import REPO, json_text, second_text
+from generated import REPO, day_text, json_text, second_text
 from snapshot_files import (
     MANIFEST,
     MANIFEST_FORMAT,
+    REDISTRIBUTION,
     SIX_DIGITS,
     CatalogCounts,
     FileDigest,
@@ -513,7 +514,7 @@ def read_excerpt(data: Path) -> str:
 
 def retrieval_day(manifest: Manifest) -> str:
     """The day the data was retrieved (UTC, ISO 8601): of the first body."""
-    return manifest["retrieved"]["first"][:10]
+    return day_text(manifest["retrieved"]["first"])
 
 
 def summarise_socrates(
@@ -629,8 +630,9 @@ def retrieved_span(inputs: Inputs) -> tuple[str, str]:
 
 def render_notice(inputs: Inputs) -> str:
     """The NOTICE: the data's source, retrieval time, files and licence."""
-    first, last = (second_text(text) for text in retrieved_span(inputs))
-    until = last[11:] if last[:10] == first[:10] else last
+    start, end = retrieved_span(inputs)
+    first, last = second_text(start), second_text(end)
+    until = last[11:] if day_text(end) == day_text(start) else last
     groups = textwrap.fill(
         f"- {SNAPSHOT}: the GP element sets of CelesTrak's groups "
         f"{', '.join(inputs.group_rows)}, one (the newest) per object;",
@@ -639,7 +641,7 @@ def render_notice(inputs: Inputs) -> str:
     )
     return (
         "Data: USSPACECOM/18 SDS via Space-Track.org, retrieved from CelesTrak\n"
-        f"(celestrak.org) on {first[:10]}.\n"
+        f"(celestrak.org) on {day_text(start)}.\n"
         "\n"
         f"Retrieved {first} to {until} UTC by tools/screening_snapshot.py:\n"
         "\n"
@@ -652,9 +654,7 @@ def render_notice(inputs: Inputs) -> str:
         f"{MANIFEST} lists the URLs, retrieval times, counts and SHA-256\n"
         "digests.\n"
         "\n"
-        "This is basic space situational awareness data, which the\n"
-        "Space-Track.org user agreement allows to redistribute with the\n"
-        "citation above. It is not covered by keepout's MIT licence.\n"
+        f"{REDISTRIBUTION}"
     )
 
 

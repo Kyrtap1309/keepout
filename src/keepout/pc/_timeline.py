@@ -19,11 +19,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from functools import lru_cache
 from itertools import pairwise
-from typing import Final, TypeAlias
+from typing import Final, NamedTuple, TypeAlias
 
 import numpy as np
 
-from keepout._types import BoolArray, FloatArray, read_only
+from keepout._types import BoolArray, FloatArray, IndexArray, read_only
 from keepout.encounter import sigma_along
 from keepout.errors import PcConvergenceError
 
@@ -72,6 +72,19 @@ MAX_BREAKPOINTS: Final = 50
 REFINE_CROSSING_FRACTION: Final = 1.0 / 8.0
 """Refinement spacing around significant nodes, as a fraction of the
 crossing time."""
+
+CC_START_ORDER: Final = 32
+"""Intervals of the first Clenshaw-Curtis rule of the time integral of one
+piece (``CC_START_ORDER + 1`` nodes)."""
+
+CC_MAX_ORDER: Final = 1024
+"""Intervals of the finest Clenshaw-Curtis rule of one piece."""
+
+STAGNATION_RTOL: Final = 1e-4
+"""Relative difference of two rules below which a difference that no longer
+halves is taken as the rate's own noise (its sphere quadrature, ~1e-5 of the
+peak): doubling further would not reduce it."""
+
 
 _ROUNDING_SLACK: Final = 1e-9
 """Relative slack on grid gaps: a grid already at its refinement spacing
@@ -191,7 +204,7 @@ class RateScan:
         candidate intervals of the screen with a detection grid, refined
         where the rate is significant, and is absent where the screen ruled
         the rate negligible.
-    segments
+    index_ranges
         Index ranges ``[first, last]`` (inclusive, padded by one grid step) of
         the stretches where the rate is not negligible; each lies within one
         candidate interval.
@@ -199,7 +212,7 @@ class RateScan:
 
     times: FloatArray
     values: FloatArray
-    segments: tuple[tuple[int, int], ...]
+    index_ranges: tuple[tuple[int, int], ...]
 
     @property
     def window(self) -> tuple[float, float]:
@@ -229,6 +242,16 @@ def _edge(values: FloatArray) -> float:
     return float(max(values[0], values[-1])) / peak if peak > 0.0 else 0.0
 
 
+class _GridPlan(NamedTuple):
+    """A planned detection grid: ``points`` nodes uniformly over ``[start, end]``,
+    with the spacing its refinement needs."""
+
+    start: float
+    end: float
+    points: int
+    refine_spacing: float
+
+
 def _detection_grids(
     window: tuple[float, float], candidates: list[Candidate]
 ) -> list[tuple[FloatArray, float]]:
@@ -246,7 +269,7 @@ def _detection_grids(
     """
     start, end = window
     coarsest = (end - start) / (MIN_SCAN_POINTS - 1)
-    plan: list[tuple[float, float, int, float]] = []
+    plan: list[_GridPlan] = []
     finest = math.inf
     for candidate in candidates:
         a, b = max(candidate.start, start), min(candidate.end, end)
@@ -255,10 +278,9 @@ def _detection_grids(
         spacing = min(DETECTION_SIGMAS * candidate.width, coarsest)
         finest = min(finest, spacing)
         count = math.ceil((b - a) / spacing) + 1
-        plan.append(
-            (a, b, count, min(candidate.crossing * REFINE_CROSSING_FRACTION, spacing))
-        )
-    if sum(count for _, _, count, _ in plan) > MAX_SCAN_POINTS:
+        refine_spacing = min(candidate.crossing * REFINE_CROSSING_FRACTION, spacing)
+        plan.append(_GridPlan(a, b, count, refine_spacing))
+    if sum(grid.points for grid in plan) > MAX_SCAN_POINTS:
         raise PcConvergenceError(
             f"cannot resolve the collision rate over the window [{start:.6g}, "
             f"{end:.6g}] s: detecting its possible encounters needs a scan "
@@ -266,7 +288,10 @@ def _detection_grids(
             "pass a shorter window around the encounter, e.g. "
             "compute_pc(conjunction, 'hall3d', window=(a, b)) (or 'montecarlo')"
         )
-    return [(np.linspace(a, b, count), fine) for a, b, count, fine in plan]
+    return [
+        (np.linspace(grid.start, grid.end, grid.points), grid.refine_spacing)
+        for grid in plan
+    ]
 
 
 def _refine(
@@ -345,6 +370,21 @@ def _detect(
     lasts = firsts + np.array([grid.size for grid in grids]) - 1
     # Gaps between blocks are never refined: their ends are negligible.
     fine[lasts] = math.inf
+    _require_negligible_gaps(times, values, firsts, lasts)
+    return times, values, fine
+
+
+def _require_negligible_gaps(
+    times: FloatArray, values: FloatArray, firsts: IndexArray, lasts: IndexArray
+) -> None:
+    """A check that the rate is negligible at the interior block edges.
+
+    Raises
+    ------
+    PcConvergenceError
+        If the rate at a block edge next to a gap the screen ruled negligible
+        is above :data:`RATE_FLOOR` of the peak.
+    """
     peak = float(values.max())
     last = times.size - 1
     interior = set(firsts[firsts > 0].tolist()) | set(lasts[lasts < last].tolist())
@@ -355,10 +395,9 @@ def _detect(
                 f"{values[index] / peak:.1e} of its peak where the screen "
                 "ruled it negligible"
             )
-    return times, values, fine
 
 
-def _segments(
+def _refined_scan(
     rate: Rate,
     times: FloatArray,
     values: FloatArray,
@@ -370,11 +409,11 @@ def _segments(
     times, values = _refine(rate, times, values, fine)
     peak = float(values.max())
     last = times.size - 1
-    segments = tuple(
-        (max(first - 1, 0), min(final + 1, last))
-        for first, final in regions(values > RATE_FLOOR * peak)
+    index_ranges = tuple(
+        (max(first - 1, 0), min(last_index + 1, last))
+        for first, last_index in regions(values > RATE_FLOOR * peak)
     )
-    return RateScan(times, values, segments)
+    return RateScan(times, values, index_ranges)
 
 
 def locate(rate: Rate, window: tuple[float, float], screen: Screen) -> RateScan:
@@ -391,7 +430,7 @@ def locate(rate: Rate, window: tuple[float, float], screen: Screen) -> RateScan:
         If detection would need more than :data:`MAX_SCAN_POINTS` points, or
         the rate is not negligible where the screen ruled it negligible.
     """
-    return _segments(rate, *_detect(rate, window, screen))
+    return _refined_scan(rate, *_detect(rate, window, screen))
 
 
 def locate_auto(
@@ -429,21 +468,8 @@ def locate_auto(
     while True:
         times, values, fine = _detect(rate, (a - half, b + half), screen)
         if (values.max() > 0.0 and _edge(values) < RATE_FLOOR) or half >= limit:
-            return _segments(rate, times, values, fine)
+            return _refined_scan(rate, times, values, fine)
         half = min(2.0 * half, limit)
-
-
-CC_START_ORDER: Final = 32
-"""Intervals of the first Clenshaw-Curtis rule of the time integral of one
-piece (``CC_START_ORDER + 1`` nodes)."""
-
-CC_MAX_ORDER: Final = 1024
-"""Intervals of the finest Clenshaw-Curtis rule of one piece."""
-
-STAGNATION_RTOL: Final = 1e-4
-"""Relative difference of two rules below which a difference that no longer
-halves is taken as the rate's own noise (its sphere quadrature, ~1e-5 of the
-peak): doubling further would not reduce it."""
 
 
 @lru_cache(maxsize=8)
@@ -518,13 +544,14 @@ def integrate_segments(rate: Rate, found: RateScan, *, rtol: float) -> RateInteg
     """
     segments: list[Segment] = []
     shortfalls: list[float] = []
-    for lo, hi in found.segments:
-        inner = found.values[lo : hi + 1]
+    for first, last in found.index_ranges:
+        inner = found.values[first : last + 1]
         maxima = (inner[1:-1] > inner[:-2]) & (inner[1:-1] >= inner[2:])
-        cuts = found.times[lo + 1 + np.flatnonzero(maxima)][:MAX_BREAKPOINTS].tolist()
-        start, end = float(found.times[lo]), float(found.times[hi])
+        cuts = found.times[first + 1 + np.flatnonzero(maxima)][:MAX_BREAKPOINTS]
+        start, end = float(found.times[first]), float(found.times[last])
         pieces = [
-            _nested_integral(rate, a, b, rtol) for a, b in pairwise([start, *cuts, end])
+            _nested_integral(rate, a, b, rtol)
+            for a, b in pairwise([start, *cuts.tolist(), end])
         ]
         shortfalls += [d for v, d in pieces if not d <= rtol * abs(v)]
         segments.append(Segment(start, end, math.fsum(v for v, _ in pieces)))

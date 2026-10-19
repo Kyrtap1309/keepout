@@ -54,7 +54,7 @@ from typing import Final, NamedTuple, assert_never
 import numpy as np
 from astropy.time import Time
 
-from keepout._types import require_non_negative, require_positive
+from keepout._types import require_non_negative, require_positive, require_single_time
 from keepout.covariance import Covariance
 from keepout.omm import Omm
 from keepout.units import DAY, KM, seconds_between
@@ -237,11 +237,6 @@ PUBLISHED_PARAMETERS: Final[Mapping[OrbitRegime, RegimeParameters]] = MappingPro
 the safety factor."""
 
 
-def _require_scalar(time: Time) -> None:
-    if not time.isscalar:
-        raise ValueError(f"time must be a single time, got shape {time.shape}")
-
-
 @dataclass(frozen=True, slots=True)
 class SyntheticCovarianceModel:
     """The age-dependent RTN position covariance of a GP element set.
@@ -312,7 +307,7 @@ class SyntheticCovarianceModel:
         ValueError
             If ``time`` is not a single time.
         """
-        _require_scalar(time)
+        require_single_time(time, "time")
         return self._sigmas(self.parameters(orbit_regime(omm)), omm, time)
 
     def _sigmas(self, parameters: RegimeParameters, omm: Omm, time: Time) -> RtnSigmas:
@@ -373,7 +368,7 @@ class SyntheticCovarianceModel:
         ValueError
             If ``time`` is not a single time.
         """
-        _require_scalar(time)
+        require_single_time(time, "time")
         regime = orbit_regime(omm)
         parameters = self.parameters(regime)
         sigmas = self._sigmas(parameters, omm, time)

@@ -58,7 +58,7 @@ def validate_command(
         "monte_carlo": monte_carlo,
         "comparisons": len(outcomes),
         "failed": len(failed),
-        "summary": [_summary_json(s) for s in summary],
+        "summary": [dataclasses.asdict(s) for s in summary],
         "outcomes": [_outcome_json(o) for o in outcomes],
     }
     lines = [
@@ -96,10 +96,6 @@ def _table(summary: Sequence[MethodSummary], *, monte_carlo: bool) -> Table:
             "-" if worst is None else f"{worst:.1e}",
         )
     return rows
-
-
-def _summary_json(summary: MethodSummary) -> dict[str, JsonValue]:
-    return dataclasses.asdict(summary)
 
 
 def _outcome_json(outcome: Outcome) -> dict[str, JsonValue]:

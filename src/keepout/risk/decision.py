@@ -14,6 +14,7 @@ from keepout.risk.trend import (
     Trend,
     TrendConfig,
     TrendPoint,
+    _days,
     analyse_trend,
 )
 from keepout.units import DAY
@@ -88,10 +89,6 @@ class Decision:
     reasons: tuple[str, ...]
 
 
-def _days(seconds: float) -> str:
-    return f"{seconds / DAY:.2f} d"
-
-
 def _describe(point: TrendPoint, *, before_a_failure: bool = False) -> str:
     """The point's Pc, level and time; ``before_a_failure`` phrases it as the
     latest observation with a Pc, followed by one without."""
@@ -134,15 +131,18 @@ def _trend_reason(trend: Trend) -> str:
 
 def _red(
     time_to_tca: float,
-    settings: DecisionConfig,
+    config: DecisionConfig,
     reasons: Sequence[str],
     concerns: Sequence[str],
 ) -> Decision:
     """The decision on a red event, judged ``time_to_tca`` seconds before TCA."""
-    point = f"the decision point ({_days(settings.decision_point)} before TCA)"
-    if time_to_tca <= settings.decision_point:
-        return Decision(Action.MANOEUVRE, (*reasons, f"within {point}", *concerns))
-    timing = f"before {point}: prepare a manoeuvre"
+    decision_point_text = (
+        f"the decision point ({_days(config.decision_point)} before TCA)"
+    )
+    if time_to_tca <= config.decision_point:
+        within = f"within {decision_point_text}"
+        return Decision(Action.MANOEUVRE, (*reasons, within, *concerns))
+    timing = f"before {decision_point_text}: prepare a manoeuvre"
     return Decision(Action.PREPARE_MANOEUVRE, (*reasons, timing, *concerns))
 
 
@@ -174,8 +174,8 @@ def decide(trend: Trend, *, config: DecisionConfig | None = None) -> Decision:
     config
         The decision point; :class:`DecisionConfig` defaults if ``None``.
     """
-    settings = config if config is not None else DecisionConfig()
-    limits = trend.thresholds
+    config = config if config is not None else DecisionConfig()
+    thresholds = trend.thresholds
     latest = trend.latest_observation
     if latest is None:
         return Decision(
@@ -187,24 +187,24 @@ def decide(trend: Trend, *, config: DecisionConfig | None = None) -> Decision:
         if point is None or point.level is not RiskLevel.RED:
             return Decision(Action.MONITOR, tuple(reasons))
         reasons += [_describe(point, before_a_failure=True), _trend_reason(trend)]
-        return _red(latest.time_to_tca, settings, reasons, _concerns(point))
+        return _red(latest.time_to_tca, config, reasons, _concerns(point))
     assert point is not None  # noqa: S101 (the latest observation has a Pc)
     reasons = [_describe(point), _trend_reason(trend)]
     concerns = _concerns(point)
     if point.level is RiskLevel.RED:
-        return _red(point.time_to_tca, settings, reasons, concerns)
+        return _red(point.time_to_tca, config, reasons, concerns)
     if point.level is RiskLevel.YELLOW:
         return Decision(Action.MONITOR, (*reasons, *concerns))
     if trend.direction is Direction.RISING and trend.slope is not None:
-        reaches = _reaches(point, trend.slope, limits.green_below)
+        reaches = _reaches(point, trend.slope, thresholds.green_below)
         if reaches:
             concerns.insert(
                 0,
-                f"rising fast enough to reach {limits.green_below:g} before TCA",
+                f"rising fast enough to reach {thresholds.green_below:g} before TCA",
             )
         else:
             reasons.append(
-                f"rising, but at this rate below {limits.green_below:g} at TCA"
+                f"rising, but at this rate below {thresholds.green_below:g} at TCA"
             )
     action = Action.MONITOR if concerns else Action.IGNORE
     return Decision(action, (*reasons, *concerns))

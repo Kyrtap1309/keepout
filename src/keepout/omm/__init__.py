@@ -14,6 +14,7 @@ from pathlib import Path
 from keepout.errors import OmmParseError
 from keepout.omm import celestrak, kvn, tle, xml
 from keepout.omm._io import load_file
+from keepout.omm.keywords import VERSION_KEYWORD
 from keepout.omm.model import Deduplicated, Omm, deduplicate
 
 __all__ = [
@@ -62,7 +63,7 @@ def loads(text: str) -> tuple[Omm, ...]:
         return xml.loads(start)
     if start.startswith(("[", "{")):
         return celestrak.loads_json(body)
-    if start.startswith(kvn.VERSION_KEYWORD):
+    if start.startswith(VERSION_KEYWORD):
         return kvn.loads(body)
     if "," in first and "NORAD_CAT_ID" in first:
         return celestrak.loads_csv(start)

@@ -168,7 +168,7 @@ def test_the_method_option_offers_every_pc_method() -> None:
 
 
 def test_a_name_that_is_no_pc_method_is_refused() -> None:
-    with pytest.raises(ValueError, match="not a Pc method: 'best'"):
+    with pytest.raises(ValueError, match="unknown Pc method 'best'"):
         method_choice("best")
 
 

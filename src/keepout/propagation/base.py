@@ -22,7 +22,13 @@ import numpy as np
 import numpy.typing as npt
 from astropy.time import Time
 
-from keepout._types import BoolArray, FloatArray, read_only, require_at_least
+from keepout._types import (
+    BoolArray,
+    FloatArray,
+    read_only,
+    require_at_least,
+    require_single_time,
+)
 from keepout.state import RefFrame, as_ref_frame
 
 __all__ = [
@@ -105,8 +111,7 @@ def time_offsets(epoch: Time, offsets: npt.ArrayLike) -> FloatArray:
         If ``epoch`` is not a single time, or the offsets are not finite
         numbers in at most one dimension.
     """
-    if not epoch.isscalar:
-        raise ValueError(f"epoch must be a single time, got shape {epoch.shape}")
+    require_single_time(epoch, "epoch")
     seconds = np.array(offsets, dtype=np.float64, ndmin=1)
     if seconds.ndim != 1:
         raise ValueError(f"offsets must be one-dimensional, got shape {seconds.shape}")

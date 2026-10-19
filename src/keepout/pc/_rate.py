@@ -45,8 +45,11 @@ FALLBACK_TOLERANCE: Final = 1e-10
 """Largest rate, relative to the peak, allowed where the peak-overlap
 iteration failed and the mean-centred expansion was used instead."""
 
-SCREEN_MIN_CELLS, SCREEN_MAX_CELLS = 64, 50_000
-"""Bounds on the number of screen cells in a window."""
+SCREEN_MIN_CELLS: Final = 64
+"""Fewest screen cells in a window."""
+
+SCREEN_MAX_CELLS: Final = 50_000
+"""Most screen cells in a window."""
 
 SCREEN_PERIOD_FRACTION: Final = 1.0 / 64.0
 """Largest screen cell, as a fraction of the shorter orbital period."""
@@ -711,11 +714,11 @@ def check_fallbacks(fallbacks: Sequence[tuple[float, float]], found: RateScan) -
     times, peak = found.times, found.peak
     zones = [
         (
-            float(times[lo] - (times[lo + 1] - times[lo])),
-            float(times[hi] + (times[hi] - times[hi - 1])),
+            float(times[first] - (times[first + 1] - times[first])),
+            float(times[last] + (times[last] - times[last - 1])),
         )
-        for lo, hi in found.segments
-        if hi > lo
+        for first, last in found.index_ranges
+        if last > first
     ]
     for t, value in fallbacks:
         inside = any(a <= t <= b for a, b in zones)

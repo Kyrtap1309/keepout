@@ -369,23 +369,24 @@ def load(path: Path | None = None) -> tuple[KelvinsEvent, ...]:
     for event_id, group in itertools.groupby(
         _parsed(source), key=lambda row: row.event_id
     ):
-        rows: list[_Row] = []
-        for row in group:
-            if not rows and event_id in seen:
-                raise KelvinsFormatError(
-                    f"{row.where}: rows of event {event_id} are not contiguous"
-                )
-            if rows and row.mission_id != rows[0].mission_id:
+        first = next(group)
+        if event_id in seen:
+            raise KelvinsFormatError(
+                f"{first.where}: rows of event {event_id} are not contiguous"
+            )
+        rows = [first]
+        for row in group:  # noqa: B031 (the rows after the first)
+            if row.mission_id != first.mission_id:
                 raise KelvinsFormatError(
                     f"{row.where}: event {event_id} changes mission from "
-                    f"{rows[0].mission_id} to {row.mission_id}"
+                    f"{first.mission_id} to {row.mission_id}"
                 )
             rows.append(row)
         seen.add(event_id)
         events.append(
             KelvinsEvent(
                 event_id,
-                rows[0].mission_id,
+                first.mission_id,
                 np.array([row.values for row in rows], dtype=np.float64),
                 tuple(row.object_type for row in rows),
             )

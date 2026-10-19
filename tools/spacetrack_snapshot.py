@@ -63,12 +63,13 @@ from pathlib import Path
 from typing import Final, Literal, TypedDict, cast
 
 import snapshot_files
-from generated import REPO, json_text, positive, second_text
+from generated import REPO, day_text, json_text, positive, second_text
 from screening_snapshot import REGIMES, nearest_approach, regime, utc_text
 from snapshot_files import (
     MANIFEST,
     MANIFEST_FORMAT,
     RAW_INDEX,
+    REDISTRIBUTION,
     CatalogCounts,
     FileDigest,
     RawIndex,
@@ -102,7 +103,7 @@ from keepout.sources.spacetrack import (
     read_public_cdms,
 )
 from keepout.sources.spacetrack import read_catalog as read_gp
-from keepout.units import seconds_between
+from keepout.units import KM, MINUTE, seconds_between
 
 TOOL: Final = "tools/spacetrack_snapshot.py"
 DATA: Final = REPO / "tests/screening/spacetrack-data"
@@ -131,10 +132,10 @@ NOTICE: Final = "NOTICE"
 REPLAY: Final = Credentials("replay", "replay")
 """Credentials for replaying saved answers (no server sees them)."""
 
-WINDOW: Final = 600.0
+WINDOW: Final = 10 * MINUTE
 """Time searched on each side of a public CDM's TCA [s] (:func:`compare`)."""
 
-SEARCH_RADIUS: Final = 100e3
+SEARCH_RADIUS: Final = 100 * KM
 """Radius of the sphere searched around the first object [m]: far beyond
 the errors of GP data, so the range minimum is found wherever it is."""
 
@@ -469,7 +470,7 @@ def read_catalog(data: Path) -> tuple[Omm, ...]:
 
 def retrieval_day(manifest: Manifest) -> str:
     """The day the catalog was retrieved, UTC, ISO 8601."""
-    return manifest["download"]["retrieved"][:10]
+    return day_text(manifest["download"]["retrieved"])
 
 
 def inputs_from_data(data: Path) -> Inputs:
@@ -493,9 +494,10 @@ def inputs_from_data(data: Path) -> Inputs:
 def render_notice(inputs: Inputs) -> str:
     """The NOTICE: the data's source, citation, retrieval time and licence."""
     retrieved = second_text(inputs.download.retrieved)
+    day = day_text(inputs.download.retrieved)
     return (
         "Data: USSPACECOM/18 SDS via Space-Track.org (www.space-track.org),\n"
-        f"retrieved on {retrieved[:10]}.\n"
+        f"retrieved on {day}.\n"
         "\n"
         f"Retrieved {retrieved} UTC by tools/spacetrack_snapshot.py with\n"
         "Space-Track's recommended query for the GP catalog (see manifest.json):\n"
@@ -507,9 +509,7 @@ def render_notice(inputs: Inputs) -> str:
         f"{MANIFEST} lists the URL, retrieval time, counts and SHA-256\n"
         "digests.\n"
         "\n"
-        "This is basic space situational awareness data, which the\n"
-        "Space-Track.org user agreement allows to redistribute with the\n"
-        "citation above. It is not covered by keepout's MIT licence.\n"
+        f"{REDISTRIBUTION}"
     )
 
 
@@ -680,19 +680,22 @@ def spread(values: Sequence[float]) -> Spread:
 
 def summarise(comparison: Comparison) -> ComparisonSummary:
     """Counts, and how keepout's approaches differ from the public CDMs."""
-    found = [
-        (match.cdm, match.approach)
+    misses = [
+        (match.cdm.min_range, miss)
         for match in comparison.matches
-        if match.approach is not None
+        if (miss := match.miss_distance) is not None
     ]
-    misses = [(cdm.min_range, approach.miss_distance) for cdm, approach in found]
     return {
         "cdms": len(comparison.matches) + comparison.outside_catalog,
         "outside_catalog": comparison.outside_catalog,
         "compared": len(comparison.matches),
-        "found": len(found),
+        "found": len(misses),
         "tca_difference": spread(
-            [abs(seconds_between(cdm.tca, approach.tca)) for cdm, approach in found]
+            [
+                abs(difference)
+                for match in comparison.matches
+                if (difference := match.tca_difference) is not None
+            ]
         ),
         "range_difference": spread([abs(miss - rng) for rng, miss in misses]),
         "range_ratio": spread([rng / miss for rng, miss in misses if miss > 0.0]),

@@ -29,6 +29,7 @@ __all__ = [
     "SGP4_EPHEMERIS_TYPE",
     "VERSION",
     "VERSIONS",
+    "VERSION_KEYWORD",
 ]
 
 DEGREE: Final = math.pi / 180.0
@@ -119,6 +120,9 @@ DEFAULTS: Final[Mapping[str, str]] = {
     "CLASSIFICATION_TYPE": "U",
 }
 """Values of the TLE parameters CCSDS 502.0-B-3 (table 4-3) lets an OMM omit."""
+
+VERSION_KEYWORD: Final = "CCSDS_OMM_VERS"
+"""Keyword of the OMM version, the first of every KVN message."""
 
 VERSIONS: Final = ("2.0", "3.0")
 """``CCSDS_OMM_VERS`` values read: CCSDS 502.0-B-2 and 502.0-B-3."""

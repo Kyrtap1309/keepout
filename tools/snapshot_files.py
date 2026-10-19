@@ -52,6 +52,14 @@ MANIFEST_FORMAT: Final = 1
 SIX_DIGITS: Final = 100_000
 """The first six-digit catalog number."""
 
+REDISTRIBUTION: Final = (
+    "This is basic space situational awareness data, which the\n"
+    "Space-Track.org user agreement allows to redistribute with the\n"
+    "citation above. It is not covered by keepout's MIT licence.\n"
+)
+"""The last paragraph of a snapshot's NOTICE: why the data may be
+redistributed, and that keepout's licence does not cover it."""
+
 _Entry = TypeVar("_Entry", bound="DataclassInstance")
 _Inputs = TypeVar("_Inputs")
 _T = TypeVar("_T")
@@ -228,10 +236,11 @@ def stored_files(
     files: dict[str, bytes] = {}
     for name, content in contents.items():
         path = data / name
+        stored = path.read_bytes() if name in gzipped and path.exists() else None
         if name not in gzipped:
             files[name] = content
-        elif path.exists() and gunzip(path.read_bytes()) == content:
-            files[name] = path.read_bytes()
+        elif stored is not None and gunzip(stored) == content:
+            files[name] = stored
         else:
             files[name] = gzip.compress(content, compresslevel=9, mtime=0)
     files[MANIFEST] = manifest(files).encode()

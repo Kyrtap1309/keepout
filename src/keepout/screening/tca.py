@@ -100,7 +100,6 @@ from typing import Final, NamedTuple
 import numpy as np
 import numpy.typing as npt
 from astropy.time import Time
-from scipy.optimize import brentq
 
 from keepout._types import (
     BoolArray,
@@ -111,6 +110,7 @@ from keepout._types import (
     require_at_least,
     require_non_negative,
     require_positive,
+    require_single_time,
 )
 from keepout.orbits import EARTH_MU
 from keepout.propagation.base import (
@@ -177,11 +177,15 @@ MIN_RADIUS: Final = 6_356_752.0
 error [m]: the Earth's polar radius (WGS 84). SGP4 reports error 6 below
 6378.135 km."""
 
-_STENCIL: Final = np.array([-2.0, -1.0, 1.0, 2.0]) * DERIVATIVE_STEP
-_WEIGHTS: Final = np.array([1.0, -8.0, 8.0, -1.0]) / (24.0 * DERIVATIVE_STEP)
-"""Fourth-order central difference of ``|rho|^2``, halved: ``f``."""
+_CENTRAL_OFFSETS: Final = np.array([-2.0, -1.0, 1.0, 2.0]) * DERIVATIVE_STEP
+"""Offsets [s] of the four positions of the central difference that gives
+``f``, from the time it is computed at."""
 
-_ONE_SIDED: Final = np.array([-25.0, 48.0, -36.0, 16.0, -3.0]) / 24.0
+_CENTRAL_WEIGHTS: Final = np.array([1.0, -8.0, 8.0, -1.0]) / (24.0 * DERIVATIVE_STEP)
+"""Weights of ``|rho|^2`` at :data:`_CENTRAL_OFFSETS`: its fourth-order
+central difference, halved, ``f`` [m^2/s]."""
+
+_ONE_SIDED_WEIGHTS: Final = np.array([-25.0, 48.0, -36.0, 16.0, -3.0]) / 24.0
 """Fourth-order one-sided difference of ``|rho|^2`` over positions 0 to 4
 steps away, halved, per unit step: ``f`` at a window's ends when the
 central difference reaches a failed state outside the window."""
@@ -367,9 +371,9 @@ class SearchResult:
 def _dot(a: FloatArray, b: FloatArray) -> FloatArray:
     """Dot products along the last axis, element by element: the same bits
     whatever the shape of the arrays (a reduction might not)."""
-    product: FloatArray = (
-        a[..., 0] * b[..., 0] + a[..., 1] * b[..., 1] + a[..., 2] * b[..., 2]
-    )
+    product: FloatArray = a[..., 0] * b[..., 0]
+    product += a[..., 1] * b[..., 1]
+    product += a[..., 2] * b[..., 2]
     return product
 
 
@@ -524,7 +528,7 @@ class _Pair:
     def __init__(self, sample: States, duration: float) -> None:
         self.sample = sample
         self.duration = duration
-        self.known: dict[float, float] = {}
+        self._known_f: dict[float, float] = {}
 
     def states(
         self, stamps: FloatArray
@@ -535,61 +539,62 @@ class _Pair:
             _require_no_failure(errors[0], errors[1], stamps)
         return r[0], v[0], r[1], v[1]
 
-    def derivative(self, times: FloatArray) -> FloatArray:
-        """``rho . drho/dt`` at ``times`` (in the window) from positions only.
+    def _computed_f(self, times: FloatArray) -> FloatArray:
+        """``f = rho . drho/dt`` at ``times`` (in the window) from positions
+        only, whether known or not.
 
         Raises :class:`_Failed` for a failure in the window only: a time
         whose central difference reaches a failed state outside the window
         takes the one-sided difference inside it.
         """
-        stamps = (times[:, None] + _STENCIL).reshape(-1)
+        stamps = (times[:, None] + _CENTRAL_OFFSETS).reshape(-1)
         errors, r, _ = self.sample(stamps)
         if not errors.any():
-            return _stencil_sum(r[1] - r[0], _WEIGHTS)
+            return _stencil_sum(r[1] - r[0], _CENTRAL_WEIGHTS)
         outside = (stamps < 0.0) | (stamps > self.duration)
         inside = ~outside
         _require_no_failure(errors[0][inside], errors[1][inside], stamps[inside])
-        derivative = _stencil_sum(r[1] - r[0], _WEIGHTS)
+        derivative = _stencil_sum(r[1] - r[0], _CENTRAL_WEIGHTS)
         failed = (errors[0] != NO_ERROR) | (errors[1] != NO_ERROR)
-        reaching = (failed & outside).reshape(-1, len(_STENCIL))
+        reaching = (failed & outside).reshape(-1, len(_CENTRAL_OFFSETS))
         edge = np.flatnonzero(np.any(reaching, axis=1))
         if edge.size > 0:
-            derivative[edge] = self._one_sided(times[edge])
+            derivative[edge] = self._one_sided_f(times[edge])
         return derivative
 
-    def _one_sided(self, times: FloatArray) -> FloatArray:
-        """``rho . drho/dt`` at ``times`` from five positions inside the
-        window, towards its far end (closer together than DERIVATIVE_STEP in
-        a window shorter than four of them)."""
+    def _one_sided_f(self, times: FloatArray) -> FloatArray:
+        """``f`` at ``times`` from five positions inside the window, towards
+        its far end (closer together than DERIVATIVE_STEP in a window
+        shorter than four of them)."""
         after = self.duration - times
         forward = after >= times
         room = np.where(forward, after, times)
         spacing = np.minimum(DERIVATIVE_STEP, room / 4.0) * np.where(forward, 1.0, -1.0)
-        nodes = times[:, None] + spacing[:, None] * np.arange(len(_ONE_SIDED))
+        nodes = times[:, None] + spacing[:, None] * np.arange(len(_ONE_SIDED_WEIGHTS))
         stamps = np.clip(nodes, 0.0, self.duration).reshape(-1)
         r_primary, _, r_secondary, _ = self.states(stamps)
         derivative: FloatArray = (
-            _stencil_sum(r_secondary - r_primary, _ONE_SIDED) / spacing
+            _stencil_sum(r_secondary - r_primary, _ONE_SIDED_WEIGHTS) / spacing
         )
         return derivative
 
-    def values(self, times: FloatArray) -> FloatArray:
-        """``rho . drho/dt`` at ``times``, from those already known if all
-        are."""
+    def f_values(self, times: FloatArray) -> FloatArray:
+        """``f`` at ``times``, from the values already known if all are,
+        else computed (and kept)."""
         listed = times.tolist()
-        if all(time in self.known for time in listed):
-            return np.array([self.known[time] for time in listed])
-        values = self.derivative(times)
-        self.known.update(zip(listed, values.tolist(), strict=True))
+        if all(time in self._known_f for time in listed):
+            return np.array([self._known_f[time] for time in listed])
+        values = self._computed_f(times)
+        self._known_f.update(zip(listed, values.tolist(), strict=True))
         return values
 
-    def at(self, time: float) -> float:
-        """``rho . drho/dt`` at one time, for Brent's method (which starts
-        at the ends of its bracket, already known)."""
-        known = self.known.get(time)
+    def f_at(self, time: float) -> float:
+        """``f`` at one time, for Brent's method (which starts at the ends
+        of its bracket, already known)."""
+        known = self._known_f.get(time)
         if known is not None:
             return known
-        return float(self.derivative(np.array([time]))[0])
+        return float(self._computed_f(np.array([time]))[0])
 
 
 class _Interval(NamedTuple):
@@ -610,6 +615,26 @@ def _samples(interval: _Interval) -> FloatArray:
     samples = first + (last - first) * (np.arange(count + 1) / count)
     samples[-1] = last
     return samples
+
+
+def _roots(pair: _Pair, samples: FloatArray) -> tuple[list[float], _Failed | None]:
+    """The TCAs of a pair in one interval, sampled at ``samples``, in order,
+    and the failure that stopped the search, if one did."""
+    # Imported here: scipy.optimize takes a noticeable time to import.
+    from scipy.optimize import brentq
+
+    try:
+        values = pair.f_values(samples)
+    except _Failed as exc:
+        return [], exc
+    tcas: list[float] = []
+    for j in np.flatnonzero((values[:-1] < 0.0) & (values[1:] >= 0.0)):
+        try:
+            tca = brentq(pair.f_at, samples[j], samples[j + 1], xtol=TCA_TOLERANCE)
+        except _Failed as exc:
+            return tcas, exc
+        tcas.append(float(tca))
+    return tcas, None
 
 
 def _record_first_failures(
@@ -679,8 +704,7 @@ class ApproachSearch:
                 f"primaries and catalog must share a frame, got {primaries.frame} "
                 f"and {catalog.frame}"
             )
-        if not start.isscalar:
-            raise ValueError(f"start must be a single time, got shape {start.shape}")
+        require_single_time(start, "start")
         self._offsets = time_grid(duration, step)
         mask = np.array(pairs)
         if mask.dtype != np.bool_ or mask.shape != (len(primaries), len(catalog)):
@@ -903,6 +927,19 @@ class ApproachSearch:
         monotone = (sweep > 0.0) & (sweep * sweep > range_bound * acceleration)
         return keep, monotone
 
+    def _pair_states(
+        self, sampler: Sgp4Sampler | None, primary: int, secondary: int
+    ) -> States:
+        """The sampler of one pair's states: from SGP4's fast path when there
+        is one (:meth:`_sampler_for`), else from the propagators."""
+        if sampler is None:
+            return _pair_sampler(
+                self._primaries.subset(np.array([primary])),
+                self._catalog.subset(np.array([secondary])),
+                self._start,
+            )
+        return sampler.states((primary, len(self._primaries) + secondary))
+
     def _refine(
         self,
         sampler: Sgp4Sampler | None,
@@ -916,20 +953,12 @@ class ApproachSearch:
         A failure while refining an interval is recorded in ``failures`` and
         loses that interval's minima only.
         """
-        if sampler is None:
-            sample = _pair_sampler(
-                self._primaries.subset(np.array([primary])),
-                self._catalog.subset(np.array([secondary])),
-                self._start,
-            )
-        else:
-            sample = sampler.states((primary, len(self._primaries) + secondary))
-        pair = _Pair(sample, self._duration)
+        pair = _Pair(self._pair_states(sampler, primary, secondary), self._duration)
         brackets = [_samples(interval) for interval in intervals]
         # Every interval's samples in one evaluation, kept by the pair; after a
         # failure, each interval is evaluated, and its failure found, on its own.
         with contextlib.suppress(_Failed):
-            pair.values(np.unique(np.concatenate(brackets)))
+            pair.f_values(np.unique(np.concatenate(brackets)))
         roots = [_roots(pair, samples) for samples in brackets]
         tcas = np.array([tca for interval_tcas, _ in roots for tca in interval_tcas])
         if tcas.size == 0:
@@ -941,16 +970,16 @@ class ApproachSearch:
         minima: list[RangeMinimum] = []
         first = 0
         for interval_tcas, failed in roots:
-            rows = slice(first, first + len(interval_tcas))
-            first = rows.stop
+            span = slice(first, first + len(interval_tcas))
+            first = span.stop
             try:
                 minima.extend(
                     self._minima_inside_volume(
                         primary,
                         secondary,
-                        tcas[rows],
-                        errors[:, rows],
-                        tuple(state[rows] for state in states),
+                        tcas[span],
+                        errors[:, span],
+                        tuple(state[span] for state in states),
                         failed,
                     )
                 )
@@ -1002,20 +1031,3 @@ class ApproachSearch:
             )
             for k in np.flatnonzero(inside)
         ]
-
-
-def _roots(pair: _Pair, samples: FloatArray) -> tuple[list[float], _Failed | None]:
-    """The TCAs of a pair in one interval, sampled at ``samples``, in order,
-    and the failure that stopped the search, if one did."""
-    try:
-        values = pair.values(samples)
-    except _Failed as exc:
-        return [], exc
-    tcas: list[float] = []
-    for j in np.flatnonzero((values[:-1] < 0.0) & (values[1:] >= 0.0)):
-        try:
-            tca = brentq(pair.at, samples[j], samples[j + 1], xtol=TCA_TOLERANCE)
-        except _Failed as exc:
-            return tcas, exc
-        tcas.append(float(tca))
-    return tcas, None
