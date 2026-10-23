@@ -7,32 +7,27 @@ import inspect
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Final, Literal, NamedTuple, Self, TypeAlias, cast, overload
-
-import numpy as np
+from typing import Final, Literal, Self, TypeAlias, cast, overload
 
 from keepout._methods import MethodChoice
 from keepout._pickling import reduce_with_mappings
 from keepout._types import override
 from keepout.conjunction import Conjunction
-from keepout.encounter import Role
-from keepout.errors import GeometryError, PcConvergenceError
-from keepout.orbits import orbital_period
-from keepout.pc._duration import (
-    DURATION_LIMIT,
-    SIGMA_EXTENT,
-    encounter_duration,
-    long_encounter,
+from keepout.pc._auto import (
+    AUTO_MC_SAMPLES,
+    AUTO_MC_SEED,
+    TCA_OFFSET_LIMIT,
+    applicability,
+    assess,
+    auto,
+    known_only_in_position,
 )
-from keepout.pc._plane import MissingCovariance
-from keepout.pc._rate import UnusableOrbit
+from keepout.pc._duration import DURATION_LIMIT, SIGMA_EXTENT, encounter_duration
 from keepout.pc.elrod import elrod
 from keepout.pc.foster import foster
-from keepout.pc.hall3d import Encounters, hall3d
-from keepout.pc.hall3d import integrate as hall3d_over_scan
+from keepout.pc.hall3d import hall3d
 from keepout.pc.maxpc import alfano, dilution, frisbee
 from keepout.pc.montecarlo import montecarlo
-from keepout.pc.montecarlo import sample as montecarlo_over_scan
 from keepout.pc.result import Method, PcResult
 
 __all__ = [
@@ -52,79 +47,6 @@ __all__ = [
     "compute_pc",
     "encounter_duration",
 ]
-
-TCA_OFFSET_LIMIT: Final = 0.01
-"""Largest relative-position component along the relative velocity, as a
-fraction of the relative distance, before the states are reported as not
-being at the time of closest approach."""
-
-AUTO_MC_SAMPLES: Final = 1_000_000
-"""Trial budget of ``auto``'s Monte Carlo fallback (seconds to a minute)."""
-
-AUTO_MC_SEED: Final = 0
-"""Seed of ``auto``'s Monte Carlo fallback, so ``auto`` is reproducible."""
-
-
-def applicability(conjunction: Conjunction, duration: float) -> tuple[str, ...]:
-    """Warnings about the assumptions behind 2-D Pc for this conjunction.
-
-    Both hold whether or not the covariances are known: the closest-approach
-    offset does not depend on them, and with a covariance unknown the
-    duration from the known one alone is a lower bound on the true duration,
-    so a duration warning is still valid.
-
-    Parameters
-    ----------
-    conjunction
-        The conjunction at TCA.
-    duration
-        Its :func:`encounter_duration` [s].
-    """
-    warnings: list[str] = []
-    fraction = long_encounter(conjunction, duration)
-    if fraction is not None:
-        lasts = "at least about" if conjunction.unknown_covariance else "about"
-        warnings.append(
-            f"2-D Pc assumptions questionable: the encounter lasts {lasts} "
-            f"{duration:.3g} s, {100.0 * fraction:.2g}% of the primary's "
-            f"orbital period (limit {100.0 * DURATION_LIMIT:g}%); a 3-D Pc may "
-            "differ"
-        )
-    plane = conjunction.plane
-    along = abs(plane.closest_approach_offset)
-    if along > TCA_OFFSET_LIMIT * float(np.linalg.norm(plane.relative_position)):
-        warnings.append(
-            f"states are {along:.3g} m from closest approach along the relative "
-            "velocity; 2-D Pc uses the straight-line closest approach"
-        )
-    return tuple(warnings)
-
-
-class _Assessment(NamedTuple):
-    """What :func:`compute_pc` adds to every method's result."""
-
-    notes: tuple[str, ...]
-    """Applicability warnings."""
-    details: dict[str, float]
-    """``encounter_duration_s``, when it is meaningful."""
-
-
-def _assess(conjunction: Conjunction) -> _Assessment:
-    """Applicability notes and encounter duration, when they are meaningful.
-
-    Only with an encounter plane (non-zero relative velocity). The notes are
-    kept with a covariance unknown (see :func:`applicability`); the duration
-    detail is not, since it is then only a lower bound.
-    """
-    if conjunction.relative_speed == 0.0:
-        return _Assessment((), {})
-    duration = encounter_duration(conjunction)
-    notes = applicability(conjunction, duration)
-    details = (
-        {} if conjunction.unknown_covariance else {"encounter_duration_s": duration}
-    )
-    return _Assessment(notes, details)
-
 
 MethodKind: TypeAlias = Literal["2d", "3d", "montecarlo", "maxpc"]
 """A family of Pc methods: 2-D on the encounter plane, 3-D, Monte Carlo, or
@@ -193,195 +115,6 @@ METHODS: Final[Mapping[Method, MethodSpec]] = MappingProxyType(
     }
 )
 """Every Pc method by name: the one table of what each is and takes."""
-
-
-def _spec(method: str) -> MethodSpec:
-    """The :class:`MethodSpec` of a method name.
-
-    Raises
-    ------
-    ValueError
-        If ``method`` names no method (nor does ``"auto"``: it is a choice).
-    """
-    # A name that is no method is only looked up: it finds nothing.
-    spec = METHODS.get(cast(Method, method))
-    if spec is None:
-        raise ValueError(
-            f"unknown Pc method {method!r}; expected 'auto' or one of {tuple(METHODS)}"
-        )
-    return spec
-
-
-def _require_options(method: MethodChoice, options: Mapping[str, object]) -> None:
-    """A check that ``method`` is known and takes every option in ``options``.
-
-    Raises
-    ------
-    ValueError
-        If ``method`` is unknown, or options are given with ``"auto"``.
-    TypeError
-        If the method does not take an option.
-    """
-    if method == "auto":
-        if options:
-            raise ValueError(f"options {sorted(options)} need an explicit method")
-        return
-    spec = _spec(method)
-    refused = sorted(options.keys() - spec.options)
-    if refused:
-        takes = ", ".join(sorted(spec.options)) or "none"
-        raise TypeError(f"{method} takes no option {refused}; it takes: {takes}")
-
-
-class _AutoResult(NamedTuple):
-    """A method's result as :func:`compute_pc` chose and ran it."""
-
-    result: PcResult
-    """The chosen method's result."""
-    notes: tuple[str, ...]
-    """Applicability warnings."""
-    details: dict[str, float]
-    """Extra details."""
-
-
-_NO_PLANE: Final = (
-    "no Pc method applies: the relative velocity is zero (no encounter plane)"
-)
-"""Start of ``"auto"``'s error when the 3-D methods, the only ones left at
-zero relative velocity, cannot run."""
-
-
-def _both_orbits_elliptic(conjunction: Conjunction) -> bool:
-    """Whether both objects are on elliptic (bound) orbits, as the 3-D
-    methods need."""
-    return all(
-        orbital_period(item.state) is not None
-        for item in (conjunction.primary, conjunction.secondary)
-    )
-
-
-def _auto(conjunction: Conjunction) -> _AutoResult:
-    """The automatic choice: a method's result, applicability notes and details.
-
-    Raises
-    ------
-    GeometryError
-        If the relative velocity is zero and the 3-D methods cannot run.
-    """
-    if conjunction.relative_speed == 0.0:
-        return _auto_without_plane(conjunction)
-    unknown = conjunction.unknown_covariance
-    notes, details = _assess(conjunction)
-    plane, hard_body_radius = conjunction.plane, conjunction.hard_body_radius
-    if len(unknown) == 2:
-        return _AutoResult(alfano(plane, hard_body_radius), notes, details)
-    if unknown:
-        return _AutoResult(frisbee(plane, hard_body_radius), notes, details)
-    if not notes or not _both_orbits_elliptic(conjunction):
-        return _AutoResult(foster(plane, hard_body_radius), notes, details)
-    position_only = conjunction.position_only_covariance
-    if position_only:
-        note = (
-            f"{_known_only_in_position(conjunction, position_only)}: the 3-D "
-            "methods need the velocity uncertainty, so the 2-D Pc is used"
-        )
-        return _AutoResult(foster(plane, hard_body_radius), (*notes, note), details)
-    pc_2d = foster(plane, hard_body_radius).value
-    encounters = Encounters.scan(conjunction, None)
-    return _three_d(conjunction, encounters, notes, {**details, "pc_2d": pc_2d})
-
-
-def _auto_without_plane(conjunction: Conjunction) -> _AutoResult:
-    """The automatic choice at zero relative velocity: a 3-D method.
-
-    Raises
-    ------
-    GeometryError
-        If the 3-D methods cannot run.
-    """
-    try:
-        encounters = Encounters.scan(conjunction, None)
-    except MissingCovariance as exc:
-        raise GeometryError(
-            f"{_NO_PLANE} and {_covariances_of(conjunction, exc.roles)} unknown"
-        ) from exc
-    except UnusableOrbit as exc:
-        raise GeometryError(
-            f"{_NO_PLANE} and the 3-D methods cannot use the orbit of "
-            f"{conjunction.label(exc.role)}: {exc}"
-        ) from exc
-    notes = ("relative velocity is zero: 2-D Pc is undefined",)
-    return _three_d(conjunction, encounters, notes, {})
-
-
-def _covariances_of(conjunction: Conjunction, roles: tuple[Role, ...]) -> str:
-    """``the covariance of <object> is`` or ``the covariances of <object> and
-    <object> are``."""
-    labels = " and ".join(conjunction.label(role) for role in roles)
-    if len(roles) == 2:
-        return f"the covariances of {labels} are"
-    return f"the covariance of {labels} is"
-
-
-def _known_only_in_position(conjunction: Conjunction, roles: tuple[Role, ...]) -> str:
-    """``the covariance of <object> is known only in position (...)``."""
-    return (
-        f"{_covariances_of(conjunction, roles)} known only in position "
-        "(zero velocity block)"
-    )
-
-
-def _velocity_notes(conjunction: Conjunction, method: Method) -> tuple[str, ...]:
-    """A note when ``method`` needs the velocity uncertainty and a covariance
-    has none: whichever way the method was chosen, it takes that velocity as
-    exact."""
-    position_only = conjunction.position_only_covariance
-    if not METHODS[method].uses_velocity or not position_only:
-        return ()
-    return (
-        (
-            f"{_known_only_in_position(conjunction, position_only)}: {method} "
-            "takes its velocity as exact"
-        ),
-    )
-
-
-def _three_d(
-    conjunction: Conjunction,
-    encounters: Encounters,
-    notes: tuple[str, ...],
-    details: dict[str, float],
-) -> _AutoResult:
-    """Hall's 3D-Nc over an encounter scan, or Monte Carlo over it if Hall fails."""
-    try:
-        return _AutoResult(hall3d_over_scan(conjunction, encounters), notes, details)
-    except PcConvergenceError as exc:
-        fallback = (
-            f"{exc}; Monte Carlo used instead (seed {AUTO_MC_SEED}, at most "
-            f"{AUTO_MC_SAMPLES:,} trials)"
-        )
-        result = montecarlo_over_scan(
-            conjunction, encounters, max_samples=AUTO_MC_SAMPLES, seed=AUTO_MC_SEED
-        )
-        return _AutoResult(result, (*notes, fallback), details)
-
-
-def _compute(
-    conjunction: Conjunction, method: MethodChoice, options: Mapping[str, object]
-) -> PcResult:
-    """:func:`compute_pc` with its options as a mapping."""
-    _require_options(method, options)
-    if method == "auto":
-        result, notes, details = _auto(conjunction)
-    else:
-        notes, details = _assess(conjunction)
-        result = METHODS[method].run(conjunction, options)
-    notes += _velocity_notes(conjunction, result.method)
-    return dataclasses.replace(
-        result,
-        diagnostics=conjunction.diagnostics + notes + result.diagnostics,
-        details={**result.details, **details},
-    )
 
 
 @overload
@@ -508,6 +241,77 @@ def compute_pc(
         grid), since the Monte Carlo fallback shares that scan.
     """
     return _compute(conjunction, method, options)
+
+
+def _compute(
+    conjunction: Conjunction, method: MethodChoice, options: Mapping[str, object]
+) -> PcResult:
+    """:func:`compute_pc` with its options as a mapping."""
+    _require_options(method, options)
+    if method == "auto":
+        result, (notes, details) = auto(conjunction)
+    else:
+        notes, details = assess(conjunction)
+        result = METHODS[method].run(conjunction, options)
+    notes += _velocity_notes(conjunction, result.method)
+    return dataclasses.replace(
+        result,
+        diagnostics=conjunction.diagnostics + notes + result.diagnostics,
+        details={**result.details, **details},
+    )
+
+
+def _velocity_notes(conjunction: Conjunction, method: Method) -> tuple[str, ...]:
+    """A note when ``method`` needs the velocity uncertainty and a covariance
+    has none: whichever way the method was chosen, it takes that velocity as
+    exact."""
+    position_only = conjunction.position_only_covariance
+    if not METHODS[method].uses_velocity or not position_only:
+        return ()
+    return (
+        (
+            f"{known_only_in_position(conjunction, position_only)}: {method} "
+            "takes its velocity as exact"
+        ),
+    )
+
+
+def _require_options(method: MethodChoice, options: Mapping[str, object]) -> None:
+    """A check that ``method`` is known and takes every option in ``options``.
+
+    Raises
+    ------
+    ValueError
+        If ``method`` is unknown, or options are given with ``"auto"``.
+    TypeError
+        If the method does not take an option.
+    """
+    if method == "auto":
+        if options:
+            raise ValueError(f"options {sorted(options)} need an explicit method")
+        return
+    spec = _spec(method)
+    refused = sorted(options.keys() - spec.options)
+    if refused:
+        takes = ", ".join(sorted(spec.options)) or "none"
+        raise TypeError(f"{method} takes no option {refused}; it takes: {takes}")
+
+
+def _spec(method: str) -> MethodSpec:
+    """The :class:`MethodSpec` of a method name.
+
+    Raises
+    ------
+    ValueError
+        If ``method`` names no method (nor does ``"auto"``: it is a choice).
+    """
+    # A name that is no method is only looked up: it finds nothing.
+    spec = METHODS.get(cast(Method, method))
+    if spec is None:
+        raise ValueError(
+            f"unknown Pc method {method!r}; expected 'auto' or one of {tuple(METHODS)}"
+        )
+    return spec
 
 
 @dataclass(frozen=True, eq=False, slots=True)

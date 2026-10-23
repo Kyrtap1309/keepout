@@ -4,10 +4,11 @@ Every patch of a private symbol of :mod:`keepout.pc` is made here, by a named
 seam taking pytest's ``monkeypatch``, so tests do not name private symbols and
 a rename in ``src`` is fixed in one place.
 
-The main seams are :func:`keepout.pc._rate._iterate_overlap`, the batched
-peak-overlap iteration (the code under test, ``_peak_overlap``, keeps its own
+The main seams are :func:`keepout.pc._overlap._iterate_overlap`, the batched
+peak-overlap iteration (the code under test, ``peak_overlap``, keeps its own
 error isolation and fallback logic), the automatic window search
-:func:`keepout.pc._timeline.locate_auto` as :mod:`keepout.pc._rate` calls it,
+:func:`keepout.pc._timeline.locate_auto` as :mod:`keepout.pc._encounters`
+calls it,
 the rate of a batch of times (``CollisionRate._rates``), the Clenshaw-Curtis
 orders of the time integral, the Monte Carlo batch size and the methods
 :func:`keepout.pc.compute_pc` falls back between.
@@ -23,12 +24,16 @@ from typing_extensions import override
 
 from keepout._types import BoolArray, FloatArray, IndexArray
 from keepout.errors import GeometryError
+from keepout.pc import _auto as auto_module
+from keepout.pc import _encounters as encounters_module
+from keepout.pc import _overlap as overlap_module
+from keepout.pc import _quadrature as quadrature_module
 from keepout.pc import _rate as rate_module
-from keepout.pc import _timeline as timeline_module
-from keepout.pc import api
 from keepout.pc._orbit import OrbitUncertainty
-from keepout.pc._rate import Gaussians
-from keepout.pc._timeline import Rate, RateIntegral, RateScan, Screen
+from keepout.pc._overlap import Gaussians
+from keepout.pc._quadrature import RateIntegral
+from keepout.pc._timeline import Rate, RateScan, Screen
+from keepout.pc._timeline import locate_auto as real_locate_auto
 from keepout.pc.montecarlo import _Trials
 from keepout.pc.result import PcResult
 
@@ -78,7 +83,7 @@ def failing_where(
     when: Callable[[FloatArray], BoolArray], failure: Failure
 ) -> Iteration:
     """``_iterate_overlap`` that fails through ``failure`` at the times ``when``."""
-    real = rate_module._iterate_overlap
+    real = overlap_module._iterate_overlap
 
     def patched(
         primary: OrbitUncertainty,
@@ -96,7 +101,7 @@ def failing_where(
 
 def never_converging_overlap(monkeypatch: pytest.MonkeyPatch) -> None:
     """The peak-overlap iteration fails at every time."""
-    monkeypatch.setattr(rate_module, "_iterate_overlap", never_converges)
+    monkeypatch.setattr(overlap_module, "_iterate_overlap", never_converges)
 
 
 def overlap_failing_where(
@@ -105,17 +110,19 @@ def overlap_failing_where(
     failure: Failure,
 ) -> None:
     """The peak-overlap iteration fails through ``failure`` at the times ``when``."""
-    monkeypatch.setattr(rate_module, "_iterate_overlap", failing_where(when, failure))
+    monkeypatch.setattr(
+        overlap_module, "_iterate_overlap", failing_where(when, failure)
+    )
 
 
 def overlap_failing_while_integrating(monkeypatch: pytest.MonkeyPatch) -> None:
     """The peak-overlap iteration fails at Hall's quadrature nodes only.
 
     It converges during the scan, and fails everywhere while
-    :func:`~keepout.pc._timeline.integrate_segments` integrates the rate.
+    :func:`~keepout.pc._quadrature.integrate_segments` integrates the rate.
     """
-    real_integral = timeline_module.integrate_segments
-    real_iteration = rate_module._iterate_overlap
+    real_integral = quadrature_module.integrate_segments
+    real_iteration = overlap_module._iterate_overlap
     integrating = False
 
     def integral(rate: Rate, found: RateScan, *, rtol: float) -> RateIntegral:
@@ -137,7 +144,7 @@ def overlap_failing_while_integrating(monkeypatch: pytest.MonkeyPatch) -> None:
         return run(primary, secondary, times, floor, mean_centred)
 
     monkeypatch.setattr(hall3d_module, "integrate_segments", integral)
-    monkeypatch.setattr(rate_module, "_iterate_overlap", iteration)
+    monkeypatch.setattr(overlap_module, "_iterate_overlap", iteration)
 
 
 class WindowSearch(NamedTuple):
@@ -161,7 +168,7 @@ def searching_with(change: Callable[[WindowSearch], WindowSearch]) -> LocateAuto
     ``change`` may record them (a spy), replace them, or raise to stop the
     search before any scan.
     """
-    real = timeline_module.locate_auto
+    real = real_locate_auto
 
     def patched(
         rate: Rate,
@@ -181,12 +188,12 @@ def window_search(
 ) -> None:
     """The automatic window search runs with its arguments passed through
     ``change`` (see :func:`searching_with`)."""
-    monkeypatch.setattr(rate_module, "locate_auto", searching_with(change))
+    monkeypatch.setattr(encounters_module, "locate_auto", searching_with(change))
 
 
 def straight_line_closest_at(monkeypatch: pytest.MonkeyPatch, time: float) -> None:
     """The automatic window takes the straight-line closest approach at ``time``."""
-    monkeypatch.setattr(rate_module, "straight_line_closest_time", lambda _: time)
+    monkeypatch.setattr(encounters_module, "straight_line_closest_time", lambda _: time)
 
 
 def rate_returning(monkeypatch: pytest.MonkeyPatch, value: float) -> None:
@@ -230,8 +237,8 @@ def time_integral_orders(
     """The time integral's Clenshaw-Curtis orders: the first is ``start``
     (unchanged if ``None``) and the finest ``largest``."""
     if start is not None:
-        monkeypatch.setattr(timeline_module, "CC_START_ORDER", start)
-    monkeypatch.setattr(timeline_module, "CC_MAX_ORDER", largest)
+        monkeypatch.setattr(quadrature_module, "CC_START_ORDER", start)
+    monkeypatch.setattr(quadrature_module, "CC_MAX_ORDER", largest)
 
 
 def monte_carlo_batches(monkeypatch: pytest.MonkeyPatch, size: int) -> None:
@@ -240,23 +247,24 @@ def monte_carlo_batches(monkeypatch: pytest.MonkeyPatch, size: int) -> None:
 
 
 Runner = Callable[..., PcResult]
-"""A fake for :func:`~keepout.pc.hall3d.integrate` or
-:func:`~keepout.pc.montecarlo.sample`: conjunction, encounters, options."""
+"""A fake for :func:`~keepout.pc.hall3d.hall3d_over_scan` or
+:func:`~keepout.pc.montecarlo.montecarlo_over_scan`: conjunction, encounters,
+options."""
 
 
 def auto_hall_integration(monkeypatch: pytest.MonkeyPatch, fake: Runner) -> None:
     """``compute_pc`` integrates Hall's rate over its scan with ``fake``."""
-    monkeypatch.setattr(api, "hall3d_over_scan", fake)
+    monkeypatch.setattr(auto_module, "hall3d_over_scan", fake)
 
 
 def auto_monte_carlo(monkeypatch: pytest.MonkeyPatch, fake: Runner) -> None:
     """``compute_pc``'s Monte Carlo fallback samples Hall's scan with ``fake``."""
-    monkeypatch.setattr(api, "montecarlo_over_scan", fake)
+    monkeypatch.setattr(auto_module, "montecarlo_over_scan", fake)
 
 
 def auto_monte_carlo_budget(monkeypatch: pytest.MonkeyPatch, trials: int) -> None:
     """``compute_pc``'s Monte Carlo fallback runs at most ``trials`` trials."""
-    monkeypatch.setattr(api, "AUTO_MC_SAMPLES", trials)
+    monkeypatch.setattr(auto_module, "AUTO_MC_SAMPLES", trials)
 
 
 class _MisleadingLine(_Trials):

@@ -7,7 +7,6 @@ import json
 import math
 import time
 import urllib.parse
-from collections import deque
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from http import HTTPStatus
@@ -26,18 +25,19 @@ from keepout.errors import (
 )
 from keepout.omm.celestrak import loads_json
 from keepout.omm.model import Omm
-from keepout.sources._store import cache_dir, store_json
+from keepout.sources._store import cache_dir
 from keepout.sources.cache import cached_fetch
 from keepout.sources.catalog import Catalog, CatalogPart, Retrieval
 from keepout.sources.spacetrack._credentials import Credentials, redacted_excerpt
+from keepout.sources.spacetrack._ledger import LEDGER_FILE, RequestLedger
 from keepout.sources.spacetrack._query import (
     CATALOG,
-    CLASS_INTERVALS,
     LOGIN_URL,
     LOGOUT_URL,
     PUBLIC_CDMS,
     Query,
 )
+from keepout.sources.spacetrack._throttle import Throttle
 from keepout.sources.spacetrack._transport import (
     Request,
     Response,
@@ -48,20 +48,11 @@ from keepout.sources.spacetrack.public_cdm import PublicCdms, read_public_cdms
 from keepout.units import HOUR, MINUTE
 
 __all__ = [
-    "PER_HOUR",
-    "PER_MINUTE",
     "SpaceTrackClient",
-    "Throttle",
     "fetch_catalog",
     "fetch_public_cdms",
     "read_catalog",
 ]
-
-PER_MINUTE: Final = 20
-"""Most requests sent in any 60 s; Space-Track allows fewer than 30."""
-
-PER_HOUR: Final = 200
-"""Most requests sent in any hour; Space-Track allows fewer than 300."""
 
 _RATE_LIMIT_TEXT: Final = b"violated your query rate limit"
 """What Space-Track's answer says when a query broke the per-minute limit."""
@@ -72,62 +63,7 @@ _EXCERPT: Final = 200
 _FORMAT_EXCERPT: Final = 60
 """Bytes of an answer quoted when it is not the expected format."""
 
-_LEDGER: Final = "requests.json"
-"""The file recording when each request class was last queried."""
-
-_LEDGER_FORMAT: Final = 1
-"""Version of the ledger layout; another version is an error."""
-
 _T = TypeVar("_T")
-
-
-class Throttle:
-    """A pacing of requests: at most ``per_minute`` in any 60 s and
-    ``per_hour`` in any hour, with a wait before a request that would make
-    more.
-
-    Parameters
-    ----------
-    per_minute, per_hour
-        The limits.
-    clock
-        Gives the time [s] (a monotonic clock).
-    sleep
-        Waits the given seconds.
-
-    Raises
-    ------
-    ValueError
-        If a limit is below 1.
-    """
-
-    def __init__(
-        self,
-        *,
-        per_minute: int = PER_MINUTE,
-        per_hour: int = PER_HOUR,
-        clock: Callable[[], float] = time.monotonic,
-        sleep: Callable[[float], object] = time.sleep,
-    ) -> None:
-        if per_minute < 1 or per_hour < 1:
-            raise ValueError(
-                f"limits must be at least 1, got {per_minute}/min and {per_hour}/h"
-            )
-        self._limits = ((MINUTE, per_minute), (HOUR, per_hour))
-        self._clock = clock
-        self._sleep = sleep
-        self._sent: deque[float] = deque(maxlen=max(per_minute, per_hour))
-
-    def wait(self) -> None:
-        """A wait until a request may be sent, which then counts as sent."""
-        now = self._clock()
-        due = now
-        for window, limit in self._limits:
-            if len(self._sent) >= limit:
-                due = max(due, self._sent[-limit] + window)
-        if due > now:
-            self._sleep(due - now)
-        self._sent.append(due)
 
 
 class SpaceTrackClient:
@@ -164,6 +100,7 @@ class SpaceTrackClient:
     ) -> None:
         self._credentials = credentials
         self._root = cache_dir(cache) / "spacetrack"
+        self._ledger = RequestLedger(self._root / LEDGER_FILE)
         self._transport = UrllibTransport() if transport is None else transport
         self._throttle = Throttle() if throttle is None else throttle
         self._now = now
@@ -192,7 +129,7 @@ class SpaceTrackClient:
     @property
     def ledger(self) -> Path:
         """The file recording when each request class was last queried."""
-        return self._root / _LEDGER
+        return self._ledger.path
 
     def fetch(
         self,
@@ -340,14 +277,14 @@ class SpaceTrackClient:
             If the ledger is not one keepout wrote.
         """
         now = self._now()
-        self._check_interval(query, self._read_ledger(), now)
+        self._check_interval(query, self._ledger.read(), now)
         self._check_running()
         if not self._logged_in:
             self._login()
             now = self._now()
-        ledger = self._read_ledger()
+        ledger = self._ledger.read()
         self._check_interval(query, ledger, now)
-        self._write_ledger({**ledger, query.request_class: now})
+        self._ledger.write({**ledger, query.request_class: now})
 
     def _check_interval(
         self, query: Query, ledger: Mapping[str, float], now: float
@@ -457,36 +394,6 @@ class SpaceTrackClient:
             else text[:_EXCERPT]
         ).strip()
         return f"{excerpt} ..." if len(text) > _EXCERPT else excerpt
-
-    def _read_ledger(self) -> dict[str, float]:
-        try:
-            record: JsonValue = json.loads(self.ledger.read_bytes())
-        except FileNotFoundError:
-            return {}
-        except (OSError, ValueError) as exc:
-            raise SourceFormatError(
-                f"cannot read the Space-Track request record {self.ledger}: {exc}"
-            ) from exc
-        invalid = (
-            f"{self.ledger} is not a Space-Track request record of this "
-            "keepout version; delete it only if no query was sent in the "
-            f"last {max(CLASS_INTERVALS.values()) / HOUR:g} hours"
-        )
-        if not isinstance(record, dict) or record.get("format") != _LEDGER_FORMAT:
-            raise SourceFormatError(invalid)
-        queried = record.get("queried")
-        if not isinstance(queried, dict):
-            raise SourceFormatError(invalid)
-        sent: dict[str, float] = {}
-        for query, sent_at in queried.items():
-            if not isinstance(sent_at, float) or not math.isfinite(sent_at):
-                raise SourceFormatError(invalid)
-            sent[query] = sent_at
-        return sent
-
-    def _write_ledger(self, queried: Mapping[str, float]) -> None:
-        record = {"format": _LEDGER_FORMAT, "queried": dict(sorted(queried.items()))}
-        store_json(self.ledger, record)
 
 
 def _allowance(query: Query) -> str:

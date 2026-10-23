@@ -35,7 +35,10 @@ from keepout.propagation import (
 )
 from keepout.screening import (
     DEFAULT_VOLUME,
+    ObjectFailure,
+    RangeMinimum,
     ScreeningVolume,
+    SearchResult,
     VolumeRule,
     apogee_perigee_filter,
     volume_for,
@@ -47,9 +50,6 @@ from keepout.screening.tca import (
     PERTURBATION,
     SPEED_BOUND_MARGIN,
     ApproachSearch,
-    ObjectFailure,
-    RangeMinimum,
-    SearchResult,
     speed_bounds,
     time_grid,
 )
@@ -934,7 +934,7 @@ def test_a_docked_spacecraft_has_no_minimum() -> None:
         primary_bounds=own.radius_bounds(WEEK_START, 86400.0),
         catalog_bounds=catalog.radius_bounds(WEEK_START, 86400.0),
     ).run()
-    assert summary(result) == summary(SearchResult((), {}, {}))
+    assert summary(result) == summary(SearchResult.empty())
 
 
 def test_sgp4_results_do_not_depend_on_the_chunks() -> None:

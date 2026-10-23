@@ -18,7 +18,8 @@ from typing import Final, NamedTuple
 
 from astropy.time import Time
 
-from keepout.ccsds.keywords import format_epoch, format_value, parse_epoch
+from keepout.ccsds.epochs import format_epoch, parse_epoch
+from keepout.ccsds.keywords import format_value
 from keepout.omm.keywords import ATTRIBUTES, KEYWORDS, SGP4_EPHEMERIS_TYPE
 
 __all__ = [

@@ -45,11 +45,10 @@ from scipy.spatial.transform import Rotation
 from keepout.conjunction import Conjunction
 from keepout.errors import CovarianceError, GeometryError, PcConvergenceError
 from keepout.orbits import orbital_period
-from keepout.pc import _rate as rate_module
+from keepout.pc import _overlap as overlap_module
 from keepout.pc import foster, hall3d
+from keepout.pc._encounters import Encounters, UnusableOrbit
 from keepout.pc._plane import MissingCovariance
-from keepout.pc._rate import UnusableOrbit
-from keepout.pc.hall3d import Encounters
 
 # The package exports the function hall3d under the module's name.
 hall3d_module = importlib.import_module("keepout.pc.hall3d")
@@ -538,7 +537,7 @@ def test_floored_inverse_keeps_a_tiny_axis_next_to_a_huge_one() -> None:
     # the rounding of the 1e10 m^2 eigenvalue (~1e-6 m^2).
     rotation = Rotation.from_euler("xyz", [0.3, -0.7, 1.1]).as_matrix()
     matrix = (rotation * np.array([0.0, 1e2, 1e10])) @ rotation.T
-    inverse = rate_module._floored_inverse(matrix, 4e-6)
+    inverse = overlap_module._floored_inverse(matrix, 4e-6)
     narrow = rotation[:, 0]
     assert narrow @ inverse @ narrow == pytest.approx(1.0 / 4e-6, rel=1e-6)
 

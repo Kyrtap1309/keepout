@@ -43,6 +43,7 @@ from keepout.pc import (
     frisbee,
     hall3d,
 )
+from keepout.pc._encounters import Encounters
 from keepout.pc.api import (
     AUTO_MC_SAMPLES,
     AUTO_MC_SEED,
@@ -51,7 +52,6 @@ from keepout.pc.api import (
     MethodChoice,
     encounter_duration,
 )
-from keepout.pc.hall3d import Encounters
 from keepout.pc.montecarlo import MC_BATCH, montecarlo
 from keepout.pc.result import Method
 from keepout.state import StateVector

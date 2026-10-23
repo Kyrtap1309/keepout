@@ -65,10 +65,7 @@ allows to redistribute with citation; cite them as such. Other classes
 """
 
 from keepout.sources.spacetrack._client import (
-    PER_HOUR,
-    PER_MINUTE,
     SpaceTrackClient,
-    Throttle,
     fetch_catalog,
     fetch_public_cdms,
     read_catalog,
@@ -90,6 +87,7 @@ from keepout.sources.spacetrack._query import (
     Query,
     RequestClass,
 )
+from keepout.sources.spacetrack._throttle import PER_HOUR, PER_MINUTE, Throttle
 from keepout.sources.spacetrack._transport import (
     Request,
     Response,

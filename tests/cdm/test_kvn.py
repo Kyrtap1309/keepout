@@ -9,7 +9,7 @@ from builders import known
 from cdm_builders import TRACSS, assert_equivalent, cdms, minimal_cdm
 from hypothesis import given, settings
 
-from keepout.ccsds.keywords import format_epoch
+from keepout.ccsds.epochs import format_epoch
 from keepout.cdm import Cdm, Field, Section, kvn
 from keepout.conjunction import Conjunction
 from keepout.errors import CdmParseError, CdmWriteError, CovarianceError

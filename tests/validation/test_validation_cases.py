@@ -19,6 +19,12 @@ from keepout.errors import CaraFormatError
 from keepout.objects import ObjectState
 from keepout.sources import cara
 from keepout.validation import cases as cases_module
+from keepout.validation.cara_inputs import (
+    alfano_objects,
+    load_alfano_inputs,
+    load_alfano_windows,
+    load_pc_method_inputs,
+)
 from keepout.validation.cases import (
     MC_MIN_PC,
     MC_SAMPLES,
@@ -27,15 +33,11 @@ from keepout.validation.cases import (
     alfano_3d_cases,
     alfano_cases,
     alfano_monte_carlo_cases,
-    alfano_objects,
     elrod_similar_to_3d_case,
     hall_similar_to_2d_case,
-    load_alfano_inputs,
-    load_alfano_windows,
     load_hall_2d3d_cases,
     load_max_pc_cases,
     load_non_pd_case,
-    load_pc_method_inputs,
     monte_carlo_options,
     pc_method_3d_cases,
     pc_method_cases,

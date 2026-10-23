@@ -24,13 +24,12 @@ from keepout.screening.result import (
     SkippedObject,
     SkipReason,
 )
-from keepout.screening.tca import (
-    ApproachSearch,
+from keepout.screening.search_result import (
     ObjectFailure,
     RangeMinimum,
     SearchResult,
-    time_grid,
 )
+from keepout.screening.tca import ApproachSearch, time_grid
 from keepout.screening.volume import (
     DEFAULT_VOLUME,
     SFS_HANDBOOK_VOLUMES,

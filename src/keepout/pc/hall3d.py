@@ -26,7 +26,6 @@ diagnostic says so.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
 from typing import Final
 
 import numpy as np
@@ -35,30 +34,23 @@ from keepout._validation import require_positive
 from keepout.conjunction import Conjunction
 from keepout.errors import PcConvergenceError
 from keepout.pc._duration import encounter_duration, long_encounter
-from keepout.pc._plane import require_known_covariance
-from keepout.pc._rate import (
-    CollisionRate,
+from keepout.pc._encounters import (
+    Encounters,
     check_fallbacks,
-    collision_rate,
-    encounter_scan,
-    reach,
     straight_line_closest_time,
 )
-from keepout.pc._timeline import (
-    RATE_FLOOR,
-    RateIntegral,
-    RateScan,
-    integrate_segments,
-    negligible_note,
-)
+from keepout.pc._plane import require_known_covariance
+from keepout.pc._quadrature import RateIntegral, integrate_segments
+from keepout.pc._rate import CollisionRate
+from keepout.pc._screen import reach
+from keepout.pc._timeline import RATE_FLOOR, negligible_note
 from keepout.pc.result import PcResult
 
 __all__ = [
     "HALL_RTOL",
     "QUIET_AGREEMENT",
-    "Encounters",
     "hall3d",
-    "integrate",
+    "hall3d_over_scan",
     "is_long",
 ]
 
@@ -157,63 +149,7 @@ def hall3d(
     require_positive(rtol, "rtol")
     require_known_covariance(conjunction.unknown_covariance, "hall3d")
     encounters = Encounters.scan(conjunction, window)
-    return integrate(conjunction, encounters, rtol=rtol)
-
-
-@dataclass(frozen=True, eq=False, slots=True)
-class Encounters:
-    """A conjunction's 3D-Nc collision rate and the scan locating its encounters.
-
-    :func:`hall3d` integrates the rate over the scan's segments and
-    :func:`~keepout.pc.montecarlo.montecarlo` samples trials only inside them,
-    so one scan serves both (``compute_pc`` falls back from one to the other).
-
-    Parameters
-    ----------
-    rate
-        The collision rate.
-    found
-        Its scan over the window.
-    window_given
-        Whether the window was passed rather than sized automatically.
-    scan_fallbacks
-        Times [s] and rates where the peak-overlap iteration failed during
-        the scan; ``rate.fallbacks`` also collects later failures (at Hall's
-        quadrature nodes).
-    """
-
-    rate: CollisionRate
-    found: RateScan
-    window_given: bool
-    scan_fallbacks: tuple[tuple[float, float], ...]
-
-    @classmethod
-    def scan(
-        cls,
-        conjunction: Conjunction,
-        window: tuple[float, float] | None,
-    ) -> Encounters:
-        """The encounters found by scanning ``window``, or an automatic one if ``None``.
-
-        Raises
-        ------
-        MissingCovariance
-            If a covariance is unknown (a :class:`CovarianceError` naming
-            no method: the callers do).
-        UnusableOrbit
-            If an orbit has no equinoctial elements (a
-            :class:`GeometryError`, with the object).
-        ValueError
-            If ``window`` is not finite with ``start < end``.
-        PcConvergenceError
-            If the encounters cannot be resolved (they need more detection
-            points than allowed, the rate is significant where the screen
-            ruled it negligible, or the rate cannot be computed on the scan
-            grid).
-        """
-        rate = collision_rate(conjunction)
-        found = encounter_scan(conjunction, rate, window)
-        return cls(rate, found, window is not None, tuple(rate.fallbacks))
+    return hall3d_over_scan(conjunction, encounters, rtol=rtol)
 
 
 def is_long(conjunction: Conjunction) -> bool:
@@ -225,7 +161,7 @@ def is_long(conjunction: Conjunction) -> bool:
     return long_encounter(conjunction, encounter_duration(conjunction)) is not None
 
 
-def integrate(
+def hall3d_over_scan(
     conjunction: Conjunction,
     encounters: Encounters,
     *,

@@ -19,7 +19,7 @@ from omm_builders import (
 )
 from sgp4 import omm as sgp4_omm
 
-from keepout.ccsds.keywords import parse_epoch
+from keepout.ccsds.epochs import parse_epoch
 from keepout.errors import OmmParseError
 from keepout.omm import Omm, celestrak
 from keepout.omm.celestrak import (

@@ -1,16 +1,22 @@
 """How long an encounter lasts, and when that is too long for 2-D Pc.
 
-Used by :mod:`keepout.pc.api` (the applicability warning) and by
-:mod:`keepout.pc.hall3d` (the note that Nc counts repeated entries).
+Used by :mod:`keepout.pc.api` (the applicability warning), by
+:mod:`keepout.pc.hall3d` (the note that Nc counts repeated entries) and,
+for the straight-line half-window, by the automatic 3D-Nc window.
 """
 
 from __future__ import annotations
 
+import math
 from typing import Final
 
+import numpy as np
+
+from keepout._types import FloatArray
 from keepout.conjunction import Conjunction
+from keepout.encounter import sigma_along
 from keepout.orbits import orbital_period
-from keepout.pc._timeline import straight_line_half_window
+from keepout.pc._timeline import SIGMA_REACH
 
 SIGMA_EXTENT: Final = 5.0
 """Standard deviations of the combined position covariance along the
@@ -20,6 +26,26 @@ duration."""
 DURATION_LIMIT: Final = 0.01
 """Largest encounter duration, as a fraction of the primary's orbital
 period, for which the 2-D (straight-line) model is considered sound."""
+
+
+def straight_line_half_window(
+    relative_velocity: FloatArray,
+    position_covariance: FloatArray,
+    radius: float,
+    sigmas: float = SIGMA_REACH,
+) -> float:
+    """Half-window of a straight-line encounter [s].
+
+    With ``sigma_v`` the combined position standard deviation along the
+    relative velocity, the rate is negligible beyond
+    ``(sigmas * sigma_v + R) / |v|`` (``sigmas`` defaults to
+    :data:`~keepout.pc._timeline.SIGMA_REACH`); infinite for zero relative velocity.
+    """
+    speed = float(np.linalg.norm(relative_velocity))
+    if speed == 0.0:
+        return math.inf
+    sigma = sigma_along(relative_velocity / speed, position_covariance)
+    return (sigmas * sigma + radius) / speed
 
 
 def encounter_duration(conjunction: Conjunction) -> float:

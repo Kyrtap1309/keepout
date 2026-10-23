@@ -6,6 +6,8 @@
 
 ::: keepout.ccsds.keywords
 
+::: keepout.ccsds.epochs
+
 ::: keepout.ccsds.kvn
 
 ::: keepout.ccsds.xml

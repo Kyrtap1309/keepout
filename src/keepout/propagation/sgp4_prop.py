@@ -17,7 +17,8 @@ from sgp4.api import WGS72, Satrec, SatrecArray
 
 from keepout._types import FloatArray, IndexArray, override
 from keepout._validation import require_non_negative
-from keepout.ccsds.keywords import format_epoch, message_number, utc_fields
+from keepout.ccsds.epochs import format_epoch, utc_fields
+from keepout.ccsds.keywords import message_number
 from keepout.errors import UnsupportedElements
 from keepout.omm.keywords import ATTRIBUTES, DEGREE, KEYWORDS, SGP4_EPHEMERIS_TYPE
 from keepout.omm.model import SGP4_EPOCH_DIGITS, Omm
@@ -136,7 +137,7 @@ def _sgp4_epoch(epoch: Time) -> float:
     That is, of the epoch's text rounded to microseconds (see
     :meth:`keepout.omm.Omm.keywords`); read from the text itself only where
     it is not plain ``YYYY-MM-DDThh:mm:ss.ffffff`` from ERFA (see
-    :func:`~keepout.ccsds.keywords.utc_fields`).
+    :func:`~keepout.ccsds.epochs.utc_fields`).
 
     Raises
     ------

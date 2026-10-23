@@ -9,17 +9,19 @@ from astropy.time import Time
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
+from keepout.ccsds.epochs import (
+    format_epoch,
+    parse_epoch,
+    parse_epochs,
+    preparse_epochs,
+    utc_fields,
+)
 from keepout.ccsds.keywords import (
     Keyword,
-    format_epoch,
     format_value,
     message_number,
     normalize_unit,
-    parse_epoch,
-    parse_epochs,
     parse_value,
-    preparse_epochs,
-    utc_fields,
 )
 from keepout.cdm.keywords import SEGMENT
 

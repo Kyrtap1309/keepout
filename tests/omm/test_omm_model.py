@@ -8,7 +8,7 @@ from astropy.time import Time
 from omm_builders import ISS, assert_same_satrec, omm_from, sgp4_record
 from screening_data import load_fixture
 
-from keepout.ccsds.keywords import parse_epoch
+from keepout.ccsds.epochs import parse_epoch
 from keepout.errors import UnsupportedElements
 from keepout.omm.keywords import DEGREE, KEYWORDS, REVOLUTION_PER_DAY
 from keepout.omm.model import (

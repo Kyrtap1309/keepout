@@ -3,6 +3,11 @@ from collections import Counter
 
 import pytest
 
+from keepout.validation.cara_inputs import (
+    load_alfano_inputs,
+    load_alfano_windows,
+    load_pc_method_inputs,
+)
 from keepout.validation.cases import (
     ALFANO,
     ALFANO_3D,
@@ -14,10 +19,7 @@ from keepout.validation.cases import (
     UNIT_TESTS,
     ValidationCase,
     alfano_monte_carlo_cases,
-    load_alfano_inputs,
-    load_alfano_windows,
     load_all,
-    load_pc_method_inputs,
     pc_method_monte_carlo_cases,
 )
 from keepout.validation.evaluation import Outcome, evaluate

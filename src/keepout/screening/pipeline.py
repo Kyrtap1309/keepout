@@ -87,13 +87,12 @@ from keepout.screening.result import (
     SkippedObject,
     SkipReason,
 )
-from keepout.screening.tca import (
-    DEFAULT_STEP,
-    ApproachSearch,
+from keepout.screening.search_result import (
     ObjectFailure,
     RangeMinimum,
     SearchResult,
 )
+from keepout.screening.tca import DEFAULT_STEP, ApproachSearch
 from keepout.screening.volume import (
     DEFAULT_VOLUME,
     ScreeningVolume,
@@ -192,38 +191,44 @@ def screen(
     require_positive(step, "step")
     processes = resolve_workers(workers)
     require_at_least(max_states, 1, "max_states")
-    window = _Window(start, float(duration), float(step), max_states)
-    current_primaries, skipped_by_epoch_primaries = _current(
-        primaries, ScreeningRole.PRIMARY, window, max_age, max_lead
+    settings = _SearchSettings(start, float(duration), float(step), max_states)
+    unique_primaries, duplicate_primaries = _deduplicated(
+        primaries, ScreeningRole.PRIMARY
     )
-    current_catalog, skipped_by_epoch_catalog = _current(
-        catalog, ScreeningRole.CATALOG, window, max_age, max_lead
+    current_primaries, out_of_window_primaries = _within_window(
+        unique_primaries, ScreeningRole.PRIMARY, settings, max_age, max_lead
+    )
+    unique_catalog, duplicate_catalog = _deduplicated(catalog, ScreeningRole.CATALOG)
+    current_catalog, out_of_window_catalog = _within_window(
+        unique_catalog, ScreeningRole.CATALOG, settings, max_age, max_lead
     )
     primary_propagator, volumes, skipped_unusable_primaries = _primaries(
         current_primaries, volume
     )
     primary_omms = primary_propagator.omms
     parts = _parts(
-        primary_propagator, primary_omms, volumes, current_catalog, window, processes
+        primary_propagator, primary_omms, volumes, current_catalog, settings, processes
     )
     skipped_before_search = [
-        *skipped_by_epoch_primaries,
-        *skipped_by_epoch_catalog,
+        *duplicate_primaries,
+        *out_of_window_primaries,
+        *duplicate_catalog,
+        *out_of_window_catalog,
         *skipped_unusable_primaries,
     ]
-    return _collect(
+    return _merge_part_results(
         _run(parts),
         primary_propagator,
         primary_omms,
         volumes,
         current_catalog,
-        window,
+        settings,
         skipped_before_search,
     )
 
 
 @dataclass(frozen=True, slots=True)
-class _Window:
+class _SearchSettings:
     """The window and the search's settings, shared by every part."""
 
     start: Time
@@ -236,7 +241,7 @@ class _Window:
 class _Part:
     """The primaries and one part of the catalog, to screen in one process."""
 
-    window: _Window
+    settings: _SearchSettings
     primaries: Propagator
     primary_omms: tuple[Omm, ...]
     """Element set of each of ``primaries``."""
@@ -255,15 +260,10 @@ class _PartResult:
     unsupported: tuple[tuple[int, str], ...]
 
 
-def _current(
-    omms: Iterable[Omm],
-    role: ScreeningRole,
-    window: _Window,
-    max_age: float,
-    max_lead: float,
+def _deduplicated(
+    omms: Iterable[Omm], role: ScreeningRole
 ) -> tuple[tuple[Omm, ...], list[SkippedObject]]:
-    """The newest element set of each object, unless too far from the window,
-    and the element sets left out."""
+    """The newest element set of each object, and the older ones left out."""
     unique = deduplicate(omms)
     newest = {omm.catalog_number: omm for omm in unique.kept}
     skipped: list[SkippedObject] = []
@@ -271,18 +271,31 @@ def _current(
         used = newest[omm.catalog_number].epoch.isot
         detail = f"epoch {omm.epoch.isot}; the element set of epoch {used} is used"
         skipped.append(SkippedObject(omm, role, SkipReason.DUPLICATE, detail))
-    if not unique.kept:
-        return (), skipped
+    return tuple(unique.kept), skipped
+
+
+def _within_window(
+    omms: Sequence[Omm],
+    role: ScreeningRole,
+    settings: _SearchSettings,
+    max_age: float,
+    max_lead: float,
+) -> tuple[tuple[Omm, ...], list[SkippedObject]]:
+    """The element sets whose epochs are close enough to the window, and the
+    others left out (stale, or too far ahead)."""
+    if not omms:
+        return (), []
     epochs = Time(
-        [omm.epoch.jd1 for omm in unique.kept],
-        [omm.epoch.jd2 for omm in unique.kept],
+        [omm.epoch.jd1 for omm in omms],
+        [omm.epoch.jd2 for omm in omms],
         format="jd",
         scale="utc",
     )
-    elapsed_at_start_s = (window.start - epochs).to_value(u.s)
+    elapsed_at_start_s = (settings.start - epochs).to_value(u.s)
     current: list[Omm] = []
-    for omm, elapsed_s in zip(unique.kept, elapsed_at_start_s.tolist(), strict=True):
-        age, lead = elapsed_s + window.duration, -elapsed_s
+    skipped: list[SkippedObject] = []
+    for omm, elapsed_s in zip(omms, elapsed_at_start_s.tolist(), strict=True):
+        age, lead = elapsed_s + settings.duration, -elapsed_s
         if age > max_age:
             detail = (
                 f"the window ends {age / DAY:.2f} days after the epoch "
@@ -327,86 +340,6 @@ def _primaries(
     return subset, volumes, skipped
 
 
-def _parts(
-    primaries: Propagator,
-    primary_omms: tuple[Omm, ...],
-    volumes: Sequence[ScreeningVolume],
-    catalog: tuple[Omm, ...],
-    window: _Window,
-    processes: int,
-) -> list[_Part]:
-    """The primaries with the catalog dealt into at most ``processes`` parts:
-    object ``i`` to part ``i mod count``, none for an empty catalog."""
-    bounds = primaries.radius_bounds(window.start, window.duration)
-    count = min(processes, len(catalog))
-    return [
-        _Part(
-            window=window,
-            primaries=primaries,
-            primary_omms=primary_omms,
-            primary_bounds=bounds,
-            volumes=tuple(volumes),
-            catalog=catalog[part::count],
-            columns=np.arange(part, len(catalog), count),
-        )
-        for part in range(count)
-    ]
-
-
-def _collect(
-    results: Sequence[_PartResult],
-    primaries: Propagator,
-    primary_omms: Sequence[Omm],
-    volumes: Sequence[ScreeningVolume],
-    catalog: Sequence[Omm],
-    window: _Window,
-    skipped_before_search: Sequence[SkippedObject],
-) -> ScreeningResult:
-    """The parts' results merged into the screening's result.
-
-    ``skipped_before_search`` are the element sets left out before the
-    search; to them
-    are added the catalog's element sets SGP4 cannot be initialised with and
-    the objects SGP4 failed for, whose minima are dropped.
-    """
-    unsupported_catalog = [
-        (catalog[index], message)
-        for result in results
-        for index, message in result.unsupported
-    ]
-    search = SearchResult.merge(result.search for result in results)
-    skipped = [
-        *skipped_before_search,
-        *_unsupported(unsupported_catalog, ScreeningRole.CATALOG),
-        *_failed(search.primary_failures, primary_omms, ScreeningRole.PRIMARY, window),
-        *_failed(search.catalog_failures, catalog, ScreeningRole.CATALOG, window),
-    ]
-    failed_primaries = set(search.primary_failures)
-    failed_catalog = set(search.catalog_failures)
-    minima = [
-        minimum
-        for minimum in search.minima
-        if minimum.primary_index not in failed_primaries
-        and minimum.secondary_index not in failed_catalog
-    ]
-    screened_volumes = {
-        omm.catalog_number: volumes[index]
-        for index, omm in enumerate(primary_omms)
-        if index not in failed_primaries
-    }
-    approaches = _approaches(
-        minima, primary_omms, catalog, window.start, primaries.frame
-    )
-    return ScreeningResult(
-        approaches=tuple(approaches),
-        skipped=tuple(skipped),
-        start=window.start,
-        duration=window.duration,
-        volumes=screened_volumes,
-        catalog_count=len(catalog) - len(unsupported_catalog) - len(failed_catalog),
-    )
-
-
 def _unsupported(
     unsupported: Iterable[tuple[Omm, str]], role: ScreeningRole
 ) -> list[SkippedObject]:
@@ -417,20 +350,30 @@ def _unsupported(
     ]
 
 
-def _failed(
-    failures: Mapping[int, ObjectFailure],
-    omms: Sequence[Omm],
-    role: ScreeningRole,
-    window: _Window,
-) -> list[SkippedObject]:
-    """The objects SGP4 failed for (by position in ``omms``), left out."""
-    skipped: list[SkippedObject] = []
-    for index, failure in failures.items():
-        when = (window.start + failure.offset * u.s).utc.isot
-        detail = f"{describe_error(failure.code)}, at {when}"
-        reason = SkipReason.PROPAGATION_FAILED
-        skipped.append(SkippedObject(omms[index], role, reason, detail))
-    return skipped
+def _parts(
+    primaries: Propagator,
+    primary_omms: tuple[Omm, ...],
+    volumes: Sequence[ScreeningVolume],
+    catalog: tuple[Omm, ...],
+    settings: _SearchSettings,
+    processes: int,
+) -> list[_Part]:
+    """The primaries with the catalog dealt into at most ``processes`` parts:
+    object ``i`` to part ``i mod count``, none for an empty catalog."""
+    bounds = primaries.radius_bounds(settings.start, settings.duration)
+    count = min(processes, len(catalog))
+    return [
+        _Part(
+            settings=settings,
+            primaries=primaries,
+            primary_omms=primary_omms,
+            primary_bounds=bounds,
+            volumes=tuple(volumes),
+            catalog=catalog[part::count],
+            columns=np.arange(part, len(catalog), count),
+        )
+        for part in range(count)
+    ]
 
 
 def _run(parts: Sequence[_Part]) -> list[_PartResult]:
@@ -449,10 +392,10 @@ def _screen_part(part: _Part) -> _PartResult:
     unsupported = tuple(
         (int(part.columns[index]), str(error)) for index, error in rejected
     )
-    window = part.window
+    settings = part.settings
     if len(part.primaries) == 0 or len(catalog) == 0:
-        return _PartResult(SearchResult((), {}, {}), unsupported)
-    bounds = catalog.radius_bounds(window.start, window.duration)
+        return _PartResult(SearchResult.empty(), unsupported)
+    bounds = catalog.radius_bounds(settings.start, settings.duration)
     pairs = apogee_perigee_filter(part.primary_bounds, bounds, part.volumes)
     primary_numbers = np.array(
         [omm.catalog_number for omm in part.primary_omms], dtype=np.int64
@@ -462,15 +405,15 @@ def _screen_part(part: _Part) -> _PartResult:
     search = ApproachSearch(
         part.primaries,
         catalog,
-        window.start,
-        window.duration,
+        settings.start,
+        settings.duration,
         part.volumes,
         pairs,
-        step=window.step,
+        step=settings.step,
         primary_bounds=part.primary_bounds,
         catalog_bounds=bounds,
     )
-    search_result = search.run(max_states=window.max_states)
+    search_result = search.run(max_states=settings.max_states)
     minima = [
         replace(minimum, secondary_index=int(columns[minimum.secondary_index]))
         for minimum in search_result.minima
@@ -483,6 +426,78 @@ def _screen_part(part: _Part) -> _PartResult:
         SearchResult(tuple(minima), search_result.primary_failures, failures),
         unsupported,
     )
+
+
+def _merge_part_results(
+    results: Sequence[_PartResult],
+    primaries: Propagator,
+    primary_omms: Sequence[Omm],
+    volumes: Sequence[ScreeningVolume],
+    catalog: Sequence[Omm],
+    settings: _SearchSettings,
+    skipped_before_search: Sequence[SkippedObject],
+) -> ScreeningResult:
+    """The parts' results merged into the screening's result.
+
+    ``skipped_before_search`` are the element sets left out before the
+    search; to them are added the catalog's element sets SGP4 cannot be
+    initialised with and the objects SGP4 failed for, whose minima are
+    dropped.
+    """
+    unsupported_catalog = [
+        (catalog[index], message)
+        for result in results
+        for index, message in result.unsupported
+    ]
+    search = SearchResult.merge(result.search for result in results)
+    skipped = [
+        *skipped_before_search,
+        *_unsupported(unsupported_catalog, ScreeningRole.CATALOG),
+        *_failed(
+            search.primary_failures, primary_omms, ScreeningRole.PRIMARY, settings
+        ),
+        *_failed(search.catalog_failures, catalog, ScreeningRole.CATALOG, settings),
+    ]
+    failed_primaries = set(search.primary_failures)
+    failed_catalog = set(search.catalog_failures)
+    minima = [
+        minimum
+        for minimum in search.minima
+        if minimum.primary_index not in failed_primaries
+        and minimum.secondary_index not in failed_catalog
+    ]
+    screened_volumes = {
+        omm.catalog_number: volumes[index]
+        for index, omm in enumerate(primary_omms)
+        if index not in failed_primaries
+    }
+    approaches = _approaches(
+        minima, primary_omms, catalog, settings.start, primaries.frame
+    )
+    return ScreeningResult(
+        approaches=tuple(approaches),
+        skipped=tuple(skipped),
+        start=settings.start,
+        duration=settings.duration,
+        volumes=screened_volumes,
+        catalog_count=len(catalog) - len(unsupported_catalog) - len(failed_catalog),
+    )
+
+
+def _failed(
+    failures: Mapping[int, ObjectFailure],
+    omms: Sequence[Omm],
+    role: ScreeningRole,
+    settings: _SearchSettings,
+) -> list[SkippedObject]:
+    """The objects SGP4 failed for (by position in ``omms``), left out."""
+    skipped: list[SkippedObject] = []
+    for index, failure in failures.items():
+        when = (settings.start + failure.offset * u.s).utc.isot
+        detail = f"{describe_error(failure.code)}, at {when}"
+        reason = SkipReason.PROPAGATION_FAILED
+        skipped.append(SkippedObject(omms[index], role, reason, detail))
+    return skipped
 
 
 def _approaches(

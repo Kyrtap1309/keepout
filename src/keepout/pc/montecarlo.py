@@ -30,10 +30,9 @@ from keepout._validation import require_at_least, require_positive
 from keepout.conjunction import Conjunction
 from keepout.equinoctial import Orbits
 from keepout.orbits import EARTH_MU
+from keepout.pc._encounters import Encounters, check_fallbacks
 from keepout.pc._plane import require_known_covariance
-from keepout.pc._rate import check_fallbacks
 from keepout.pc._timeline import RateScan, negligible_note
-from keepout.pc.hall3d import Encounters
 from keepout.pc.result import PcResult
 
 __all__ = [
@@ -44,7 +43,7 @@ __all__ = [
     "NEWTON_STEPS",
     "SPEED_BOUND_FACTOR",
     "montecarlo",
-    "sample",
+    "montecarlo_over_scan",
 ]
 
 MC_RTOL: Final = 0.1
@@ -298,7 +297,7 @@ def montecarlo(
         raise ValueError("need max_samples >= 1 and 0 < confidence < 1")
     require_known_covariance(conjunction.unknown_covariance, "montecarlo")
     encounters = Encounters.scan(conjunction, window)
-    return sample(
+    return montecarlo_over_scan(
         conjunction,
         encounters,
         samples=samples,
@@ -309,7 +308,7 @@ def montecarlo(
     )
 
 
-def sample(
+def montecarlo_over_scan(
     conjunction: Conjunction,
     encounters: Encounters,
     *,

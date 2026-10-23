@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from keepout.errors import PcConvergenceError
+from keepout.pc._quadrature import integrate_segments
 from keepout.pc._timeline import (
     DETECTION_LEVEL,
     DETECTION_SIGMAS,
@@ -12,7 +13,6 @@ from keepout.pc._timeline import (
     Candidate,
     Rate,
     Screen,
-    integrate_segments,
     locate,
 )
 

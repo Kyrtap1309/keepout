@@ -27,7 +27,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from keepout._types import JsonValue
-from keepout.ccsds.keywords import preparse_epochs
+from keepout.ccsds.epochs import preparse_epochs
 from keepout.errors import OmmParseError
 from keepout.omm._io import load_file, parse_record
 from keepout.omm.keywords import KEYWORDS

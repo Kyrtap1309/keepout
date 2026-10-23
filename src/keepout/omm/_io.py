@@ -11,7 +11,8 @@ from typing import Any, Final, NamedTuple, TypeVar
 from astropy.time import Time
 
 from keepout.ccsds import files
-from keepout.ccsds.keywords import format_epoch, parse_value
+from keepout.ccsds.epochs import format_epoch
+from keepout.ccsds.keywords import parse_value
 from keepout.ccsds.message import Family, Located
 from keepout.errors import OmmParseError, OmmWriteError
 from keepout.omm.keywords import (
@@ -96,8 +97,8 @@ def parse_record(
         Element path of the object, likewise.
     epoch
         The ``EPOCH`` value, if the caller has parsed its text already (with
-        :func:`~keepout.ccsds.keywords.preparse_epochs`, as
-        :func:`~keepout.ccsds.keywords.parse_epoch` parses it); used when
+        :func:`~keepout.ccsds.epochs.preparse_epochs`, as
+        :func:`~keepout.ccsds.epochs.parse_epoch` parses it); used when
         the value has no unit.
 
     Raises
