@@ -23,6 +23,7 @@ from keepout.pc.api import METHODS
 from keepout.pc.result import Method
 from keepout.sources import cara
 from keepout.sources.cara import Cell
+from keepout.sources.cara_legacy import load_legacy_objects
 from keepout.state import StateVector
 from keepout.validation.criteria import (
     HALL,
@@ -31,7 +32,6 @@ from keepout.validation.criteria import (
     TWO_D,
     Criterion,
 )
-from keepout.validation.legacy import legacy_objects
 
 __all__ = [
     "ALFANO",
@@ -691,11 +691,11 @@ not in the repository), transcribed from
 def load_max_pc_cases(cache: Path | None = None) -> list[ValidationCase]:
     """CARA's maximum-Pc unit tests (Frisbee and dilution).
 
-    The CDMs are read with :func:`~keepout.validation.legacy.legacy_objects`:
+    The CDMs are read with :func:`~keepout.sources.cara_legacy.load_legacy_objects`:
     they do not conform to CCSDS. Frisbee's secondary covariance is unknown,
     as CARA's test passes zeros for it.
     """
-    primary, secondary = legacy_objects(
+    primary, secondary = load_legacy_objects(
         cara.fetch(cara.FRISBEE_CDM, cache=cache), known=(True, False)
     )
     cases = [
@@ -710,7 +710,7 @@ def load_max_pc_cases(cache: Path | None = None) -> list[ValidationCase]:
         for radius, reference in FRISBEE_REFERENCES
     ]
     for name, (radius, reference) in DILUTION_REFERENCES.items():
-        objects = legacy_objects(cara.fetch(cara.DILUTION_CDMS[name], cache=cache))
+        objects = load_legacy_objects(cara.fetch(cara.DILUTION_CDMS[name], cache=cache))
         cases.append(
             ValidationCase(
                 MAX_PC_UNIT_TESTS,

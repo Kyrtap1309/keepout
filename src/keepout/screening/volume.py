@@ -33,10 +33,12 @@ from typing import Final, TypeAlias
 import numpy as np
 import numpy.typing as npt
 
-from keepout._types import BoolArray, FloatArray, read_only, require_positive
+from keepout import _defaults
+from keepout._types import BoolArray, FloatArray, read_only
+from keepout._validation import positive_float
 from keepout.frames import relative_position_rtn
 from keepout.omm import Omm
-from keepout.propagation._sgp4_radius import brouwer_mean_motion
+from keepout.propagation import sgp4_shape
 from keepout.units import KM, MINUTE
 
 __all__ = [
@@ -56,9 +58,9 @@ __all__ = [
     "volume_for",
 ]
 
-SOCRATES_RADIUS: Final = 5_000.0
-"""Radius [m] of the default volume: CelesTrak's SOCRATES reports every
-approach closer than 5 km."""
+SOCRATES_RADIUS: Final = _defaults.SOCRATES_RADIUS
+"""Radius [m] of the default volume, 5 km: CelesTrak's SOCRATES reports
+every approach closer than that."""
 
 NASA_GP_DATA_RADIUS: Final = 10_000.0
 """Radius [m] of :meth:`ScreeningVolume.nasa_gp_data`."""
@@ -92,9 +94,7 @@ class ScreeningVolume:
 
     def __post_init__(self) -> None:
         for name in ("radial", "transverse", "normal"):
-            value = float(getattr(self, name))
-            require_positive(value, name)
-            object.__setattr__(self, name, value)
+            object.__setattr__(self, name, positive_float(getattr(self, name), name))
 
     @classmethod
     def sphere(cls, radius: float, *, label: str = "") -> ScreeningVolume:
@@ -149,7 +149,7 @@ class ScreeningVolume:
         ------
         UnsupportedElements
             If SGP4 cannot be initialised from ``primary``
-            (:meth:`keepout.omm.Omm.satrec`).
+            (:func:`keepout.propagation.satrec_of`).
 
         References
         ----------
@@ -232,7 +232,7 @@ class ScreeningVolume:
 
 
 DEFAULT_VOLUME: Final = ScreeningVolume.sphere(
-    SOCRATES_RADIUS, label="5 km sphere (as CelesTrak SOCRATES)"
+    SOCRATES_RADIUS, label=f"{SOCRATES_RADIUS / KM:g} km sphere (as CelesTrak SOCRATES)"
 )
 """The volume screening uses unless told otherwise: a 5 km sphere."""
 
@@ -381,16 +381,16 @@ def sfs_regime(primary: Omm) -> SfsRegime:
     ------
     UnsupportedElements
         If SGP4 cannot be initialised from ``primary``
-        (:meth:`keepout.omm.Omm.satrec`).
+        (:func:`keepout.propagation.satrec_of`).
     """
     if primary.eccentricity >= SFS_ECCENTRICITY:
         return SfsRegime.OUTSIDE
-    satrec = primary.satrec()
-    perigee = satrec.altp * satrec.radiusearthkm * KM
+    shape = sgp4_shape(primary)
+    perigee = shape.perigee_altitude * shape.earth_radius_km * KM
     for regime, highest in SFS_LEO_PERIGEES.items():
         if perigee <= highest:
             return regime
-    period = 2.0 * math.pi / brouwer_mean_motion(satrec) * MINUTE
+    period = 2.0 * math.pi / shape.mean_motion * MINUTE
     lowest, highest = SFS_DEEP_SPACE_PERIOD
     if lowest < period < highest and primary.inclination < SFS_DEEP_SPACE_INCLINATION:
         return SfsRegime.DEEP_SPACE

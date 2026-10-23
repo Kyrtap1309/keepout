@@ -1,19 +1,20 @@
-"""Private helpers shared by the package: array aliases, argument checks and
-symmetric-matrix algebra."""
+"""Type aliases shared by the package (NumPy arrays, JSON values), with
+:func:`read_only` for those arrays, :class:`OrderedEnum` and
+:func:`override`.
+
+Argument checks are in :mod:`keepout._validation`, vector and matrix
+helpers in :mod:`keepout._linalg`."""
 
 from __future__ import annotations
 
 import enum
 import functools
-import math
 from typing import TYPE_CHECKING, Any, TypeAlias, TypeVar
 
 import numpy as np
 import numpy.typing as npt
 
 if TYPE_CHECKING:
-    from astropy.time import Time
-
     # typing.override from Python 3.12, for the type checkers only, so
     # typing_extensions stays out of the dependencies.
     from typing_extensions import override
@@ -32,17 +33,8 @@ __all__ = [
     "IndexArray",
     "JsonValue",
     "OrderedEnum",
-    "as_vector",
-    "from_eigen",
-    "is_probability",
     "override",
     "read_only",
-    "require_at_least",
-    "require_non_negative",
-    "require_positive",
-    "require_probability",
-    "require_single_time",
-    "symmetric_part",
 ]
 
 FloatArray: TypeAlias = npt.NDArray[np.float64]
@@ -87,117 +79,3 @@ def read_only(*arrays: npt.NDArray[Any]) -> None:
     """The ``arrays``, made read-only in place."""
     for array in arrays:
         array.flags.writeable = False
-
-
-def symmetric_part(matrix: FloatArray) -> FloatArray:
-    """``(M + M^T) / 2`` of a matrix or a stack of matrices ``(..., n, n)``."""
-    result: FloatArray = 0.5 * (matrix + np.swapaxes(matrix, -1, -2))
-    return result
-
-
-def from_eigen(values: FloatArray, vectors: FloatArray) -> FloatArray:
-    """``V diag(values) V^T`` of symmetric matrices, batched over leading axes.
-
-    Applies a function to a symmetric matrix through its eigen-decomposition:
-    pass ``f(eigenvalues)`` with the eigenvectors (columns), as
-    :func:`numpy.linalg.eigh` returns them, to get ``f(M)`` (e.g. ``1 /
-    values`` for the inverse, ``sqrt`` for the symmetric square root).
-
-    Parameters
-    ----------
-    values
-        Mapped eigenvalues, shape ``(..., n)``.
-    vectors
-        Unit eigenvectors as columns, shape ``(..., n, n)``.
-    """
-    result: FloatArray = (vectors * values[..., None, :]) @ np.swapaxes(vectors, -1, -2)
-    return result
-
-
-def as_vector(value: npt.ArrayLike, name: str) -> FloatArray:
-    """A read-only, finite float64 copy of a 3-vector.
-
-    Parameters
-    ----------
-    value
-        Anything NumPy can turn into a shape ``(3,)`` array.
-    name
-        Name used in error messages.
-
-    Raises
-    ------
-    ValueError
-        If the shape is not ``(3,)`` or a component is not finite.
-    """
-    array = np.array(value, dtype=np.float64)
-    if array.shape != (3,):
-        raise ValueError(f"{name} must have shape (3,), got {array.shape}")
-    if not np.all(np.isfinite(array)):
-        raise ValueError(f"{name} must be finite")
-    read_only(array)
-    return array
-
-
-def require_positive(value: float, name: str) -> None:
-    """A check that ``value`` is finite and positive (``ValueError`` if not).
-
-    Raises
-    ------
-    ValueError
-        If ``value`` is not finite or not greater than zero.
-    """
-    if not (math.isfinite(value) and value > 0.0):
-        raise ValueError(f"{name} must be finite and > 0, got {value}")
-
-
-def require_non_negative(value: float, name: str) -> None:
-    """A check that ``value`` is finite and non-negative (``ValueError`` if not).
-
-    Raises
-    ------
-    ValueError
-        If ``value`` is not finite or is negative.
-    """
-    if not (math.isfinite(value) and value >= 0.0):
-        raise ValueError(f"{name} must be finite and >= 0, got {value}")
-
-
-def is_probability(value: float) -> bool:
-    """Whether ``value`` is a probability: finite and in [0, 1]."""
-    return math.isfinite(value) and 0.0 <= value <= 1.0
-
-
-def require_probability(value: float, name: str) -> None:
-    """A check that ``value`` is a probability (``ValueError`` if not).
-
-    Raises
-    ------
-    ValueError
-        If ``value`` is not finite or not in [0, 1].
-    """
-    if not is_probability(value):
-        raise ValueError(f"{name} must be in [0, 1], got {value}")
-
-
-def require_at_least(value: int, minimum: int, name: str) -> None:
-    """A check that the count ``value`` is at least ``minimum`` (``ValueError`` if not).
-
-    Raises
-    ------
-    ValueError
-        If ``value`` is below ``minimum``.
-    """
-    if value < minimum:
-        raise ValueError(f"{name} must be at least {minimum}, got {value}")
-
-
-def require_single_time(time: Time, name: str) -> None:
-    """A check that ``time`` is a single time, not an array (``ValueError`` if not).
-
-    Raises
-    ------
-    ValueError
-        If ``time`` is not scalar.
-    """
-    if not time.isscalar:
-        raise ValueError(f"{name} must be a single time, got shape {time.shape}")

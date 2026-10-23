@@ -19,6 +19,7 @@ from sgp4.io import compute_checksum
 
 from keepout.errors import OmmParseError
 from keepout.omm import tle
+from keepout.propagation import satrec_of
 
 GOES_LINE_1, GOES_LINE_2 = GOES_9_TLE.splitlines()[1:]
 
@@ -73,8 +74,8 @@ def test_the_ccsds_tle_is_read() -> None:
 
 def test_the_ccsds_tle_propagates_like_twoline2rv() -> None:
     (goes,) = tle.loads(GOES_9_TLE)
-    assert_same_satrec(goes.satrec(), sgp4_record(GOES_9_TLE_VALUES))
-    assert_close_to_twoline2rv(goes.satrec(), GOES_LINE_1, GOES_LINE_2)
+    assert_same_satrec(satrec_of(goes), sgp4_record(GOES_9_TLE_VALUES))
+    assert_close_to_twoline2rv(satrec_of(goes), GOES_LINE_1, GOES_LINE_2)
 
 
 @pytest.mark.parametrize(("line_1", "line_2"), verification_pairs())
@@ -87,7 +88,7 @@ def test_the_verification_tles_propagate_like_twoline2rv(
         return
     (omm,) = tle.loads(f"{line_1}\n{line_2}\n")
     assert omm.object_name == "UNKNOWN"
-    assert_close_to_twoline2rv(omm.satrec(), line_1, line_2)
+    assert_close_to_twoline2rv(satrec_of(omm), line_1, line_2)
 
 
 def test_blank_fields_take_their_defaults() -> None:
@@ -111,7 +112,7 @@ def test_alpha_5_catalog_numbers_are_read(satnum: str, number: int) -> None:
     line_2 = with_checksum(f"2 {satnum}{GOES_LINE_2[7:68]}")
     (omm,) = tle.loads(f"{line_1}\n{line_2}\n")
     assert omm.catalog_number == number
-    assert_close_to_twoline2rv(omm.satrec(), line_1, line_2)
+    assert_close_to_twoline2rv(satrec_of(omm), line_1, line_2)
 
 
 def test_names_two_and_three_line_forms_are_read_together() -> None:
@@ -232,7 +233,7 @@ def test_satrec_is_sgp4s_initialisation_of_the_tle_values(
     text, values = element_set
     (omm,) = tle.loads(text)
     assert omm == omm_from(values)
-    assert_same_satrec(omm.satrec(), sgp4_record(values))
+    assert_same_satrec(satrec_of(omm), sgp4_record(values))
 
 
 def test_an_epoch_on_a_day_that_ends_in_a_utc_step_is_read_exactly() -> None:
@@ -246,4 +247,4 @@ def test_an_epoch_on_a_day_that_ends_in_a_utc_step_is_read_exactly() -> None:
         "EPOCH": "1964-12-31T00:00:00.432864",
     }
     assert omm == omm_from(values)
-    assert_same_satrec(omm.satrec(), sgp4_record(values))
+    assert_same_satrec(satrec_of(omm), sgp4_record(values))

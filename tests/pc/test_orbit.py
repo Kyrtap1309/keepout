@@ -2,7 +2,8 @@ import numpy as np
 import pytest
 from builders import LEO_R, LEO_V, known, object_state
 
-from keepout._types import FloatArray, symmetric_part
+from keepout._linalg import symmetric_part
+from keepout._types import FloatArray
 from keepout.equinoctial import complex_step, propagate, to_cartesian, wrap_angle
 from keepout.errors import CovarianceError
 from keepout.objects import ObjectState

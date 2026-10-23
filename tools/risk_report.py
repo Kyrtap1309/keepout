@@ -36,7 +36,6 @@ from generated import (
 from matplotlib.figure import Figure
 
 from keepout.risk import (
-    DAY,
     PC_FLOOR,
     Action,
     Assessment,
@@ -51,6 +50,7 @@ from keepout.risk import (
 )
 from keepout.sources import kelvins
 from keepout.sources.kelvins import KelvinsEvent
+from keepout.units import DAY
 
 PAGE: Final = REPO / "docs/risk-kelvins.md"
 IMAGES: Final = REPO / "docs/img/risk-kelvins"

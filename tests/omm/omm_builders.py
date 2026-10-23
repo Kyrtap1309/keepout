@@ -17,7 +17,7 @@ from sgp4.io import compute_checksum
 from keepout.omm import Omm
 from keepout.omm.celestrak import loads_csv
 from keepout.omm.keywords import KEYWORDS
-from keepout.omm.model import MAX_SATREC_NUMBER
+from keepout.propagation import MAX_SATREC_NUMBER
 
 OMM_DATA = Path(__file__).parent / "data"
 SAMPLE_CSV = OMM_DATA / "celestrak_sample.csv"

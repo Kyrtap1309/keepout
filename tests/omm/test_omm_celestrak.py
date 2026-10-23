@@ -30,6 +30,7 @@ from keepout.omm.celestrak import (
     loads_csv,
     loads_json,
 )
+from keepout.propagation import satrec_of
 
 
 def test_the_sample_csv_is_read_in_file_order() -> None:
@@ -59,7 +60,7 @@ def test_every_sample_record_is_the_one_sgp4_makes_from_the_file() -> None:
     omms = load_csv(SAMPLE_CSV)
     assert len(omms) == len(fields) == 8
     for omm, values in zip(omms, fields, strict=True):
-        assert_same_satrec(omm.satrec(), sgp4_record(values))
+        assert_same_satrec(satrec_of(omm), sgp4_record(values))
 
 
 def test_a_file_with_a_byte_order_mark_is_read(tmp_path: Path) -> None:
@@ -259,9 +260,9 @@ def test_satrec_is_bit_identical_to_sgp4s_own_initialisation(
     values: dict[str, str],
 ) -> None:
     (omm,) = loads_csv(csv_text([values]))
-    assert_same_satrec(omm.satrec(), sgp4_record(values))
+    assert_same_satrec(satrec_of(omm), sgp4_record(values))
     (from_json,) = loads_json(json_text([values]))
-    assert_same_satrec(from_json.satrec(), sgp4_record(values))
+    assert_same_satrec(satrec_of(from_json), sgp4_record(values))
 
 
 @settings(deadline=None)
@@ -283,7 +284,7 @@ def test_written_epochs_do_not_depend_on_the_time_precision(precision: int) -> N
     assert loads_json(dumps_json([omm])) == (omm,)
     # sgp4 reads the written CSV, and makes the same record of it.
     (fields,) = sgp4_omm.parse_csv(io.StringIO(text))
-    assert_same_satrec(omm.satrec(), sgp4_record(fields))
+    assert_same_satrec(satrec_of(omm), sgp4_record(fields))
 
 
 def test_an_epoch_finer_than_microseconds_is_written_rounded() -> None:

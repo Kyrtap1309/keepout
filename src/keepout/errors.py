@@ -158,7 +158,7 @@ class OmmWriteError(KeepoutError):
 class UnsupportedElements(KeepoutError, ValueError):
     """An element set SGP4 cannot be initialised with.
 
-    E.g. a catalog number above :data:`~keepout.omm.model.MAX_SATREC_NUMBER`
+    E.g. a catalog number above :data:`~keepout.propagation.MAX_SATREC_NUMBER`
     or an epoch in a leap second. It is also a :class:`ValueError`, as
     raised for any other invalid argument.
     """
@@ -183,7 +183,7 @@ class EventError(KeepoutError, ValueError):
     different ``CONJUNCTION_ID`` values.
 
     It is also a :class:`ValueError`, as raised for any other invalid
-    argument of :class:`~keepout.risk.ConjunctionEvent`.
+    argument of :class:`~keepout.events.ConjunctionEvent`.
     """
 
 

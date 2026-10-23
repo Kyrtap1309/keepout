@@ -26,11 +26,11 @@ from spacetrack_builders import (
 from web_builders import digest, pin_kelvins, zipped
 
 from keepout import cli
-from keepout.cli import fetch
 from keepout.cli.output import ExitCode
 from keepout.omm import load
 from keepout.sources import cara, celestrak, kelvins, spacetrack
-from keepout.sources.cache import RETRY_DELAYS
+from keepout.sources._http import RETRY_DELAYS
+from keepout.sources.catalog import CatalogSource
 
 FILES = {
     "DataFiles/one.csv": b"a,b\n1,2\n",
@@ -373,11 +373,11 @@ def test_a_bug_shows_its_traceback_without_the_password(
 ) -> None:
     # As the console script runs it: main(), and the bug reaches the
     # interpreter's excepthook, which Typer replaces with its pretty one.
-    def load_catalog(source: object, cache: object) -> None:
+    def fetch_catalog(source: object, cache: object) -> None:
         password = os.environ[spacetrack.PASSWORD_VARIABLE]
         raise RuntimeError(f"a bug with {len(password)} characters at hand")
 
-    monkeypatch.setattr(fetch, "load_catalog", load_catalog)
+    monkeypatch.setattr(CatalogSource, "fetch", fetch_catalog)
     monkeypatch.setattr(sys, "excepthook", sys.excepthook)
     monkeypatch.setenv(spacetrack.IDENTITY_VARIABLE, IDENTITY)
     monkeypatch.setenv(spacetrack.PASSWORD_VARIABLE, PASSWORD)

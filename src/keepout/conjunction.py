@@ -9,7 +9,8 @@ from functools import cached_property
 import numpy as np
 from astropy.time import Time
 
-from keepout._types import FloatArray, require_positive
+from keepout._types import FloatArray
+from keepout._validation import positive_float
 from keepout.encounter import EncounterPlane, Role, encounter_plane
 from keepout.errors import HardBodyRadiusError
 from keepout.objects import ObjectState, require_same_epoch
@@ -81,8 +82,7 @@ class Conjunction:
     hard_body_radius: float
 
     def __post_init__(self) -> None:
-        radius = float(self.hard_body_radius)
-        require_positive(radius, "hard_body_radius")
+        radius = positive_float(self.hard_body_radius, "hard_body_radius")
         object.__setattr__(self, "hard_body_radius", radius)
         require_same_epoch(
             self.secondary.state.epoch,

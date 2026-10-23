@@ -9,7 +9,6 @@ from builders import KELVINS_EXCERPT as EXCERPT
 from builders import series
 
 from keepout.risk import (
-    DAY,
     Assessment,
     DecisionConfig,
     PcObservation,
@@ -19,6 +18,7 @@ from keepout.risk import (
 from keepout.risk import assess as real_assess
 from keepout.sources import kelvins
 from keepout.sources.kelvins import KelvinsEvent
+from keepout.units import DAY
 
 
 def paths(tmp_path: Path) -> list[str]:

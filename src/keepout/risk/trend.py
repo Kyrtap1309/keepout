@@ -8,7 +8,7 @@ import statistics
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
-from keepout._types import require_at_least, require_positive
+from keepout._validation import require_at_least, require_positive
 from keepout.risk.observation import PC_FLOOR, PcObservation
 from keepout.risk.thresholds import RiskLevel, Thresholds
 from keepout.units import DAY

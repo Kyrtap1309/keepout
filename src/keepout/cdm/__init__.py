@@ -10,6 +10,7 @@ from pathlib import Path
 from keepout.cdm import kvn, xml
 from keepout.cdm._io import load_file
 from keepout.cdm.builder import (
+    ORIGINATOR,
     Maneuverable,
     ObjectMetadata,
     ObjectType,
@@ -19,6 +20,7 @@ from keepout.cdm.builder import (
 from keepout.cdm.model import Cdm, CdmObject, CovarianceMethod, Field, Section
 
 __all__ = [
+    "ORIGINATOR",
     "Cdm",
     "CdmObject",
     "CovarianceMethod",

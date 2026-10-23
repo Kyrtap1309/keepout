@@ -84,13 +84,13 @@ from keepout._workers import ONE_THREAD
 from keepout.omm import Omm
 from keepout.omm.celestrak import dumps_csv
 from keepout.screening import (
+    DEFAULT_DURATION,
     DEFAULT_VOLUME,
     ScreeningResult,
     ScreeningVolume,
     SkipReason,
     VolumeRule,
 )
-from keepout.screening.pipeline import DEFAULT_DURATION
 from keepout.screening.volume import SOCRATES_RADIUS
 from keepout.units import DAY, KM
 

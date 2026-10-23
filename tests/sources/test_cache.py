@@ -23,7 +23,7 @@ from keepout.errors import (
     SourceFormatError,
     SourceUnavailable,
 )
-from keepout.sources import cache
+from keepout.sources import _http, _store, cache
 
 PAYLOAD = b"reference bytes"
 DIGEST = digest(PAYLOAD)
@@ -33,8 +33,8 @@ def test_cache_dir_env_override(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setenv("KEEPOUT_CACHE_DIR", str(tmp_path / "custom"))
-    assert cache.cache_dir() == tmp_path / "custom"
-    assert cache.cache_dir(tmp_path / "given") == tmp_path / "given"
+    assert _store.cache_dir() == tmp_path / "custom"
+    assert _store.cache_dir(tmp_path / "given") == tmp_path / "given"
 
 
 linux_only = pytest.mark.skipif(
@@ -46,14 +46,14 @@ def test_cache_dir_defaults_to_the_platforms_user_cache(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("KEEPOUT_CACHE_DIR", raising=False)
-    assert cache.cache_dir() == platformdirs.user_cache_path("keepout")
+    assert _store.cache_dir() == platformdirs.user_cache_path("keepout")
 
 
 @linux_only
 def test_cache_dir_uses_xdg(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("KEEPOUT_CACHE_DIR", raising=False)
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
-    assert cache.cache_dir() == tmp_path / "keepout"
+    assert _store.cache_dir() == tmp_path / "keepout"
 
 
 @linux_only
@@ -63,13 +63,13 @@ def test_cache_dir_defaults_to_home(
     monkeypatch.delenv("KEEPOUT_CACHE_DIR", raising=False)
     monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
     monkeypatch.setenv("HOME", str(tmp_path))
-    assert cache.cache_dir() == tmp_path / ".cache" / "keepout"
+    assert _store.cache_dir() == tmp_path / ".cache" / "keepout"
 
 
 def test_the_user_agent_names_keepout_its_version_and_home_page() -> None:
     assert (
         f"keepout/{version('keepout')} (+https://github.com/Kyrtap1309/keepout)"
-    ) == cache.USER_AGENT
+    ) == _http.USER_AGENT
 
 
 def test_http_download_returns_body(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -77,7 +77,7 @@ def test_http_download_returns_body(monkeypatch: pytest.MonkeyPatch) -> None:
         return FakeResponse(b"body")
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
-    assert cache.http_download("https://example.invalid/x") == b"body"
+    assert _http.http_download("https://example.invalid/x") == b"body"
 
 
 def test_every_request_names_keepout_in_the_user_agent(
@@ -90,14 +90,14 @@ def test_every_request_names_keepout_in_the_user_agent(
         return FakeResponse(b"body")
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
-    cache.http_download("https://example.invalid/x")
-    cache.http_stream("https://example.invalid/y", io.BytesIO())
+    _http.http_download("https://example.invalid/x")
+    _http.http_stream("https://example.invalid/y", io.BytesIO())
     assert [request.full_url for request in requests] == [
         "https://example.invalid/x",
         "https://example.invalid/y",
     ]
     for request in requests:
-        assert request.header_items() == [("User-agent", cache.USER_AGENT)]
+        assert request.header_items() == [("User-agent", _http.USER_AGENT)]
 
 
 def test_http_download_wraps_network_errors(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -106,7 +106,7 @@ def test_http_download_wraps_network_errors(monkeypatch: pytest.MonkeyPatch) -> 
 
     monkeypatch.setattr(urllib.request, "urlopen", offline)
     with pytest.raises(SourceUnavailable, match=r"example\.invalid.*offline"):
-        cache.http_download("https://example.invalid/x", retry_delays=())
+        _http.http_download("https://example.invalid/x", retry_delays=())
 
 
 def test_http_download_wraps_http_404(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -115,7 +115,7 @@ def test_http_download_wraps_http_404(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(urllib.request, "urlopen", not_found)
     with pytest.raises(HttpStatusError, match="404") as caught:
-        cache.http_download("https://example.invalid/x")
+        _http.http_download("https://example.invalid/x")
     assert caught.value.status == 404
     assert caught.value.url == "https://example.invalid/x"
 
@@ -127,7 +127,7 @@ def test_http_download_refuses_a_success_other_than_200(
         urllib.request, "urlopen", lambda url, timeout: FakeResponse(b"", status=204)
     )
     with pytest.raises(HttpStatusError, match="HTTP 204 No Content") as caught:
-        cache.http_download("https://example.invalid/x")
+        _http.http_download("https://example.invalid/x")
     assert caught.value.status == 204
 
 
@@ -145,7 +145,7 @@ def test_http_download_wraps_mid_read_failure(
 
     monkeypatch.setattr(urllib.request, "urlopen", dropped)
     with pytest.raises(SourceUnavailable, match=r"example\.invalid"):
-        cache.http_download("https://example.invalid/x", retry_delays=())
+        _http.http_download("https://example.invalid/x", retry_delays=())
 
 
 def test_http_download_wraps_connection_reset(
@@ -156,14 +156,14 @@ def test_http_download_wraps_connection_reset(
 
     monkeypatch.setattr(urllib.request, "urlopen", reset)
     with pytest.raises(SourceUnavailable, match="reset by peer"):
-        cache.http_download("https://example.invalid/x", retry_delays=())
+        _http.http_download("https://example.invalid/x", retry_delays=())
 
 
 def test_http_stream_writes_the_body_in_chunks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     body = bytes(range(256)) * 10
-    monkeypatch.setattr(cache, "CHUNK_SIZE", 1000)
+    monkeypatch.setattr(_http, "CHUNK_SIZE", 1000)
     monkeypatch.setattr(
         urllib.request, "urlopen", lambda url, timeout: FakeResponse(body)
     )
@@ -174,7 +174,7 @@ def test_http_stream_writes_the_body_in_chunks(
             chunks.append(data)
             return len(data)
 
-    cache.http_stream("https://example.invalid/x", Collect())
+    _http.http_stream("https://example.invalid/x", Collect())
     assert b"".join(chunks) == body
     assert [len(chunk) for chunk in chunks] == [1000, 1000, 560]
 
@@ -182,12 +182,12 @@ def test_http_stream_writes_the_body_in_chunks(
 def test_http_stream_wraps_mid_read_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(urllib.request, "urlopen", lambda url, timeout: _BrokenBody())
     with pytest.raises(SourceUnavailable, match=r"example\.invalid"):
-        cache.http_stream("https://example.invalid/x", io.BytesIO())
+        _http.http_stream("https://example.invalid/x", io.BytesIO())
 
 
 def test_store_writes_a_verified_file_and_its_parents(tmp_path: Path) -> None:
     target = tmp_path / "a" / "b" / "file.bin"
-    cache.store(target, lambda sink: sink.write(PAYLOAD), DIGEST, "test")
+    _store.store(target, lambda sink: sink.write(PAYLOAD), DIGEST, "test")
     assert target.read_bytes() == PAYLOAD
     assert [p.name for p in target.parent.iterdir()] == ["file.bin"]
 
@@ -196,18 +196,20 @@ def test_store_keeps_the_old_file_on_a_checksum_mismatch(tmp_path: Path) -> None
     target = tmp_path / "file.bin"
     target.write_bytes(b"previous")
     with pytest.raises(ChecksumMismatch, match=r"source-name: expected sha256"):
-        cache.store(target, lambda sink: sink.write(b"tampered"), DIGEST, "source-name")
+        _store.store(
+            target, lambda sink: sink.write(b"tampered"), DIGEST, "source-name"
+        )
     assert target.read_bytes() == b"previous"
     assert [p.name for p in tmp_path.iterdir()] == ["file.bin"]
 
 
 def test_store_removes_the_partial_file_when_writing_fails(tmp_path: Path) -> None:
-    def broken(sink: cache.Sink) -> None:
+    def broken(sink: _http.Sink) -> None:
         sink.write(b"half")
         raise SourceUnavailable("connection dropped")
 
     with pytest.raises(SourceUnavailable, match="connection dropped"):
-        cache.store(tmp_path / "file.bin", broken, DIGEST, "test")
+        _store.store(tmp_path / "file.bin", broken, DIGEST, "test")
     assert list(tmp_path.iterdir()) == []
 
 
@@ -224,37 +226,37 @@ def test_a_stored_file_is_not_hashed_again(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     target = tmp_path / "file.bin"
-    cache.store(target, lambda sink: sink.write(PAYLOAD), DIGEST, "test")
+    _store.store(target, lambda sink: sink.write(PAYLOAD), DIGEST, "test")
     refuse_hashing(monkeypatch)
-    assert cache.has_digest(target, DIGEST)
+    assert _store.has_digest(target, DIGEST)
 
 
 def test_a_changed_file_is_hashed_again(tmp_path: Path) -> None:
     target = tmp_path / "file.bin"
-    cache.store(target, lambda sink: sink.write(PAYLOAD), DIGEST, "test")
+    _store.store(target, lambda sink: sink.write(PAYLOAD), DIGEST, "test")
     target.write_bytes(b"tampered!")
-    assert not cache.has_digest(target, DIGEST)
+    assert not _store.has_digest(target, DIGEST)
 
 
 def test_a_forgotten_file_is_hashed_again(tmp_path: Path) -> None:
     target = tmp_path / "file.bin"
-    cache.store(target, lambda sink: sink.write(PAYLOAD), DIGEST, "test")
+    _store.store(target, lambda sink: sink.write(PAYLOAD), DIGEST, "test")
     before = target.stat()
     # Same inode, size and modification time: only hashing shows the change.
     with target.open("r+b") as stream:
         stream.write(b"X")
     os.utime(target, ns=(before.st_atime_ns, before.st_mtime_ns))
-    assert cache.has_digest(target, DIGEST)
-    cache.forget_verified()
-    assert not cache.has_digest(target, DIGEST)
+    assert _store.has_digest(target, DIGEST)
+    _store.forget_verified()
+    assert not _store.has_digest(target, DIGEST)
 
 
 def test_has_digest_rejects_a_missing_or_different_file(tmp_path: Path) -> None:
     target = tmp_path / "file.bin"
-    assert not cache.has_digest(target, DIGEST)
+    assert not _store.has_digest(target, DIGEST)
     target.write_bytes(b"other")
-    assert not cache.has_digest(target, DIGEST)
-    assert not cache.has_digest(tmp_path, DIGEST)
+    assert not _store.has_digest(target, DIGEST)
+    assert not _store.has_digest(tmp_path, DIGEST)
 
 
 def test_store_bytes_writes_the_file_and_gives_its_digest(
@@ -263,30 +265,30 @@ def test_store_bytes_writes_the_file_and_gives_its_digest(
     target = tmp_path / "a" / "file.bin"
     target.parent.mkdir()
     target.write_bytes(b"previous")
-    assert cache.store_bytes(target, PAYLOAD) == DIGEST
+    assert _store.store_bytes(target, PAYLOAD) == DIGEST
     assert target.read_bytes() == PAYLOAD
     assert [p.name for p in target.parent.iterdir()] == ["file.bin"]
     refuse_hashing(monkeypatch)
-    assert cache.has_digest(target, DIGEST)
+    assert _store.has_digest(target, DIGEST)
 
 
 def test_store_bytes_creates_the_parents(tmp_path: Path) -> None:
     target = tmp_path / "a" / "b" / "file.bin"
-    cache.store_bytes(target, b"")
+    _store.store_bytes(target, b"")
     assert target.read_bytes() == b""
 
 
 @pytest.mark.parametrize("url", ["file:///etc/passwd", "ftp://example.invalid/x"])
 def test_only_http_urls_are_opened(url: str) -> None:
     with pytest.raises(ValueError, match="not an HTTP or HTTPS URL"):
-        cache.http_stream(url, io.BytesIO())
+        _http.http_stream(url, io.BytesIO())
 
 
 def test_a_cached_copy_is_found_with_its_metadata(tmp_path: Path) -> None:
     target = tmp_path / "source" / "data.json"
     meta = cache.CopyMeta(
         url="https://example.org/data",
-        sha256=cache.store_bytes(target, PAYLOAD),
+        sha256=_store.store_bytes(target, PAYLOAD),
         retrieved=1_790_000_000.0,
         checked=1_790_000_060.0,
     )
@@ -299,7 +301,7 @@ def test_a_cached_copy_is_found_with_its_metadata(tmp_path: Path) -> None:
 
 
 def test_a_request_names_keepout_and_adds_the_headers_given() -> None:
-    request = cache.http_request(
+    request = _http.http_request(
         "https://example.org/x",
         data=b"a=1",
         method="POST",
@@ -308,7 +310,7 @@ def test_a_request_names_keepout_and_adds_the_headers_given() -> None:
     assert request.get_method() == "POST"
     assert request.data == b"a=1"
     assert dict(request.header_items()) == {
-        "User-agent": cache.USER_AGENT,
+        "User-agent": _http.USER_AGENT,
         "Content-type": "application/x-www-form-urlencoded",
     }
 
@@ -324,38 +326,38 @@ def test_a_request_refuses_other_schemes(
     url: str, schemes: tuple[str, ...], message: str
 ) -> None:
     with pytest.raises(ValueError, match=message):
-        cache.http_request(url, schemes=schemes)
+        _http.http_request(url, schemes=schemes)
 
 
 @pytest.mark.parametrize("error", [OSError("refused"), http.client.IncompleteRead(b"")])
 def test_network_errors_become_source_unavailable(error: Exception) -> None:
     with (
         pytest.raises(SourceUnavailable, match=r"^cannot reach x: ") as raised,
-        cache.network_errors("cannot reach x"),
+        _http.network_errors("cannot reach x"),
     ):
         raise error
     assert raised.value.__cause__ is error
 
 
 def test_other_errors_pass_through_network_errors() -> None:
-    with pytest.raises(KeyError), cache.network_errors("cannot reach x"):
+    with pytest.raises(KeyError), _http.network_errors("cannot reach x"):
         raise KeyError("bug")
 
 
 def test_store_json_writes_indented_text_with_a_final_newline(tmp_path: Path) -> None:
     path = tmp_path / "index.json"
-    written = cache.store_json(path, {"format": 1})
+    written = _store.store_json(path, {"format": 1})
     assert path.read_text(encoding="utf-8") == '{\n  "format": 1\n}\n'
     assert written == digest(path.read_bytes())
 
 
 def test_gunzip_decompresses_gzip_data() -> None:
-    assert cache.gunzip(gzip.compress(b"rows")) == b"rows"
+    assert _http.gunzip(gzip.compress(b"rows")) == b"rows"
 
 
 @pytest.mark.parametrize("data", [b"not gzip", b"\x1f\x8b\x08truncated"])
 def test_gunzip_of_something_else_is_none(data: bytes) -> None:
-    assert cache.gunzip(data) is None
+    assert _http.gunzip(data) is None
 
 
 def test_a_dropped_download_is_tried_again(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -368,7 +370,7 @@ def test_a_dropped_download_is_tried_again(monkeypatch: pytest.MonkeyPatch) -> N
         return FakeResponse(answer)
 
     monkeypatch.setattr(urllib.request, "urlopen", flaky)
-    assert cache.http_download("https://example.invalid/x", retry_delays=(0.0,)) == (
+    assert _http.http_download("https://example.invalid/x", retry_delays=(0.0,)) == (
         b"body"
     )
     assert answers == []
@@ -396,7 +398,7 @@ def _failing(*errors: Exception) -> Callable[[], str]:
 )
 def test_retrying_waits_and_tries_a_transient_failure_again(error: Exception) -> None:
     waits: list[float] = []
-    assert cache.retrying(
+    assert _http.retrying(
         _failing(error, error), delays=(1.0, 2.0), sleep=waits.append
     ) == ("done")
     assert waits == [1.0, 2.0]
@@ -414,7 +416,7 @@ def test_retrying_waits_and_tries_a_transient_failure_again(error: Exception) ->
 def test_retrying_raises_a_lasting_failure_at_once(error: Exception) -> None:
     waits: list[float] = []
     with pytest.raises(type(error)):
-        cache.retrying(_failing(error), delays=(1.0,), sleep=waits.append)
+        _http.retrying(_failing(error), delays=(1.0,), sleep=waits.append)
     assert waits == []
 
 
@@ -422,7 +424,7 @@ def test_retrying_raises_the_last_failure_when_attempts_run_out() -> None:
     waits: list[float] = []
     attempt = _failing(SourceUnavailable("first"), SourceUnavailable("second"))
     with pytest.raises(SourceUnavailable, match="second"):
-        cache.retrying(attempt, delays=(1.0,), sleep=waits.append)
+        _http.retrying(attempt, delays=(1.0,), sleep=waits.append)
     assert waits == [1.0]
 
 

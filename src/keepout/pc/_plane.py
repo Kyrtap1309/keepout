@@ -15,7 +15,8 @@ from typing import Final, Self, overload
 import numpy as np
 from scipy import special
 
-from keepout._types import FloatArray, override, require_positive
+from keepout._types import FloatArray, override
+from keepout._validation import require_positive
 from keepout.encounter import Role
 from keepout.errors import CovarianceError, GeometryError
 from keepout.pc.result import Method

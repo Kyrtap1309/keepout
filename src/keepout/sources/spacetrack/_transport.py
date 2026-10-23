@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from typing import Literal, Protocol
 
 from keepout.errors import SourceUnavailable
-from keepout.sources.cache import DOWNLOAD_TIMEOUT, gunzip, http_request, network_errors
+from keepout.sources._http import DOWNLOAD_TIMEOUT, gunzip, http_request, network_errors
 
 __all__ = ["Request", "Response", "Transport", "UrllibTransport"]
 
@@ -71,7 +71,7 @@ class UrllibTransport:
     """A :class:`Transport` on :mod:`urllib.request`, with a cookie jar.
 
     Requests name keepout in the ``User-Agent``
-    (:data:`~keepout.sources.cache.USER_AGENT`); redirects are followed.
+    (:data:`~keepout.sources._http.USER_AGENT`); redirects are followed.
 
     Parameters
     ----------

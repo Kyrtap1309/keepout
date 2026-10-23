@@ -9,6 +9,7 @@ Monte Carlo functions (:func:`hall3d`, :func:`montecarlo`) on a conjunction.
 """
 
 from keepout.pc.api import (
+    AUTO,
     METHODS,
     MethodChoice,
     MethodKind,
@@ -25,6 +26,7 @@ from keepout.pc.montecarlo import montecarlo
 from keepout.pc.result import Method, PcResult, ResultKind
 
 __all__ = [
+    "AUTO",
     "METHODS",
     "Method",
     "MethodChoice",

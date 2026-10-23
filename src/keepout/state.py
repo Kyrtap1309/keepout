@@ -8,7 +8,8 @@ from typing import Final, Literal, TypeAlias, get_args
 import numpy.typing as npt
 from astropy.time import Time
 
-from keepout._types import FloatArray, as_vector
+from keepout._linalg import as_vector
+from keepout._types import FloatArray
 from keepout.errors import UnsupportedFrame
 
 __all__ = ["REF_FRAMES", "RefFrame", "StateVector", "as_ref_frame"]

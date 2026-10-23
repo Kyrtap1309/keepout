@@ -60,9 +60,9 @@ import astropy.units as u
 import numpy as np
 from astropy.time import Time
 
-from keepout._types import (
-    FloatArray,
-    IndexArray,
+from keepout._defaults import SCREENING_DURATION
+from keepout._types import FloatArray, IndexArray
+from keepout._validation import (
     require_at_least,
     require_non_negative,
     require_positive,
@@ -72,12 +72,13 @@ from keepout._workers import process_pool, resolve_workers
 from keepout.errors import KeepoutError
 from keepout.frames import frame_to_gcrf
 from keepout.omm import Omm, deduplicate
-from keepout.propagation.base import (
+from keepout.propagation import (
     CHUNK_STATES,
+    Propagator,
     RadiusBounds,
+    Sgp4Propagator,
     describe_error,
 )
-from keepout.propagation.sgp4_prop import Sgp4Propagator
 from keepout.screening.filters import apogee_perigee_filter
 from keepout.screening.result import (
     CloseApproach,
@@ -104,7 +105,7 @@ from keepout.units import DAY
 
 __all__ = ["DEFAULT_DURATION", "MAX_AGE", "MAX_LEAD", "screen"]
 
-DEFAULT_DURATION: Final = 7 * DAY
+DEFAULT_DURATION: Final = SCREENING_DURATION
 """Length of the window unless told otherwise [s]: 7 days, as SOCRATES."""
 
 MAX_AGE: Final = 30 * DAY
@@ -201,7 +202,10 @@ def screen(
     primary_propagator, volumes, skipped_unusable_primaries = _primaries(
         current_primaries, volume
     )
-    parts = _parts(primary_propagator, volumes, current_catalog, window, processes)
+    primary_omms = primary_propagator.omms
+    parts = _parts(
+        primary_propagator, primary_omms, volumes, current_catalog, window, processes
+    )
     skipped_before_search = [
         *skipped_by_epoch_primaries,
         *skipped_by_epoch_catalog,
@@ -210,6 +214,7 @@ def screen(
     return _collect(
         _run(parts),
         primary_propagator,
+        primary_omms,
         volumes,
         current_catalog,
         window,
@@ -232,7 +237,9 @@ class _Part:
     """The primaries and one part of the catalog, to screen in one process."""
 
     window: _Window
-    primaries: Sgp4Propagator
+    primaries: Propagator
+    primary_omms: tuple[Omm, ...]
+    """Element set of each of ``primaries``."""
     primary_bounds: RadiusBounds
     volumes: tuple[ScreeningVolume, ...]
     catalog: tuple[Omm, ...]
@@ -321,7 +328,8 @@ def _primaries(
 
 
 def _parts(
-    primaries: Sgp4Propagator,
+    primaries: Propagator,
+    primary_omms: tuple[Omm, ...],
     volumes: Sequence[ScreeningVolume],
     catalog: tuple[Omm, ...],
     window: _Window,
@@ -335,6 +343,7 @@ def _parts(
         _Part(
             window=window,
             primaries=primaries,
+            primary_omms=primary_omms,
             primary_bounds=bounds,
             volumes=tuple(volumes),
             catalog=catalog[part::count],
@@ -346,7 +355,8 @@ def _parts(
 
 def _collect(
     results: Sequence[_PartResult],
-    primaries: Sgp4Propagator,
+    primaries: Propagator,
+    primary_omms: Sequence[Omm],
     volumes: Sequence[ScreeningVolume],
     catalog: Sequence[Omm],
     window: _Window,
@@ -365,7 +375,6 @@ def _collect(
         for index, message in result.unsupported
     ]
     search = SearchResult.merge(result.search for result in results)
-    primary_omms = primaries.omms
     skipped = [
         *skipped_before_search,
         *_unsupported(unsupported_catalog, ScreeningRole.CATALOG),
@@ -446,7 +455,7 @@ def _screen_part(part: _Part) -> _PartResult:
     bounds = catalog.radius_bounds(window.start, window.duration)
     pairs = apogee_perigee_filter(part.primary_bounds, bounds, part.volumes)
     primary_numbers = np.array(
-        [omm.catalog_number for omm in part.primaries.omms], dtype=np.int64
+        [omm.catalog_number for omm in part.primary_omms], dtype=np.int64
     )
     numbers = np.array([omm.catalog_number for omm in catalog.omms])
     pairs &= primary_numbers[:, None] != numbers[None, :]

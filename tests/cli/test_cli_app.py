@@ -11,7 +11,7 @@ from typer.testing import CliRunner
 import keepout as package
 from keepout.cli.output import (
     ExitCode,
-    JsonValue,
+    JsonOut,
     fail,
     minute,
     plural,
@@ -116,7 +116,7 @@ def test_fail_prints_the_message_and_exits_with_the_status(
 
 
 def test_show_prints_json_or_text(capsys: pytest.CaptureFixture[str]) -> None:
-    payload: dict[str, JsonValue] = {
+    payload: dict[str, JsonOut] = {
         "name": "[bold]x[/]",
         "values": [1, 2.5, None],
         "ok": True,

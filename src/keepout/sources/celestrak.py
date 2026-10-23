@@ -24,7 +24,7 @@ The client follows CelesTrak's usage policy
 - Any other status than 200 OK, and any network error, raises at once;
   nothing is retried (clients that ignore errors are blocked).
 - Requests name keepout, its version and its home page in the
-  ``User-Agent`` (:data:`~keepout.sources.cache.USER_AGENT`).
+  ``User-Agent`` (:data:`~keepout.sources._http.USER_AGENT`).
 
 Cached copies live under ``<cache>/celestrak/`` (``gp/<group>.csv`` and
 ``socrates/sort-minRange.csv``), each with a ``.meta.json`` file holding its
@@ -47,26 +47,21 @@ from http import HTTPStatus
 from pathlib import Path
 from typing import Final, TypeVar
 
+from keepout._defaults import CELESTRAK_TTL
 from keepout.errors import HttpStatusError, OmmParseError, SourceFormatError
 from keepout.omm.celestrak import loads_csv
 from keepout.omm.model import Omm
-from keepout.sources.cache import (
-    Downloader,
-    Unchanged,
-    cache_dir,
-    cached_fetch,
-    http_download,
-)
+from keepout.sources._http import Downloader, http_download
+from keepout.sources._store import cache_dir
+from keepout.sources.cache import Unchanged, cached_fetch
 from keepout.sources.catalog import Catalog, CatalogPart, Retrieval
 from keepout.sources.socrates import COLUMNS, SocratesApproach, read_socrates
-from keepout.units import HOUR
 
 __all__ = [
     "GP_URL",
     "PUBLIC_GROUPS",
     "SOCRATES_URL",
     "TTL",
-    "Downloader",
     "SocratesReport",
     "fetch_catalog",
     "fetch_group",
@@ -80,7 +75,7 @@ GP_URL: Final = "https://celestrak.org/NORAD/elements/gp.php"
 SOCRATES_URL: Final = "https://celestrak.org/socrates/sort-minRange.csv"
 """The latest SOCRATES Plus report, sorted by miss distance (CSV)."""
 
-TTL: Final = 2 * HOUR
+TTL: Final = CELESTRAK_TTL
 """Seconds a download is used without asking CelesTrak again: CelesTrak's
 update interval of two hours. Also the least ``max_age`` allowed."""
 
@@ -172,7 +167,7 @@ def fetch_group(
     name
         The group, e.g. ``active`` (case-insensitive).
     cache
-        Cache root; :func:`~keepout.sources.cache.cache_dir` if ``None``.
+        Cache root; :func:`~keepout.sources._store.cache_dir` if ``None``.
     max_age
         Seconds a cached copy is used without asking CelesTrak; at least
         :data:`TTL`.
@@ -218,7 +213,7 @@ def fetch_catalog(
     groups
         Group names; a name given twice is fetched once.
     cache
-        Cache root; :func:`~keepout.sources.cache.cache_dir` if ``None``.
+        Cache root; :func:`~keepout.sources._store.cache_dir` if ``None``.
     max_age
         Seconds a cached copy is used without asking CelesTrak; at least
         :data:`TTL`.
@@ -265,7 +260,7 @@ def fetch_socrates(
     Parameters
     ----------
     cache
-        Cache root; :func:`~keepout.sources.cache.cache_dir` if ``None``.
+        Cache root; :func:`~keepout.sources._store.cache_dir` if ``None``.
     max_age
         Seconds a cached copy is used without asking CelesTrak; at least
         :data:`TTL`.

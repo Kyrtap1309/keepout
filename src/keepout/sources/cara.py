@@ -3,7 +3,7 @@
 keepout never vendors CARA files (they are distributed under the NASA Open
 Source Agreement). Files are downloaded on demand from a pinned commit,
 verified by SHA-256 and cached under
-:func:`~keepout.sources.cache.cache_dir`.
+:func:`~keepout.sources._store.cache_dir`.
 """
 
 from __future__ import annotations
@@ -21,13 +21,8 @@ from pathlib import Path, PurePosixPath
 from typing import Final, TypeAlias
 
 from keepout.errors import CaraFormatError
-from keepout.sources.cache import (
-    Downloader,
-    cache_dir,
-    has_digest,
-    http_download,
-    store,
-)
+from keepout.sources._http import Downloader, http_download
+from keepout.sources._store import cache_dir, has_digest, store
 
 __all__ = [
     "ALFANO_2009_RESULTS",
@@ -46,7 +41,6 @@ __all__ = [
     "PREFETCH_WORKERS",
     "CaraFile",
     "Cell",
-    "Downloader",
     "commit_dir",
     "fetch",
     "load_csv",
@@ -182,7 +176,7 @@ def commit_dir(cache: Path | None = None) -> Path:
     """The folder of the cached files of :data:`CARA_COMMIT`.
 
     ``<cache>/cara/<CARA_COMMIT>``, ``<cache>`` being
-    :func:`~keepout.sources.cache.cache_dir` of ``cache``; a file's copy is
+    :func:`~keepout.sources._store.cache_dir` of ``cache``; a file's copy is
     at its :attr:`CaraFile.path` below it.
     """
     return cache_dir(cache) / "cara" / CARA_COMMIT

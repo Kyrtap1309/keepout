@@ -24,7 +24,7 @@ for an operator:
    and the screening window and volume.
 5. **Risk.** Each CDM is assessed as its recipient would assess it: its Pc
    is computed from the message
-   (:meth:`keepout.risk.ConjunctionEvent.observations`) and the event is
+   (:meth:`keepout.events.ConjunctionEvent.observations`) and the event is
    assessed (:func:`keepout.risk.assess`).
 
 Every approach is an event of its own, with one CDM: two approaches of one
@@ -47,8 +47,9 @@ from typing import Final
 
 from astropy.time import Time
 
-from keepout._types import require_single_time
+from keepout._validation import require_single_time
 from keepout.cdm import (
+    ORIGINATOR,
     Cdm,
     CovarianceMethod,
     Maneuverable,
@@ -56,20 +57,20 @@ from keepout.cdm import (
     ObjectType,
     make_cdm,
 )
-from keepout.cdm.builder import ORIGINATOR
 from keepout.errors import FleetError
+from keepout.events import ConjunctionEvent
 from keepout.omm import Omm, deduplicate
-from keepout.pc.api import AUTO, PcComputation
+from keepout.pc import AUTO, PcComputation
 from keepout.risk import (
     Action,
     Assessment,
-    ConjunctionEvent,
     DecisionConfig,
     PcObservation,
     Thresholds,
     assess,
 )
 from keepout.screening import (
+    DEFAULT_DURATION,
     DEFAULT_VOLUME,
     CloseApproach,
     ScreeningResult,
@@ -77,7 +78,6 @@ from keepout.screening import (
     VolumeRule,
     screen,
 )
-from keepout.screening.pipeline import DEFAULT_DURATION
 from keepout.synthetic.covariance_model import SyntheticCovarianceModel
 from keepout.synthetic.fleet import Fleet
 
@@ -225,7 +225,7 @@ def run(
         ``ORIGINATOR`` of the CDMs.
     compute
         Pc method and options, as for
-        :meth:`keepout.risk.ConjunctionEvent.observations`; ``"auto"``
+        :meth:`keepout.events.ConjunctionEvent.observations`; ``"auto"``
         keeps the 2-D Pc for the model's position-only covariances.
     thresholds, decision_config
         Risk thresholds and decision point, as for

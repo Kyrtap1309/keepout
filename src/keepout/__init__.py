@@ -3,7 +3,8 @@
 The core types, the Pc entry point, the event assessment, screening (with
 its volume) and the exception hierarchy are available from the package
 itself; CDM input and output are in :mod:`keepout.cdm`, the individual Pc
-methods in :mod:`keepout.pc`, risk levels, trends and decisions in
+methods in :mod:`keepout.pc`, conjunction events (the CDMs of one
+encounter) in :mod:`keepout.events`, risk levels, trends and decisions in
 :mod:`keepout.risk`, element sets in :mod:`keepout.omm`, the screening
 search, its parts and the reasons for skipped element sets in
 :mod:`keepout.screening`, propagators in :mod:`keepout.propagation`, the
@@ -46,9 +47,10 @@ from keepout.errors import (
 if TYPE_CHECKING:
     from keepout.conjunction import Conjunction
     from keepout.covariance import Covariance, make_covariance
+    from keepout.events import ConjunctionEvent
     from keepout.objects import ObjectState
     from keepout.pc import Method, MethodChoice, PcResult, compute_pc
-    from keepout.risk import ConjunctionEvent, PcObservation, assess
+    from keepout.risk import PcObservation, assess
     from keepout.screening import (
         CloseApproach,
         ScreeningResult,
@@ -69,7 +71,7 @@ _LAZY: Final = {
     "MethodChoice": "keepout.pc",
     "PcResult": "keepout.pc",
     "compute_pc": "keepout.pc",
-    "ConjunctionEvent": "keepout.risk",
+    "ConjunctionEvent": "keepout.events",
     "PcObservation": "keepout.risk",
     "assess": "keepout.risk",
     "CloseApproach": "keepout.screening",

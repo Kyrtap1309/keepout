@@ -23,7 +23,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Final, Literal, TypeAlias
 
-from keepout.units import HOUR
+from keepout._defaults import CELESTRAK_TTL, GP_INTERVAL
 
 if TYPE_CHECKING:
     from astropy.time import Time
@@ -186,7 +186,7 @@ CATALOG_SOURCES: Final[Mapping[CatalogSourceName, CatalogSource]] = MappingProxy
             "Group",
             "public groups, no account",
             "keepout.sources.celestrak",
-            2 * HOUR,
+            CELESTRAK_TTL,
         ),
         "spacetrack": CatalogSource(
             "spacetrack",
@@ -194,7 +194,7 @@ CATALOG_SOURCES: Final[Mapping[CatalogSourceName, CatalogSource]] = MappingProxy
             "Query",
             "the full catalog, needs SPACETRACK_IDENTITY and SPACETRACK_PASSWORD",
             "keepout.sources.spacetrack",
-            HOUR,
+            GP_INTERVAL,
         ),
     }
 )

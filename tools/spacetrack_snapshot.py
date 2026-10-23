@@ -83,7 +83,7 @@ from keepout.errors import SourceFormatError, SourceUnavailable
 from keepout.omm import Omm, load
 from keepout.omm.celestrak import dumps_csv
 from keepout.screening.result import CloseApproach
-from keepout.sources.cache import store_bytes
+from keepout.sources._store import store_bytes
 from keepout.sources.catalog import Catalog
 from keepout.sources.spacetrack import (
     CATALOG,
@@ -103,7 +103,7 @@ from keepout.sources.spacetrack import (
     read_public_cdms,
 )
 from keepout.sources.spacetrack import read_catalog as read_gp
-from keepout.units import KM, MINUTE, seconds_between
+from keepout.units import KM, MINUTE, julian_seconds_between
 
 TOOL: Final = "tools/spacetrack_snapshot.py"
 DATA: Final = REPO / "tests/screening/spacetrack-data"
@@ -574,7 +574,7 @@ class Match:
         approach."""
         if self.approach is None:
             return None
-        return seconds_between(self.cdm.tca, self.approach.tca)
+        return julian_seconds_between(self.cdm.tca, self.approach.tca)
 
     @property
     def miss_distance(self) -> float | None:

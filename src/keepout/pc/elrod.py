@@ -28,7 +28,8 @@ from typing import Final
 
 import numpy as np
 
-from keepout._types import FloatArray, require_at_least
+from keepout._types import FloatArray
+from keepout._validation import require_at_least
 from keepout.encounter import EncounterPlane
 from keepout.pc._plane import PlaneGaussian, plane_gaussian, require_known_covariance
 from keepout.pc.result import PcResult

@@ -24,7 +24,7 @@ from keepout.objects import ObjectState, ReportedObject, gcrf_object_states
 from keepout.state import StateVector, as_ref_frame
 from keepout.units import KM
 
-__all__ = ["legacy_objects"]
+__all__ = ["load_legacy_objects"]
 
 _LINE: Final = re.compile(r"^\s*([A-Z][A-Z0-9_]*)\s*=\s*(\S+)")
 _OBJECT: Final = re.compile(r"^\s*OBJECT\s*=")
@@ -70,7 +70,7 @@ def _reported(
     )
 
 
-def legacy_objects(
+def load_legacy_objects(
     path: Path, *, known: tuple[bool, bool] = (True, True)
 ) -> tuple[ObjectState, ObjectState]:
     """Both objects of a legacy CARA sample CDM, in GCRF.

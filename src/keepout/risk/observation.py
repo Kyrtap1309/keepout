@@ -6,7 +6,7 @@ import math
 from dataclasses import dataclass
 from typing import Final, Literal, TypeAlias, get_args
 
-from keepout._types import require_probability
+from keepout._validation import require_probability
 from keepout.pc.result import PcResult
 
 __all__ = ["PC_FLOOR", "PC_KINDS", "PcKind", "PcObservation"]

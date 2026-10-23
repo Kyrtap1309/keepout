@@ -14,10 +14,10 @@ from keepout.omm.keywords import DEGREE, KEYWORDS, REVOLUTION_PER_DAY
 from keepout.omm.model import (
     MAX_CATALOG_NUMBER,
     MAX_ELEMENT_SET_NO,
-    MAX_SATREC_NUMBER,
     SGP4_EPOCH_DIGITS,
     InvalidElement,
 )
+from keepout.propagation import MAX_SATREC_NUMBER, satrec_of
 
 ISS_OMM = omm_from(ISS)
 
@@ -61,7 +61,7 @@ def test_keywords_give_back_the_message_values() -> None:
 
 
 def test_satrec_is_the_record_sgp4_makes_from_the_message() -> None:
-    assert_same_satrec(ISS_OMM.satrec(), sgp4_record(ISS))
+    assert_same_satrec(satrec_of(ISS_OMM), sgp4_record(ISS))
 
 
 @pytest.mark.parametrize(
@@ -71,7 +71,7 @@ def test_epochs_outside_the_leap_second_table_are_read_and_used(epoch: str) -> N
     values = {**ISS, "EPOCH": epoch}
     omm = omm_from(values)
     assert omm.keywords() == {**ISS_OMM.keywords(), "EPOCH": epoch}
-    assert_same_satrec(omm.satrec(), sgp4_record(values))
+    assert_same_satrec(satrec_of(omm), sgp4_record(values))
 
 
 @pytest.mark.parametrize(
@@ -83,7 +83,7 @@ def test_epochs_on_a_day_that_ends_in_a_utc_step_are_read_and_used(
     values = {**ISS, "EPOCH": epoch}
     omm = omm_from(values)
     assert omm.keywords() == {**ISS_OMM.keywords(), "EPOCH": epoch}
-    assert_same_satrec(omm.satrec(), sgp4_record(values))
+    assert_same_satrec(satrec_of(omm), sgp4_record(values))
 
 
 @pytest.mark.parametrize(
@@ -98,11 +98,11 @@ def test_an_epoch_rounded_past_the_end_of_a_step_day_starts_the_next(
 ) -> None:
     omm = omm_from({**ISS, "EPOCH": epoch})
     assert omm.keywords()["EPOCH"] == epoch
-    assert_same_satrec(omm.satrec(), sgp4_record({**ISS, "EPOCH": sgp4_epoch}))
+    assert_same_satrec(satrec_of(omm), sgp4_record({**ISS, "EPOCH": sgp4_epoch}))
 
 
 def test_satrec_holds_a_six_digit_catalog_number() -> None:
-    record = dataclasses.replace(ISS_OMM, catalog_number=MAX_SATREC_NUMBER).satrec()
+    record = satrec_of(dataclasses.replace(ISS_OMM, catalog_number=MAX_SATREC_NUMBER))
     assert record.satnum == MAX_SATREC_NUMBER
     assert record.satnum_str == "Z9999"
 
@@ -110,7 +110,7 @@ def test_satrec_holds_a_six_digit_catalog_number() -> None:
 def test_satrec_refuses_a_catalog_number_sgp4_cannot_hold() -> None:
     above = dataclasses.replace(ISS_OMM, catalog_number=MAX_SATREC_NUMBER + 1)
     with pytest.raises(UnsupportedElements, match="340000 is above 339999"):
-        above.satrec()
+        satrec_of(above)
 
 
 def test_satrec_rounds_the_epoch_to_microseconds() -> None:
@@ -119,11 +119,11 @@ def test_satrec_rounds_the_epoch_to_microseconds() -> None:
         ISS_OMM,
         epoch=Time("2026-10-06T00:20:47.8605118", scale="utc", precision=7),
     )
-    assert_same_satrec(finer.satrec(), ISS_OMM.satrec())
+    assert_same_satrec(satrec_of(finer), satrec_of(ISS_OMM))
     coarse = dataclasses.replace(
         ISS_OMM, epoch=Time("2026-10-06T00:20:48", scale="utc", precision=0)
     )
-    assert coarse.satrec().jdsatepochF == pytest.approx(
+    assert satrec_of(coarse).jdsatepochF == pytest.approx(
         (20 * 60 + 48) / 86400.0, abs=1e-12
     )
 
@@ -131,7 +131,7 @@ def test_satrec_rounds_the_epoch_to_microseconds() -> None:
 def test_satrec_is_the_record_sgp4_makes_from_the_keywords() -> None:
     for omm in load_fixture():
         values = omm.keywords(epoch_digits=SGP4_EPOCH_DIGITS)
-        assert_same_satrec(omm.satrec(), sgp4_record(values))
+        assert_same_satrec(satrec_of(omm), sgp4_record(values))
 
 
 @pytest.mark.parametrize(
@@ -144,7 +144,7 @@ def test_satrec_is_the_record_sgp4_makes_from_the_keywords() -> None:
 def test_satrec_refuses_an_epoch_in_a_leap_second(epoch: str, text: str) -> None:
     leap = dataclasses.replace(ISS_OMM, epoch=parse_epoch(epoch))
     with pytest.raises(UnsupportedElements, match=f"epoch {text} falls in a leap"):
-        leap.satrec()
+        satrec_of(leap)
 
 
 def test_the_epoch_is_stored_in_utc() -> None:
@@ -229,7 +229,7 @@ def test_the_written_epoch_does_not_depend_on_the_time_precision(
     omm = dataclasses.replace(ISS_OMM, epoch=Time(ISS_OMM.epoch, precision=precision))
     assert omm.keywords() == ISS_OMM.keywords()
     assert omm.keywords()["EPOCH"] == ISS["EPOCH"]
-    assert_same_satrec(omm.satrec(), ISS_OMM.satrec())
+    assert_same_satrec(satrec_of(omm), satrec_of(ISS_OMM))
 
 
 @pytest.mark.parametrize(

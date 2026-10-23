@@ -24,7 +24,7 @@ from astropy.time import Time
 import keepout.omm
 from keepout.cdm import kvn
 from keepout.synthetic import load_fleet
-from keepout.synthetic.operator import run
+from keepout.synthetic import run
 
 
 def main() -> None:
@@ -113,7 +113,7 @@ text; both raise `FleetError` naming the satellite and the key at fault.
 
 ## What a run does
 
-`keepout.synthetic.operator.run(fleet, catalog, start, duration, volume)`
+`keepout.synthetic.run(fleet, catalog, start, duration, volume)`
 does what a conjunction assessment service does for an operator:
 
 1. **Element sets.** Each fleet satellite's newest element set is taken
@@ -184,7 +184,7 @@ The [report](synthetic-operator.md#example-cdm) shows one in full.
 The `MESSAGE_ID` carries the creation time, so a run on another day issues
 new messages: the CDMs of one approach from several runs (the same pair,
 TCAs within 10 minutes) are successive CDMs of one event for
-`keepout assess` and `keepout.risk.group_events`, which then follow the Pc's
+`keepout assess` and `keepout.events.group_events`, which then follow the Pc's
 trend. With new element sets the TCA and the Pc move as an operational
 service's would; with unchanged element sets only the time to TCA changes.
 

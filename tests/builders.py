@@ -17,8 +17,9 @@ from keepout.conjunction import Conjunction
 from keepout.covariance import Covariance
 from keepout.objects import ObjectState
 from keepout.pc.result import PcResult
-from keepout.risk import DAY, PcKind, PcObservation
+from keepout.risk import PcKind, PcObservation
 from keepout.state import StateVector
+from keepout.units import DAY
 from keepout.validation.cases import ValidationCase
 from keepout.validation.criteria import TWO_D, Criterion
 

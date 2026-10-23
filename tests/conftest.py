@@ -26,7 +26,7 @@ import pytest
 from astropy.utils import iers
 from hypothesis import settings
 
-from keepout.sources import cache
+from keepout.sources import _store
 
 # The CLI tests read plain text: Typer (on import) and Rich take these to
 # mean a colour terminal, and GitHub Actions sets GITHUB_ACTIONS.
@@ -87,6 +87,6 @@ def no_network(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) 
 def _forget_verified() -> Iterator[None]:
     """Start and end every test without the process-wide memo of verified
     files."""
-    cache.forget_verified()
+    _store.forget_verified()
     yield
-    cache.forget_verified()
+    _store.forget_verified()

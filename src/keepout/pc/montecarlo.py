@@ -25,13 +25,8 @@ from typing import Final
 
 import numpy as np
 
-from keepout._types import (
-    BoolArray,
-    FloatArray,
-    IndexArray,
-    require_at_least,
-    require_positive,
-)
+from keepout._types import BoolArray, FloatArray, IndexArray
+from keepout._validation import require_at_least, require_positive
 from keepout.conjunction import Conjunction
 from keepout.equinoctial import Orbits
 from keepout.orbits import EARTH_MU

@@ -139,7 +139,7 @@ errors, computes the Pc from each CDM and assesses each event.
   or not).
 - **Volume and model.** A 5 km sphere, as CelesTrak's SOCRATES, and the
   covariance model's published parameters; the library's
-  `keepout.synthetic.operator.run` takes others.
+  `keepout.synthetic.run` takes others.
 - **CDMs.** `--cdm-dir DIR` writes each CDM as `DIR/<MESSAGE_ID>.kvn`. The
   `MESSAGE_ID` is made of both catalog numbers, the TCA and the creation
   time (e.g.

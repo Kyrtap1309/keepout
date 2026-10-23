@@ -15,7 +15,8 @@ from functools import cached_property
 
 import numpy as np
 
-from keepout._types import FloatArray, from_eigen, symmetric_part
+from keepout._linalg import from_eigen, symmetric_part
+from keepout._types import FloatArray
 from keepout.covariance import to_correlation
 from keepout.equinoctial import (
     RetrogradeFactor,

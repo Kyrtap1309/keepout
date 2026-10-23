@@ -9,11 +9,12 @@ from typing import Final
 import numpy.typing as npt
 from astropy.time import Time
 
-from keepout._types import require_non_negative
+from keepout._validation import require_non_negative
 from keepout.covariance import Covariance, Policy, make_covariance
 from keepout.errors import GeometryError
 from keepout.frames import to_gcrf_all
 from keepout.state import StateVector
+from keepout.units import elapsed_seconds
 
 __all__ = [
     "EPOCH_TOLERANCE_S",
@@ -44,7 +45,7 @@ def require_same_epoch(first: Time, second: Time, what: str) -> None:
     """
     if first is second:
         return
-    offset = abs(float((first - second).to_value("s")))
+    offset = abs(elapsed_seconds(second, first))
     if offset > EPOCH_TOLERANCE_S:
         raise GeometryError(f"{what} epochs differ by {offset:.3g} s")
 

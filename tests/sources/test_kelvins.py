@@ -8,9 +8,10 @@ from builders import KELVINS_EXCERPT as EXCERPT
 from web_builders import pin_kelvins, zipped
 
 from keepout.errors import ChecksumMismatch, KelvinsFormatError
-from keepout.risk import DAY, Action, assess
-from keepout.sources import cache, kelvins
+from keepout.risk import Action, assess
+from keepout.sources import _http, kelvins
 from keepout.sources.kelvins import FEATURES, KelvinsEvent
+from keepout.units import DAY
 
 
 @pytest.fixture(scope="module")
@@ -151,7 +152,7 @@ class FakeZenodo:
         self.body = body
         self.calls = 0
 
-    def __call__(self, url: str, sink: cache.Sink) -> None:
+    def __call__(self, url: str, sink: _http.Sink) -> None:
         assert url == kelvins.ARCHIVE_URL
         self.calls += 1
         sink.write(self.body)

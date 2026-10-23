@@ -14,8 +14,8 @@ The writers give back what the readers take: reading a written file gives
 equal :class:`~keepout.omm.model.Omm` objects. Epochs are written to the
 microsecond, as CelesTrak writes them and as :func:`sgp4.omm.initialize`
 reads them: an epoch with a finer part (none read from CelesTrak's formats
-has one) is rounded to the microsecond, as :meth:`~keepout.omm.model.Omm.satrec`
-rounds it.
+has one) is rounded to the microsecond, as
+:func:`~keepout.propagation.satrec_of` rounds it.
 """
 
 from __future__ import annotations

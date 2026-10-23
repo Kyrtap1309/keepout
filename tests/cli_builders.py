@@ -16,6 +16,7 @@ from web_builders import FakeResponse
 from keepout.cli.app import app
 from keepout.omm.celestrak import dumps_csv
 from keepout.sources import celestrak, spacetrack
+from keepout.sources.spacetrack import _client
 
 
 def keepout(*args: str, env: Mapping[str, str | None] | None = None) -> Result:
@@ -59,9 +60,10 @@ def fake_space_track(
     monkeypatch: pytest.MonkeyPatch, answers: Mapping[str, bytes]
 ) -> FakeSpaceTrack:
     """A :class:`FakeSpaceTrack` serving ``answers`` (query URL to body),
-    used by every Space-Track client the commands open."""
+    used by every Space-Track client the commands open (each makes its
+    transport with the ``UrllibTransport`` its module ``_client`` names)."""
     server = FakeSpaceTrack(answers)
-    monkeypatch.setattr(spacetrack, "UrllibTransport", lambda: server)
+    monkeypatch.setattr(_client, "UrllibTransport", lambda: server)
     return server
 
 

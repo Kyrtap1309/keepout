@@ -31,7 +31,8 @@ from typing import Final
 import numpy as np
 from scipy import optimize
 
-from keepout._types import FloatArray, require_positive
+from keepout._types import FloatArray
+from keepout._validation import require_positive
 from keepout.encounter import EncounterPlane
 from keepout.pc._plane import plane_gaussian, require_known_covariance
 from keepout.pc.foster import gaussian_pc

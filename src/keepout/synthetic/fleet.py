@@ -30,7 +30,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
-from keepout._types import require_non_negative, require_positive
+from keepout._validation import (
+    is_single_line,
+    non_negative_float,
+    positive_float,
+)
 from keepout.errors import FleetError
 from keepout.omm.model import MAX_CATALOG_NUMBER
 
@@ -90,13 +94,10 @@ class FleetSatellite:
                 f"catalog_number must be in [1, {MAX_CATALOG_NUMBER}], "
                 f"got {self.catalog_number}"
             )
-        radius = float(self.hard_body_radius)
-        require_positive(radius, "hard_body_radius")
+        radius = positive_float(self.hard_body_radius, "hard_body_radius")
         object.__setattr__(self, "hard_body_radius", radius)
         name = self.name
-        if name is not None and (
-            not name or name != name.strip() or len(name.splitlines()) > 1
-        ):
+        if name is not None and (not name or not is_single_line(name)):
             raise ValueError(
                 f"name must be one non-empty line without leading or trailing "
                 f"blanks, got {name!r}"
@@ -136,8 +137,9 @@ class Fleet:
             raise ValueError(
                 f"catalog_number repeated: {', '.join(map(str, repeated))}"
             )
-        radius = float(self.catalog_hard_body_radius)
-        require_non_negative(radius, "catalog_hard_body_radius")
+        radius = non_negative_float(
+            self.catalog_hard_body_radius, "catalog_hard_body_radius"
+        )
         object.__setattr__(self, "satellites", satellites)
         object.__setattr__(self, "catalog_hard_body_radius", radius)
 

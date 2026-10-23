@@ -23,7 +23,7 @@ from astropy.time import Time
 
 from keepout.errors import SourceFormatError
 from keepout.omm import Omm
-from keepout.units import DAY, KM, seconds_between
+from keepout.units import DAY, KM, julian_seconds_between
 
 __all__ = [
     "COLUMNS",
@@ -152,7 +152,7 @@ def epoch_matches(approach: SocratesApproach, primary: Omm, secondary: Omm) -> b
         Element sets of its two objects.
     """
     return all(
-        abs(seconds_between(omm.epoch, approach.tca) - since)
+        abs(julian_seconds_between(omm.epoch, approach.tca) - since)
         <= approach.since_epoch_tolerance
         for omm, since in (
             (primary, approach.since_epoch_primary),

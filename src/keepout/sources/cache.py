@@ -1,470 +1,50 @@
-"""Downloaded reference data: cache location, verified atomic writes, HTTP.
-
-Shared by :mod:`keepout.sources.cara`, :mod:`keepout.sources.kelvins`,
-:mod:`keepout.sources.celestrak` and :mod:`keepout.sources.spacetrack`.
-Every cached file has a pinned SHA-256 digest; a file is written under a
-unique temporary name and renamed into place only once its digest matches,
-so the cache never uses a partial or unverified file (:func:`store`). Bytes
-already in memory are written the same way, without a digest to match
-(:func:`store_bytes`). A hard kill (SIGKILL,
-power loss) mid-write can leave the temporary ``.part`` file behind; it is
-never read.
+"""Downloads kept for reuse: a copy with its metadata, and the policy of
+when to download again.
 
 A download kept for reuse (CelesTrak, Space-Track) has a ``.meta.json``
 file next to it recording its URL, digest and times (:class:`CopyMeta`);
 :func:`read_copy` gives the copy only if both files are intact, and
 :func:`cached_fetch` holds the policy around it: use a fresh copy that can
-be read, else download, read and save (gzipped if asked).
+be read, else download, read and save (gzipped if asked). Both files are
+written atomically (:mod:`keepout.sources._store`), under the cache root
+:func:`~keepout.sources._store.cache_dir`.
 """
 
 from __future__ import annotations
 
-import contextlib
 import dataclasses
 import enum
+import functools
 import gzip
 import hashlib
-import http.client
-import io
 import json
 import math
-import os
-import stat
-import tempfile
-import threading
-import time
-import urllib.error
-import urllib.parse
-import urllib.request
-import zlib
-from collections.abc import Callable, Collection, Generator, Mapping, Sequence
+from collections.abc import Callable
 from dataclasses import dataclass
-from http import HTTPStatus
-from importlib.metadata import version
 from pathlib import Path
-from typing import TYPE_CHECKING, Final, NamedTuple, Protocol, TypeAlias, TypeVar
-
-import platformdirs
+from typing import TYPE_CHECKING, Final, NamedTuple, TypeVar
 
 from keepout._types import JsonValue
-from keepout.errors import (
-    ChecksumMismatch,
-    HttpStatusError,
-    SourceFormatError,
-    SourceUnavailable,
-)
+from keepout.errors import SourceFormatError, SourceUnavailable
+from keepout.sources._http import gunzip
+from keepout.sources._store import store_bytes, store_json
 
 if TYPE_CHECKING:
     from typing_extensions import TypeIs
 
 __all__ = [
-    "CHUNK_SIZE",
-    "DOWNLOAD_TIMEOUT",
-    "HOME_PAGE",
-    "RETRY_DELAYS",
-    "USER_AGENT",
     "CachedCopy",
     "CopyMeta",
-    "Downloader",
-    "Sink",
     "Unchanged",
-    "cache_dir",
     "cached_fetch",
-    "forget_verified",
-    "gunzip",
-    "has_digest",
-    "http_download",
-    "http_request",
-    "http_stream",
     "meta_path",
-    "network_errors",
     "read_copy",
     "require_max_age",
-    "retrying",
     "save_copy",
-    "store",
-    "store_bytes",
-    "store_json",
     "write_meta",
 ]
 
-DOWNLOAD_TIMEOUT: Final = 60.0
-"""Seconds :func:`http_download` and :func:`http_stream` wait for the server."""
-
 _T = TypeVar("_T")
-
-RETRY_DELAYS: Final = (5.0, 30.0)
-"""Seconds waited before each new attempt of a download that failed
-transiently (:func:`retrying`): two more attempts, over about half a minute."""
-
-CHUNK_SIZE: Final = 1 << 20
-"""Bytes :func:`http_stream` reads at a time."""
-
-HOME_PAGE: Final = "https://github.com/Kyrtap1309/keepout"
-"""keepout's home page, named in :data:`USER_AGENT`."""
-
-USER_AGENT: Final = f"keepout/{version('keepout')} (+{HOME_PAGE})"
-"""The ``User-Agent`` of every request: keepout, its version and where to
-find it, for servers that ask clients to identify themselves (CelesTrak)."""
-
-
-class Sink(Protocol):
-    """Where streamed bytes go: anything with a binary ``write``."""
-
-    def write(self, data: bytes, /) -> object:
-        """The next chunk, taken."""
-
-
-def cache_dir(given: Path | None = None) -> Path:
-    """Root cache directory for downloaded reference data.
-
-    ``given`` if not ``None``, else ``$KEEPOUT_CACHE_DIR`` if set, else the
-    platform's user cache directory for keepout (on Linux
-    ``$XDG_CACHE_HOME/keepout`` or ``~/.cache/keepout``; on macOS
-    ``~/Library/Caches/keepout``). The directory is not created here.
-    """
-    if given is not None:
-        return given
-    override = os.environ.get("KEEPOUT_CACHE_DIR")
-    if override:
-        return Path(override)
-    return platformdirs.user_cache_path("keepout")
-
-
-Downloader: TypeAlias = Callable[[str], bytes]
-"""A download of a URL's body, raising
-:class:`~keepout.errors.HttpStatusError` for an HTTP status other than 200
-and :class:`~keepout.errors.SourceUnavailable` for other failures, like
-:func:`http_download`."""
-
-
-def http_download(url: str, *, retry_delays: Sequence[float] = RETRY_DELAYS) -> bytes:
-    """The body at ``url``, downloaded as :func:`http_stream` does.
-
-    A download that fails on the network or with a server error is tried
-    again (:func:`retrying`).
-
-    Parameters
-    ----------
-    url
-        What to download.
-    retry_delays
-        Seconds waited before each new attempt.
-
-    Raises
-    ------
-    HttpStatusError
-        If the server answers with a status other than 200 OK.
-    SourceUnavailable
-        On any other network or HTTP error.
-    """
-
-    def attempt() -> bytes:
-        buffer = io.BytesIO()
-        http_stream(url, buffer)
-        return buffer.getvalue()
-
-    return retrying(attempt, delays=retry_delays)
-
-
-def retrying(
-    attempt: Callable[[], _T],
-    *,
-    delays: Sequence[float] = RETRY_DELAYS,
-    sleep: Callable[[float], object] | None = None,
-) -> _T:
-    """``attempt()``, tried again after each of ``delays`` while it fails
-    transiently.
-
-    A failure is transient if it is a
-    :class:`~keepout.errors.SourceUnavailable` other than an HTTP status (a
-    network error), or an HTTP 429 or 5xx status. ``attempt`` must start
-    afresh each time: a stream already written to cannot be retried. The
-    waits are ``sleep``'s, :func:`time.sleep` if ``None``.
-
-    Raises
-    ------
-    SourceUnavailable
-        The first failure that is not transient, or the last one.
-    """
-    for delay in delays:
-        try:
-            return attempt()
-        except SourceUnavailable as exc:
-            if not _transient(exc):
-                raise
-        (time.sleep if sleep is None else sleep)(delay)
-    return attempt()
-
-
-def _transient(error: SourceUnavailable) -> bool:
-    """Whether a download that failed with ``error`` may succeed if tried again."""
-    if not isinstance(error, HttpStatusError):
-        return type(error) is SourceUnavailable
-    return error.status == HTTPStatus.TOO_MANY_REQUESTS or error.status >= 500
-
-
-def http_request(
-    url: str,
-    *,
-    schemes: Collection[str] = ("http", "https"),
-    data: bytes | None = None,
-    method: str | None = None,
-    headers: Mapping[str, str] | None = None,
-) -> urllib.request.Request:
-    """A request for ``url`` that names keepout in its ``User-Agent``
-    (:data:`USER_AGENT`), with ``headers`` added.
-
-    Raises
-    ------
-    ValueError
-        If ``url``'s scheme is not one of ``schemes``: urllib must never
-        open a local file.
-    """
-    if urllib.parse.urlsplit(url).scheme not in schemes:
-        named = " or ".join(scheme.upper() for scheme in schemes)
-        raise ValueError(f"not an {named} URL: {url!r}")
-    # The scheme is checked above, so urllib cannot open a local file.
-    return urllib.request.Request(  # noqa: S310
-        url,
-        data=data,
-        headers={"User-Agent": USER_AGENT, **(headers or {})},
-        method=method,
-    )
-
-
-@contextlib.contextmanager
-def network_errors(message: str) -> Generator[None]:
-    """A context in which a network or protocol error becomes
-    :class:`~keepout.errors.SourceUnavailable`, ``<message>: <error>``.
-
-    Raises
-    ------
-    SourceUnavailable
-        On an :class:`OSError` or :class:`http.client.HTTPException`.
-    """
-    try:
-        yield
-    except (OSError, http.client.HTTPException) as exc:
-        raise SourceUnavailable(f"{message}: {exc}") from exc
-
-
-def http_stream(url: str, sink: Sink) -> None:
-    """The download of ``url`` into ``sink``, in chunks of :data:`CHUNK_SIZE` bytes.
-
-    For files too large to hold in memory at once. The request names keepout
-    in the ``User-Agent`` (:data:`USER_AGENT`). Redirects are followed; any
-    final status but 200 OK is an error, the success codes included, and
-    nothing is retried.
-
-    Parameters
-    ----------
-    url
-        What to download.
-    sink
-        Where the body goes.
-
-    Raises
-    ------
-    HttpStatusError
-        If the server answers with a status other than 200 OK.
-    SourceUnavailable
-        On any other network or HTTP error, also one in the middle of the body.
-    ValueError
-        If ``url`` is not an ``http`` or ``https`` URL.
-    """
-    request = http_request(url)
-    with network_errors(f"cannot download {url}"):
-        try:
-            with urllib.request.urlopen(  # noqa: S310
-                request, timeout=DOWNLOAD_TIMEOUT
-            ) as response:
-                if response.status != HTTPStatus.OK:
-                    raise HttpStatusError(
-                        f"cannot download {url}: "
-                        f"HTTP {response.status} {response.reason}",
-                        url=url,
-                        status=response.status,
-                    )
-                while chunk := response.read(CHUNK_SIZE):
-                    sink.write(chunk)
-        except urllib.error.HTTPError as exc:
-            raise HttpStatusError(
-                f"cannot download {url}: {exc}", url=url, status=exc.code
-            ) from exc
-
-
-_Signature: TypeAlias = tuple[int, int, int]
-"""Inode, size and modification time [ns] of a cached file."""
-
-_verified: Final[dict[Path, tuple[str, _Signature]]] = {}
-"""Cached files whose digest this process has checked (or written), with the
-signature they had then; see :func:`has_digest`."""
-_verified_lock = threading.Lock()
-
-
-def _signature(path: Path) -> _Signature | None:
-    """Signature of the regular file at ``path``; ``None`` if there is none."""
-    try:
-        status = path.stat()
-    except OSError:
-        return None
-    if not stat.S_ISREG(status.st_mode):
-        return None
-    return status.st_ino, status.st_size, status.st_mtime_ns
-
-
-def _remember(path: Path, sha256: str, signature: _Signature | None) -> None:
-    """The record that ``path``, with ``signature``, has digest ``sha256``."""
-    if signature is not None:
-        with _verified_lock:
-            _verified[path] = (sha256, signature)
-
-
-def forget_verified() -> None:
-    """The end of this process's record of the cached files it has verified
-    (or written).
-
-    The next :func:`has_digest` of each file hashes it again, even if its
-    inode, size and modification time are unchanged: for a file changed
-    in a way its signature does not show.
-    """
-    with _verified_lock:
-        _verified.clear()
-
-
-def has_digest(path: Path, sha256: str) -> bool:
-    """Whether the file at ``path`` exists and has SHA-256 digest ``sha256``.
-
-    A file already checked by this process (or written by :func:`store` or
-    :func:`store_bytes`) is not hashed again while its inode, size and
-    modification time are unchanged, until :func:`forget_verified`.
-    """
-    signature = _signature(path)
-    if signature is None:
-        return False
-    with _verified_lock:
-        if _verified.get(path) == (sha256, signature):
-            return True
-    with path.open("rb") as cached:
-        if hashlib.file_digest(cached, "sha256").hexdigest() != sha256:
-            return False
-    _remember(path, sha256, signature)
-    return True
-
-
-class _Hashing:
-    """A sink that hashes what it writes to ``stream``."""
-
-    def __init__(self, stream: Sink) -> None:
-        self.stream = stream
-        self.digest = hashlib.sha256()
-
-    def write(self, data: bytes, /) -> object:
-        self.digest.update(data)
-        return self.stream.write(data)
-
-
-def store(
-    target: Path, write: Callable[[Sink], object], sha256: str, source: str
-) -> None:
-    """The atomic write of ``target``, kept only if its digest is ``sha256``.
-
-    Parameters
-    ----------
-    target
-        The file to create or replace; parent directories are created.
-    write
-        Writes the contents to the sink it is given.
-    sha256
-        Expected SHA-256 hex digest of the contents.
-    source
-        Where the contents come from, for the error message.
-
-    Raises
-    ------
-    ChecksumMismatch
-        If the contents do not have digest ``sha256``; ``target`` is then
-        left as it was.
-    """
-
-    def check(actual: str) -> None:
-        if actual != sha256:
-            raise ChecksumMismatch(f"{source}: expected sha256 {sha256}, got {actual}")
-
-    _write(target, write, check)
-
-
-def store_bytes(target: Path, data: bytes) -> str:
-    """The atomic write of ``data`` to ``target``, as :func:`store` does it.
-
-    For contents already in memory, so there is no digest to check them
-    against; the one computed while writing is returned.
-
-    Parameters
-    ----------
-    target
-        The file to create or replace; parent directories are created.
-    data
-        Its contents.
-
-    Returns
-    -------
-    str
-        The SHA-256 hex digest of ``data``.
-    """
-    return _write(target, lambda sink: sink.write(data))
-
-
-def store_json(target: Path, record: Mapping[str, object]) -> str:
-    """The atomic write of ``record`` to ``target`` as indented JSON text.
-
-    Returns
-    -------
-    str
-        The SHA-256 hex digest of the text written.
-    """
-    return store_bytes(target, (json.dumps(record, indent=2) + "\n").encode())
-
-
-def gunzip(data: bytes) -> bytes | None:
-    """``data`` decompressed, or ``None`` if it is not intact gzip data."""
-    try:
-        return gzip.decompress(data)
-    except (OSError, EOFError, zlib.error):
-        return None
-
-
-def _write(
-    target: Path,
-    write: Callable[[Sink], object],
-    check: Callable[[str], None] | None = None,
-) -> str:
-    """The atomic write of ``target``; ``check`` may refuse the contents' digest.
-
-    Returns the SHA-256 hex digest of what was written. If ``write`` or
-    ``check`` raises, ``target`` is left as it was.
-    """
-    target.parent.mkdir(parents=True, exist_ok=True)
-    # A unique temporary name, so concurrent writers never share a partial file.
-    descriptor, name = tempfile.mkstemp(
-        dir=target.parent, prefix=f".{target.name}.", suffix=".part"
-    )
-    partial = Path(name)
-    try:
-        with os.fdopen(descriptor, "wb") as stream:
-            hashing = _Hashing(stream)
-            write(hashing)
-        actual = hashing.digest.hexdigest()
-        if check is not None:
-            check(actual)
-        partial.replace(target)
-    except BaseException:
-        partial.unlink(missing_ok=True)
-        raise
-    _remember(target, actual, _signature(target))
-    return actual
-
 
 _META_FORMAT: Final = 1
 """Version of the ``.meta.json`` layout; another version is not read."""
@@ -598,6 +178,16 @@ def require_max_age(max_age: float, interval: float, reason: str) -> None:
         )
 
 
+class _Unreadable(enum.Enum):
+    """The marker of a cached copy that does not decompress, or that ``read``
+    refused (see :func:`cached_fetch`)."""
+
+    UNREADABLE = enum.auto()
+
+
+_UNREADABLE: Final = _Unreadable.UNREADABLE
+
+
 def cached_fetch(
     target: Path,
     url: str,
@@ -665,47 +255,53 @@ def cached_fetch(
     require_max_age(max_age, interval, reason)
     start = now()
     cached = read_copy(target, url)
+    if cached is None:
+        return _read_and_save(target, url, read, download(), now, compressed=compressed)
     # The cached copy is read at most once: gunzip and parse can take seconds.
-    value: _T | _Unread = _Unread.UNTRIED
-    if cached is not None and 0.0 <= start - cached.meta.checked < max_age:
-        value = _read_cached(read, cached, compressed=compressed)
-        if not isinstance(value, _Unread):
+    read_cached = functools.cache(
+        functools.partial(_read_cached, read, cached, compressed=compressed)
+    )
+    if 0.0 <= start - cached.meta.checked < max_age:
+        value = read_cached()
+        if value is not _UNREADABLE:
             return value, cached.meta
     try:
         data = download()
     except Unchanged:
-        if cached is None:
-            raise
-        if value is _Unread.UNTRIED:
-            value = _read_cached(read, cached, compressed=compressed)
-        if isinstance(value, _Unread):
+        value = read_cached()
+        if value is _UNREADABLE:
             raise
         meta = dataclasses.replace(cached.meta, checked=start)
         write_meta(target, meta)
         return value, meta
-    result = read(data)
-    # The full Space-Track catalog is 36 MB of JSON, 5 MB gzipped.
-    stored = gzip.compress(data, compresslevel=6, mtime=0) if compressed else data
-    return result, save_copy(target, url, stored, now())
-
-
-class _Unread(enum.Enum):
-    """No value read from a cached copy (see :func:`cached_fetch`)."""
-
-    UNTRIED = enum.auto()
-    """The copy has not been read."""
-    UNREADABLE = enum.auto()
-    """The copy does not decompress, or ``read`` refused it."""
+    return _read_and_save(target, url, read, data, now, compressed=compressed)
 
 
 def _read_cached(
     read: Callable[[bytes], _T], cached: CachedCopy, *, compressed: bool
-) -> _T | _Unread:
-    """``read(body)`` of a cached copy; ``_Unread.UNREADABLE`` if it cannot."""
+) -> _T | _Unreadable:
+    """``read(body)`` of a cached copy; :data:`_UNREADABLE` if it cannot."""
     data = gunzip(cached.data) if compressed else cached.data
     if data is None:
-        return _Unread.UNREADABLE
+        return _UNREADABLE
     try:
         return read(data)
     except SourceFormatError:
-        return _Unread.UNREADABLE
+        return _UNREADABLE
+
+
+def _read_and_save(
+    target: Path,
+    url: str,
+    read: Callable[[bytes], _T],
+    data: bytes,
+    now: Callable[[], float],
+    *,
+    compressed: bool,
+) -> tuple[_T, CopyMeta]:
+    """What ``read`` makes of a download, and the metadata of its copy, saved
+    (gzipped if ``compressed``) only once it has been read."""
+    result = read(data)
+    # The full Space-Track catalog is 36 MB of JSON, 5 MB gzipped.
+    stored = gzip.compress(data, compresslevel=6, mtime=0) if compressed else data
+    return result, save_copy(target, url, stored, now())

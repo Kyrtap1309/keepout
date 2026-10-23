@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
-import math
 from pathlib import Path
 from typing import Annotated, TypeAlias
 
 import typer
 
+from keepout._validation import require_positive
+from keepout.sources.catalog import CATALOG_SOURCES, DEFAULT_SOURCE, CatalogSourceName
+
 __all__ = [
     "CacheDir",
     "JsonFlag",
+    "SourceOption",
     "Workers",
     "positive",
 ]
@@ -31,7 +34,7 @@ CacheDir: TypeAlias = Annotated[
         help="Cache root for downloaded data (default: the user cache directory).",
     ),
 ]
-"""``--cache-dir``: the cache root (:func:`keepout.sources.cache.cache_dir`),
+"""``--cache-dir``: the cache root (:func:`keepout.sources._store.cache_dir`),
 also read from ``$KEEPOUT_CACHE_DIR``, which ``--help`` shows."""
 
 Workers: TypeAlias = Annotated[
@@ -45,6 +48,25 @@ Workers: TypeAlias = Annotated[
 """``--workers``: processes to compute in (``None``: the library's default,
 one per CPU, at most 4)."""
 
+SourceOption: TypeAlias = Annotated[
+    CatalogSourceName | None,
+    typer.Option(
+        "--source",
+        help=" ".join(
+            [
+                *(
+                    f"{source.name}: {source.summary}."
+                    for source in CATALOG_SOURCES.values()
+                ),
+                f"Default: {DEFAULT_SOURCE}.",
+            ]
+        ),
+    ),
+]
+"""``--source``: where the catalog comes from (:data:`CATALOG_SOURCES`);
+``None`` is :data:`~keepout.sources.catalog.DEFAULT_SOURCE`, so a command
+can tell it apart from an explicit choice."""
+
 
 def positive(value: float | None) -> float | None:
     """An option's number, checked to be finite and above zero (``None``
@@ -55,6 +77,9 @@ def positive(value: float | None) -> float | None:
     typer.BadParameter
         If it is not: a usage error.
     """
-    if value is not None and not (math.isfinite(value) and value > 0.0):
-        raise typer.BadParameter(f"must be a positive number, got {value}")
+    if value is not None:
+        try:
+            require_positive(value, "value")
+        except ValueError as exc:
+            raise typer.BadParameter(f"must be a positive number, got {value}") from exc
     return value

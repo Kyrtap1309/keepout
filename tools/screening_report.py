@@ -48,10 +48,17 @@ from screening_snapshot import SocratesSummary
 
 from keepout._workers import DEFAULT_WORKERS
 from keepout.omm import Omm
-from keepout.screening import DEFAULT_VOLUME, CloseApproach, ScreeningResult, screen
-from keepout.screening.pipeline import DEFAULT_DURATION, MAX_AGE, MAX_LEAD
+from keepout.screening import (
+    DEFAULT_DURATION,
+    DEFAULT_VOLUME,
+    MAX_AGE,
+    MAX_LEAD,
+    CloseApproach,
+    ScreeningResult,
+    screen,
+)
 from keepout.sources.socrates import SocratesApproach, read_socrates
-from keepout.units import DAY, KM, MINUTE, seconds_between
+from keepout.units import DAY, KM, MINUTE, julian_seconds_between
 
 PAGE: Final = REPO / "docs/screening-socrates.md"
 START: Final = "<!-- screening-socrates-summary:start -->"
@@ -196,7 +203,7 @@ class Match:
         """TCA by keepout minus TCA by SOCRATES [s] (NaN if keepout has none)."""
         if self.keepout is None:
             return float("nan")
-        return seconds_between(self.socrates.tca, self.keepout.tca)
+        return julian_seconds_between(self.socrates.tca, self.keepout.tca)
 
     @property
     def miss_distance_difference(self) -> float:
@@ -328,8 +335,8 @@ def _nearest_matches(
     by_pair: defaultdict[tuple[int, int], list[int]] = defaultdict(list)
     for position, approach in enumerate(found):
         by_pair[_pair_of(approach)].append(position)
-    found_at = [seconds_between(start, approach.tca) for approach in found]
-    socrates_at = [seconds_between(start, approach.tca) for approach in socrates]
+    found_at = [julian_seconds_between(start, approach.tca) for approach in found]
+    socrates_at = [julian_seconds_between(start, approach.tca) for approach in socrates]
     candidates = sorted(
         (abs(found_at[position] - socrates_at[index]), index, position)
         for index, approach in enumerate(socrates)
@@ -450,7 +457,7 @@ def _round_m(metres: float) -> float:
 
 def _values(approach: CloseApproach, tca: Time) -> Values:
     return {
-        "tca_difference": _round_s(seconds_between(tca, approach.tca)),
+        "tca_difference": _round_s(julian_seconds_between(tca, approach.tca)),
         "miss_distance": _round_m(approach.miss_distance),
         "relative_speed": _round_m(approach.relative_speed),
     }
@@ -483,7 +490,7 @@ def _nearest_other(
     """Seconds to the nearest other approach of ``of_pair``, the approaches of
     ``approach``'s pair."""
     gaps = [
-        abs(seconds_between(approach.tca, other.tca))
+        abs(julian_seconds_between(approach.tca, other.tca))
         for other in of_pair
         if other is not approach
     ]

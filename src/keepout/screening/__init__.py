@@ -16,7 +16,7 @@ for element sets: it returns a :class:`ScreeningResult` of close approaches
 """
 
 from keepout.screening.filters import apogee_perigee_filter
-from keepout.screening.pipeline import screen
+from keepout.screening.pipeline import DEFAULT_DURATION, MAX_AGE, MAX_LEAD, screen
 from keepout.screening.result import (
     CloseApproach,
     ScreeningResult,
@@ -42,7 +42,10 @@ from keepout.screening.volume import (
 )
 
 __all__ = [
+    "DEFAULT_DURATION",
     "DEFAULT_VOLUME",
+    "MAX_AGE",
+    "MAX_LEAD",
     "SFS_HANDBOOK_VOLUMES",
     "ApproachSearch",
     "CloseApproach",

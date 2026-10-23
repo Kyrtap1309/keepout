@@ -31,7 +31,7 @@ from typing import Final
 
 import numpy as np
 
-from keepout._types import require_positive
+from keepout._validation import require_positive
 from keepout.conjunction import Conjunction
 from keepout.errors import PcConvergenceError
 from keepout.pc._duration import encounter_duration, long_encounter

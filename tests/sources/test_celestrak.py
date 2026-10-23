@@ -14,7 +14,7 @@ from web_builders import START, Clock, FakeDownloader, FakeResponse, digest
 from keepout.errors import HttpStatusError, SourceFormatError, SourceUnavailable
 from keepout.omm import Omm
 from keepout.omm.celestrak import dumps_csv
-from keepout.sources import cache
+from keepout.sources import _http
 from keepout.sources.celestrak import (
     PUBLIC_GROUPS,
     SOCRATES_URL,
@@ -481,4 +481,4 @@ def test_requests_name_keepout_in_the_user_agent(
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
     assert fetch_group("active", cache=tmp_path, now=clock).omms == SAMPLE[:4]
     assert [request.full_url for request in requests] == [ACTIVE]
-    assert requests[0].get_header("User-agent") == cache.USER_AGENT
+    assert requests[0].get_header("User-agent") == _http.USER_AGENT

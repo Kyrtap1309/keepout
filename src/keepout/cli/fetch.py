@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import dataclasses
-from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, TypeAlias
+from typing import TYPE_CHECKING
 
-import typer
-
-from keepout.cli.options import CacheDir, JsonFlag
+from keepout._defaults import CDM_PUBLIC_INTERVAL
+from keepout.cli.options import CacheDir, JsonFlag, SourceOption
 from keepout.cli.output import (
-    JsonValue,
+    JsonOut,
+    duration_words,
     isot,
     minute,
     pc_text,
@@ -19,13 +18,12 @@ from keepout.cli.output import (
     table,
     utc,
 )
-from keepout.sources.catalog import CATALOG_SOURCES, DEFAULT_SOURCE, CatalogSourceName
-from keepout.units import HOUR
+from keepout.sources.catalog import CATALOG_SOURCES, DEFAULT_SOURCE
 
 # The sources are imported in the commands: keepout --help need not load
 # the numerical libraries.
 if TYPE_CHECKING:
-    from keepout.sources.catalog import Catalog, CatalogPart, Retrieval
+    from keepout.sources.catalog import CatalogPart, Retrieval
     from keepout.sources.spacetrack import PublicCdm
 
 __all__ = [
@@ -33,37 +31,7 @@ __all__ = [
     "fetch_catalog",
     "fetch_cdm",
     "fetch_kelvins",
-    "load_catalog",
 ]
-
-SourceOption: TypeAlias = Annotated[
-    CatalogSourceName,
-    typer.Option(
-        "--source",
-        help=" ".join(
-            f"{source.name}: {source.summary}." for source in CATALOG_SOURCES.values()
-        ),
-    ),
-]
-"""``--source``: where ``fetch catalog`` gets the catalog."""
-
-
-def load_catalog(source: CatalogSourceName, cache: Path | None) -> Catalog:
-    """The catalog of ``source``: its cached copy while that is current, else a
-    download (:meth:`keepout.sources.catalog.CatalogSource.fetch`).
-
-    Raises
-    ------
-    KeepoutError
-        As :func:`keepout.sources.celestrak.fetch_catalog` or
-        :func:`keepout.sources.spacetrack.fetch_catalog`.
-    """
-    return CATALOG_SOURCES[source].fetch(cache)
-
-
-def _hours(seconds: float) -> str:
-    """A whole number of hours in words: ``an hour``, ``2 hours``."""
-    return "an hour" if seconds == HOUR else f"{seconds / HOUR:g} hours"
 
 
 def fetch_cara(*, cache_dir: CacheDir = None, as_json: JsonFlag = False) -> None:
@@ -76,7 +44,7 @@ def fetch_cara(*, cache_dir: CacheDir = None, as_json: JsonFlag = False) -> None
 
     cara.prefetch(cara.MANIFEST, cache=cache_dir)
     folder = cara.commit_dir(cache_dir)
-    payload: dict[str, JsonValue] = {
+    payload: dict[str, JsonOut] = {
         "source": "cara",
         "commit": cara.CARA_COMMIT,
         "files": len(cara.MANIFEST),
@@ -99,7 +67,7 @@ def fetch_kelvins(*, cache_dir: CacheDir = None, as_json: JsonFlag = False) -> N
     from keepout.sources import kelvins
 
     path = kelvins.fetch_raw(cache=cache_dir)
-    payload: dict[str, JsonValue] = {
+    payload: dict[str, JsonOut] = {
         "source": "kelvins",
         "doi": kelvins.DOI,
         "path": str(path),
@@ -113,7 +81,7 @@ def fetch_kelvins(*, cache_dir: CacheDir = None, as_json: JsonFlag = False) -> N
 
 def fetch_catalog(
     *,
-    source: SourceOption = DEFAULT_SOURCE,
+    source: SourceOption = None,
     cache_dir: CacheDir = None,
     as_json: JsonFlag = False,
 ) -> None:
@@ -127,14 +95,14 @@ def fetch_catalog(
     The data is basic SSA data of USSPACECOM (18th Space Defense
     Squadron); cite it as such.
     """
-    catalog = load_catalog(source, cache_dir)
-    payload: dict[str, JsonValue] = {
-        "source": str(source),
+    described = CATALOG_SOURCES[source or DEFAULT_SOURCE]
+    catalog = described.fetch(cache_dir)
+    payload: dict[str, JsonOut] = {
+        "source": described.name,
         "objects": len(catalog.omms),
         "duplicates": len(catalog.duplicates),
         "parts": [_part_json(part) for part in catalog.parts],
     }
-    described = CATALOG_SOURCES[source]
     parts = table(described.title)
     parts.add_column(described.part_title)
     parts.add_column("Objects", justify="right")
@@ -153,7 +121,7 @@ def fetch_catalog(
 
 # The reuse times in the help are the sources' own (none under python -OO).
 fetch_catalog.__doc__ = (fetch_catalog.__doc__ or "").format_map(
-    {name: _hours(source.reuse) for name, source in CATALOG_SOURCES.items()}
+    {name: duration_words(source.reuse) for name, source in CATALOG_SOURCES.items()}
 )
 
 
@@ -161,7 +129,7 @@ def fetch_cdm(*, cache_dir: CacheDir = None, as_json: JsonFlag = False) -> None:
     """Download Space-Track's public CDM summaries of approaches to come.
 
     Needs the account in SPACETRACK_IDENTITY and SPACETRACK_PASSWORD; a copy
-    is reused for 8 hours, and Space-Track is asked at most once in 8 hours.
+    is reused for {interval}, and Space-Track is asked at most once in {interval}.
     The summaries (cdm_public) give the objects, TCA, minimum range and Pc,
     but no states or covariances, so keepout assess cannot read them. They
     may not be redistributed without Space-Track's approval.
@@ -170,7 +138,7 @@ def fetch_cdm(*, cache_dir: CacheDir = None, as_json: JsonFlag = False) -> None:
 
     public = spacetrack.fetch_public_cdms(cache=cache_dir)
     rows = sorted(public.cdms, key=lambda cdm: (cdm.tca.jd1, cdm.tca.jd2, cdm.cdm_id))
-    payload: dict[str, JsonValue] = {
+    payload: dict[str, JsonOut] = {
         "source": "spacetrack",
         "retrieval": _retrieval_json(public.retrieval),
         "cdms": [_public_cdm_json(cdm) for cdm in rows],
@@ -198,7 +166,13 @@ def fetch_cdm(*, cache_dir: CacheDir = None, as_json: JsonFlag = False) -> None:
     )
 
 
-def _retrieval_json(retrieval: Retrieval) -> dict[str, JsonValue]:
+# The interval in the help is Space-Track's own (none under python -OO).
+fetch_cdm.__doc__ = (fetch_cdm.__doc__ or "").format_map(
+    {"interval": duration_words(CDM_PUBLIC_INTERVAL)}
+)
+
+
+def _retrieval_json(retrieval: Retrieval) -> dict[str, JsonOut]:
     return {
         "url": retrieval.url,
         "path": str(retrieval.path),
@@ -207,7 +181,7 @@ def _retrieval_json(retrieval: Retrieval) -> dict[str, JsonValue]:
     }
 
 
-def _part_json(part: CatalogPart) -> dict[str, JsonValue]:
+def _part_json(part: CatalogPart) -> dict[str, JsonOut]:
     return {
         "name": part.name,
         "objects": len(part.omms),
@@ -215,7 +189,7 @@ def _part_json(part: CatalogPart) -> dict[str, JsonValue]:
     }
 
 
-def _public_cdm_json(cdm: PublicCdm) -> dict[str, JsonValue]:
+def _public_cdm_json(cdm: PublicCdm) -> dict[str, JsonOut]:
     return {
         "cdm_id": cdm.cdm_id,
         "created": isot(cdm.created),

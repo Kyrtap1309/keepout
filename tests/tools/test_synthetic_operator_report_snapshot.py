@@ -5,10 +5,8 @@ import pytest
 import screening_snapshot as snapshot
 import synthetic_operator_report as report
 
-from keepout.screening import DEFAULT_VOLUME
-from keepout.screening.pipeline import DEFAULT_DURATION
-from keepout.synthetic import load_fleet
-from keepout.synthetic.operator import run
+from keepout.screening import DEFAULT_DURATION, DEFAULT_VOLUME
+from keepout.synthetic import load_fleet, run
 
 pytestmark = pytest.mark.validation
 

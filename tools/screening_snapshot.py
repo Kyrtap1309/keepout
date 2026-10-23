@@ -97,20 +97,20 @@ from keepout.omm import Omm, load
 from keepout.omm.celestrak import dumps_csv, loads_csv
 from keepout.screening import CloseApproach, ScreeningVolume, screen
 from keepout.screening.volume import SFS_DEEP_SPACE_PERIOD, SFS_ECCENTRICITY
-from keepout.sources.cache import http_download, store_bytes
+from keepout.sources._http import Downloader, http_download
+from keepout.sources._store import store_bytes
 from keepout.sources.catalog import Catalog
 from keepout.sources.celestrak import (
     GP_URL,
     PUBLIC_GROUPS,
     SOCRATES_URL,
-    Downloader,
     SocratesReport,
     fetch_catalog,
     fetch_socrates,
 )
 from keepout.sources.socrates import SocratesApproach, epoch_matches, read_socrates
 from keepout.synthetic.covariance_model import LEO_HIGHEST_APOGEE
-from keepout.units import DAY, seconds_between
+from keepout.units import DAY, julian_seconds_between
 
 TOOL: Final = "tools/screening_snapshot.py"
 DATA: Final = REPO / "tests/screening/data"
@@ -337,7 +337,7 @@ def nearest_approach(
     )
     return min(
         result.approaches,
-        key=lambda approach: abs(seconds_between(tca, approach.tca)),
+        key=lambda approach: abs(julian_seconds_between(tca, approach.tca)),
         default=None,
     )
 

@@ -20,13 +20,15 @@ from rich.console import Console, RenderableType
 from rich.table import Table
 
 from keepout.errors import KeepoutError
+from keepout.units import DAY, HOUR, MINUTE
 
 if TYPE_CHECKING:
     from astropy.time import Time
 
 __all__ = [
     "ExitCode",
-    "JsonValue",
+    "JsonOut",
+    "duration_words",
     "fail",
     "isot",
     "minute",
@@ -53,15 +55,16 @@ class ExitCode(enum.IntEnum):
     """``keepout assess``: at least one event's decision is to manoeuvre."""
 
 
-JsonValue: TypeAlias = (
-    "str | int | float | bool | Sequence[JsonValue] | Mapping[str, JsonValue] | None"
+JsonOut: TypeAlias = (
+    "str | int | float | bool | Sequence[JsonOut] | Mapping[str, JsonOut] | None"
 )
-"""A value :func:`json.dumps` writes as JSON."""
+"""A value :func:`json.dumps` writes as JSON: what a command prints with
+``--json``. Unlike :data:`keepout._types.JsonValue`, what :func:`json.loads`
+returns (``dict`` and ``list``, to narrow with ``isinstance``), it takes any
+sequence and mapping, so a command can pass tuples and read-only mappings."""
 
 
-def show(
-    payload: Mapping[str, JsonValue], *text: RenderableType, as_json: bool
-) -> None:
+def show(payload: Mapping[str, JsonOut], *text: RenderableType, as_json: bool) -> None:
     """The output of a command: its result as JSON or as text for people.
 
     Parameters
@@ -128,6 +131,20 @@ def plural(count: int, noun: str, nouns: str | None = None) -> str:
     if count == 1:
         return f"{count} {noun}"
     return f"{count} {nouns or noun + 's'}"
+
+
+def duration_words(seconds: float) -> str:
+    """A whole number of the largest unit of days, hours and minutes that
+    ``seconds`` holds, in words: ``a day``, ``an hour``, ``10 minutes``
+    (else seconds, ``90 s``); for help texts."""
+    for unit, noun, one in ((DAY, "day", "a day"), (HOUR, "hour", "an hour")):
+        count = seconds / unit
+        if count >= 1.0 and count.is_integer():
+            return one if count == 1.0 else f"{count:g} {noun}s"
+    count = seconds / MINUTE
+    if count >= 1.0 and count.is_integer():
+        return "a minute" if count == 1.0 else f"{count:g} minutes"
+    return f"{seconds:g} s"
 
 
 def table(title: str) -> Table:

@@ -20,9 +20,12 @@ from screening_data import (
 from keepout.errors import GeometryError, UnsupportedElements
 from keepout.frames import teme_to_gcrf
 from keepout.omm import Omm
-from keepout.propagation import Sgp4Propagator, describe_error
+from keepout.propagation import Sgp4Propagator, describe_error, satrec_of
 from keepout.screening import (
+    DEFAULT_DURATION,
     DEFAULT_VOLUME,
+    MAX_AGE,
+    MAX_LEAD,
     ApproachSearch,
     RangeMinimum,
     ScreeningResult,
@@ -31,7 +34,6 @@ from keepout.screening import (
     apogee_perigee_filter,
     screen,
 )
-from keepout.screening.pipeline import DEFAULT_DURATION, MAX_AGE, MAX_LEAD
 from keepout.screening.tca import PERTURBATION
 from keepout.units import DAY
 
@@ -234,7 +236,7 @@ def test_default_ages_keep_sgp4_within_the_searchs_assumption() -> None:
     mu, re, j2 = 398600.8e9, 6378.135e3, 0.001082616  # SGP4's WGS 72
     worst: dict[int, float] = {}
     for omm in FIXTURE:
-        satrec = omm.satrec()
+        satrec = satrec_of(omm)
         worst[omm.catalog_number] = 0.0
         for days in np.arange(-MAX_LEAD / DAY, MAX_AGE / DAY + 0.25, 0.5):
             minutes = days * 1440.0 + np.array([-1.0, 0.0, 1.0]) / 60.0

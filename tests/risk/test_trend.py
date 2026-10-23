@@ -8,7 +8,6 @@ from hypothesis import strategies as st
 from risk_builders import observations
 
 from keepout.risk import (
-    DAY,
     PcObservation,
     RiskLevel,
     Thresholds,
@@ -16,6 +15,7 @@ from keepout.risk import (
     TrendConfig,
     analyse_trend,
 )
+from keepout.units import DAY
 
 
 def test_points_are_oldest_first_with_levels() -> None:

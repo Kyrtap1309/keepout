@@ -30,7 +30,8 @@ from generated import read_json, write_or_check
 from keepout._types import JsonValue
 from keepout.omm import Omm
 from keepout.omm.celestrak import dumps_csv, loads_csv
-from keepout.sources.cache import gunzip, store_json
+from keepout.sources._http import gunzip
+from keepout.sources._store import store_json
 
 if TYPE_CHECKING:
     from _typeshed import DataclassInstance

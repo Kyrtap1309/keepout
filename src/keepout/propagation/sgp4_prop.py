@@ -1,37 +1,193 @@
 """SGP4 for many objects at once, behind the
-:class:`~keepout.propagation.base.Propagator` interface."""
+:class:`~keepout.propagation.base.Propagator` interface, and the SGP4 record
+of one element set (:func:`satrec_of`)."""
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Iterable, Iterator, Sequence
-from typing import Final, Literal, Self, TypeAlias
+from datetime import UTC, datetime
+from typing import Final, Literal, NamedTuple, Self, TypeAlias
 
 import erfa
 import numpy as np
 import numpy.typing as npt
 from astropy.time import Time
-from sgp4.api import Satrec, SatrecArray
+from sgp4.api import WGS72, Satrec, SatrecArray
 
-from keepout._types import FloatArray, IndexArray, override, require_non_negative
+from keepout._types import FloatArray, IndexArray, override
+from keepout._validation import require_non_negative
+from keepout.ccsds.keywords import format_epoch, message_number, utc_fields
 from keepout.errors import UnsupportedElements
-from keepout.omm.model import Omm
-from keepout.propagation._sgp4_radius import radius_bounds
+from keepout.omm.keywords import ATTRIBUTES, DEGREE, KEYWORDS, SGP4_EPHEMERIS_TYPE
+from keepout.omm.model import SGP4_EPOCH_DIGITS, Omm
+from keepout.propagation._sgp4_radius import brouwer_mean_motion, radius_bounds
 from keepout.propagation.base import (
     Ephemeris,
     ErrorArray,
+    Propagator,
     RadiusBounds,
+    States,
+    pair_sampler,
     time_offsets,
 )
 from keepout.units import DAY, KM, MINUTE
 
-__all__ = ["Sgp4Propagator", "Sgp4Sampler", "States"]
+__all__ = [
+    "MAX_SATREC_NUMBER",
+    "PairStates",
+    "Sgp4Propagator",
+    "Sgp4Sampler",
+    "Sgp4Shape",
+    "pair_states",
+    "satrec_of",
+    "sgp4_shape",
+]
+
+MAX_SATREC_NUMBER: Final = 339_999
+"""Largest catalog number SGP4's satellite record holds (Alpha-5 ``Z9999``)."""
 
 _MINUTES_PER_DAY: Final = DAY / MINUTE
 
-States: TypeAlias = Callable[[FloatArray], tuple[ErrorArray, FloatArray, FloatArray]]
-"""States of some objects at offsets [s] from an epoch: error codes ``(N,
-T)``, positions [m] and velocities [m/s] ``(N, T, 3)``, as the arrays of an
-:class:`~keepout.propagation.base.Ephemeris`."""
+_EPOCH_SECONDS: Final = slice(17, 19)
+"""The whole seconds of epoch text ``YYYY-MM-DDTHH:MM:SS.ffffff``."""
+
+_SGP4_EPOCH_FORMAT: Final = "%Y-%m-%dT%H:%M:%S.%f"
+"""How :func:`sgp4.omm.initialize` reads the epoch text."""
+
+# The constants of sgp4.omm, computed as it does.
+_SGP4_EPOCH0: Final = datetime(1949, 12, 31, tzinfo=UTC)
+_NDOT_UNITS: Final = 1036800.0 / math.pi
+_NDDOT_UNITS: Final = 2985984000.0 / 2.0 / math.pi
+
+_SCALES: Final = {
+    attribute: KEYWORDS[keyword].scale for keyword, attribute in ATTRIBUTES.items()
+}
+"""Factor from message units to the :class:`~keepout.omm.Omm` attribute's,
+by attribute."""
+
+PairStates: TypeAlias = Callable[[int, int], States]
+"""The states of one pair, from its primary's and its secondary's positions
+in their propagators: rows 0 and 1, as :func:`pair_states` gives them."""
+
+
+def satrec_of(omm: Omm) -> Satrec:
+    """A new SGP4 satellite record of an element set (WGS-72 constants).
+
+    It is the record :func:`sgp4.omm.initialize` makes from the message the
+    elements were read from, bit for bit: every number is converted back to
+    the message's value exactly (see :meth:`keepout.omm.Omm.keywords`; this
+    holds for numbers of up to 15 significant digits, and CelesTrak writes
+    at most 10). Only the epoch is rounded to whole microseconds, the
+    resolution :func:`sgp4.omm.initialize` reads; CelesTrak's epochs have
+    exactly that resolution.
+
+    Parameters
+    ----------
+    omm
+        The element set.
+
+    Raises
+    ------
+    UnsupportedElements
+        If the catalog number is above :data:`MAX_SATREC_NUMBER`, or the
+        epoch falls in a leap second (SGP4 counts days of 86400 s).
+    """
+    if omm.catalog_number > MAX_SATREC_NUMBER:
+        raise UnsupportedElements(
+            f"catalog number {omm.catalog_number} is above "
+            f"{MAX_SATREC_NUMBER}, the largest an SGP4 record holds"
+        )
+    epoch = _sgp4_epoch(omm.epoch)
+    # What sgp4.omm.initialize does with the text of Omm.keywords(), without
+    # the text: each number is the one the text reads back as.
+    satrec = Satrec()
+    satrec.classification = omm.classification
+    satrec.intldesg = omm.international_designator[2:].replace("-", "")
+    satrec.ephtype = SGP4_EPHEMERIS_TYPE
+    satrec.elnum = omm.element_set_no
+    satrec.revnum = omm.rev_at_epoch
+    satrec.sgp4init(
+        WGS72,
+        "i",
+        omm.catalog_number,
+        epoch,
+        _message_number(omm, "bstar"),
+        _message_number(omm, "mean_motion_dot") / _NDOT_UNITS,
+        _message_number(omm, "mean_motion_ddot") / _NDDOT_UNITS,
+        _message_number(omm, "eccentricity"),
+        _message_number(omm, "arg_of_pericenter") * DEGREE,
+        _message_number(omm, "inclination") * DEGREE,
+        _message_number(omm, "mean_anomaly") * DEGREE,
+        _message_number(omm, "mean_motion") / 720.0 * math.pi,
+        _message_number(omm, "ra_of_asc_node") * DEGREE,
+    )
+    return satrec
+
+
+def _message_number(omm: Omm, attribute: str) -> float:
+    """The value of an attribute in the message's units, as written."""
+    return message_number(getattr(omm, attribute), _SCALES[attribute])
+
+
+def _sgp4_epoch(epoch: Time) -> float:
+    """Days from 1949-12-31 0h UTC that :func:`sgp4.omm.initialize` reads.
+
+    That is, of the epoch's text rounded to microseconds (see
+    :meth:`keepout.omm.Omm.keywords`); read from the text itself only where
+    it is not plain ``YYYY-MM-DDThh:mm:ss.ffffff`` from ERFA (see
+    :func:`~keepout.ccsds.keywords.utc_fields`).
+
+    Raises
+    ------
+    UnsupportedElements
+        If the epoch falls in a leap second.
+    """
+    fields = utc_fields(epoch, SGP4_EPOCH_DIGITS)
+    if fields is None:
+        text = format_epoch(Time(epoch, precision=SGP4_EPOCH_DIGITS))
+        if text[_EPOCH_SECONDS] == "60":
+            raise UnsupportedElements(f"epoch {text} falls in a leap second")
+        when = datetime.strptime(text, _SGP4_EPOCH_FORMAT).replace(tzinfo=UTC)
+    else:
+        year, month, day, hour, minute, second, microsecond = fields
+        if second == 60:
+            text = (
+                f"{year}-{month:02d}-{day:02d}T{hour:02d}:{minute:02d}:"
+                f"{second:02d}.{microsecond:06d}"
+            )
+            raise UnsupportedElements(f"epoch {text} falls in a leap second")
+        when = datetime(year, month, day, hour, minute, second, microsecond, UTC)
+    return (when - _SGP4_EPOCH0).total_seconds() / DAY
+
+
+class Sgp4Shape(NamedTuple):
+    """The size and shape of an orbit as SGP4 derives them from an element
+    set (WGS 72 constants, un-Kozai'd elements); see :func:`sgp4_shape`."""
+
+    perigee_altitude: float
+    """Perigee altitude [Earth radii] (``Satrec.altp``)."""
+    apogee_altitude: float
+    """Apogee altitude [Earth radii] (``Satrec.alta``)."""
+    earth_radius_km: float
+    """The Earth radius SGP4 uses [km] (``Satrec.radiusearthkm``)."""
+    mean_motion: float
+    """SGP4's un-Kozai'd (Brouwer) mean motion [rad/min]; ``Satrec.no`` is
+    the element set's Kozai mean motion."""
+
+
+def sgp4_shape(omm: Omm) -> Sgp4Shape:
+    """The orbit's size and shape as SGP4 initialises it from ``omm``.
+
+    Raises
+    ------
+    UnsupportedElements
+        If SGP4 cannot be initialised from ``omm`` (:func:`satrec_of`).
+    """
+    satrec = satrec_of(omm)
+    return Sgp4Shape(
+        satrec.altp, satrec.alta, satrec.radiusearthkm, brouwer_mean_motion(satrec)
+    )
 
 
 def _utc_dates(epoch: Time, seconds: FloatArray) -> tuple[FloatArray, FloatArray]:
@@ -85,10 +241,10 @@ def _initialised(
     omms: Iterable[Omm],
 ) -> Iterator[tuple[int, Omm, Satrec | UnsupportedElements]]:
     """Each element set with its position and its SGP4 record, or the error
-    :meth:`keepout.omm.Omm.satrec` raised for it; one at a time, in order."""
+    :func:`satrec_of` raised for it; one at a time, in order."""
     for index, omm in enumerate(omms):
         try:
-            satrec = omm.satrec()
+            satrec = satrec_of(omm)
         except UnsupportedElements as error:
             yield index, omm, error
         else:
@@ -99,7 +255,7 @@ class Sgp4Propagator:
     """SGP4 states of many objects at many times, in one vectorised call.
 
     Each object is initialised once, from its OMM, exactly as
-    :meth:`keepout.omm.Omm.satrec` does (WGS-72 constants, the record
+    :func:`satrec_of` does (WGS-72 constants, the record
     :func:`sgp4.omm.initialize` makes); :meth:`propagate` then runs the
     compiled SGP4 of the ``sgp4`` package (``SatrecArray``) over every object
     and time, and returns TEME positions [m] and velocities [m/s] with SGP4's
@@ -124,7 +280,7 @@ class Sgp4Propagator:
     ------
     UnsupportedElements
         If an element set cannot initialise SGP4 (a catalog number above
-        ``keepout.omm.model.MAX_SATREC_NUMBER``, or an epoch in a leap
+        :data:`MAX_SATREC_NUMBER`, or an epoch in a leap
         second); the message names its position and catalog number.
     """
 
@@ -169,7 +325,7 @@ class Sgp4Propagator:
             Position of each of them in ``omms``.
         rejected : list of tuple of int and UnsupportedElements
             Position in ``omms`` of every other element set, with the error
-            :meth:`keepout.omm.Omm.satrec` raised for it.
+            :func:`satrec_of` raised for it.
         """
         kept: list[int] = []
         elements: list[Omm] = []
@@ -370,3 +526,44 @@ class Sgp4Sampler:
             return errors, r, v
 
         return states
+
+
+def pair_states(start: Time, primaries: Propagator, catalog: Propagator) -> PairStates:
+    """The states of pairs of a primary and a catalog object, at offsets [s]
+    from ``start``, as the propagators give them.
+
+    The fast path of SGP4 (:class:`Sgp4Sampler`) when both propagators are
+    :class:`Sgp4Propagator`; else each pair's propagators
+    (:func:`~keepout.propagation.base.pair_sampler`).
+
+    Parameters
+    ----------
+    start
+        Reference epoch of the offsets; one time.
+    primaries, catalog
+        The primaries and the catalog objects.
+
+    Returns
+    -------
+    PairStates
+        For a primary's and a catalog object's positions in ``primaries`` and
+        ``catalog``, the sampler of their states (rows 0 and 1). Its offsets
+        must be finite float64 numbers in one dimension (not checked).
+    """
+    if isinstance(primaries, Sgp4Propagator) and isinstance(catalog, Sgp4Propagator):
+        sampler = Sgp4Sampler(start, (primaries, catalog))
+        catalog_first = len(primaries)
+
+        def sgp4_states(primary: int, secondary: int) -> States:
+            return sampler.states((primary, catalog_first + secondary))
+
+        return sgp4_states
+
+    def propagated_states(primary: int, secondary: int) -> States:
+        return pair_sampler(
+            primaries.subset(np.array([primary])),
+            catalog.subset(np.array([secondary])),
+            start,
+        )
+
+    return propagated_states

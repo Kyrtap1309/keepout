@@ -8,9 +8,10 @@ from risk_builders import b1_cdm
 import keepout.cdm
 from keepout import EventError, PcConvergenceError, compute_pc
 from keepout.cdm import Cdm
+from keepout.events import ConjunctionEvent, group_events, time_to_tca
 from keepout.pc import MethodChoice, api, computation
-from keepout.risk import DAY, Action, assess
-from keepout.risk.event import ConjunctionEvent, group_events, time_to_tca
+from keepout.risk import Action, assess
+from keepout.units import DAY
 
 HBR = 20.0
 B1_TIME_TO_TCA = DAY + 6 * 60 + 40.618

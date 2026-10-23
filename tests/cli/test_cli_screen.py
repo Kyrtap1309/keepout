@@ -12,8 +12,7 @@ from keepout.cli import screen
 from keepout.cli.output import ExitCode
 from keepout.omm import load
 from keepout.omm.celestrak import dumps_csv
-from keepout.synthetic import read_fleet
-from keepout.synthetic.operator import run
+from keepout.synthetic import read_fleet, run
 
 
 def screen_fixture(

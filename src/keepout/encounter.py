@@ -21,7 +21,8 @@ from typing import TYPE_CHECKING, Literal, TypeAlias
 import numpy as np
 from astropy.time import Time
 
-from keepout._types import FloatArray, read_only, symmetric_part
+from keepout._linalg import symmetric_part
+from keepout._types import FloatArray, read_only
 from keepout.errors import GeometryError
 from keepout.frames import PARALLEL_RTOL
 

@@ -15,7 +15,7 @@ from concurrent.futures import ProcessPoolExecutor
 from types import MappingProxyType
 from typing import Final
 
-from keepout._types import require_at_least
+from keepout._validation import require_at_least
 
 __all__ = ["DEFAULT_WORKERS", "ONE_THREAD", "process_pool", "resolve_workers"]
 

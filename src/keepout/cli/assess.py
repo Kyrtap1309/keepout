@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Annotated, Final, TypeAlias
 
 import typer
 
+from keepout._defaults import DECISION_POINT, TCA_TOLERANCE
 from keepout._methods import METHOD_CHOICES, MethodChoice
 from keepout.cli.events import (
     AssessedEvent,
@@ -17,7 +18,14 @@ from keepout.cli.events import (
     reasons,
 )
 from keepout.cli.options import JsonFlag, positive
-from keepout.cli.output import ExitCode, JsonValue, fail, plural, show
+from keepout.cli.output import (
+    ExitCode,
+    JsonOut,
+    duration_words,
+    fail,
+    plural,
+    show,
+)
 from keepout.errors import KeepoutError
 
 # The library is imported where it is used: keepout --help need not load the
@@ -100,16 +108,17 @@ def assess_command(
 ) -> None:
     """Compute the Pc of each CDM and the risk and action of each event.
 
-    CDMs of the same two objects whose TCAs are within 10 minutes form one
+    CDMs of the same two objects whose TCAs are within {tca_tolerance} form one
     event. Each CDM's Pc is computed from its states and covariances, and
     the event's risk level, Pc trend and recommended action are decided as
-    of the latest CDM's creation date (a manoeuvre needs a red Pc within two
-    days of TCA). Exits with status 3 if at least one event's action is to
-    manoeuvre.
+    of the latest CDM's creation date (a manoeuvre needs a red Pc within
+    {decision_point} of TCA). Exits with status 3 if at least one event's
+    action is to manoeuvre.
     """
     from keepout import cdm
+    from keepout.events import group_events
     from keepout.pc import computation
-    from keepout.risk import Action, assess, group_events
+    from keepout.risk import Action, assess
 
     messages = []
     for path in files:
@@ -127,7 +136,7 @@ def assess_command(
     actions = Counter(item.assessment.decision.action for item in assessed)
     manoeuvre = actions[Action.MANOEUVRE] > 0
     assumed = sum(item.event.assumed_covariance for item in assessed)
-    payload: dict[str, JsonValue] = {
+    payload: dict[str, JsonOut] = {
         "cdms": len(messages),
         "events": [event_json(item) for item in assessed],
         "assumed_covariances": assumed,
@@ -162,3 +171,12 @@ def assess_command(
     )
     if manoeuvre:
         raise typer.Exit(ExitCode.MANOEUVRE)
+
+
+# The defaults in the help are the library's own (none under python -OO).
+assess_command.__doc__ = (assess_command.__doc__ or "").format_map(
+    {
+        "tca_tolerance": duration_words(TCA_TOLERANCE),
+        "decision_point": duration_words(DECISION_POINT),
+    }
+)

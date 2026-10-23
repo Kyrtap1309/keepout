@@ -9,8 +9,8 @@ from builders import known
 from keepout import frames
 from keepout.errors import CaraFormatError
 from keepout.frames import to_gcrf
+from keepout.sources.cara_legacy import load_legacy_objects
 from keepout.state import StateVector
-from keepout.validation.legacy import legacy_objects
 
 COVARIANCE = """\
 CR_R = 100.0 [m**2]
@@ -66,7 +66,7 @@ def write(tmp_path: Path, text: str) -> Path:
 
 
 def test_states_and_covariances_are_read_in_si_units(tmp_path: Path) -> None:
-    primary, secondary = legacy_objects(write(tmp_path, legacy_cdm("GCRF")))
+    primary, secondary = load_legacy_objects(write(tmp_path, legacy_cdm("GCRF")))
     assert (primary.object_id, secondary.object_id) == ("28376", "1399")
     np.testing.assert_allclose(primary.state.r, [7000e3, 0.0, 0.0])
     np.testing.assert_allclose(secondary.state.v, [0.0, 0.0, 7500.0])
@@ -77,7 +77,7 @@ def test_states_and_covariances_are_read_in_si_units(tmp_path: Path) -> None:
 
 
 def test_eme2000_states_are_converted_to_gcrf(tmp_path: Path) -> None:
-    primary, _ = legacy_objects(write(tmp_path, legacy_cdm()))
+    primary, _ = load_legacy_objects(write(tmp_path, legacy_cdm()))
     assert primary.state.frame == "GCRF"
     eme2000 = StateVector(
         Time("2008-06-27T15:34:55.320", scale="utc"),
@@ -105,13 +105,15 @@ def test_itrf_objects_are_converted_together(
         return convert(states)
 
     monkeypatch.setattr(frames, "_itrf_to_gcrf", counting)
-    primary, secondary = legacy_objects(write(tmp_path, legacy_cdm("ITRF")))
+    primary, secondary = load_legacy_objects(write(tmp_path, legacy_cdm("ITRF")))
     assert batches == [2]
     assert primary.state.frame == secondary.state.frame == "GCRF"
 
 
 def test_an_unused_covariance_is_unknown(tmp_path: Path) -> None:
-    _, secondary = legacy_objects(write(tmp_path, legacy_cdm()), known=(True, False))
+    _, secondary = load_legacy_objects(
+        write(tmp_path, legacy_cdm()), known=(True, False)
+    )
     assert secondary.covariance is None
 
 
@@ -129,4 +131,4 @@ def test_malformed_files_are_format_errors(
     tmp_path: Path, text: str, message: str
 ) -> None:
     with pytest.raises(CaraFormatError, match=message):
-        legacy_objects(write(tmp_path, text))
+        load_legacy_objects(write(tmp_path, text))

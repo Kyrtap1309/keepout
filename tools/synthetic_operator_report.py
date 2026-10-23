@@ -3,7 +3,7 @@
 Usage: ``uv run python tools/synthetic_operator_report.py [--check] [--workers N]``.
 Screens the example fleet (``examples/synthetic-operator/fleet.toml``)
 against the committed public catalog (``tests/screening/data/``, see
-``tools/screening_snapshot.py``) with :func:`keepout.synthetic.operator.run`
+``tools/screening_snapshot.py``) with :func:`keepout.synthetic.run`
 over the week of the snapshot's SOCRATES report, with the defaults: the 5 km
 sphere, the published covariance model, keepout's risk thresholds and
 decision point. Writes ``docs/synthetic-operator.json`` (the numbers) and
@@ -50,8 +50,7 @@ from keepout.cdm import kvn
 from keepout.omm import Omm, deduplicate
 from keepout.pc import dilution
 from keepout.risk import Action, DecisionConfig, Thresholds
-from keepout.screening import DEFAULT_VOLUME
-from keepout.screening.pipeline import DEFAULT_DURATION
+from keepout.screening import DEFAULT_DURATION, DEFAULT_VOLUME
 from keepout.synthetic import (
     FleetSatellite,
     OperatorEvent,

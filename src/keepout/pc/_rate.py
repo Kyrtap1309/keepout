@@ -15,7 +15,8 @@ from typing import Final, NamedTuple, Self
 import numpy as np
 from scipy import special
 
-from keepout._types import BoolArray, FloatArray, IndexArray, from_eigen, override
+from keepout._linalg import from_eigen
+from keepout._types import BoolArray, FloatArray, IndexArray, override
 from keepout.conjunction import Conjunction
 from keepout.encounter import Role
 from keepout.errors import GeometryError, PcConvergenceError

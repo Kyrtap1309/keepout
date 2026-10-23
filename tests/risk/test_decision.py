@@ -9,7 +9,6 @@ from hypothesis import strategies as st
 from risk_builders import observations, pcs
 
 from keepout.risk import (
-    DAY,
     Action,
     DecisionConfig,
     PcKind,
@@ -20,6 +19,7 @@ from keepout.risk import (
     assess,
     decide,
 )
+from keepout.units import DAY
 
 
 def decision_for(seen: list[PcObservation], **config: float) -> Action:

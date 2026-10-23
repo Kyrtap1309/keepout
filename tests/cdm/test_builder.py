@@ -33,9 +33,9 @@ from keepout.cdm.builder import (
 )
 from keepout.conjunction import Conjunction
 from keepout.covariance import Covariance
+from keepout.events import ConjunctionEvent
 from keepout.frames import relative_position_rtn
 from keepout.objects import ObjectState
-from keepout.risk import ConjunctionEvent
 from keepout.screening import ScreeningVolume
 from keepout.state import StateVector
 from keepout.synthetic import SyntheticCovarianceModel

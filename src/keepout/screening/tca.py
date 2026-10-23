@@ -101,27 +101,26 @@ import numpy as np
 import numpy.typing as npt
 from astropy.time import Time
 
-from keepout._types import (
-    BoolArray,
-    FloatArray,
-    IndexArray,
-    as_vector,
-    read_only,
+from keepout._linalg import as_vector
+from keepout._types import BoolArray, FloatArray, IndexArray, read_only
+from keepout._validation import (
     require_at_least,
     require_non_negative,
     require_positive,
     require_single_time,
 )
 from keepout.orbits import EARTH_MU
-from keepout.propagation.base import (
+from keepout.propagation import (
     CHUNK_STATES,
     NO_ERROR,
     ErrorArray,
+    PairStates,
     Propagator,
     RadiusBounds,
+    States,
+    pair_states,
     propagate_in_chunks,
 )
-from keepout.propagation.sgp4_prop import Sgp4Propagator, Sgp4Sampler, States
 from keepout.screening.volume import ScreeningVolume, per_primary
 
 __all__ = [
@@ -503,21 +502,6 @@ def _stencil_sum(rho: FloatArray, weights: FloatArray) -> FloatArray:
     return total
 
 
-def _pair_sampler(primary: Propagator, secondary: Propagator, start: Time) -> States:
-    """The sampler of a pair's states, from any propagators: rows 0 and 1."""
-
-    def states(stamps: FloatArray) -> tuple[ErrorArray, FloatArray, FloatArray]:
-        primary_states = primary.propagate(start, stamps)
-        secondary_states = secondary.propagate(start, stamps)
-        return (
-            np.concatenate((primary_states.errors, secondary_states.errors)),
-            np.concatenate((primary_states.r, secondary_states.r)),
-            np.concatenate((primary_states.v, secondary_states.v)),
-        )
-
-    return states
-
-
 class _Pair:
     """One primary and one catalog object, evaluated at any times.
 
@@ -757,22 +741,13 @@ class ApproachSearch:
             return SearchResult((), {}, {})
         failures = _Failures()
         candidates = self._candidates(rows, max_states, failures)
-        sampler = self._sampler_for()
+        states_of = pair_states(self._start, self._primaries, self._catalog)
         minima: list[RangeMinimum] = []
         for (primary, secondary), intervals in sorted(candidates.items()):
             minima.extend(
-                self._refine(sampler, primary, secondary, intervals, failures)
+                self._refine(states_of, primary, secondary, intervals, failures)
             )
         return SearchResult(tuple(minima), failures.primary, failures.catalog)
-
-    def _sampler_for(self) -> Sgp4Sampler | None:
-        """The fast path of SGP4 for the pairs' states, when both propagators
-        are SGP4 (primaries numbered first, then the catalog)."""
-        if isinstance(self._primaries, Sgp4Propagator) and isinstance(
-            self._catalog, Sgp4Propagator
-        ):
-            return Sgp4Sampler(self._start, (self._primaries, self._catalog))
-        return None
 
     def _candidates(
         self, rows: IndexArray, max_states: int, failures: _Failures
@@ -927,22 +902,9 @@ class ApproachSearch:
         monotone = (sweep > 0.0) & (sweep * sweep > range_bound * acceleration)
         return keep, monotone
 
-    def _pair_states(
-        self, sampler: Sgp4Sampler | None, primary: int, secondary: int
-    ) -> States:
-        """The sampler of one pair's states: from SGP4's fast path when there
-        is one (:meth:`_sampler_for`), else from the propagators."""
-        if sampler is None:
-            return _pair_sampler(
-                self._primaries.subset(np.array([primary])),
-                self._catalog.subset(np.array([secondary])),
-                self._start,
-            )
-        return sampler.states((primary, len(self._primaries) + secondary))
-
     def _refine(
         self,
-        sampler: Sgp4Sampler | None,
+        states_of: PairStates,
         primary: int,
         secondary: int,
         intervals: list[_Interval],
@@ -953,7 +915,7 @@ class ApproachSearch:
         A failure while refining an interval is recorded in ``failures`` and
         loses that interval's minima only.
         """
-        pair = _Pair(self._pair_states(sampler, primary, secondary), self._duration)
+        pair = _Pair(states_of(primary, secondary), self._duration)
         brackets = [_samples(interval) for interval in intervals]
         # Every interval's samples in one evaluation, kept by the pair; after a
         # failure, each interval is evaluated, and its failure found, on its own.

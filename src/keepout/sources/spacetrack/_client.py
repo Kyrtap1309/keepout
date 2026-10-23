@@ -26,17 +26,24 @@ from keepout.errors import (
 )
 from keepout.omm.celestrak import loads_json
 from keepout.omm.model import Omm
-from keepout.sources.cache import cache_dir, cached_fetch, store_json
+from keepout.sources._store import cache_dir, store_json
+from keepout.sources.cache import cached_fetch
 from keepout.sources.catalog import Catalog, CatalogPart, Retrieval
 from keepout.sources.spacetrack._credentials import Credentials, redacted_excerpt
 from keepout.sources.spacetrack._query import (
     CATALOG,
+    CLASS_INTERVALS,
     LOGIN_URL,
     LOGOUT_URL,
     PUBLIC_CDMS,
     Query,
 )
-from keepout.sources.spacetrack._transport import Request, Response, Transport
+from keepout.sources.spacetrack._transport import (
+    Request,
+    Response,
+    Transport,
+    UrllibTransport,
+)
 from keepout.sources.spacetrack.public_cdm import PublicCdms, read_public_cdms
 from keepout.units import HOUR, MINUTE
 
@@ -136,7 +143,7 @@ class SpaceTrackClient:
         The account; from the environment (:meth:`Credentials.from_env`)
         at the login if ``None``.
     cache
-        Cache root; :func:`~keepout.sources.cache.cache_dir` if ``None``.
+        Cache root; :func:`~keepout.sources._store.cache_dir` if ``None``.
     transport
         Sends the requests; a new :class:`UrllibTransport` if ``None``.
     throttle
@@ -157,7 +164,7 @@ class SpaceTrackClient:
     ) -> None:
         self._credentials = credentials
         self._root = cache_dir(cache) / "spacetrack"
-        self._transport = _new_transport() if transport is None else transport
+        self._transport = UrllibTransport() if transport is None else transport
         self._throttle = Throttle() if throttle is None else throttle
         self._now = now
         self._logged_in = False
@@ -254,8 +261,7 @@ class SpaceTrackClient:
             send,
             max_age=interval if max_age is None else max_age,
             interval=interval,
-            reason=f"Space-Track allows one {query.request_class} query per "
-            f"{interval:g} s",
+            reason=_allowance(query),
             now=self._now,
             compressed=True,
         )
@@ -267,8 +273,8 @@ class SpaceTrackClient:
         Parameters
         ----------
         max_age
-            Seconds a cached copy is used; one hour (the ``gp`` interval)
-            if ``None``, and not less.
+            Seconds a cached copy is used; the ``gp`` interval of
+            :data:`CLASS_INTERVALS` (1 h) if ``None``, and not less.
 
         Returns
         -------
@@ -291,8 +297,8 @@ class SpaceTrackClient:
         Parameters
         ----------
         max_age
-            Seconds a cached copy is used; 8 hours (the ``cdm_public``
-            interval) if ``None``, and not less.
+            Seconds a cached copy is used; the ``cdm_public`` interval of
+            :data:`CLASS_INTERVALS` (8 h) if ``None``, and not less.
 
         Raises
         ------
@@ -361,8 +367,7 @@ class SpaceTrackClient:
         if last is not None and now - last < interval:
             wait = interval - (now - last)
             raise RateLimited(
-                f"Space-Track allows one {query.request_class} query per "
-                f"{interval / HOUR:g} h; the last was sent at {_utc(last)} "
+                f"{_allowance(query)}; the last was sent at {_utc(last)} "
                 f"(recorded in {self.ledger}); try again in {_duration(wait)}",
                 retry_after=wait,
             )
@@ -465,7 +470,7 @@ class SpaceTrackClient:
         invalid = (
             f"{self.ledger} is not a Space-Track request record of this "
             "keepout version; delete it only if no query was sent in the "
-            "last 8 hours"
+            f"last {max(CLASS_INTERVALS.values()) / HOUR:g} hours"
         )
         if not isinstance(record, dict) or record.get("format") != _LEDGER_FORMAT:
             raise SourceFormatError(invalid)
@@ -482,6 +487,15 @@ class SpaceTrackClient:
     def _write_ledger(self, queried: Mapping[str, float]) -> None:
         record = {"format": _LEDGER_FORMAT, "queried": dict(sorted(queried.items()))}
         store_json(self.ledger, record)
+
+
+def _allowance(query: Query) -> str:
+    """What Space-Track allows of ``query``'s class, for messages: ``Space-Track
+    allows one gp query per 1 h``."""
+    return (
+        f"Space-Track allows one {query.request_class} query per "
+        f"{query.interval / HOUR:g} h"
+    )
 
 
 def read_catalog(data: bytes) -> tuple[Omm, ...]:
@@ -520,9 +534,10 @@ def fetch_public_cdms(
     Parameters
     ----------
     cache
-        Cache root; :func:`~keepout.sources.cache.cache_dir` if ``None``.
+        Cache root; :func:`~keepout.sources._store.cache_dir` if ``None``.
     max_age
-        Seconds a cached copy is used; 8 hours if ``None``, and not less.
+        Seconds a cached copy is used; the ``cdm_public`` interval of
+        :data:`CLASS_INTERVALS` (8 h) if ``None``, and not less.
     credentials
         The account; from the environment if ``None`` and needed.
     transport
@@ -560,9 +575,10 @@ def fetch_catalog(
     Parameters
     ----------
     cache
-        Cache root; :func:`~keepout.sources.cache.cache_dir` if ``None``.
+        Cache root; :func:`~keepout.sources._store.cache_dir` if ``None``.
     max_age
-        Seconds a cached copy is used; one hour if ``None``, and not less.
+        Seconds a cached copy is used; the ``gp`` interval of
+        :data:`CLASS_INTERVALS` (1 h) if ``None``, and not less.
     credentials
         The account; from the environment if ``None`` and needed.
     transport
@@ -597,15 +613,6 @@ def _in_session(
         credentials, cache=cache, transport=transport, now=now
     ) as client:
         return fetch(client)
-
-
-def _new_transport() -> Transport:
-    """A new :class:`UrllibTransport`, looked up on the package when called,
-    so that replacing ``keepout.sources.spacetrack.UrllibTransport`` (as the
-    command-line tests do) changes the transport of every client."""
-    from keepout.sources import spacetrack
-
-    return spacetrack.UrllibTransport()
 
 
 def _login_refusal(body: bytes) -> str | None:

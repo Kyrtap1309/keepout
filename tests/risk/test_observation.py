@@ -4,7 +4,8 @@ from typing import Any
 import pytest
 
 from keepout.pc.result import PcResult
-from keepout.risk import DAY, PcObservation
+from keepout.risk import PcObservation
+from keepout.units import DAY
 
 
 def observation(**changes: Any) -> PcObservation:

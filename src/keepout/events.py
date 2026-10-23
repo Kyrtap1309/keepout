@@ -7,15 +7,14 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Final
 
-from astropy.time import Time
-
-from keepout._types import is_probability, require_non_negative
+from keepout._defaults import TCA_TOLERANCE
+from keepout._validation import is_probability, require_non_negative
 from keepout.cdm.model import Cdm
 from keepout.covariance import Policy
 from keepout.errors import EventError, HardBodyRadiusError, KeepoutError
-from keepout.pc.api import AUTO, PcComputation
+from keepout.pc import AUTO, PcComputation
 from keepout.risk.observation import PcObservation
-from keepout.units import MINUTE
+from keepout.units import elapsed_seconds
 
 __all__ = [
     "DEFAULT_TCA_TOLERANCE",
@@ -24,7 +23,7 @@ __all__ = [
     "time_to_tca",
 ]
 
-DEFAULT_TCA_TOLERANCE: Final = 10 * MINUTE
+DEFAULT_TCA_TOLERANCE: Final = TCA_TOLERANCE
 """Largest spread [s] of the TCAs of one event's CDMs. Successive CDMs of an
 encounter move its TCA by milliseconds to seconds; two encounters of the same
 pair are at least a large fraction of an orbit apart."""
@@ -32,12 +31,7 @@ pair are at least a large fraction of an orbit apart."""
 
 def time_to_tca(cdm: Cdm) -> float:
     """Seconds from the CDM's creation to its TCA (negative after TCA)."""
-    return _elapsed_s(cdm.creation_date, cdm.tca)
-
-
-def _elapsed_s(start: Time, end: Time) -> float:
-    """Seconds from ``start`` to ``end``, leap seconds included."""
-    return float((end - start).to_value("s"))
+    return elapsed_seconds(cdm.creation_date, cdm.tca)
 
 
 def _pair(cdm: Cdm) -> tuple[str, str]:
@@ -92,7 +86,7 @@ class ConjunctionEvent:
             sorted(
                 self.cdms,
                 key=lambda cdm: (
-                    _elapsed_s(first.creation_date, cdm.creation_date),
+                    elapsed_seconds(first.creation_date, cdm.creation_date),
                     cdm.message_id,
                 ),
             )
@@ -106,7 +100,7 @@ class ConjunctionEvent:
         if len(pairs) > 1:
             listed = ", ".join(f"{a}/{b}" for a, b in sorted(pairs))
             raise EventError(f"CDMs of one event must share both objects, got {listed}")
-        offsets = [_elapsed_s(first.tca, cdm.tca) for cdm in ordered]
+        offsets = [elapsed_seconds(first.tca, cdm.tca) for cdm in ordered]
         spread = max(offsets) - min(offsets)
         if spread > self.tca_tolerance:
             raise EventError(
@@ -155,7 +149,7 @@ class ConjunctionEvent:
             else:
                 oldest = min(
                     messages,
-                    key=lambda m: _elapsed_s(
+                    key=lambda m: elapsed_seconds(
                         messages[0].creation_date, m.creation_date
                     ),
                 )
@@ -311,7 +305,7 @@ def group_events(
     groups: list[tuple[float, tuple[str, str], list[Cdm]]] = []
     for pair, members in by_pair.items():
         timed = sorted(
-            ((_elapsed_s(reference, cdm.tca), cdm) for cdm in members),
+            ((elapsed_seconds(reference, cdm.tca), cdm) for cdm in members),
             key=lambda item: item[0],
         )
         start = timed[0][0]

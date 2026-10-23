@@ -15,15 +15,17 @@ from screening_data import FIXTURE_START, SGP4_FAILING, load_fixture
 
 from keepout.errors import UnsupportedElements
 from keepout.omm import Omm
+
+# Whitebox: the dates keepout hands SGP4, for the tests named so.
 from keepout.propagation import (
     Ephemeris,
     Propagator,
     Sgp4Propagator,
     describe_error,
     propagate_in_chunks,
+    satrec_of,
+    sgp4_prop,
 )
-
-# Whitebox: the dates keepout hands SGP4, for the tests named so.
 from keepout.propagation.sgp4_prop import Sgp4Sampler, _utc_dates
 
 OMMS = load_fixture()
@@ -40,7 +42,7 @@ def satrec_states(
 ) -> tuple[npt.NDArray[np.uint8], npt.NDArray[np.float64], npt.NDArray[np.float64]]:
     """sgp4's own single-object propagation, converted to metres."""
     utc = times.utc
-    errors, r, v = omm.satrec().sgp4_array(
+    errors, r, v = satrec_of(omm).sgp4_array(
         np.atleast_1d(utc.jd1), np.atleast_1d(utc.jd2)
     )
     return errors, r * 1e3, v * 1e3
@@ -63,7 +65,7 @@ def test_whitebox_states_are_bit_identical_to_satrec_at_keepouts_dates() -> None
     # The same compiled SGP4 as Satrec.sgp4, given the same Julian dates.
     jd, fraction = _utc_dates(FIXTURE_START, OFFSETS)
     for i, omm in enumerate(OMMS):
-        errors, r, v = omm.satrec().sgp4_array(jd, fraction)
+        errors, r, v = satrec_of(omm).sgp4_array(jd, fraction)
         np.testing.assert_array_equal(WHOLE.errors[i], errors)
         np.testing.assert_array_equal(WHOLE.r[i], r * 1e3)
         np.testing.assert_array_equal(WHOLE.v[i], v * 1e3)
@@ -160,10 +162,10 @@ def test_failed_states_have_codes_and_nan() -> None:
 
 
 def test_subsets_share_the_records(monkeypatch: pytest.MonkeyPatch) -> None:
-    def refuse(self: Omm) -> None:
+    def refuse(omm: Omm) -> None:
         raise AssertionError("a subset must not initialise SGP4 again")
 
-    monkeypatch.setattr(Omm, "satrec", refuse)
+    monkeypatch.setattr(sgp4_prop, "satrec_of", refuse)
     subset = PROPAGATOR.subset([5, 0, 5])
     assert len(subset) == 3
     assert subset.omms == (OMMS[5], OMMS[0], OMMS[5])

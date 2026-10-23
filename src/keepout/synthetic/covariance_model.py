@@ -54,10 +54,15 @@ from typing import Final, NamedTuple, assert_never
 import numpy as np
 from astropy.time import Time
 
-from keepout._types import require_non_negative, require_positive, require_single_time
+from keepout._validation import (
+    non_negative_float,
+    positive_float,
+    require_single_time,
+)
 from keepout.covariance import Covariance
 from keepout.omm import Omm
-from keepout.units import DAY, KM, seconds_between
+from keepout.propagation import sgp4_shape
+from keepout.units import DAY, KM, julian_seconds_between
 
 __all__ = [
     "FLOHRER_SIGMAS",
@@ -129,11 +134,11 @@ def orbit_regime(omm: Omm) -> OrbitRegime:
     ------
     UnsupportedElements
         If SGP4 cannot be initialised from ``omm``
-        (:meth:`keepout.omm.Omm.satrec`).
+        (:func:`keepout.propagation.satrec_of`).
     """
-    satrec = omm.satrec()
-    radius = satrec.radiusearthkm * KM
-    perigee, apogee = satrec.altp * radius, satrec.alta * radius
+    shape = sgp4_shape(omm)
+    radius = shape.earth_radius_km * KM
+    perigee, apogee = shape.perigee_altitude * radius, shape.apogee_altitude * radius
     if apogee < LEO_HIGHEST_APOGEE:
         return OrbitRegime.LEO
     if perigee > GEO_LOWEST_PERIGEE and apogee < GEO_HIGHEST_APOGEE:
@@ -176,11 +181,8 @@ class RegimeParameters:
 
     def __post_init__(self) -> None:
         for name in ("radial", "transverse", "normal"):
-            value = float(getattr(self, name))
-            require_positive(value, name)
-            object.__setattr__(self, name, value)
-        rate = float(self.transverse_rate)
-        require_non_negative(rate, "transverse_rate")
+            object.__setattr__(self, name, positive_float(getattr(self, name), name))
+        rate = non_negative_float(self.transverse_rate, "transverse_rate")
         object.__setattr__(self, "transverse_rate", rate)
 
 
@@ -269,8 +271,7 @@ class SyntheticCovarianceModel:
     safety_factor: float = SAFETY_FACTOR
 
     def __post_init__(self) -> None:
-        factor = float(self.safety_factor)
-        require_positive(factor, "safety_factor")
+        factor = positive_float(self.safety_factor, "safety_factor")
         object.__setattr__(self, "safety_factor", factor)
 
     def parameters(self, regime: OrbitRegime) -> RegimeParameters:
@@ -311,7 +312,7 @@ class SyntheticCovarianceModel:
         return self._sigmas(self.parameters(orbit_regime(omm)), omm, time)
 
     def _sigmas(self, parameters: RegimeParameters, omm: Omm, time: Time) -> RtnSigmas:
-        age = abs(seconds_between(omm.epoch, time.utc))
+        age = abs(julian_seconds_between(omm.epoch, time.utc))
         transverse = parameters.transverse + parameters.transverse_rate * age
         factor = self.safety_factor
         return RtnSigmas(
@@ -372,7 +373,7 @@ class SyntheticCovarianceModel:
         regime = orbit_regime(omm)
         parameters = self.parameters(regime)
         sigmas = self._sigmas(parameters, omm, time)
-        age = seconds_between(omm.epoch, time.utc) / DAY
+        age = julian_seconds_between(omm.epoch, time.utc) / DAY
         epoch = omm.epoch.utc.isot
         return (
             "Synthetic covariance: keepout GP element-set age model, an assumption",

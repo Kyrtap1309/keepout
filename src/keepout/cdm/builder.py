@@ -27,6 +27,7 @@ from typing import Final, Protocol
 import numpy as np
 from astropy.time import Time
 
+from keepout._validation import is_single_line
 from keepout.cdm.keywords import (
     STATE_KEYWORDS,
     VERSION_1_0,
@@ -106,7 +107,7 @@ def _check_comments(comments: Sequence[str], what: str) -> tuple[str, ...]:
         If a comment has more than one line or leading or trailing blanks.
     """
     for text in comments:
-        if len(text.splitlines()) > 1 or text != text.strip():
+        if not is_single_line(text):
             raise ValueError(
                 f"{what} comment {text!r} must be one line without leading or "
                 "trailing blanks"

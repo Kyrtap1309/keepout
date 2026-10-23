@@ -13,8 +13,7 @@ from keepout.cli.assess import AUTO_METHOD, PcMethod, method_choice
 from keepout.cli.output import ExitCode
 from keepout.omm import load
 from keepout.pc import METHODS, Method
-from keepout.synthetic import read_fleet
-from keepout.synthetic.operator import run
+from keepout.synthetic import read_fleet, run
 
 RESULT = run(
     read_fleet(FLEET_TOML),

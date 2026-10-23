@@ -64,6 +64,7 @@ nav:
       - Synthetic operator on public data: synthetic-operator.md
   - Reference:
       - Probability of collision: reference/pc.md
+      - Conjunction events: reference/events.md
       - Risk: reference/risk.md
       - Screening: reference/screening.md
       - Synthetic operator: reference/synthetic.md

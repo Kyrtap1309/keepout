@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Final, NamedTuple
 
-from keepout._types import require_non_negative
+from keepout._validation import require_non_negative
 
 __all__ = [
     "HALL",

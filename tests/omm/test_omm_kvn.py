@@ -19,6 +19,7 @@ from omm_builders import (
 from keepout.errors import OmmParseError, OmmWriteError
 from keepout.omm import kvn
 from keepout.omm.celestrak import load_csv, loads_csv
+from keepout.propagation import satrec_of
 
 CREATED = Time("2026-10-06T12:00:00", scale="utc", precision=0)
 
@@ -68,7 +69,7 @@ def test_the_ccsds_examples_are_read() -> None:
 
 def test_the_ccsds_example_initialises_sgp4_like_its_values() -> None:
     (goes,) = kvn.load(CCSDS_KVN[0])
-    assert_same_satrec(goes.satrec(), sgp4_record(GOES_9))
+    assert_same_satrec(satrec_of(goes), sgp4_record(GOES_9))
 
 
 def test_writer_layout_and_units() -> None:

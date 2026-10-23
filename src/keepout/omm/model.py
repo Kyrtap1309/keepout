@@ -3,8 +3,9 @@
 An :class:`Omm` holds what the 18th Space Defense Squadron publishes for one
 catalogued object as general perturbations (GP) data, read from CCSDS OMM
 (CCSDS 502.0-B-3) or CelesTrak's CSV and JSON: the object's identity and its
-SGP4/SDP4 mean elements in SI units. :meth:`Omm.satrec` initialises SGP4 from
-it exactly as :func:`sgp4.omm.initialize` does from the message.
+SGP4/SDP4 mean elements in SI units.
+:func:`keepout.propagation.satrec_of` initialises SGP4 from it exactly as
+:func:`sgp4.omm.initialize` does from the message.
 """
 
 from __future__ import annotations
@@ -13,27 +14,16 @@ import math
 import numbers
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import Final, NamedTuple
 
 from astropy.time import Time
-from sgp4.api import WGS72, Satrec
 
-from keepout.ccsds.keywords import (
-    format_epoch,
-    format_value,
-    message_number,
-    parse_epoch,
-    utc_fields,
-)
-from keepout.errors import UnsupportedElements
-from keepout.omm.keywords import ATTRIBUTES, DEGREE, KEYWORDS, SGP4_EPHEMERIS_TYPE
-from keepout.units import DAY
+from keepout.ccsds.keywords import format_epoch, format_value, parse_epoch
+from keepout.omm.keywords import ATTRIBUTES, KEYWORDS, SGP4_EPHEMERIS_TYPE
 
 __all__ = [
     "MAX_CATALOG_NUMBER",
     "MAX_ELEMENT_SET_NO",
-    "MAX_SATREC_NUMBER",
     "SGP4_EPOCH_DIGITS",
     "Deduplicated",
     "InvalidElement",
@@ -46,9 +36,6 @@ MAX_CATALOG_NUMBER: Final = 999_999_999
 
 MAX_ELEMENT_SET_NO: Final = 9999
 """Largest ``ELEMENT_SET_NO`` (four digits, as in a TLE and the OMM schema)."""
-
-MAX_SATREC_NUMBER: Final = 339_999
-"""Largest catalog number SGP4's satellite record holds (Alpha-5 ``Z9999``)."""
 
 _REALS: Final = (
     "mean_motion",
@@ -66,19 +53,8 @@ SGP4_EPOCH_DIGITS: Final = 6
 """Fractional-second digits of the epoch :func:`sgp4.omm.initialize` reads:
 microseconds, the resolution of CelesTrak's epochs."""
 
-_EPOCH_SECONDS: Final = slice(17, 19)
-"""The whole seconds of epoch text ``YYYY-MM-DDTHH:MM:SS.ffffff``."""
-
 _MAX_EPOCH_DIGITS: Final = 9
 """Most fractional-second digits astropy writes (nanoseconds)."""
-
-_SGP4_EPOCH_FORMAT: Final = "%Y-%m-%dT%H:%M:%S.%f"
-"""How :func:`sgp4.omm.initialize` reads the epoch text."""
-
-# The constants of sgp4.omm, computed as it does.
-_SGP4_EPOCH0: Final = datetime(1949, 12, 31, tzinfo=UTC)
-_NDOT_UNITS: Final = 1036800.0 / math.pi
-_NDDOT_UNITS: Final = 2985984000.0 / 2.0 / math.pi
 
 
 class InvalidElement(ValueError):
@@ -103,7 +79,8 @@ class Omm:
 
     Units are SI except for ``bstar``, which SGP4 defines in inverse Earth
     radii. Mean elements belong to the SGP4/SDP4 theory and must be
-    propagated with it (:meth:`satrec`); they are not osculating elements.
+    propagated with it (:func:`keepout.propagation.satrec_of`); they are not
+    osculating elements.
 
     Parameters
     ----------
@@ -227,58 +204,6 @@ class Omm:
         values["EPHEMERIS_TYPE"] = str(SGP4_EPHEMERIS_TYPE)
         return {keyword: values[keyword] for keyword in KEYWORDS}
 
-    def satrec(self) -> Satrec:
-        """A new SGP4 satellite record of these elements (WGS-72 constants).
-
-        It is the record :func:`sgp4.omm.initialize` makes from the message
-        the elements were read from, bit for bit: every number is converted
-        back to the message's value exactly (see :meth:`keywords`; this holds
-        for numbers of up to 15 significant digits, and CelesTrak writes at
-        most 10). Only the epoch is rounded to whole microseconds, the
-        resolution :func:`sgp4.omm.initialize` reads; CelesTrak's epochs have
-        exactly that resolution.
-
-        Raises
-        ------
-        UnsupportedElements
-            If the catalog number is above :data:`MAX_SATREC_NUMBER`, or
-            the epoch falls in a leap second (SGP4 counts days of 86400 s).
-        """
-        if self.catalog_number > MAX_SATREC_NUMBER:
-            raise UnsupportedElements(
-                f"catalog number {self.catalog_number} is above "
-                f"{MAX_SATREC_NUMBER}, the largest an SGP4 record holds"
-            )
-        epoch = _sgp4_epoch(self.epoch)
-        # What sgp4.omm.initialize does with the text of keywords(), without
-        # the text: each number is the one the text reads back as.
-        satrec = Satrec()
-        satrec.classification = self.classification
-        satrec.intldesg = self.international_designator[2:].replace("-", "")
-        satrec.ephtype = SGP4_EPHEMERIS_TYPE
-        satrec.elnum = self.element_set_no
-        satrec.revnum = self.rev_at_epoch
-        satrec.sgp4init(
-            WGS72,
-            "i",
-            self.catalog_number,
-            epoch,
-            self._message_number("bstar"),
-            self._message_number("mean_motion_dot") / _NDOT_UNITS,
-            self._message_number("mean_motion_ddot") / _NDDOT_UNITS,
-            self._message_number("eccentricity"),
-            self._message_number("arg_of_pericenter") * DEGREE,
-            self._message_number("inclination") * DEGREE,
-            self._message_number("mean_anomaly") * DEGREE,
-            self._message_number("mean_motion") / 720.0 * math.pi,
-            self._message_number("ra_of_asc_node") * DEGREE,
-        )
-        return satrec
-
-    def _message_number(self, attribute: str) -> float:
-        """The value of an attribute in the message's units, as written."""
-        return message_number(getattr(self, attribute), _SCALES[attribute])
-
 
 class Deduplicated(NamedTuple):
     """Element sets split by :func:`deduplicate`."""
@@ -325,43 +250,6 @@ def deduplicate(omms: Iterable[Omm]) -> Deduplicated:
     kept = tuple(newest.values())
     kept_ids = {id(omm) for omm in kept}
     return Deduplicated(kept, tuple(omm for omm in order if id(omm) not in kept_ids))
-
-
-_SCALES: Final = {
-    attribute: KEYWORDS[keyword].scale for keyword, attribute in ATTRIBUTES.items()
-}
-"""Factor from message units to the attribute's, by attribute."""
-
-
-def _sgp4_epoch(epoch: Time) -> float:
-    """Days from 1949-12-31 0h UTC that :func:`sgp4.omm.initialize` reads.
-
-    That is, of the epoch's text rounded to microseconds (see
-    :meth:`Omm.keywords`); read from the text itself only where it is not
-    plain ``YYYY-MM-DDThh:mm:ss.ffffff`` from ERFA (see
-    :func:`~keepout.ccsds.keywords.utc_fields`).
-
-    Raises
-    ------
-    UnsupportedElements
-        If the epoch falls in a leap second.
-    """
-    fields = utc_fields(epoch, SGP4_EPOCH_DIGITS)
-    if fields is None:
-        text = _epoch_text(epoch, SGP4_EPOCH_DIGITS)
-        if text[_EPOCH_SECONDS] == "60":
-            raise UnsupportedElements(f"epoch {text} falls in a leap second")
-        when = datetime.strptime(text, _SGP4_EPOCH_FORMAT).replace(tzinfo=UTC)
-    else:
-        year, month, day, hour, minute, second, microsecond = fields
-        if second == 60:
-            text = (
-                f"{year}-{month:02d}-{day:02d}T{hour:02d}:{minute:02d}:"
-                f"{second:02d}.{microsecond:06d}"
-            )
-            raise UnsupportedElements(f"epoch {text} falls in a leap second")
-        when = datetime(year, month, day, hour, minute, second, microsecond, UTC)
-    return (when - _SGP4_EPOCH0).total_seconds() / DAY
 
 
 def _epoch_text(epoch: Time, digits: int | None) -> str:

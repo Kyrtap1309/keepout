@@ -18,8 +18,9 @@ def test_version_matches_distribution_metadata() -> None:
 
 def test_core_api_is_importable_from_the_package() -> None:
     from keepout.conjunction import Conjunction
+    from keepout.events import ConjunctionEvent
     from keepout.pc import compute_pc
-    from keepout.risk import ConjunctionEvent, assess
+    from keepout.risk import assess
     from keepout.screening import (
         CloseApproach,
         ScreeningResult,

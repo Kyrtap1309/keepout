@@ -6,7 +6,9 @@ import math
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
-from keepout._types import OrderedEnum, require_positive
+from keepout._defaults import DECISION_POINT
+from keepout._types import OrderedEnum
+from keepout._validation import require_positive
 from keepout.risk.observation import PC_FLOOR, PcObservation
 from keepout.risk.thresholds import RiskLevel, Thresholds
 from keepout.risk.trend import (
@@ -66,7 +68,7 @@ class DecisionConfig:
         If ``decision_point`` is not finite and positive.
     """
 
-    decision_point: float = 2 * DAY
+    decision_point: float = DECISION_POINT
 
     def __post_init__(self) -> None:
         require_positive(self.decision_point, "decision_point")
@@ -253,7 +255,7 @@ def assess(
     ----------
     observations
         The event's observations, e.g. from
-        :meth:`~keepout.risk.event.ConjunctionEvent.observations`.
+        :meth:`~keepout.events.ConjunctionEvent.observations`.
     thresholds
         Risk thresholds; :class:`~keepout.risk.thresholds.Thresholds`
         defaults if ``None``.

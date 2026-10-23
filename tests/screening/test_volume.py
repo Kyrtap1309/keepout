@@ -18,6 +18,7 @@ from keepout._types import FloatArray
 from keepout.errors import UnsupportedElements
 from keepout.frames import relative_position_rtn
 from keepout.omm import Omm
+from keepout.propagation import satrec_of
 from keepout.screening import (
     DEFAULT_VOLUME,
     SFS_HANDBOOK_VOLUMES,
@@ -260,7 +261,7 @@ def test_regimes_of_real_orbits(number: int, regime: SfsRegime) -> None:
 
 
 def sgp4_perigee(omm: Omm) -> float:
-    satrec = omm.satrec()
+    satrec = satrec_of(omm)
     return float(satrec.altp * satrec.radiusearthkm * 1e3)
 
 
@@ -269,7 +270,7 @@ def sgp4_period(omm: Omm) -> float:
 
     ``Satrec.no`` is the element set's Kozai mean motion, not this one.
     """
-    satrec = omm.satrec()
+    satrec = satrec_of(omm)
     python = PythonSatrec()
     python.sgp4init(
         WGS72,

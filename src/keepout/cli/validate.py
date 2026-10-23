@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Annotated, TypeAlias
 import typer
 
 from keepout.cli.options import CacheDir, JsonFlag, Workers
-from keepout.cli.output import JsonValue, fail, show, table
+from keepout.cli.output import JsonOut, fail, show, table
 
 if TYPE_CHECKING:
     from rich.table import Table
@@ -53,7 +53,7 @@ def validate_command(
     outcomes = evaluate(cases, workers=workers)
     summary = summarise(outcomes)
     failed = [o for o in outcomes if not o.passed]
-    payload: dict[str, JsonValue] = {
+    payload: dict[str, JsonOut] = {
         "cara_commit": CARA_COMMIT,
         "monte_carlo": monte_carlo,
         "comparisons": len(outcomes),
@@ -98,7 +98,7 @@ def _table(summary: Sequence[MethodSummary], *, monte_carlo: bool) -> Table:
     return rows
 
 
-def _outcome_json(outcome: Outcome) -> dict[str, JsonValue]:
+def _outcome_json(outcome: Outcome) -> dict[str, JsonOut]:
     case, verdict = outcome.case, outcome.verdict
     return {
         "suite": case.suite,

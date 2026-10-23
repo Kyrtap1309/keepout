@@ -347,7 +347,7 @@ def test_max_pc_cases_follow_cara_unit_tests(monkeypatch: pytest.MonkeyPatch) ->
         )
 
     monkeypatch.setattr(cara, "fetch", lambda file, cache=None: Path(file.path))
-    monkeypatch.setattr(cases_module, "legacy_objects", objects)
+    monkeypatch.setattr(cases_module, "load_legacy_objects", objects)
     found = load_max_pc_cases()
     assert [c.methods for c in found] == [("frisbee",)] * 2 + [("dilution",)] * 4
     assert seen[0] == (True, False)

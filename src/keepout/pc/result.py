@@ -9,7 +9,8 @@ from typing import Final, Literal, Self, TypeAlias, get_args
 
 from keepout._methods import Method
 from keepout._pickling import reduce_with_mappings
-from keepout._types import override, require_probability
+from keepout._types import override
+from keepout._validation import require_probability
 
 __all__ = ["RESULT_KINDS", "Method", "PcResult", "ResultKind"]
 

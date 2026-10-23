@@ -10,7 +10,8 @@ import numpy as np
 import numpy.typing as npt
 from astropy.time import Time
 
-from keepout._types import FloatArray, from_eigen, read_only, symmetric_part
+from keepout._linalg import from_eigen, symmetric_part
+from keepout._types import FloatArray, read_only
 from keepout.errors import CovarianceError, GeometryError, UnsupportedFrame
 from keepout.frames import inertial_to_rtn_covariance, rtn_to_inertial_covariance
 from keepout.state import StateVector

@@ -15,8 +15,7 @@ from screening_data import FIXTURE_START, load_fixture
 
 from keepout.cdm import kvn
 from keepout.omm.celestrak import dumps_csv
-from keepout.synthetic import Fleet, FleetSatellite
-from keepout.synthetic.operator import run
+from keepout.synthetic import Fleet, FleetSatellite, run
 from keepout.units import DAY
 
 

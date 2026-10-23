@@ -9,12 +9,12 @@ from typing import TYPE_CHECKING, Annotated, TypeAlias
 
 import typer
 
+from keepout._defaults import SCREENING_DURATION, SOCRATES_RADIUS
 from keepout.cli.events import event_json, events_table, reasons
-from keepout.cli.fetch import load_catalog
-from keepout.cli.options import CacheDir, JsonFlag, Workers, positive
-from keepout.cli.output import JsonValue, isot, plural, show, utc
+from keepout.cli.options import CacheDir, JsonFlag, SourceOption, Workers, positive
+from keepout.cli.output import JsonOut, isot, plural, show, utc
 from keepout.sources.catalog import CATALOG_SOURCES, DEFAULT_SOURCE, CatalogSourceName
-from keepout.units import DAY
+from keepout.units import DAY, KM
 
 # The library is imported in the command: keepout --help need not load the
 # numerical libraries.
@@ -88,18 +88,6 @@ CatalogFile: TypeAlias = Annotated[
 ]
 """``--catalog``: a local catalog file instead of a source."""
 
-SourceOption: TypeAlias = Annotated[
-    CatalogSourceName | None,
-    typer.Option(
-        "--source",
-        help=(
-            "Catalog to screen against, as keepout fetch catalog gets it "
-            f"(default: {DEFAULT_SOURCE})."
-        ),
-    ),
-]
-"""``--source``: the catalog source, unless ``--catalog`` is given."""
-
 CdmDir: TypeAlias = Annotated[
     Path | None,
     typer.Option(
@@ -114,7 +102,7 @@ CdmDir: TypeAlias = Annotated[
 def screen_command(
     *,
     fleet: FleetFile,
-    days: Days = 7.0,
+    days: Days = SCREENING_DURATION / DAY,
     start: Start = None,
     catalog: CatalogFile = None,
     source: SourceOption = None,
@@ -125,7 +113,7 @@ def screen_command(
 ) -> None:
     """Screen a fleet against the catalog, issue a CDM per approach, assess each.
 
-    A synthetic operator on public data: each close approach (5 km sphere)
+    A synthetic operator on public data: each close approach ({radius:g} km sphere)
     of a fleet satellite in the window becomes a CDM whose covariances come
     from keepout's model of GP element set errors, an assumption, not orbit
     determination. Each CDM's Pc is computed and its risk assessed as of the
@@ -138,8 +126,7 @@ def screen_command(
         raise typer.BadParameter(
             "give either --catalog or --source, not both", param_hint="--source"
         )
-    from keepout.synthetic import load_fleet
-    from keepout.synthetic.operator import run
+    from keepout.synthetic import load_fleet, run
 
     satellites = load_fleet(fleet)
     omms, catalog_label = _catalog_input(catalog, source, cache_dir)
@@ -150,6 +137,12 @@ def screen_command(
     payload = _payload(result, catalog_label, files, cdm_dir)
     summary = _summary(result, catalog_label, files, cdm_dir)
     show(payload, *summary, as_json=as_json)
+
+
+# The volume in the help is the library's default (none under python -OO).
+screen_command.__doc__ = (screen_command.__doc__ or "").format_map(
+    {"radius": SOCRATES_RADIUS / KM}
+)
 
 
 def _start_time(start: str) -> Time:
@@ -182,8 +175,8 @@ def _catalog_input(
         from keepout.omm import load
 
         return load(catalog), str(catalog)
-    chosen = source or DEFAULT_SOURCE
-    return load_catalog(chosen, cache_dir).omms, CATALOG_SOURCES[chosen].title
+    described = CATALOG_SOURCES[source or DEFAULT_SOURCE]
+    return described.fetch(cache_dir).omms, described.title
 
 
 def _write_cdms(result: OperatorResult, cdm_dir: Path) -> dict[str, Path]:
@@ -205,7 +198,7 @@ def _payload(
     catalog_label: str,
     files: Mapping[str, Path],
     cdm_dir: Path | None,
-) -> dict[str, JsonValue]:
+) -> dict[str, JsonOut]:
     """The result as JSON values, for ``--json``."""
     screening = result.screening
     return {
@@ -280,9 +273,7 @@ def _not_screened(skipped: SkippedObject, fleet: Fleet) -> str:
     )
 
 
-def _event_json(
-    event: OperatorEvent, files: Mapping[str, Path]
-) -> dict[str, JsonValue]:
+def _event_json(event: OperatorEvent, files: Mapping[str, Path]) -> dict[str, JsonOut]:
     path = files.get(event.cdm.message_id)
     return event_json(event) | {
         "relative_speed": event.approach.relative_speed,
@@ -290,7 +281,7 @@ def _event_json(
     }
 
 
-def _skipped_json(skipped: SkippedObject) -> dict[str, JsonValue]:
+def _skipped_json(skipped: SkippedObject) -> dict[str, JsonOut]:
     return {
         "catalog_number": skipped.catalog_number,
         "role": str(skipped.role),

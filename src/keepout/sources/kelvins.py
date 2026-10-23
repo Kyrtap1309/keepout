@@ -33,14 +33,8 @@ import numpy as np
 from keepout._types import FloatArray, read_only
 from keepout.errors import KelvinsFormatError
 from keepout.risk.observation import PcObservation
-from keepout.sources.cache import (
-    Sink,
-    cache_dir,
-    has_digest,
-    http_stream,
-    retrying,
-    store,
-)
+from keepout.sources._http import Sink, http_stream, retrying
+from keepout.sources._store import cache_dir, has_digest, store
 from keepout.units import DAY
 
 __all__ = [
@@ -127,7 +121,7 @@ _FEATURE_INDEX: Final = {name: index for index, name in enumerate(FEATURES)}
 _FEATURE_COLUMNS: Final = tuple(_INDEX[name] for name in FEATURES)
 
 StreamDownloader: TypeAlias = Callable[[str, Sink], None]
-"""A download of a URL into a sink, like :func:`keepout.sources.cache.http_stream`."""
+"""A download of a URL into a sink, like :func:`keepout.sources._http.http_stream`."""
 
 
 def fetch_raw(
@@ -143,7 +137,7 @@ def fetch_raw(
     Parameters
     ----------
     cache
-        Cache root; :func:`~keepout.sources.cache.cache_dir` if ``None``.
+        Cache root; :func:`~keepout.sources._store.cache_dir` if ``None``.
     download
         Downloads the archive.
 
@@ -151,7 +145,7 @@ def fetch_raw(
     ------
     SourceUnavailable
         If the download fails, also when tried again
-        (:func:`~keepout.sources.cache.retrying`).
+        (:func:`~keepout.sources._http.retrying`).
     ChecksumMismatch
         If the archive or the table does not have its pinned digest.
     KelvinsFormatError

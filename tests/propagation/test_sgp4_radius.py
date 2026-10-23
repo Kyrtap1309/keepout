@@ -18,7 +18,12 @@ from sgp4.model import Satrec as PythonSatrec
 
 from keepout._types import FloatArray
 from keepout.omm import Omm, load, loads
-from keepout.propagation import RadiusBounds, Sgp4Propagator, propagate_in_chunks
+from keepout.propagation import (
+    RadiusBounds,
+    Sgp4Propagator,
+    propagate_in_chunks,
+    satrec_of,
+)
 from keepout.propagation._sgp4_radius import C1L, C1SS, drag_terms
 from keepout.units import DAY
 
@@ -79,7 +84,9 @@ def assert_within(bounds: RadiusBounds, radius: FloatArray) -> None:
 
 
 def test_drag_terms_are_sgp4inits() -> None:
-    near = [satrec for satrec in (omm.satrec() for omm in OMMS) if satrec.method == "n"]
+    near = [
+        satrec for satrec in (satrec_of(omm) for omm in OMMS) if satrec.method == "n"
+    ]
     terms = drag_terms(near)
     python = [python_satrec(satrec) for satrec in near]
     simple = np.array([p.isimp == 1 for p in python])
@@ -117,7 +124,9 @@ def lunisolar_changes(monkeypatch: pytest.MonkeyPatch) -> list[float]:
 def test_the_lunisolar_terms_stay_within_their_bound(
     lunisolar_changes: list[float],
 ) -> None:
-    deep = [satrec for satrec in (omm.satrec() for omm in OMMS) if satrec.method == "d"]
+    deep = [
+        satrec for satrec in (satrec_of(omm) for omm in OMMS) if satrec.method == "d"
+    ]
     assert len(deep) > 80
     for satrec in deep:
         python = python_satrec(satrec)
@@ -144,7 +153,7 @@ def test_the_bounds_are_close_over_the_week() -> None:
     bounds = PROPAGATOR.radius_bounds(FIXTURE_START, WEEK)
     radius = radii(PROPAGATOR, FIXTURE_START, np.arange(0.0, WEEK + 1.0, 60.0))
     assert_within(bounds, radius)
-    near = np.array([omm.satrec().method == "n" for omm in OMMS])
+    near = np.array([satrec_of(omm).method == "n" for omm in OMMS])
     chosen = near & ~np.any(np.isnan(radius), axis=1)
     below = radius[chosen].min(axis=1) - bounds.lowest[chosen]
     above = bounds.highest[chosen] - radius[chosen].max(axis=1)

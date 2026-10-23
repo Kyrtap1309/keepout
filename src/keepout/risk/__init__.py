@@ -13,12 +13,6 @@ from keepout.risk.decision import (
     assess,
     decide,
 )
-from keepout.risk.event import (
-    DEFAULT_TCA_TOLERANCE,
-    ConjunctionEvent,
-    group_events,
-    time_to_tca,
-)
 from keepout.risk.observation import PC_FLOOR, PcKind, PcObservation
 from keepout.risk.thresholds import Basis, RiskLevel, Thresholds
 from keepout.risk.trend import (
@@ -28,16 +22,12 @@ from keepout.risk.trend import (
     TrendPoint,
     analyse_trend,
 )
-from keepout.units import DAY
 
 __all__ = [
-    "DAY",
-    "DEFAULT_TCA_TOLERANCE",
     "PC_FLOOR",
     "Action",
     "Assessment",
     "Basis",
-    "ConjunctionEvent",
     "Decision",
     "DecisionConfig",
     "Direction",
@@ -51,6 +41,4 @@ __all__ = [
     "analyse_trend",
     "assess",
     "decide",
-    "group_events",
-    "time_to_tca",
 ]

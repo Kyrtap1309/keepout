@@ -12,7 +12,7 @@ and a numerical propagator can be used alike.
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Final, Protocol, Self, TypeAlias, runtime_checkable
@@ -22,13 +22,8 @@ import numpy as np
 import numpy.typing as npt
 from astropy.time import Time
 
-from keepout._types import (
-    BoolArray,
-    FloatArray,
-    read_only,
-    require_at_least,
-    require_single_time,
-)
+from keepout._types import BoolArray, FloatArray, read_only
+from keepout._validation import require_at_least, require_single_time
 from keepout.state import RefFrame, as_ref_frame
 
 __all__ = [
@@ -39,13 +34,20 @@ __all__ = [
     "ErrorArray",
     "Propagator",
     "RadiusBounds",
+    "States",
     "describe_error",
+    "pair_sampler",
     "propagate_in_chunks",
     "time_offsets",
 ]
 
 ErrorArray: TypeAlias = npt.NDArray[np.uint8]
 """Error codes, one per object and time; see :data:`ERROR_MESSAGES`."""
+
+States: TypeAlias = Callable[[FloatArray], tuple[ErrorArray, FloatArray, FloatArray]]
+"""States of some objects at offsets [s] from an epoch: error codes ``(N,
+T)``, positions [m] and velocities [m/s] ``(N, T, 3)``, as the arrays of an
+:class:`Ephemeris`."""
 
 NO_ERROR: Final = 0
 """Error code of a state computed without error."""
@@ -380,3 +382,19 @@ def propagate_in_chunks(
         )
         for start in range(0, end, advance)
     )
+
+
+def pair_sampler(primary: Propagator, secondary: Propagator, start: Time) -> States:
+    """The states of a pair, from any propagators of one object each: rows 0
+    (``primary``) and 1 (``secondary``), at offsets [s] from ``start``."""
+
+    def states(offsets: FloatArray) -> tuple[ErrorArray, FloatArray, FloatArray]:
+        primary_states = primary.propagate(start, offsets)
+        secondary_states = secondary.propagate(start, offsets)
+        return (
+            np.concatenate((primary_states.errors, secondary_states.errors)),
+            np.concatenate((primary_states.r, secondary_states.r)),
+            np.concatenate((primary_states.v, secondary_states.v)),
+        )
+
+    return states

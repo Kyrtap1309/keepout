@@ -9,7 +9,7 @@ object's name may come first (the "3LE" form; Space-Track writes it as
 have no TLE form, which is why OMM replaces it.
 
 Each field becomes its OMM keyword's text, read like any other OMM, so
-:meth:`~keepout.omm.model.Omm.satrec` gives the record
+:func:`~keepout.propagation.satrec_of` gives the record
 :meth:`sgp4.api.Satrec.twoline2rv` makes from the lines. Two-digit years
 57-99 are 1957-1999 and 00-56 are 2000-2056. The epoch's day fraction has
 eight digits, a grid of 864 microseconds, so it becomes whole microseconds

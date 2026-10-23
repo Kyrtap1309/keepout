@@ -17,6 +17,7 @@ from screening_data import fixture_by_number
 from keepout.covariance import problems
 from keepout.errors import UnsupportedElements
 from keepout.omm import Omm
+from keepout.propagation import satrec_of
 from keepout.synthetic import (
     OrbitRegime,
     RegimeParameters,
@@ -95,7 +96,7 @@ def test_regimes_of_real_orbits(number: int, regime: OrbitRegime) -> None:
 
 def sgp4_altitudes(omm: Omm) -> tuple[float, float]:
     """SGP4's perigee and apogee altitudes [m] of an element set."""
-    satrec = omm.satrec()
+    satrec = satrec_of(omm)
     radius = satrec.radiusearthkm * 1e3
     return float(satrec.altp * radius), float(satrec.alta * radius)
 
@@ -107,7 +108,7 @@ def with_altitudes(perigee: float, apogee: float) -> Omm:
     search) the perigee.
     """
     base = BY_NUMBER[900]
-    radius = base.satrec().radiusearthkm * 1e3
+    radius = satrec_of(base).radiusearthkm * 1e3
     eccentricity = (apogee - perigee) / (apogee + perigee + 2.0 * radius)
     shaped = dataclasses.replace(base, eccentricity=eccentricity)
 

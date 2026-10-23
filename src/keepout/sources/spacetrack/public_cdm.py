@@ -17,8 +17,8 @@ from typing import Final
 
 from astropy.time import Time
 
-from keepout._types import (
-    JsonValue,
+from keepout._types import JsonValue
+from keepout._validation import (
     require_at_least,
     require_non_negative,
     require_probability,

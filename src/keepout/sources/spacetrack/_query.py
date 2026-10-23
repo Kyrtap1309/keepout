@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Final, Literal, TypeAlias
 
-from keepout.units import HOUR
+from keepout._defaults import CDM_PUBLIC_INTERVAL, GP_INTERVAL
 
 __all__ = [
     "BASE_URL",
@@ -40,7 +40,7 @@ RequestClass: TypeAlias = Literal["gp", "cdm_public"]
 """A Space-Track request class keepout queries (:data:`CLASS_INTERVALS`)."""
 
 CLASS_INTERVALS: Final[Mapping[RequestClass, float]] = MappingProxyType(
-    {"gp": HOUR, "cdm_public": 8 * HOUR}
+    {"gp": GP_INTERVAL, "cdm_public": CDM_PUBLIC_INTERVAL}
 )
 """Least seconds between two queries of each request class, as Space-Track
 publishes them: ``gp`` once an hour, ``cdm_public`` (every public CDM) once

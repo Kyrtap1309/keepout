@@ -7,11 +7,12 @@ from typing import TYPE_CHECKING, NamedTuple, Protocol
 
 from rich.table import Table
 
-from keepout.cli.output import JsonValue, isot, minute, pc_text, table
+from keepout.cli.output import JsonOut, isot, minute, pc_text, table
 
 if TYPE_CHECKING:
     from keepout.cdm import CdmObject
-    from keepout.risk import Action, Assessment, ConjunctionEvent, PcObservation
+    from keepout.events import ConjunctionEvent
+    from keepout.risk import Action, Assessment, PcObservation
 
 __all__ = [
     "Assessed",
@@ -88,11 +89,11 @@ def reasons(events: Sequence[Assessed], least: Action) -> list[str]:
     ]
 
 
-def _cdm_object_json(cdm_object: CdmObject) -> dict[str, JsonValue]:
+def _cdm_object_json(cdm_object: CdmObject) -> dict[str, JsonOut]:
     return {"designator": cdm_object.designator, "name": cdm_object.name}
 
 
-def _observation_json(observation: PcObservation) -> dict[str, JsonValue]:
+def _observation_json(observation: PcObservation) -> dict[str, JsonOut]:
     result = observation.result
     return {
         "message_id": observation.message_id,
@@ -106,7 +107,7 @@ def _observation_json(observation: PcObservation) -> dict[str, JsonValue]:
     }
 
 
-def event_json(item: Assessed) -> dict[str, JsonValue]:
+def event_json(item: Assessed) -> dict[str, JsonOut]:
     """The event, its CDMs' Pc and its assessment as JSON values."""
     event, assessment = item.event, item.assessment
     latest = event.latest

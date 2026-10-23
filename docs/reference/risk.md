@@ -1,7 +1,5 @@
 # Risk
 
-::: keepout.risk.event
-
 ::: keepout.risk.observation
 
 ::: keepout.risk.thresholds
