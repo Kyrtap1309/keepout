@@ -167,11 +167,11 @@ class OperatorResult:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
-class _Settings:
+class _RunContext:
     """How each approach becomes an event."""
 
     fleet: Fleet
-    elements: Mapping[int, Omm]
+    newest_by_number: Mapping[int, Omm]
     screening: ScreeningResult
     model: SyntheticCovarianceModel
     created: Time
@@ -255,9 +255,9 @@ def run(
     require_single_time(created, "created")
     primaries = [newest[number] for number in fleet.catalog_numbers]
     screening = screen(primaries, elements, start, duration, volume, workers=workers)
-    settings = _Settings(
+    context = _RunContext(
         fleet=fleet,
-        elements=newest,
+        newest_by_number=newest,
         screening=screening,
         model=model,
         created=created,
@@ -266,18 +266,20 @@ def run(
         thresholds=thresholds,
         decision_config=decision_config,
     )
-    events = tuple(_event(approach, settings) for approach in screening.approaches)
+    events = tuple(_event(approach, context) for approach in screening.approaches)
     return OperatorResult(fleet, screening, events, model, created)
 
 
-def _metadata(omm: Omm, settings: _Settings, tca: Time) -> tuple[ObjectMetadata, float]:
+def _metadata(
+    omm: Omm, context: _RunContext, tca: Time
+) -> tuple[ObjectMetadata, float]:
     """What the CDM says about an object, and its hard-body radius."""
-    satellite = settings.fleet.find(omm.catalog_number)
+    satellite = context.fleet.find(omm.catalog_number)
     if satellite is None:
         name = omm.object_name
         maneuverable = Maneuverable.NOT_APPLICABLE
         object_type = None
-        radius = settings.fleet.catalog_hard_body_radius
+        radius = context.fleet.catalog_hard_body_radius
     else:
         name = satellite.name or omm.object_name
         maneuverable = Maneuverable.YES if satellite.maneuverable else Maneuverable.NO
@@ -289,42 +291,42 @@ def _metadata(omm: Omm, settings: _Settings, tca: Time) -> tuple[ObjectMetadata,
         object_type=object_type,
         maneuverable=maneuverable,
         covariance_method=CovarianceMethod.DEFAULT,
-        covariance_comments=settings.model.comments(omm, tca),
+        covariance_comments=context.model.comments(omm, tca),
     )
     return metadata, radius
 
 
-def _event(approach: CloseApproach, settings: _Settings) -> OperatorEvent:
+def _event(approach: CloseApproach, context: _RunContext) -> OperatorEvent:
     """The CDM of an approach and its assessment."""
     tca = approach.tca
-    primary = settings.elements[approach.primary_number]
-    secondary = settings.elements[approach.secondary_number]
-    primary_metadata, primary_radius = _metadata(primary, settings, tca)
-    secondary_metadata, secondary_radius = _metadata(secondary, settings, tca)
-    model = settings.model
+    primary = context.newest_by_number[approach.primary_number]
+    secondary = context.newest_by_number[approach.secondary_number]
+    primary_metadata, primary_radius = _metadata(primary, context, tca)
+    secondary_metadata, secondary_radius = _metadata(secondary, context, tca)
+    model = context.model
     conjunction = approach.to_conjunction(
         primary_covariance=model.covariance(primary, tca),
         secondary_covariance=model.covariance(secondary, tca),
         primary_radius=primary_radius,
         secondary_radius=secondary_radius,
     )
-    screening = settings.screening
+    screening = context.screening
     cdm = make_cdm(
         conjunction,
         primary_metadata,
         secondary_metadata,
-        created=settings.created,
-        originator=settings.originator,
+        created=context.created,
+        originator=context.originator,
         message_for=primary_metadata.name,
         screening_period=(screening.start, screening.end),
         screening_volume=screening.volumes[approach.primary_number],
         comments=HEADER_COMMENTS,
     )
     event = ConjunctionEvent.from_cdms([cdm])
-    (observation,) = event.observations(compute=settings.compute)
+    (observation,) = event.observations(compute=context.compute)
     assessment = assess(
         [observation],
-        thresholds=settings.thresholds,
-        decision_config=settings.decision_config,
+        thresholds=context.thresholds,
+        decision_config=context.decision_config,
     )
     return OperatorEvent(approach, event, observation, assessment)

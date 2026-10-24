@@ -107,9 +107,9 @@ class PublicCdm:
         (``EMERGENCY_REPORTABLE``, ``Y`` or ``N``).
     tca
         Time of closest approach (``TCA``, UTC).
-    min_range
+    range_at_tca
         Range at TCA [m] (``MIN_RNG``, metres in the answer).
-    probability
+    pc
         Probability of collision (``PC``); ``None`` if not given.
     object1, object2
         The two objects (``SAT_1_*`` and ``SAT_2_*`` columns).
@@ -119,8 +119,8 @@ class PublicCdm:
     created: Time
     emergency_reportable: bool
     tca: Time
-    min_range: float
-    probability: float | None
+    range_at_tca: float
+    pc: float | None
     object1: PublicCdmObject
     object2: PublicCdmObject
 
@@ -223,8 +223,8 @@ def _public_cdm(record: object) -> PublicCdm:
         created=_time(required("CREATED"), "CREATED"),
         emergency_reportable=_YES_NO[reportable],
         tca=_time(required("TCA"), "TCA"),
-        min_range=number("MIN_RNG"),
-        probability=probability,
+        range_at_tca=number("MIN_RNG"),
+        pc=probability,
         object1=public_object(1),
         object2=public_object(2),
     )

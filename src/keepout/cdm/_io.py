@@ -82,7 +82,9 @@ class SectionBuilder:
             raise CdmParseError(str(exc), line=where.line, path=where.path) from exc
 
 
-def build_cdm(header: Section, relative: Section, segments: Sequence[Section]) -> Cdm:
+def build_cdm(
+    header: Section, relative: Section, object_sections: Sequence[Section]
+) -> Cdm:
     """The message of its sections.
 
     Raises
@@ -90,7 +92,7 @@ def build_cdm(header: Section, relative: Section, segments: Sequence[Section]) -
     CdmParseError
         If the sections do not make a valid CDM.
     """
-    first, second = segments
+    first, second = object_sections
     try:
         return Cdm(header, relative, (first, second))
     except ValueError as exc:

@@ -40,7 +40,7 @@ class PlaneGaussian:
         Miss components along the wide axis ``u`` and the narrow axis ``v`` [m].
     sigma_u, sigma_v
         Standard deviations along ``u`` and ``v`` [m]; ``sigma_u >= sigma_v > 0``.
-    radius
+    hard_body_radius
         Hard-body radius [m].
     diagnostics
         Covariance floor messages, if any.
@@ -50,7 +50,7 @@ class PlaneGaussian:
     miss_v: float
     sigma_u: float
     sigma_v: float
-    radius: float
+    hard_body_radius: float
     diagnostics: tuple[str, ...] = ()
 
     @property
@@ -160,7 +160,7 @@ def require_known_covariance(
 
 
 def plane_gaussian(
-    miss_vector: FloatArray, covariance: FloatArray, radius: float
+    miss_vector: FloatArray, covariance: FloatArray, hard_body_radius: float
 ) -> PlaneGaussian:
     """An encounter-plane miss vector and covariance in principal axes.
 
@@ -170,19 +170,19 @@ def plane_gaussian(
         Miss vector in the plane axes [m].
     covariance
         Combined 2x2 position covariance in the plane axes [m^2].
-    radius
+    hard_body_radius
         Hard-body radius [m].
 
     Raises
     ------
     ValueError
-        If ``radius`` is not finite and positive.
+        If ``hard_body_radius`` is not finite and positive.
     GeometryError
         If the miss vector is not finite.
     CovarianceError
         If the covariance is not finite or has no positive eigenvalue.
     """
-    require_positive(radius, "hard_body_radius")
+    require_positive(hard_body_radius, "hard_body_radius")
     if not np.all(np.isfinite(miss_vector)):
         raise GeometryError("encounter-plane miss vector must be finite")
     if not np.all(np.isfinite(covariance)):
@@ -192,7 +192,7 @@ def plane_gaussian(
         raise CovarianceError(
             "encounter-plane covariance has no positive eigenvalue; Pc is undefined"
         )
-    floor = (SIGMA_FLOOR * radius) ** 2
+    floor = (SIGMA_FLOOR * hard_body_radius) ** 2
     diagnostics: list[str] = []
     for index, name in ((0, "narrow"), (1, "wide")):
         if eigenvalues[index] < floor:
@@ -207,13 +207,13 @@ def plane_gaussian(
         miss_v=float(miss[0]),
         sigma_u=math.sqrt(float(eigenvalues[1])),
         sigma_v=math.sqrt(float(eigenvalues[0])),
-        radius=radius,
+        hard_body_radius=hard_body_radius,
         diagnostics=tuple(diagnostics),
     )
 
 
 def plane_gaussian_of(
-    plane: EncounterPlane, radius: float, method: Method | None
+    plane: EncounterPlane, hard_body_radius: float, method: Method | None
 ) -> PlaneGaussian:
     """The :func:`plane_gaussian` of an encounter plane, for a 2-D method.
 
@@ -221,7 +221,7 @@ def plane_gaussian_of(
     ----------
     plane
         The encounter plane.
-    radius
+    hard_body_radius
         Hard-body radius [m].
     method
         The method that needs both covariances, checked to be known first
@@ -233,7 +233,7 @@ def plane_gaussian_of(
     MissingCovariance
         If ``method`` is given and a covariance is unknown.
     ValueError
-        If ``radius`` is not finite and positive.
+        If ``hard_body_radius`` is not finite and positive.
     GeometryError
         If the miss vector is not finite.
     CovarianceError
@@ -241,4 +241,4 @@ def plane_gaussian_of(
     """
     if method is not None:
         require_known_covariance(plane.unknown_covariance, method)
-    return plane_gaussian(plane.miss_vector, plane.covariance, radius)
+    return plane_gaussian(plane.miss_vector, plane.covariance, hard_body_radius)

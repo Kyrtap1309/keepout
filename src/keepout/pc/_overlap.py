@@ -38,13 +38,13 @@ expansion instead of stopping the computation."""
 class Gaussians(NamedTuple):
     """Means and covariances of both objects' states, at one time or a batch.
 
-    Batched: ``x1, x2`` ``(m, 6)`` and ``p1, p2`` ``(m, 6, 6)``.
+    Batched: the means ``(m, 6)`` and the covariances ``(m, 6, 6)``.
     """
 
-    x1: FloatArray
-    p1: FloatArray
-    x2: FloatArray
-    p2: FloatArray
+    primary_mean: FloatArray
+    primary_covariance: FloatArray
+    secondary_mean: FloatArray
+    secondary_covariance: FloatArray
 
     def take(self, index: int | slice | IndexArray | BoolArray) -> Gaussians:
         """The times ``index`` of a batch."""
@@ -53,19 +53,21 @@ class Gaussians(NamedTuple):
     @property
     def relative_position(self) -> FloatArray:
         """Mean relative positions ``(m, 3)`` [m]."""
-        result: FloatArray = self.x2[:, :3] - self.x1[:, :3]
+        result: FloatArray = self.secondary_mean[:, :3] - self.primary_mean[:, :3]
         return result
 
     @property
     def relative_velocity(self) -> FloatArray:
         """Mean relative velocities ``(m, 3)`` [m/s]."""
-        result: FloatArray = self.x2[:, 3:] - self.x1[:, 3:]
+        result: FloatArray = self.secondary_mean[:, 3:] - self.primary_mean[:, 3:]
         return result
 
     @property
-    def position_covariance(self) -> FloatArray:
+    def combined_position_covariance(self) -> FloatArray:
         """Combined position covariances ``(m, 3, 3)`` [m^2]."""
-        result: FloatArray = self.p1[:, :3, :3] + self.p2[:, :3, :3]
+        result: FloatArray = (
+            self.primary_covariance[:, :3, :3] + self.secondary_covariance[:, :3, :3]
+        )
         return result
 
 
@@ -136,11 +138,13 @@ def _iterate_overlap(
     current = mean_centred
     previous: FloatArray | None = None
     for _ in range(OVERLAP_MAX_ITERATIONS):
-        x1, p1, x2, p2 = current
-        inverse1 = _floored_inverse(p1[:, :3, :3], floor)
-        inverse2 = _floored_inverse(p2[:, :3, :3], floor)
-        precision = inverse1 + inverse2
-        rhs = _apply(inverse1, x1[:, :3]) + _apply(inverse2, x2[:, :3])
+        primary_mean, primary_covariance, secondary_mean, secondary_covariance = current
+        primary_inverse = _floored_inverse(primary_covariance[:, :3, :3], floor)
+        secondary_inverse = _floored_inverse(secondary_covariance[:, :3, :3], floor)
+        precision = primary_inverse + secondary_inverse
+        rhs = _apply(primary_inverse, primary_mean[:, :3]) + _apply(
+            secondary_inverse, secondary_mean[:, :3]
+        )
         # numpy < 2.5 types the solution as any floating dtype; it is float64.
         peak = np.linalg.solve(precision, rhs[..., None])[..., 0].astype(
             np.float64, copy=False
@@ -154,19 +158,30 @@ def _iterate_overlap(
             converged[rows[done]] = True
             keep = ~done
             rows, peak, current = rows[keep], peak[keep], current.take(keep)
-            inverse1, inverse2 = inverse1[keep], inverse2[keep]
+            primary_inverse = primary_inverse[keep]
+            secondary_inverse = secondary_inverse[keep]
             if rows.size == 0:
                 break
         previous = peak
         at = times[rows]
-        centre1 = primary.centre_at(
-            _conditioned_state(current.x1, current.p1, inverse1, peak), at
+        primary_centre = primary.centre_at(
+            _conditioned_state(
+                current.primary_mean, current.primary_covariance, primary_inverse, peak
+            ),
+            at,
         )
-        centre2 = secondary.centre_at(
-            _conditioned_state(current.x2, current.p2, inverse2, peak), at
+        secondary_centre = secondary.centre_at(
+            _conditioned_state(
+                current.secondary_mean,
+                current.secondary_covariance,
+                secondary_inverse,
+                peak,
+            ),
+            at,
         )
         current = Gaussians(
-            *primary.expansions(centre1, at), *secondary.expansions(centre2, at)
+            *primary.expansions(primary_centre, at),
+            *secondary.expansions(secondary_centre, at),
         )
     return result, converged
 

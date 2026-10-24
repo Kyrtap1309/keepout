@@ -81,7 +81,7 @@ def monte_carlo_outcome(shift: float = 0.0, *, case_id: str = "mc") -> Outcome:
         case_with_reference(2e-3, case_id=case_id),
         methods=("montecarlo",),
         criterion=MONTE_CARLO,
-        interval=(1.9e-3, 2.1e-3),
+        reference_interval=(1.9e-3, 2.1e-3),
     )
     interval = (1.8e-3 + shift, 2.6e-3 + shift)
     result = PcResult(
@@ -148,7 +148,8 @@ def test_a_record_of_the_wrong_shape_is_refused(
 
 def test_a_pair_that_is_not_two_numbers_is_refused() -> None:
     case = dataclasses.replace(
-        case_with_reference(0.0, absolute_tolerance=1.0), interval=(1e-3, 2e-3)
+        case_with_reference(0.0, absolute_tolerance=1.0),
+        reference_interval=(1e-3, 2e-3),
     )
     text = report.Record.of(evaluate([case])).dumps()
     with pytest.raises(ValueError, match="expected a pair of numbers"):

@@ -88,8 +88,8 @@ for row in upcoming.cdms[:5]:  # by TCA
         row.tca.isot,
         row.object1.catalog_number,
         row.object2.catalog_number,
-        f"{row.min_range:.0f} m",
-        row.probability,
+        f"{row.range_at_tca:.0f} m",
+        row.pc,
     )
 ```
 
@@ -135,7 +135,7 @@ not at the top or bottom of the hour; pick one for a cron job.
 
 `cdm_public` lists, for approaches still to come, a summary of each CDM 18
 SDS issued. keepout reads each row as a `PublicCdm`: `cdm_id`, `created`,
-`emergency_reportable`, `tca`, `min_range` [m], `probability` (Space-Track's
+`emergency_reportable`, `tca`, `range_at_tca` [m], `pc` (Space-Track's
 Pc) and the two objects (`PublicCdmObject`: catalog number, name, object
 type, radar cross-section class and exclusion volume, the last as given).
 

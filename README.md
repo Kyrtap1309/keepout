@@ -63,7 +63,7 @@ from keepout import Conjunction
 
 cdm = keepout.cdm.load("event.cdm")  # KVN or XML, CDM 1.0 or 2.0
 primary, secondary = cdm.object_states()  # GCRF, SI units
-plane = Conjunction(primary, secondary, hard_body_radius=20.0).plane
+plane = Conjunction(primary, secondary, combined_hard_body_radius=20.0).plane
 print(plane.miss_distance, plane.covariance, primary.covariance.repairs)
 ```
 
@@ -72,7 +72,7 @@ print(plane.miss_distance, plane.covariance, primary.covariance.repairs)
 ```python
 from keepout import compute_pc
 
-conjunction = cdm.conjunction(hard_body_radius=20.0)
+conjunction = cdm.conjunction(combined_hard_body_radius=20.0)
 result = compute_pc(conjunction)  # picks Foster, Hall 3D-Nc or a maximum Pc
 print(result.method, result.value, result.diagnostics)
 print(compute_pc(conjunction, "hall3d").details["nc"])  # a method by name
@@ -90,7 +90,7 @@ from keepout import ConjunctionEvent, assess
 
 cdms = [keepout.cdm.load(path) for path in Path("event").glob("*.cdm")]
 event = ConjunctionEvent.from_cdms(cdms)  # one encounter, oldest CDM first
-assessment = assess(event.observations(hard_body_radius=20.0))
+assessment = assess(event.observations(combined_hard_body_radius=20.0))
 print(assessment.decision.action.name, assessment.decision.reasons)
 print(assessment.trend.direction, assessment.level)
 ```
@@ -127,12 +127,12 @@ iss = [omm for omm in catalog.omms if omm.catalog_number == 25544]
 result = screen(iss, catalog.omms, Time.now())  # the next 7 days, a 5 km sphere
 for approach in result.approaches:
     print(
-        approach.tca.isot, approach.secondary_number, f"{approach.miss_distance:.0f} m"
+        approach.tca.isot, approach.secondary_number, f"{approach.range_at_tca:.0f} m"
     )
 print(Counter(skipped.reason.value for skipped in result.skipped))  # sets left out
 ```
 
-Each approach holds both objects' GCRF states at TCA, the miss distance, the
+Each approach holds both objects' GCRF states at TCA, the range at TCA, the
 miss vector in the primary's RTN frame and the relative velocity. Screening
 GP element sets finds geometry, not risk: they have no covariance and are
 kilometres off within days. [Screening](docs/screening.md) explains the

@@ -175,7 +175,7 @@ def ccsds_values(omm: Omm) -> list[CcsdsValue]:
     The metadata (the fixed metadata after ``OBJECT_ID``), then the mean
     elements and the TLE parameters, in the order of the OMM schema.
     """
-    texts = omm.keywords()
+    texts = omm.keyword_texts()
     values: list[CcsdsValue] = []
     for keyword, spec in KEYWORDS.items():
         values.append(CcsdsValue(keyword, texts[keyword], spec.unit, spec.group))

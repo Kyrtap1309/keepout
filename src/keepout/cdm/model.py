@@ -31,7 +31,8 @@ from keepout.cdm.keywords import (
     covariance_matrix,
     covariance_names,
 )
-from keepout.conjunction import Conjunction, combined_hard_body_radius
+from keepout.conjunction import Conjunction
+from keepout.conjunction import combined_hard_body_radius as combined_radius_of
 from keepout.covariance import Covariance, Policy, make_covariance
 from keepout.errors import CdmParseError
 from keepout.objects import ObjectState, ReportedObject, gcrf_object_states
@@ -313,8 +314,8 @@ class CdmObject:
     tca: Time
 
     @property
-    def designator(self) -> str:
-        """``OBJECT_DESIGNATOR`` (e.g. the catalogue number)."""
+    def object_id(self) -> str:
+        """``OBJECT_DESIGNATOR``: the object's id in ``CATALOG_NAME``."""
         return _text(self.section, "OBJECT_DESIGNATOR")
 
     @property
@@ -333,8 +334,8 @@ class CdmObject:
         return _text(self.section, "REF_FRAME")
 
     @property
-    def hbr(self) -> float | None:
-        """Hard-body radius [m] (CDM 2.0 / TraCSS ``HBR``), if given."""
+    def hard_body_radius(self) -> float | None:
+        """Hard-body radius [m] (``HBR``, CDM 2.0), if given."""
         return _optional_number(self.section, "HBR")
 
     @property
@@ -447,10 +448,10 @@ class CdmObject:
             As :meth:`state`.
         """
         return ReportedObject(
-            self.designator,
+            self.object_id,
             self.state(),
             self.state_covariance_rtn if self.has_covariance else None,
-            self.hbr,
+            self.hard_body_radius,
         )
 
     def object_state(self, *, policy: Policy = "repair") -> ObjectState:
@@ -477,7 +478,7 @@ class Cdm:
         Header section.
     relative
         Relative metadata/data section (starts at ``TCA``).
-    segments
+    object_sections
         The ``OBJECT1`` and ``OBJECT2`` sections.
 
     Raises
@@ -489,16 +490,18 @@ class Cdm:
 
     header: Section
     relative: Section
-    segments: tuple[Section, Section]
+    object_sections: tuple[Section, Section]
 
     def __post_init__(self) -> None:
-        if len(self.segments) != 2:
-            raise ValueError(f"a CDM has 2 object sections, got {len(self.segments)}")
+        if len(self.object_sections) != 2:
+            raise ValueError(
+                f"a CDM has 2 object sections, got {len(self.object_sections)}"
+            )
         named = (
             (self.header, "header", "header"),
             (self.relative, "relative", "relative metadata"),
-            (self.segments[0], "segment", "OBJECT1"),
-            (self.segments[1], "segment", "OBJECT2"),
+            (self.object_sections[0], "segment", "OBJECT1"),
+            (self.object_sections[1], "segment", "OBJECT2"),
         )
         for section, kind, name in named:
             if section.kind != kind:
@@ -511,13 +514,14 @@ class Cdm:
                     f"{name} section is missing required keyword(s): "
                     f"{', '.join(missing)}"
                 )
-        for index, segment in enumerate(self.segments, start=1):
-            label = segment.get("OBJECT")
+        for index, section in enumerate(self.object_sections, start=1):
+            label = section.get("OBJECT")
             if label != f"OBJECT{index}":
                 raise ValueError(
-                    f"segment {index} must have OBJECT = OBJECT{index}, got {label!r}"
+                    f"object section {index} must have OBJECT = OBJECT{index}, "
+                    f"got {label!r}"
                 )
-            covariance_dimension(segment)
+            covariance_dimension(section)
 
     @property
     def version(self) -> str:
@@ -567,12 +571,12 @@ class Cdm:
     @cached_property
     def object1(self) -> CdmObject:
         """Typed view of ``OBJECT1``."""
-        return CdmObject(self.segments[0], self.tca)
+        return CdmObject(self.object_sections[0], self.tca)
 
     @cached_property
     def object2(self) -> CdmObject:
         """Typed view of ``OBJECT2``."""
-        return CdmObject(self.segments[1], self.tca)
+        return CdmObject(self.object_sections[1], self.tca)
 
     @property
     def assumed_covariance(self) -> bool:
@@ -590,26 +594,30 @@ class Cdm:
     def object_states(
         self, *, policy: Policy = "repair"
     ) -> tuple[ObjectState, ObjectState]:
-        """Both objects in GCRF (covariance repairs in ``covariance.repairs``).
+        """The primary (``OBJECT1``) and the secondary (``OBJECT2``) in GCRF
+        (covariance repairs in ``covariance.repairs``).
 
         Parameters
         ----------
         policy
             Covariance policy; see :func:`keepout.covariance.make_covariance`.
         """
-        first, second = gcrf_object_states(
+        primary, secondary = gcrf_object_states(
             [self.object1.reported(), self.object2.reported()], policy=policy
         )
-        return first, second
+        return primary, secondary
 
     def conjunction(
-        self, *, hard_body_radius: float | None = None, policy: Policy = "repair"
+        self,
+        *,
+        combined_hard_body_radius: float | None = None,
+        policy: Policy = "repair",
     ) -> Conjunction:
         """The conjunction of this message (``OBJECT1`` is the primary).
 
         Parameters
         ----------
-        hard_body_radius
+        combined_hard_body_radius
             Combined radius [m]; if ``None``, the sum of both objects' ``HBR``
             (CDM 2.0).
         policy
@@ -621,5 +629,5 @@ class Cdm:
             If no radius is given and an object has no ``HBR``.
         """
         primary, secondary = self.object_states(policy=policy)
-        radius = combined_hard_body_radius(primary, secondary, hard_body_radius)
+        radius = combined_radius_of(primary, secondary, combined_hard_body_radius)
         return Conjunction(primary, secondary, radius)

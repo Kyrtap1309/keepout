@@ -99,8 +99,10 @@ def test_an_empty_event_id_is_refused() -> None:
 def test_observations_are_keepouts_pc_of_each_cdm() -> None:
     first = b1_cdm("A", created="2010-03-11T22:37:52.618")
     second = b1_cdm("B")
-    seen = ConjunctionEvent("E", (second, first)).observations(hard_body_radius=HBR)
-    expected = compute_pc(first.conjunction(hard_body_radius=HBR))
+    seen = ConjunctionEvent("E", (second, first)).observations(
+        combined_hard_body_radius=HBR
+    )
+    expected = compute_pc(first.conjunction(combined_hard_body_radius=HBR))
     assert [o.message_id for o in seen] == ["A", "B"]
     assert seen[0].pc == expected.value
     assert seen[0].source == "keepout (foster)"  # what "auto" chose
@@ -113,7 +115,7 @@ def test_an_assumed_covariance_is_flagged_on_its_observation_and_event() -> None
     measured = b1_cdm("A", created="2010-03-11T22:37:52.618")
     assumed = b1_cdm("B", assumed_covariance=True)
     event = ConjunctionEvent("E", (measured, assumed))
-    seen = event.observations(hard_body_radius=HBR)
+    seen = event.observations(combined_hard_body_radius=HBR)
     assert [o.assumed_covariance for o in seen] == [False, True]
     assert event.assumed_covariance
     assert not ConjunctionEvent("F", (measured,)).assumed_covariance
@@ -121,7 +123,7 @@ def test_an_assumed_covariance_is_flagged_on_its_observation_and_event() -> None
 
 def test_a_named_method_is_used() -> None:
     (seen,) = ConjunctionEvent("E", (b1_cdm(),)).observations(
-        compute=computation("elrod"), hard_body_radius=HBR
+        compute=computation("elrod"), combined_hard_body_radius=HBR
     )
     assert seen.source == "keepout (elrod)"
     assert seen.result is not None
@@ -131,7 +133,7 @@ def test_a_named_method_is_used() -> None:
 def test_a_computation_with_options_is_used() -> None:
     (seen,) = ConjunctionEvent("E", (b1_cdm(),)).observations(
         compute=computation("montecarlo", samples=2_000, seed=1),
-        hard_body_radius=HBR,
+        combined_hard_body_radius=HBR,
     )
     assert seen.source == "keepout (montecarlo)"
     assert seen.ci_high is not None
@@ -149,7 +151,7 @@ def test_a_failed_cdm_is_kept_with_its_error(
 
     monkeypatch.setattr(api, "_compute", stuck)
     (seen,) = ConjunctionEvent("E", (b1_cdm(),)).observations(
-        compute=computation(method), hard_body_radius=HBR
+        compute=computation(method), combined_hard_body_radius=HBR
     )
     assert not seen.ok
     assert seen.error == "PcConvergenceError: rate not computable"
@@ -191,13 +193,13 @@ def test_hbr_from_the_cdms() -> None:
         compute=computation("foster")
     )
     conjunction = message.conjunction()
-    assert conjunction.hard_body_radius == 6.0
+    assert conjunction.combined_hard_body_radius == 6.0
     assert seen.pc == compute_pc(conjunction, "foster").value
 
 
 def test_an_invalid_reported_pc_is_noted_not_used() -> None:
     (seen,) = ConjunctionEvent("E", (b1_cdm(reported_pc="2.0"),)).observations(
-        hard_body_radius=HBR
+        combined_hard_body_radius=HBR
     )
     assert seen.reported_pc is None
     assert seen.diagnostics == ("reported COLLISION_PROBABILITY 2.0 is not in [0, 1]",)
@@ -205,7 +207,7 @@ def test_an_invalid_reported_pc_is_noted_not_used() -> None:
 
 def test_an_event_is_assessed_from_its_observations() -> None:
     event = ConjunctionEvent("E", (b1_cdm(),))
-    assessment = assess(event.observations(hard_body_radius=HBR))
+    assessment = assess(event.observations(combined_hard_body_radius=HBR))
     assert assessment.decision.action is Action.MONITOR  # 4.7e-7: yellow
 
 

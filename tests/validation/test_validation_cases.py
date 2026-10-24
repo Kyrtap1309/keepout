@@ -86,7 +86,7 @@ def test_alfano_sheet_with_the_wrong_layout_is_rejected() -> None:
 
 def test_transcribed_similar_to_3d_case_is_well_formed() -> None:
     case = elrod_similar_to_3d_case()
-    assert case.conjunction.hard_body_radius == 20.0
+    assert case.conjunction.combined_hard_body_radius == 20.0
     assert case.conjunction.diagnostics == ()
     # The transcribed states reproduce CARA's 8-digit reference.
     outcomes = evaluate([case])
@@ -135,7 +135,7 @@ def test_alfano_cases_are_built_from_the_results_table(
     offline_alfano(monkeypatch, [alfano_result(n) for n in range(1, 13)])
     cases = alfano_cases(load_alfano_inputs())
     assert [c.case_id for c in cases] == [str(n) for n in range(1, 13)]
-    assert cases[0].conjunction.hard_body_radius == 10.0
+    assert cases[0].conjunction.combined_hard_body_radius == 10.0
     assert (cases[0].reference, cases[0].paper) == (1e-4, 2e-4)
 
 
@@ -191,7 +191,7 @@ def test_malformed_alfano_reference_is_a_format_error(
 @pytest.mark.usefixtures("offline_b1")
 def test_non_pd_case_uses_cara_reference_and_tolerance() -> None:
     case = load_non_pd_case()
-    assert case.conjunction.hard_body_radius == 20.0
+    assert case.conjunction.combined_hard_body_radius == 20.0
     assert (case.reference, case.criterion) == (0.0, BoundCriterion(absolute=1e-10))
 
 
@@ -235,7 +235,7 @@ def test_alfano_monte_carlo_cases_carry_the_cara_interval(
     first = alfano_monte_carlo_cases(load_alfano_inputs(), load_alfano_windows())[0]
     assert first.methods == ("montecarlo",)
     assert first.criterion is MONTE_CARLO
-    assert first.interval == (1e-3, 3e-3)
+    assert first.reference_interval == (1e-3, 3e-3)
     assert first.options.get("window") == (-100.0, 100.0)
     assert first.options.get("samples") == 200_000  # 400 / 2e-3
 
@@ -299,7 +299,7 @@ def test_pc_method_3d_and_monte_carlo_cases(
     assert three_d[0].informative == ("Coppola 3-D Pc", 1e-20)
     (only,) = pc_method_monte_carlo_cases(pc_method)
     assert only.case_id == "A"
-    assert only.interval == (2e-4, 4e-4)
+    assert only.reference_interval == (2e-4, 4e-4)
 
 
 def test_pc_method_2d_cases(monkeypatch: pytest.MonkeyPatch, offline_b1: None) -> None:
@@ -312,7 +312,7 @@ def test_pc_method_2d_cases(monkeypatch: pytest.MonkeyPatch, offline_b1: None) -
         "A",
         3e-4,
     )
-    assert case.conjunction.hard_body_radius == 20.0
+    assert case.conjunction.combined_hard_body_radius == 20.0
     assert case.methods == ("foster", "elrod")
 
 
@@ -320,7 +320,7 @@ def test_pc_method_2d_cases(monkeypatch: pytest.MonkeyPatch, offline_b1: None) -
 def test_hall_2d3d_cases_share_one_conjunction() -> None:
     two_d, three_d = load_hall_2d3d_cases()
     assert two_d.conjunction is three_d.conjunction
-    assert two_d.conjunction.hard_body_radius == 20.0
+    assert two_d.conjunction.combined_hard_body_radius == 20.0
     assert (two_d.reference, three_d.reference) == (2.2660816e-20, 1.9271201e-05)
     assert three_d.methods == ("hall3d",)
     assert three_d.criterion is HALL

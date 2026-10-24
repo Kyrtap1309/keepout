@@ -210,27 +210,28 @@ def loads(text: str) -> tuple[Omm, ...]:
         OMM keyword.
     """
     lines = [
-        (number, line.rstrip())
-        for number, line in enumerate(text.splitlines(), start=1)
+        (line_number, line.rstrip())
+        for line_number, line in enumerate(text.splitlines(), start=1)
         if line.strip()
     ]
     omms: list[Omm] = []
     index = 0
     while index < len(lines):
         record = len(omms) + 1
-        number, title = lines[index]
+        line_number, title = lines[index]
         name = UNKNOWN
         if title.startswith("2 "):
-            raise OmmParseError("expected TLE line 1", record=record, line=number)
+            raise OmmParseError("expected TLE line 1", record=record, line=line_number)
         if not title.startswith("1 "):
             name = title.removeprefix("0 ").strip()
             index += 1
-        values: dict[str, Located] = {"OBJECT_NAME": Located(name, line=number)}
+        values: dict[str, Located] = {"OBJECT_NAME": Located(name, line=line_number)}
         first = _fields(lines, index, "1", record)
         second = _fields(lines, index + 1, "2", record)
-        if first.number != second.number:
+        if first.catalog_field != second.catalog_field:
             raise OmmParseError(
-                f"line 2 is of object {second.number!r}, line 1 of {first.number!r}",
+                f"line 2 is of object {second.catalog_field!r}, "
+                f"line 1 of {first.catalog_field!r}",
                 record=record,
                 line=lines[index + 1][0],
                 keyword="NORAD_CAT_ID",
@@ -245,45 +246,47 @@ def loads(text: str) -> tuple[Omm, ...]:
 class _Line(NamedTuple):
     """One TLE line read: its catalog number field and its OMM values."""
 
-    number: str
+    catalog_field: str
     values: dict[str, Located]
 
 
-def _fields(lines: list[tuple[int, str]], index: int, digit: str, record: int) -> _Line:
-    """TLE line ``digit`` at ``index``: layout and checksum checked, converted.
+def _fields(
+    lines: list[tuple[int, str]], index: int, line_kind: str, record: int
+) -> _Line:
+    """TLE line ``line_kind`` at ``index``: layout and checksum checked, converted.
 
     Raises
     ------
     OmmParseError
-        If the line is missing, is not line ``digit``, has another layout, a
+        If the line is missing, is not line ``line_kind``, has another layout, a
         wrong checksum or an invalid field.
     """
-    if index >= len(lines) or not lines[index][1].startswith(f"{digit} "):
+    if index >= len(lines) or not lines[index][1].startswith(f"{line_kind} "):
         at = lines[index][0] if index < len(lines) else lines[-1][0] + 1
-        raise OmmParseError(f"expected TLE line {digit}", record=record, line=at)
-    number, line = lines[index]
-    match = _LINES[digit].fullmatch(line)
+        raise OmmParseError(f"expected TLE line {line_kind}", record=record, line=at)
+    line_number, line = lines[index]
+    match = _LINES[line_kind].fullmatch(line)
     if match is None:
         raise OmmParseError(
-            f"TLE line {digit} must have 69 columns laid out as "
-            f"{_LAYOUTS[digit]!r}, got {line!r}",
+            f"TLE line {line_kind} must have 69 columns laid out as "
+            f"{_LAYOUTS[line_kind]!r}, got {line!r}",
             record=record,
-            line=number,
+            line=line_number,
         )
     if match["sum"] != str(checksum(line)):
         raise OmmParseError(
-            f"TLE line {digit} checksum is {match['sum']!r}, "
+            f"TLE line {line_kind} checksum is {match['sum']!r}, "
             f"its columns give {checksum(line)}",
             record=record,
-            line=number,
+            line=line_number,
         )
     values: dict[str, Located] = {}
-    for keyword, convert in _FIELDS[digit].items():
+    for keyword, convert in _FIELDS[line_kind].items():
         try:
-            values[keyword] = Located(convert(match[keyword]), line=number)
+            values[keyword] = Located(convert(match[keyword]), line=line_number)
         except ValueError as exc:
             raise OmmParseError(
-                str(exc), record=record, line=number, keyword=keyword
+                str(exc), record=record, line=line_number, keyword=keyword
             ) from exc
     return _Line(match["NORAD_CAT_ID"], values)
 

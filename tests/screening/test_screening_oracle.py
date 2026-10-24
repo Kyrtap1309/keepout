@@ -31,8 +31,8 @@ FAILING = set(SGP4_FAILING)
 FAST_APPROACHES = [
     approach
     for approach in socrates_approaches()
-    if approach.primary in BY_NUMBER
-    and approach.secondary in BY_NUMBER
+    if approach.primary_number in BY_NUMBER
+    and approach.secondary_number in BY_NUMBER
     and approach.relative_speed >= FAST_SPEED
 ]
 """The fast (1 km/s or more) SOCRATES approaches of two fixture objects."""
@@ -72,22 +72,24 @@ def test_the_fixture_holds_fast_socrates_approaches() -> None:
 
 
 @pytest.mark.parametrize(
-    "approach", FAST_APPROACHES, ids=lambda a: f"{a.primary}-{a.secondary}-{a.tca.isot}"
+    "approach",
+    FAST_APPROACHES,
+    ids=lambda a: f"{a.primary_number}-{a.secondary_number}-{a.tca.isot}",
 )
 def test_refined_minima_are_socrates_approaches(
     approach: SocratesApproach,
 ) -> None:
     # SOCRATES prints TCA to the millisecond and the range to the metre.
-    primary = BY_NUMBER[approach.primary]
-    secondary = BY_NUMBER[approach.secondary]
+    primary = BY_NUMBER[approach.primary_number]
+    secondary = BY_NUMBER[approach.secondary_number]
     start = approach.tca - 600.0 * u.s
     oracle = brute_force([primary], [secondary], start, 1200.0, 6e3)
     (minimum,) = oracle.minima
     assert not minimum.at_edge
-    assert minimum.distance >= approach.miss_distance - 1.0
+    assert minimum.distance >= approach.range_at_tca - 1.0
     refined = refine(primary, secondary, oracle, minimum)
     assert abs(refined.offset - 600.0) <= 1e-3
-    assert refined.distance == pytest.approx(approach.miss_distance, abs=1.0)
+    assert refined.distance == pytest.approx(approach.range_at_tca, abs=1.0)
     assert refined.distance <= minimum.distance
     assert (refined.primary, refined.secondary, refined.sample) == (
         minimum.primary,
@@ -141,8 +143,8 @@ def test_each_primary_has_its_own_reach() -> None:
 
 def test_minima_at_the_edges_of_the_window() -> None:
     approach = FAST_APPROACHES[0]
-    primary = BY_NUMBER[approach.primary]
-    secondary = BY_NUMBER[approach.secondary]
+    primary = BY_NUMBER[approach.primary_number]
+    secondary = BY_NUMBER[approach.secondary_number]
     # The window opens at TCA: the distance only grows after it.
     oracle = brute_force([primary], [secondary], approach.tca, 600.0, 1e5)
     (minimum,) = oracle.minima

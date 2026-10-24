@@ -92,20 +92,20 @@ class Tolerance:
     ----------
     tca
         TCA [s].
-    miss_distance
+    range_at_tca
         Range at TCA [m].
     relative_speed
         Relative speed at TCA [m/s].
     """
 
     tca: float
-    miss_distance: float
+    range_at_tca: float
     relative_speed: float
 
 
 TOLERANCES: Final[Mapping[Group, Tolerance]] = {
-    "fast": Tolerance(tca=1e-3, miss_distance=0.501, relative_speed=0.501),
-    "slow": Tolerance(tca=0.5, miss_distance=0.501, relative_speed=0.501),
+    "fast": Tolerance(tca=1e-3, range_at_tca=0.501, relative_speed=0.501),
+    "slow": Tolerance(tca=0.5, range_at_tca=0.501, relative_speed=0.501),
 }
 """SOCRATES prints TCA to the millisecond, the range in km and the speed in
 km/s with three decimals: rounding alone leaves 0.5 ms, 0.5 m and 0.5 m/s.
@@ -168,7 +168,9 @@ def read_inputs(data: Path) -> Inputs:
 
 def objects(approaches: Sequence[SocratesApproach]) -> set[int]:
     """The catalog numbers of the objects of ``approaches``."""
-    return {a.primary for a in approaches} | {a.secondary for a in approaches}
+    return {a.primary_number for a in approaches} | {
+        a.secondary_number for a in approaches
+    }
 
 
 def group(approach: SocratesApproach) -> Group:
@@ -206,12 +208,12 @@ class Match:
         return julian_seconds_between(self.socrates.tca, self.keepout.tca)
 
     @property
-    def miss_distance_difference(self) -> float:
+    def range_at_tca_difference(self) -> float:
         """Range by keepout minus range by SOCRATES [m] (NaN if keepout has
         none)."""
         if self.keepout is None:
             return float("nan")
-        return self.keepout.miss_distance - self.socrates.miss_distance
+        return self.keepout.range_at_tca - self.socrates.range_at_tca
 
     @property
     def relative_speed_difference(self) -> float:
@@ -226,9 +228,9 @@ class Match:
         """How much the range changes over the TCA difference [m]:
         ``v^2 dt^2 / (2 rho)`` at keepout's minimum (NaN if keepout has none
         or the range is 0)."""
-        if self.keepout is None or self.keepout.miss_distance == 0.0:
+        if self.keepout is None or self.keepout.range_at_tca == 0.0:
             return float("nan")
-        speed, distance = self.keepout.relative_speed, self.keepout.miss_distance
+        speed, distance = self.keepout.relative_speed, self.keepout.range_at_tca
         return speed**2 * self.tca_difference**2 / (2.0 * distance)
 
     def agrees(self) -> bool:
@@ -238,7 +240,7 @@ class Match:
         tolerance = TOLERANCES[group(self.socrates)]
         return (
             abs(self.tca_difference) <= tolerance.tca
-            and abs(self.miss_distance_difference) <= tolerance.miss_distance
+            and abs(self.range_at_tca_difference) <= tolerance.range_at_tca
             and abs(self.relative_speed_difference) <= tolerance.relative_speed
         )
 
@@ -272,8 +274,6 @@ class Comparison:
 
 
 def _pair_of(approach: CloseApproach | SocratesApproach) -> tuple[int, int]:
-    if isinstance(approach, SocratesApproach):
-        return approach.primary, approach.secondary
     return approach.primary_number, approach.secondary_number
 
 
@@ -293,7 +293,7 @@ def compare(
     approach at most once.
     """
     by_number = {omm.catalog_number: omm for omm in catalog}
-    primary_numbers = sorted({a.primary for a in approaches})
+    primary_numbers = sorted({a.primary_number for a in approaches})
     result = screen(
         [by_number[number] for number in primary_numbers],
         [by_number[number] for number in sorted(objects(approaches))],
@@ -306,7 +306,7 @@ def compare(
     compared: list[SocratesApproach] = []
     skipped: list[SocratesApproach] = []
     for a in approaches:
-        left = a.primary in left_out or a.secondary in left_out
+        left = a.primary_number in left_out or a.secondary_number in left_out
         (skipped if left else compared).append(a)
     pairs = {_pair_of(a) for a in compared}
     found = [a for a in result.approaches if _pair_of(a) in pairs]
@@ -355,7 +355,7 @@ class Worst(TypedDict):
     """The largest differences of the approaches within tolerance."""
 
     tca: float
-    miss_distance: float
+    range_at_tca: float
     relative_speed: float
     range_change: float
 
@@ -372,7 +372,7 @@ class Values(TypedDict):
     """keepout's values of an approach."""
 
     tca_difference: float
-    miss_distance: float
+    range_at_tca: float
     relative_speed: float
 
 
@@ -383,7 +383,7 @@ class Difference(TypedDict):
     secondary: int
     tca: str
     group: Group
-    miss_distance: float
+    range_at_tca: float
     relative_speed: float
     keepout: Values | None
     reported: bool
@@ -396,7 +396,7 @@ class KeepoutOnly(TypedDict):
     primary: int
     secondary: int
     tca: str
-    miss_distance: float
+    range_at_tca: float
     relative_speed: float
     nearest_other: float | None
 
@@ -458,13 +458,16 @@ def _round_m(metres: float) -> float:
 def _values(approach: CloseApproach, tca: Time) -> Values:
     return {
         "tca_difference": _round_s(julian_seconds_between(tca, approach.tca)),
-        "miss_distance": _round_m(approach.miss_distance),
+        "range_at_tca": _round_m(approach.range_at_tca),
         "relative_speed": _round_m(approach.relative_speed),
     }
 
 
 def _cause(approach: SocratesApproach, known: Mapping[int, str]) -> int | None:
-    return next((n for n in (approach.primary, approach.secondary) if n in known), None)
+    return next(
+        (n for n in (approach.primary_number, approach.secondary_number) if n in known),
+        None,
+    )
 
 
 def _group_summary(matches: Sequence[Match]) -> GroupSummary:
@@ -473,8 +476,8 @@ def _group_summary(matches: Sequence[Match]) -> GroupSummary:
     if agree:
         worst = {
             "tca": _round_s(max(abs(m.tca_difference) for m in agree)),
-            "miss_distance": _round_m(
-                max(abs(m.miss_distance_difference) for m in agree)
+            "range_at_tca": _round_m(
+                max(abs(m.range_at_tca_difference) for m in agree)
             ),
             "relative_speed": _round_m(
                 max(abs(m.relative_speed_difference) for m in agree)
@@ -507,19 +510,19 @@ def _list_differences(
             continue
         a = match.socrates
         keepout = match.keepout or snapshot.nearest_approach(
-            by_number[a.primary],
-            by_number[a.secondary],
+            by_number[a.primary_number],
+            by_number[a.secondary_number],
             a.tca,
             window=MATCH_WINDOW,
             radius=LOOKUP_RADIUS,
         )
         differences.append(
             {
-                "primary": a.primary,
-                "secondary": a.secondary,
+                "primary": a.primary_number,
+                "secondary": a.secondary_number,
                 "tca": a.tca.iso,
                 "group": group(a),
-                "miss_distance": a.miss_distance,
+                "range_at_tca": a.range_at_tca,
                 "relative_speed": a.relative_speed,
                 "keepout": None if keepout is None else _values(keepout, a.tca),
                 "reported": match.keepout is not None,
@@ -538,7 +541,7 @@ def _list_keepout_only(comparison: Comparison) -> list[KeepoutOnly]:
             "primary": a.primary_number,
             "secondary": a.secondary_number,
             "tca": a.tca.iso,
-            "miss_distance": _round_m(a.miss_distance),
+            "range_at_tca": _round_m(a.range_at_tca),
             "relative_speed": _round_m(a.relative_speed),
             "nearest_other": _nearest_other(a, by_pair[_pair_of(a)]),
         }
@@ -550,11 +553,13 @@ def _list_skipped(comparison: Comparison) -> list[Skipped]:
     left_out = {item.catalog_number: item for item in comparison.result.skipped}
     skipped: list[Skipped] = []
     for a in comparison.skipped:
-        number = a.primary if a.primary in left_out else a.secondary
+        number = (
+            a.primary_number if a.primary_number in left_out else a.secondary_number
+        )
         skipped.append(
             {
-                "primary": a.primary,
-                "secondary": a.secondary,
+                "primary": a.primary_number,
+                "secondary": a.secondary_number,
                 "tca": a.tca.iso,
                 "object": number,
                 "reason": left_out[number].reason,
@@ -678,7 +683,7 @@ def _agreement(summary: Summary, columns: int = len(AGREEMENT_HEADER)) -> list[s
         if worst is not None:
             cells = [
                 _ms(worst["tca"]),
-                f"{worst['miss_distance']:.5f} m",
+                f"{worst['range_at_tca']:.5f} m",
                 f"{worst['relative_speed']:.5f} m/s",
                 f"{worst['range_change']:.2g} m",
             ]
@@ -733,7 +738,7 @@ def _differences(summary: Summary, known: Mapping[int, str]) -> list[str]:
         if keepout is None:
             cells: list[object] = ["-", "none within 50 km", "-"]
         else:
-            distance = _m(keepout["miss_distance"])
+            distance = _m(keepout["range_at_tca"])
             if not d["reported"]:
                 distance += " (not reported: outside the volume)"
             cells = [
@@ -745,7 +750,7 @@ def _differences(summary: Summary, known: Mapping[int, str]) -> list[str]:
             (
                 _pair(d["primary"], d["secondary"]),
                 d["tca"],
-                f"{d['miss_distance']:.0f} m",
+                f"{d['range_at_tca']:.0f} m",
                 f"{d['relative_speed']:.0f} m/s",
                 *cells,
                 "unexplained" if d["cause"] is None else d["cause"],
@@ -791,7 +796,7 @@ def _keepout_only(summary: Summary) -> list[str]:
                 (
                     _pair(a["primary"], a["secondary"]),
                     a["tca"],
-                    _m(a["miss_distance"]),
+                    _m(a["range_at_tca"]),
                     _speed(a["relative_speed"]),
                     "-"
                     if a["nearest_other"] is None
@@ -897,7 +902,7 @@ def _tolerances(summary: Summary) -> list[str]:
                 (
                     GROUP_TITLES[name],
                     f"{tolerance['tca'] * 1e3:g} ms",
-                    f"{tolerance['miss_distance']:g} m",
+                    f"{tolerance['range_at_tca']:g} m",
                     f"{tolerance['relative_speed']:g} m/s",
                 )
                 for name, tolerance in summary["tolerances"].items()

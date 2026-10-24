@@ -99,7 +99,7 @@ class MethodSpec:
         """The method's result on a conjunction, with options it takes."""
         if self.on_plane:
             return self.function(
-                conjunction.plane, conjunction.hard_body_radius, **options
+                conjunction.plane, conjunction.combined_hard_body_radius, **options
             )
         return self.function(conjunction, **options)
 
@@ -197,7 +197,7 @@ def compute_pc(
         encounter scan (the peak-overlap iteration failed where the rate
         matters, the rate cannot be computed at a quadrature node, or Nc is
         not finite), ``"auto"`` falls back to ``"montecarlo"`` with at most
-        ``AUTO_MC_SAMPLES`` trials and the seed ``AUTO_MC_SEED``, so
+        ``AUTO_MC_SAMPLES`` samples and the seed ``AUTO_MC_SEED``, so
         ``"auto"`` is reproducible. A failure of the encounter scan itself
         is not covered: Monte Carlo reuses that scan, so its error
         propagates.
@@ -215,8 +215,9 @@ def compute_pc(
         unknown covariances), then applicability warnings, then the method's.
         Applicability warnings are added, whatever the method, whenever the
         encounter plane is defined (non-zero relative velocity) and they
-        fire, also with a covariance unknown (maximum Pc): the
-        closest-approach offset does not depend on the covariances, and the
+        fire, also with a covariance unknown (maximum Pc): the distance
+        from closest approach along the relative velocity does not depend on
+        the covariances, and the
         duration from the known covariance alone is a lower bound, so its
         warning still holds. ``details["encounter_duration_s"]`` is added
         only when both covariances are known.

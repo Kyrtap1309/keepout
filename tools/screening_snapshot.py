@@ -109,7 +109,7 @@ from keepout.sources.celestrak import (
     fetch_socrates,
 )
 from keepout.sources.socrates import SocratesApproach, epoch_matches, read_socrates
-from keepout.synthetic.covariance_model import LEO_HIGHEST_APOGEE
+from keepout.synthetic.covariance_model import LEO_UPPER_ALTITUDE
 from keepout.units import DAY, julian_seconds_between
 
 TOOL: Final = "tools/screening_snapshot.py"
@@ -311,10 +311,12 @@ def comparable(
     return [
         approach
         for approach in approaches
-        if approach.primary in by_number
-        and approach.secondary in by_number
+        if approach.primary_number in by_number
+        and approach.secondary_number in by_number
         and epoch_matches(
-            approach, by_number[approach.primary], by_number[approach.secondary]
+            approach,
+            by_number[approach.primary_number],
+            by_number[approach.secondary_number],
         )
     ]
 
@@ -362,7 +364,7 @@ def regime(omm: Omm) -> Regime:
     if omm.eccentricity >= SFS_ECCENTRICITY:
         return "HEO"
     axis = semi_major_axis(omm.mean_motion)
-    if axis * (1.0 + omm.eccentricity) - EARTH_RADIUS <= LEO_HIGHEST_APOGEE:
+    if axis * (1.0 + omm.eccentricity) - EARTH_RADIUS <= LEO_UPPER_ALTITUDE:
         return "LEO"
     lowest, highest = SFS_DEEP_SPACE_PERIOD
     if lowest <= 2.0 * math.pi / omm.mean_motion <= highest:
@@ -414,12 +416,18 @@ def select_fixture(
     regimes = {omm.catalog_number: regime(omm) for omm in ordered}
     closest = sorted(
         comparable(approaches, ordered),
-        key=lambda a: (a.miss_distance, a.tca.jd1, a.tca.jd2, a.primary, a.secondary),
+        key=lambda a: (
+            a.range_at_tca,
+            a.tca.jd1,
+            a.tca.jd2,
+            a.primary_number,
+            a.secondary_number,
+        ),
     )
     pairs = _pairs(closest, CLOSEST)
     pairs += _pairs([a for a in closest if a.relative_speed >= FAST], CLOSEST_FAST)
     for name in REGIMES:
-        of_regime = [a for a in closest if regimes[a.primary] == name]
+        of_regime = [a for a in closest if regimes[a.primary_number] == name]
         pairs += _pairs(of_regime, CLOSEST_PER_REGIME)
     chosen = {number for pair in pairs for number in pair}
     for name in REGIMES:
@@ -437,7 +445,7 @@ def select_fixture(
 
 def _pairs(approaches: Sequence[SocratesApproach], count: int) -> list[tuple[int, int]]:
     """The first ``count`` distinct pairs of objects of ``approaches``."""
-    pairs = dict.fromkeys((a.primary, a.secondary) for a in approaches)
+    pairs = dict.fromkeys((a.primary_number, a.secondary_number) for a in approaches)
     return list(pairs)[:count]
 
 
@@ -531,7 +539,8 @@ def summarise_socrates(
     return SocratesSummary(
         approaches=len(approaches),
         both_in_catalog=sum(
-            a.primary in numbers and a.secondary in numbers for a in approaches
+            a.primary_number in numbers and a.secondary_number in numbers
+            for a in approaches
         ),
         comparable=len(comparable(approaches, omms)),
         first_tca=by_tca[0].tca.isot,

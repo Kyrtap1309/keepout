@@ -26,7 +26,7 @@ relative_velocities = arrays(np.float64, (3,), elements=st.floats(-2e4, 2e4))
 
 def plane_of(primary: ObjectState, secondary: ObjectState) -> EncounterPlane:
     # The hard-body radius plays no part in the plane geometry.
-    return Conjunction(primary, secondary, hard_body_radius=1.0).plane
+    return Conjunction(primary, secondary, combined_hard_body_radius=1.0).plane
 
 
 def test_head_on_encounter() -> None:
@@ -45,7 +45,7 @@ def test_head_on_encounter() -> None:
     np.testing.assert_array_equal(plane.direction, [0.0, 0.0, 1.0])
     np.testing.assert_array_equal(plane.combined_covariance, np.diag([5.0, 10.0, 17.0]))
     assert plane.miss_distance == pytest.approx(100.0)
-    assert plane.closest_approach_offset == 0.0
+    assert plane.distance_along_velocity == 0.0
     assert plane.tca is EPOCH
 
 
@@ -54,7 +54,7 @@ def test_along_track_offset_is_projected_out() -> None:
     secondary = object_state([7000e3 + 100.0, 0.0, 500.0], [0.0, 7000.0, 14000.0])
     plane = plane_of(primary, secondary)
     np.testing.assert_allclose(plane.miss_vector, [100.0, 0.0], atol=1e-9)
-    assert plane.closest_approach_offset == pytest.approx(500.0)
+    assert plane.distance_along_velocity == pytest.approx(500.0)
 
 
 def test_zero_relative_velocity_is_rejected() -> None:

@@ -98,7 +98,7 @@ def satrec_of(omm: Omm) -> Satrec:
             f"{MAX_SATREC_NUMBER}, the largest an SGP4 record holds"
         )
     epoch = _sgp4_epoch(omm.epoch)
-    # What sgp4.omm.initialize does with the text of Omm.keywords(), without
+    # What sgp4.omm.initialize does with the text of Omm.keyword_texts(), without
     # the text: each number is the one the text reads back as.
     satrec = Satrec()
     satrec.classification = omm.classification
@@ -190,22 +190,22 @@ def sgp4_shape(omm: Omm) -> Sgp4Shape:
     )
 
 
-def _utc_dates(epoch: Time, seconds: FloatArray) -> tuple[FloatArray, FloatArray]:
-    """UTC two-part Julian dates of ``epoch + seconds``, the times SGP4 takes.
+def _utc_dates(epoch: Time, offsets: FloatArray) -> tuple[FloatArray, FloatArray]:
+    """UTC two-part Julian dates of ``epoch + offsets`` [s], the times SGP4 takes.
 
     The offsets are added on TAI, which has no leap seconds, and converted
     by ERFA as astropy converts; this is exact across a leap second. Whole
     days go to the first part, so the fraction keeps ~10 ps resolution.
     """
     tai = epoch.tai
-    return _tai_to_utc(tai.jd1, tai.jd2, seconds)
+    return _tai_to_utc(tai.jd1, tai.jd2, offsets)
 
 
 def _tai_to_utc(
-    jd1: FloatArray, jd2: FloatArray, seconds: FloatArray
+    jd1: FloatArray, jd2: FloatArray, offsets: FloatArray
 ) -> tuple[FloatArray, FloatArray]:
     """:func:`_utc_dates` from the two-part TAI Julian date of the epoch."""
-    days, rest = np.divmod(seconds, DAY)
+    days, rest = np.divmod(offsets, DAY)
     fraction = jd2 + rest / DAY
     carry = np.round(fraction)
     utc1, utc2 = erfa.taiutc(jd1 + days + carry, fraction - carry)
@@ -448,9 +448,9 @@ class Sgp4Propagator:
             If ``epoch`` is not one time or the offsets are not finite
             numbers in at most one dimension.
         """
-        seconds = time_offsets(epoch, offsets)
-        errors, r, v = _si_states(*self._array.sgp4(*_utc_dates(epoch, seconds)))
-        return Ephemeris(epoch, seconds, r, v, errors, self.frame)
+        checked = time_offsets(epoch, offsets)
+        errors, r, v = _si_states(*self._array.sgp4(*_utc_dates(epoch, checked)))
+        return Ephemeris(epoch, checked, r, v, errors, self.frame)
 
     def radius_bounds(self, start: Time, duration: float) -> RadiusBounds:
         """Bounds on each object's SGP4 distance from the Earth's centre.
@@ -540,8 +540,8 @@ class Sgp4Sampler:
         array = SatrecArray([self._satrecs[index] for index in indices])
         jd1, jd2 = self._jd1, self._jd2
 
-        def states(seconds: FloatArray) -> tuple[ErrorArray, FloatArray, FloatArray]:
-            return _si_states(*array.sgp4(*_tai_to_utc(jd1, jd2, seconds)))
+        def states(offsets: FloatArray) -> tuple[ErrorArray, FloatArray, FloatArray]:
+            return _si_states(*array.sgp4(*_tai_to_utc(jd1, jd2, offsets)))
 
         return states
 

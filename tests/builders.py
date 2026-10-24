@@ -243,7 +243,7 @@ def shifted_back(conjunction: Conjunction, dt: float) -> Conjunction:
     return Conjunction(
         move(conjunction.primary),
         move(conjunction.secondary),
-        conjunction.hard_body_radius,
+        conjunction.combined_hard_body_radius,
     )
 
 

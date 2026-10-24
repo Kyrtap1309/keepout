@@ -91,17 +91,20 @@ def speed_bounds(bounds: RadiusBounds) -> FloatArray:
 
 
 def speed_sieve(
-    distance: FloatArray, length: FloatArray, speed: FloatArray, reach: float
+    distance: FloatArray,
+    length: FloatArray,
+    speed: FloatArray,
+    bounding_radius: float,
 ) -> tuple[IndexArray, IndexArray]:
     """The pairs (rows of ``distance``) and intervals that pass the speed
     sieve, from each pair's range on the grid, the intervals' lengths, each
     pair's relative speed bound and the volume's bounding radius."""
     with np.errstate(invalid="ignore"):
-        near = distance[:, :-1] + distance[:, 1:] <= 2.0 * reach + np.outer(
+        near = distance[:, :-1] + distance[:, 1:] <= 2.0 * bounding_radius + np.outer(
             speed, length
         )
-    pair, interval = np.nonzero(near)
-    return pair, interval
+    pair_rows, interval_indices = np.nonzero(near)
+    return pair_rows, interval_indices
 
 
 def _acceleration_and_range_bounds(
@@ -121,8 +124,8 @@ def _acceleration_and_range_bounds(
     end_range
         The larger range at the two ends of each interval [m].
     speed_range_bound
-        The speed sieve's bound on the range over each interval (``rho_up``)
-        [m].
+        The speed sieve's bound on the range over each interval
+        (``rho_up``) [m].
     lowest_radius
         The lowest distance of either object from the Earth's centre [m].
     interval
@@ -168,7 +171,7 @@ def chord_sieve(
     length: FloatArray,
     speed: FloatArray,
     lowest: FloatArray,
-    reach: float,
+    bounding_radius: float,
     passed: tuple[IndexArray, IndexArray],
 ) -> tuple[BoolArray, BoolArray]:
     """Which of the intervals that passed the speed sieve pass the chord
@@ -178,30 +181,39 @@ def chord_sieve(
     pairs (rows) on the grid, as :func:`speed_sieve` takes them, ``length``
     the intervals' lengths, ``speed`` each pair's relative speed bound,
     ``lowest`` the lowest radius of either object of each pair and
-    ``reach`` the volume's bounding radius; ``passed`` is what
+    ``bounding_radius`` the volume's; ``passed`` is what
     :func:`speed_sieve` returned. A pair at exactly the same position at
     both ends of an interval is taken as one object and fails.
     """
-    pair, interval = passed
-    rho_start, rho_end = rho[pair, interval], rho[pair, interval + 1]
-    range_start, range_end = distance[pair, interval], distance[pair, interval + 1]
-    interval_length = length[interval]
-    speed = speed[pair]
-    lowest = lowest[pair]
+    pair_rows, interval_indices = passed
+    rho_start = rho[pair_rows, interval_indices]
+    rho_end = rho[pair_rows, interval_indices + 1]
+    range_start = distance[pair_rows, interval_indices]
+    range_end = distance[pair_rows, interval_indices + 1]
+    interval_length = length[interval_indices]
+    speed = speed[pair_rows]
+    lowest = lowest[pair_rows]
     chord = rho_end - rho_start
     squared = dot(chord, chord)
     along = np.zeros_like(squared)
     moving = squared > 0.0
     along[moving] = -dot(rho_start[moving], chord[moving]) / squared[moving]
     closest = rho_start + np.clip(along, 0.0, 1.0)[:, None] * chord
-    nearest = np.sqrt(dot(closest, closest))
-    farthest = 0.5 * (range_start + range_end + speed * interval_length)
+    chord_distance = np.sqrt(dot(closest, closest))
+    speed_range_bound = 0.5 * (range_start + range_end + speed * interval_length)
     acceleration, range_bound = _acceleration_and_range_bounds(
-        np.maximum(range_start, range_end), farthest, lowest, interval_length
+        np.maximum(range_start, range_end),
+        speed_range_bound,
+        lowest,
+        interval_length,
     )
-    pad = acceleration * interval_length * interval_length / 8.0
+    chord_sag = acceleration * interval_length * interval_length / 8.0
     same = np.all(rho_start == 0.0, axis=1) & np.all(rho_end == 0.0, axis=1)
-    keep = (nearest - pad <= reach) & ~same
-    sweep = np.sqrt(squared) / interval_length - 0.5 * acceleration * interval_length
-    monotone = (sweep > 0.0) & (sweep * sweep > range_bound * acceleration)
+    keep = (chord_distance - chord_sag <= bounding_radius) & ~same
+    min_relative_speed = (
+        np.sqrt(squared) / interval_length - 0.5 * acceleration * interval_length
+    )
+    monotone = (min_relative_speed > 0.0) & (
+        min_relative_speed * min_relative_speed > range_bound * acceleration
+    )
     return keep, monotone

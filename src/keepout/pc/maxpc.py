@@ -11,10 +11,12 @@
   :data:`SEARCH_GAIN_RTOL`, and that point is kept unless the search's
   maximum beats it by the same margin.
 * :func:`dilution` — both covariances known but possibly too large: the
-  maximum over a scale factor ``k`` of the combined covariance (Alfano 2005;
-  Hejduk et al. 2019). The small-body optimum ``k = K^2 / 2`` seeds a bounded search.
+  maximum over a scale factor ``c`` of the combined covariance (Alfano 2005;
+  Hejduk et al. 2019). The small-body optimum ``c = K^2 / 2`` seeds a bounded
+  search.
 * :func:`alfano` — no covariance at all: the maximum over every 2-D
-  covariance for the miss distance ``d`` alone, reached by a line-like
+  covariance for the miss distance ``d`` alone (``R`` the hard-body
+  radius), reached by a line-like
   covariance along the miss vector with ``sigma^2 = 2 d R / ln((d+R)/(d-R))``
   (Alfano 2005).
 
@@ -84,9 +86,11 @@ _EDGE: Final = (
 )
 
 
-def _pc(miss_vector: FloatArray, covariance: FloatArray, radius: float) -> float:
+def _pc(
+    miss_vector: FloatArray, covariance: FloatArray, hard_body_radius: float
+) -> float:
     """Foster's Pc of a miss vector under a trial covariance."""
-    return gaussian_pc(plane_gaussian(miss_vector, covariance, radius)).value
+    return gaussian_pc(plane_gaussian(miss_vector, covariance, hard_body_radius)).value
 
 
 def _search_log_max(pc: Callable[[float], float], centre: float) -> tuple[float, float]:
@@ -278,24 +282,26 @@ def alfano(plane: EncounterPlane, hard_body_radius: float) -> PcResult:
         If ``hard_body_radius`` is not finite and positive.
     """
     require_positive(hard_body_radius, "hard_body_radius")
-    d, radius = plane.miss_distance, hard_body_radius
+    miss, radius = plane.miss_distance, hard_body_radius
     note = (
         "maximum Pc over every covariance for this miss distance (Alfano 2005): "
         "an upper bound that uses no covariance information"
     )
-    if d < radius:
-        inside = _INSIDE.format(miss=d, radius=radius)
+    if miss < radius:
+        inside = _INSIDE.format(miss=miss, radius=radius)
         return PcResult(
             1.0, "alfano", (note, inside), {"sigma_m": 0.0}, kind="upper_bound"
         )
-    if d == radius:  # ln((d+R)/(d-R)) diverges: sigma -> 0, Pc -> 1/2
-        edge = _EDGE.format(miss=d)
+    if miss == radius:  # ln((d+R)/(d-R)) diverges: sigma -> 0, Pc -> 1/2
+        edge = _EDGE.format(miss=miss)
         return PcResult(
             0.5, "alfano", (note, edge), {"sigma_m": 0.0}, kind="upper_bound"
         )
-    sigma = math.sqrt(2.0 * d * radius / math.log1p(2.0 * radius / (d - radius)))
+    sigma = math.sqrt(2.0 * miss * radius / math.log1p(2.0 * radius / (miss - radius)))
     scale = math.sqrt(2.0) * sigma
-    value = 0.5 * (math.erfc((d - radius) / scale) - math.erfc((d + radius) / scale))
+    value = 0.5 * (
+        math.erfc((miss - radius) / scale) - math.erfc((miss + radius) / scale)
+    )
     return PcResult.clamped(
         value, "alfano", (note,), {"sigma_m": sigma}, kind="upper_bound"
     )

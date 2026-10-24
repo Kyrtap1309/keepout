@@ -139,7 +139,7 @@ class Event(TypedDict):
     secondary_name: str
     secondary_regime: str
     tca: str
-    miss_distance: float
+    range_at_tca: float
     relative_speed: float
     transverse_sigmas: list[float]
     pc: float | None
@@ -213,7 +213,7 @@ def _event(
     diluted: bool | None = None
     if observation.pc is not None and observation.result is not None:
         conjunction = event.cdm.conjunction()
-        bound = dilution(conjunction.plane, conjunction.hard_body_radius)
+        bound = dilution(conjunction.plane, conjunction.combined_hard_body_radius)
         pc = significant(observation.pc)
         method = str(observation.result.method)
         max_pc = significant(bound.value)
@@ -229,7 +229,7 @@ def _event(
         "secondary_name": secondary.object_name or UNKNOWN,
         "secondary_regime": str(orbit_regime(secondary)),
         "tca": approach.tca.utc.iso,
-        "miss_distance": round(approach.miss_distance, 3),
+        "range_at_tca": round(approach.range_at_tca, 3),
         "relative_speed": round(approach.relative_speed, 3),
         "transverse_sigmas": sigmas,
         "pc": pc,
@@ -245,7 +245,7 @@ def _event(
 
 def closest(result: OperatorResult) -> OperatorEvent | None:
     """The event of the closest approach (the earliest of equals)."""
-    return min(result.events, key=lambda e: e.approach.miss_distance, default=None)
+    return min(result.events, key=lambda e: e.approach.range_at_tca, default=None)
 
 
 def summarise(
@@ -493,7 +493,7 @@ def _approaches(summary: Summary) -> list[str]:
             e["tca"],
             names[e["primary"]],
             _object(e["secondary"], e["secondary_name"]),
-            f"{e['miss_distance']:.0f} m",
+            f"{e['range_at_tca']:.0f} m",
             f"{e['relative_speed']:.1f} m/s",
             " / ".join(_km(sigma) for sigma in e["transverse_sigmas"]),
             pc_text(e["pc"]),
@@ -568,7 +568,7 @@ def _example(summary: Summary, cdm: str | None) -> list[str]:
             "The CDM of the closest approach "
             f"({_object(event['primary'], names[event['primary']])} and "
             f"{_object(event['secondary'], event['secondary_name'])}, "
-            f"{event['miss_distance']:.0f} m) in KVN, its numbers rounded to "
+            f"{event['range_at_tca']:.0f} m) in KVN, its numbers rounded to "
             f"{SIGNIFICANT_DIGITS} significant digits and those below "
             f"{NOISE_FLOOR:g} (rounding noise) shown as 0.0:"
         ),

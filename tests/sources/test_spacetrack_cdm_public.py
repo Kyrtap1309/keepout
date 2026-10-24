@@ -50,8 +50,8 @@ def test_a_row_reads_in_si_units() -> None:
     assert cdm.created.scale == "utc"
     assert cdm.emergency_reportable is True
     assert cdm.tca.isot == "2026-10-17T03:25:31.250"
-    assert cdm.min_range == 640.0
-    assert cdm.probability == 2.5e-5
+    assert cdm.range_at_tca == 640.0
+    assert cdm.pc == 2.5e-5
     assert cdm.object1 == PublicCdmObject(
         900, "CALSPHERE 1", "PAYLOAD", "MEDIUM", "5.00"
     )
@@ -63,7 +63,7 @@ def test_a_row_reads_in_si_units() -> None:
 def test_rows_keep_their_order() -> None:
     cdms = read_public_cdms(ANSWER)
     assert [cdm.cdm_id for cdm in cdms] == [1000001, 1000002]
-    assert cdms[1].probability == 0.0
+    assert cdms[1].pc == 0.0
 
 
 def test_an_empty_answer_has_no_rows() -> None:
@@ -80,7 +80,7 @@ def test_optional_values_may_be_missing(missing: str | None) -> None:
     }
     assert len(optional) == 9
     (cdm,) = read_public_cdms(space_track_cdm_public(public_cdm(**optional)))
-    assert cdm.probability is None
+    assert cdm.pc is None
     assert cdm.object1 == PublicCdmObject(900, None, None, None, None)
     assert cdm.object2 == PublicCdmObject(25544, None, None, None, None)
 
@@ -88,7 +88,7 @@ def test_optional_values_may_be_missing(missing: str | None) -> None:
 def test_numbers_and_further_columns_are_accepted() -> None:
     row = {**ROW, "CDM_ID": 7, "MIN_RNG": 12.5, "PC": 0.001, "COMMENT": "new"}
     (cdm,) = read_public_cdms(json.dumps([row]).encode())
-    assert (cdm.cdm_id, cdm.min_range, cdm.probability) == (7, 12.5, 0.001)
+    assert (cdm.cdm_id, cdm.range_at_tca, cdm.pc) == (7, 12.5, 0.001)
 
 
 def test_an_approach_not_emergency_reportable_reads_false() -> None:
@@ -142,24 +142,24 @@ def test_unreadable_answers_are_refused(data: bytes, message: str) -> None:
 @given(
     cdm_id=st.integers(1, 2**32 - 1),
     numbers=st.tuples(st.integers(1, 999_999_999), st.integers(1, 999_999_999)),
-    min_range=st.floats(0.0, 1e9),
-    probability=st.floats(0.0, 1.0),
+    range_at_tca=st.floats(0.0, 1e9),
+    pc=st.floats(0.0, 1.0),
 )
 def test_values_read_back_exactly(
-    cdm_id: int, numbers: tuple[int, int], min_range: float, probability: float
+    cdm_id: int, numbers: tuple[int, int], range_at_tca: float, pc: float
 ) -> None:
     row = public_cdm(
         CDM_ID=str(cdm_id),
         SAT_1_ID=str(numbers[0]),
         SAT_2_ID=str(numbers[1]),
-        MIN_RNG=repr(min_range),
-        PC=repr(probability),
+        MIN_RNG=repr(range_at_tca),
+        PC=repr(pc),
     )
     (cdm,) = read_public_cdms(space_track_cdm_public(row))
     assert cdm.cdm_id == cdm_id
     assert (cdm.object1.catalog_number, cdm.object2.catalog_number) == numbers
-    assert cdm.min_range == min_range
-    assert cdm.probability == probability
+    assert cdm.range_at_tca == range_at_tca
+    assert cdm.pc == pc
 
 
 def test_the_client_fetches_and_caches_the_rows(tmp_path: Path) -> None:

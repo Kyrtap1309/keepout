@@ -428,9 +428,9 @@ def test_compare_finds_keepouts_approach_of_each_pair(raw: Path) -> None:
     passing, apart = comparison.matches
     assert passing.cdm == cdms[0]
     assert passing.tca_difference == pytest.approx(-2.0, abs=1e-3)
-    assert passing.miss_distance == pytest.approx(42195.4, abs=0.1)
+    assert passing.range_at_tca == pytest.approx(42195.4, abs=0.1)
     assert apart == snapshot.Match(cdms[2], None)
-    assert (apart.tca_difference, apart.miss_distance) == (None, None)
+    assert (apart.tca_difference, apart.range_at_tca) == (None, None)
     summary = snapshot.summarise(comparison)
     assert summary["cdms"] == 3
     assert (summary["compared"], summary["found"]) == (2, 1)
@@ -443,8 +443,8 @@ def test_compare_in_processes_gives_the_same(raw: Path) -> None:
     cdms = snapshot.replay_public_cdms(raw)
     omms = snapshot.replay_catalog(raw).omms
     one, two = snapshot.compare(cdms, omms), snapshot.compare(cdms, omms, workers=2)
-    assert [(m.cdm, m.tca_difference, m.miss_distance) for m in two.matches] == [
-        (m.cdm, m.tca_difference, m.miss_distance) for m in one.matches
+    assert [(m.cdm, m.tca_difference, m.range_at_tca) for m in two.matches] == [
+        (m.cdm, m.tca_difference, m.range_at_tca) for m in one.matches
     ]
     assert two.outside_catalog == one.outside_catalog
 

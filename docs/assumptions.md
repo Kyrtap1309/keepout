@@ -44,7 +44,7 @@ element set newer than `t` is covered too. The velocity block is zero.
 | GEO | 0.359 km | 0.432 km | 0.086 km | 1.5 km/day |
 
 - **Epoch sigmas** `sigma_R0`, `sigma_T0`, `sigma_N0`: Table 1 of Flohrer et
-  al. (2009), the 1-sigma errors of the US catalogue's element sets of
+  al. (2009), the 1-sigma errors of the US catalog's element sets of
   2008-01-01 (11 286 objects) near their epoch, each against a numerical
   orbit fitted to its own SGP4 states over 24 hours.
 - **Growth** `k`: the "typical growth of 1,500 m/day" that Levit and

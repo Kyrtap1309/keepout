@@ -69,20 +69,20 @@ class Failed(Exception):
         self.secondary = secondary
 
 
-def _first_failure(errors: ErrorArray, stamps: FloatArray) -> ObjectFailure | None:
-    """The earliest failed state among ``errors`` at ``stamps``, or None when
+def _first_failure(errors: ErrorArray, offsets: FloatArray) -> ObjectFailure | None:
+    """The earliest failed state among ``errors`` at ``offsets``, or None when
     none failed."""
     bad = np.flatnonzero(errors != NO_ERROR)
     if bad.size == 0:
         return None
-    first = bad[np.argmin(stamps[bad])]
-    return ObjectFailure(float(stamps[first]), int(errors[first]))
+    first = bad[np.argmin(offsets[bad])]
+    return ObjectFailure(float(offsets[first]), int(errors[first]))
 
 
 def require_no_failure(
-    primary_errors: ErrorArray, secondary_errors: ErrorArray, stamps: FloatArray
+    primary_errors: ErrorArray, secondary_errors: ErrorArray, offsets: FloatArray
 ) -> None:
-    """A check that neither object of a pair failed at any of ``stamps``.
+    """A check that neither object of a pair failed at any of ``offsets``.
 
     Raises
     ------
@@ -91,8 +91,8 @@ def require_no_failure(
         code; it carries the earliest failure of each.
     """
     failed = (
-        _first_failure(primary_errors, stamps),
-        _first_failure(secondary_errors, stamps),
+        _first_failure(primary_errors, offsets),
+        _first_failure(secondary_errors, offsets),
     )
     if failed != (None, None):
         raise Failed(*failed)
@@ -119,14 +119,14 @@ def record_first_failures(
     failures: dict[int, ObjectFailure],
     positions: IndexArray,
     errors: ErrorArray,
-    times: FloatArray,
+    offsets: FloatArray,
 ) -> None:
     """The first failed state of each object of a chunk (in time order),
     kept as its earliest failure."""
     failed = errors != NO_ERROR
     for row in np.flatnonzero(np.any(failed, axis=1)):
         first = int(np.argmax(failed[row]))
-        failure = ObjectFailure(float(times[first]), int(errors[row, first]))
+        failure = ObjectFailure(float(offsets[first]), int(errors[row, first]))
         keep_earliest(failures, int(positions[row]), failure)
 
 
@@ -155,21 +155,21 @@ class Pair:
     """``f`` at each time it was computed at."""
 
     def states(
-        self, stamps: FloatArray
+        self, offsets: FloatArray
     ) -> tuple[FloatArray, FloatArray, FloatArray, FloatArray]:
-        """Positions and velocities of both at ``stamps``, ``(n, 3)`` each."""
-        errors, r, v = self.sample(stamps)
+        """Positions and velocities of both at ``offsets``, ``(n, 3)`` each."""
+        errors, r, v = self.sample(offsets)
         if errors.any():
-            require_no_failure(errors[0], errors[1], stamps)
+            require_no_failure(errors[0], errors[1], offsets)
         return r[0], v[0], r[1], v[1]
 
-    def f_values(self, times: FloatArray) -> FloatArray:
-        """``f`` at ``times``, from the values already known if all are,
+    def f_values(self, offsets: FloatArray) -> FloatArray:
+        """``f`` at ``offsets``, from the values already known if all are,
         else computed (and kept)."""
-        listed = times.tolist()
-        if all(time in self._known_f for time in listed):
-            return np.array([self._known_f[time] for time in listed])
-        values = self._computed_f(times)
+        listed = offsets.tolist()
+        if all(offset in self._known_f for offset in listed):
+            return np.array([self._known_f[offset] for offset in listed])
+        values = self._computed_f(offsets)
         self._known_f.update(zip(listed, values.tolist(), strict=True))
         return values
 
@@ -181,40 +181,40 @@ class Pair:
             return known
         return float(self._computed_f(np.array([time]))[0])
 
-    def _computed_f(self, times: FloatArray) -> FloatArray:
-        """``f = rho . drho/dt`` at ``times`` (in the window) from positions
+    def _computed_f(self, offsets: FloatArray) -> FloatArray:
+        """``f = rho . drho/dt`` at ``offsets`` (in the window) from positions
         only, whether known or not.
 
         Raises :class:`Failed` for a failure in the window only: a time
         whose central difference reaches a failed state outside the window
         takes the one-sided difference inside it.
         """
-        stamps = (times[:, None] + _CENTRAL_OFFSETS).reshape(-1)
-        errors, r, _ = self.sample(stamps)
+        stencil = (offsets[:, None] + _CENTRAL_OFFSETS).reshape(-1)
+        errors, r, _ = self.sample(stencil)
         if not errors.any():
             return _stencil_sum(r[1] - r[0], _CENTRAL_WEIGHTS)
-        outside = (stamps < 0.0) | (stamps > self.duration)
+        outside = (stencil < 0.0) | (stencil > self.duration)
         inside = ~outside
-        require_no_failure(errors[0][inside], errors[1][inside], stamps[inside])
+        require_no_failure(errors[0][inside], errors[1][inside], stencil[inside])
         derivative = _stencil_sum(r[1] - r[0], _CENTRAL_WEIGHTS)
         failed = (errors[0] != NO_ERROR) | (errors[1] != NO_ERROR)
         reaching = (failed & outside).reshape(-1, len(_CENTRAL_OFFSETS))
         edge = np.flatnonzero(np.any(reaching, axis=1))
         if edge.size > 0:
-            derivative[edge] = self._one_sided_f(times[edge])
+            derivative[edge] = self._one_sided_f(offsets[edge])
         return derivative
 
-    def _one_sided_f(self, times: FloatArray) -> FloatArray:
-        """``f`` at ``times`` from five positions inside the window, towards
+    def _one_sided_f(self, offsets: FloatArray) -> FloatArray:
+        """``f`` at ``offsets`` from five positions inside the window, towards
         its far end (closer together than DERIVATIVE_STEP in a window
         shorter than four of them)."""
-        after = self.duration - times
-        forward = after >= times
-        room = np.where(forward, after, times)
+        after = self.duration - offsets
+        forward = after >= offsets
+        room = np.where(forward, after, offsets)
         spacing = np.minimum(DERIVATIVE_STEP, room / 4.0) * np.where(forward, 1.0, -1.0)
-        nodes = times[:, None] + spacing[:, None] * np.arange(len(_ONE_SIDED_WEIGHTS))
-        stamps = np.clip(nodes, 0.0, self.duration).reshape(-1)
-        r_primary, _, r_secondary, _ = self.states(stamps)
+        nodes = offsets[:, None] + spacing[:, None] * np.arange(len(_ONE_SIDED_WEIGHTS))
+        stencil = np.clip(nodes, 0.0, self.duration).reshape(-1)
+        r_primary, _, r_secondary, _ = self.states(stencil)
         derivative: FloatArray = (
             _stencil_sum(r_secondary - r_primary, _ONE_SIDED_WEIGHTS) / spacing
         )

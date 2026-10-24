@@ -134,7 +134,7 @@ def test_approaches_are_the_minima_of_the_search_in_gcrf() -> None:
             assert state.epoch is approach.primary_state.epoch
             np.testing.assert_allclose(state.r, r_gcrf, rtol=0.0, atol=1e-8)
             np.testing.assert_allclose(state.v, v_gcrf, rtol=0.0, atol=1e-11)
-        assert approach.miss_distance == pytest.approx(minimum.distance, abs=1e-8)
+        assert approach.range_at_tca == pytest.approx(minimum.range_at_tca, abs=1e-8)
     assert dict(result.volumes) == dict.fromkeys(
         (omm.catalog_number for omm in primaries), DEFAULT_VOLUME
     )
@@ -371,15 +371,16 @@ def test_every_socrates_approach_of_the_fixture_is_found_in_gcrf() -> None:
     socrates = [
         approach
         for approach in socrates_approaches()
-        if approach.primary in BY_NUMBER and approach.secondary in BY_NUMBER
+        if approach.primary_number in BY_NUMBER
+        and approach.secondary_number in BY_NUMBER
     ]
     start = min(approach.tca for approach in socrates) - 1 * u.hour
     duration = (max(approach.tca for approach in socrates) - start).sec + 3600.0
-    primaries = sorted({approach.primary for approach in socrates})
+    primaries = sorted({approach.primary_number for approach in socrates})
     result = screen(elements(primaries), FIXTURE, start, duration)
     found: dict[tuple[int, int], list[npt.NDArray[np.float64]]] = {}
     for a in result.approaches:
-        row = [(a.tca - start).to_value(u.s), a.miss_distance, a.relative_speed]
+        row = [(a.tca - start).to_value(u.s), a.range_at_tca, a.relative_speed]
         found.setdefault((a.primary_number, a.secondary_number), []).append(
             np.array(row)
         )
@@ -387,12 +388,12 @@ def test_every_socrates_approach_of_the_fixture_is_found_in_gcrf() -> None:
     for approach in socrates:
         offset = (approach.tca - start).sec
         match = min(
-            found[approach.primary, approach.secondary],
+            found[approach.primary_number, approach.secondary_number],
             key=lambda m: abs(m[0] - offset),
         )
         fast = approach.relative_speed >= FAST_SPEED
         assert match[0] == pytest.approx(offset, abs=1e-3 if fast else 0.5)
-        assert match[1] == pytest.approx(approach.miss_distance, abs=0.5)
+        assert match[1] == pytest.approx(approach.range_at_tca, abs=0.5)
         assert match[2] == pytest.approx(approach.relative_speed, abs=0.5)
 
 

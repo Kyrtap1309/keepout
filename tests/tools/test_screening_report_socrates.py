@@ -56,8 +56,8 @@ def test_the_known_differences_are_as_described(
     others = [
         m
         for m in comparison.matches
-        if 38513 in (m.socrates.primary, m.socrates.secondary)
-        and m.socrates.primary != 47834
+        if 38513 in (m.socrates.primary_number, m.socrates.secondary_number)
+        and m.socrates.primary_number != 47834
     ]
     assert len(others) == 10
     assert all(m.agrees() for m in others)
@@ -96,7 +96,9 @@ def test_keepout_reports_double_minima_of_formation_flyers(
 def test_socrates_leaves_out_terrasar_x_and_tandem_x(inputs: report.Inputs) -> None:
     # Both are in the excerpt with SOCRATES's element sets, so a SOCRATES
     # approach of the pair would be in it too.
-    pairs = {frozenset((a.primary, a.secondary)) for a in inputs.approaches}
+    pairs = {
+        frozenset((a.primary_number, a.secondary_number)) for a in inputs.approaches
+    }
     objects = set().union(*pairs)
     assert {31698, 36605} <= objects
     assert frozenset((31698, 36605)) not in pairs
@@ -105,4 +107,4 @@ def test_socrates_leaves_out_terrasar_x_and_tandem_x(inputs: report.Inputs) -> N
         [by_number[31698]], [by_number[36605]], report.window_start(inputs.approaches)
     )
     assert len(result.approaches) > 100
-    assert all(100.0 < a.miss_distance < 500.0 for a in result.approaches)
+    assert all(100.0 < a.range_at_tca < 500.0 for a in result.approaches)

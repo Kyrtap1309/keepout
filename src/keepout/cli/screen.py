@@ -208,7 +208,9 @@ def _payload(
         "start": isot(screening.start),
         "end": isot(screening.end),
         "events": [_event_json(e, files) for e in result.events],
-        "assumed_covariances": sum(e.event.assumed_covariance for e in result.events),
+        "assumed_covariance_events": sum(
+            e.event.assumed_covariance for e in result.events
+        ),
         "skipped": [_skipped_json(s) for s in screening.skipped],
         "cdm_dir": None if cdm_dir is None else str(cdm_dir),
     }
@@ -276,7 +278,7 @@ def _not_screened(skipped: SkippedObject, fleet: Fleet) -> str:
 def _event_json(event: OperatorEvent, files: Mapping[str, Path]) -> dict[str, JsonOut]:
     path = files.get(event.cdm.message_id)
     return event_json(event) | {
-        "relative_speed": event.approach.relative_speed,
+        "relative_speed_m_s": event.approach.relative_speed,
         "cdm_file": None if path is None else str(path),
     }
 

@@ -80,21 +80,23 @@ def test_degenerate_states_are_refused(r: list[float], v: list[float]) -> None:
 
 
 @pytest.mark.parametrize(
-    ("r", "v", "r_other", "message"),
+    ("r", "v", "r_secondary", "message"),
     [
         pytest.param([1.0, 2.0], LEO_V, LEO_R, "r must have 3 components", id="r"),
-        pytest.param(LEO_R, LEO_V, 1.0, "r_other must have 3 components", id="other"),
+        pytest.param(
+            LEO_R, LEO_V, 1.0, "r_secondary must have 3 components", id="other"
+        ),
         pytest.param(
             np.zeros((2, 3)),
             np.zeros((3, 3)),
             LEO_R,
-            r"r \(2, 3\), v \(3, 3\) and r_other",
+            r"r \(2, 3\), v \(3, 3\) and r_secondary",
             id="broadcast",
         ),
     ],
 )
 def test_shapes_are_checked(
-    r: npt.ArrayLike, v: npt.ArrayLike, r_other: npt.ArrayLike, message: str
+    r: npt.ArrayLike, v: npt.ArrayLike, r_secondary: npt.ArrayLike, message: str
 ) -> None:
     with pytest.raises(ValueError, match=message):
-        relative_position_rtn(r, v, r_other)
+        relative_position_rtn(r, v, r_secondary)

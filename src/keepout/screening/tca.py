@@ -21,7 +21,8 @@ no point of the volume is farther):
    v_p + v_s`` and every point of the interval is within ``V (t - ta)`` of
    ``rho_a`` and ``V (tb - t)`` of ``rho_b``. A point inside ``R`` needs
    ``|rho_a| + |rho_b| <= 2 R + V h``, and the range never exceeds
-   ``rho_up = (|rho_a| + |rho_b| + V h) / 2``.
+   ``rho_up = (|rho_a| + |rho_b| + V h) / 2`` (``speed_range_bound`` in the
+   code).
 2. *Chord sieve.* With ``A`` a bound on the relative acceleration, the
    relative position is within ``A (t - ta) (tb - t) / 2 <= A h^2 / 8`` of
    the chord from ``rho_a`` to ``rho_b``; a point inside ``R`` needs the
@@ -198,12 +199,12 @@ class _PrimaryChunk(NamedTuple):
     row: int
     """Position of the primary."""
     r_primary: FloatArray
-    """The primary's positions at ``times`` [m], shape ``(T, 3)``."""
+    """The primary's positions at ``offsets`` [m], shape ``(T, 3)``."""
     r_secondaries: FloatArray
-    """Its catalog objects' positions at ``times`` [m], shape ``(S, T, 3)``."""
+    """Its catalog objects' positions at ``offsets`` [m], shape ``(S, T, 3)``."""
     secondaries: IndexArray
     """Their positions in the catalog."""
-    times: FloatArray
+    offsets: FloatArray
     """Offsets of the chunk's grid points [s]."""
 
 
@@ -284,7 +285,9 @@ class ApproachSearch:
         self._speed_catalog = speed_bounds(catalog_bounds)
         self._lowest_primary = floored_lowest(primary_bounds)
         self._lowest_catalog = floored_lowest(catalog_bounds)
-        self._reach = np.array([volume.bounding_radius for volume in self._volumes])
+        self._bounding_radii = np.array(
+            [volume.bounding_radius for volume in self._volumes]
+        )
 
     def run(self, *, max_states: int = CHUNK_STATES) -> SearchResult:
         """The search over the whole grid.
@@ -366,11 +369,11 @@ class ApproachSearch:
         """The intervals of one primary's pairs over a chunk that pass the
         sieves, added to ``intervals_by_pair``."""
         secondaries, starts, monotone = self._sieve(chunk)
-        times = chunk.times
+        offsets = chunk.offsets
         for secondary, first, last, is_monotone in zip(
             secondaries.tolist(),
-            times[starts].tolist(),
-            times[starts + 1].tolist(),
+            offsets[starts].tolist(),
+            offsets[starts + 1].tolist(),
             monotone.tolist(),
             strict=True,
         ):
@@ -382,22 +385,34 @@ class ApproachSearch:
         """The intervals of one primary's pairs that pass both sieves.
 
         Returns the catalog positions and interval indices (within
-        ``chunk.times``) that pass, and whether ``f`` is monotone over each.
+        ``chunk.offsets``) that pass, and whether ``f`` is monotone over each.
         """
         row, secondaries = chunk.row, chunk.secondaries
         rho = chunk.r_secondaries - chunk.r_primary
         distance = np.sqrt(dot(rho, rho))
-        length = np.diff(chunk.times)
+        length = np.diff(chunk.offsets)
         speed = self._speed_primary[row] + self._speed_catalog[secondaries]
         lowest = np.minimum(
             self._lowest_primary[row], self._lowest_catalog[secondaries]
         )
-        reach = self._reach[row]
-        pair, interval = speed_sieve(distance, length, speed, reach)
-        keep, monotone = chord_sieve(
-            rho, distance, length, speed, lowest, reach, (pair, interval)
+        bounding_radius = self._bounding_radii[row]
+        pair_rows, interval_indices = speed_sieve(
+            distance, length, speed, bounding_radius
         )
-        return secondaries[pair][keep], interval[keep], monotone[keep]
+        keep, monotone = chord_sieve(
+            rho,
+            distance,
+            length,
+            speed,
+            lowest,
+            bounding_radius,
+            (pair_rows, interval_indices),
+        )
+        return (
+            secondaries[pair_rows][keep],
+            interval_indices[keep],
+            monotone[keep],
+        )
 
     def _refine(
         self,

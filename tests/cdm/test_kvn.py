@@ -51,7 +51,7 @@ def test_reads_b1_example() -> None:
 
 def test_b1_example_geometry() -> None:
     primary, secondary = kvn.load(B1).object_states()
-    plane = Conjunction(primary, secondary, hard_body_radius=1.0).plane
+    plane = Conjunction(primary, secondary, combined_hard_body_radius=1.0).plane
     relative = secondary.state.r - primary.state.r
     assert plane.miss_distance == pytest.approx(
         float(np.linalg.norm(relative)), abs=0.01
@@ -71,8 +71,8 @@ def test_reads_tracss_cdm_version_2() -> None:
     assert cdm.relative.get("CONJUNCTION_ID") is None
     first = cdm.object1
     assert first.ref_frame == "ITRF"
-    assert first.hbr == 5.0
-    assert cdm.object2.hbr is None
+    assert first.hard_body_radius == 5.0
+    assert cdm.object2.hard_body_radius is None
     assert first.user_defined == {
         "USER_DEFINED_RUN_ID": "8e815679-b659-48df-957e-9c5b4921af52",
         "USER_DEFINED_MEETS_ALERTABLE_CRITERIA": "NO",
@@ -238,7 +238,9 @@ def test_empty_message_is_rejected(text: str) -> None:
 
 
 def test_objects_must_be_labelled_in_order() -> None:
-    with pytest.raises(CdmParseError, match="segment 2 must have OBJECT = OBJECT2"):
+    with pytest.raises(
+        CdmParseError, match="object section 2 must have OBJECT = OBJECT2"
+    ):
         kvn.loads(mutate_b1("= OBJECT2", "= OBJECT1"))
 
 
@@ -273,14 +275,14 @@ def test_comments_before_tca_and_object_open_the_new_section() -> None:
     )
     cdm = kvn.loads(text)
     assert cdm.relative.comments == ("screening option A",)
-    assert cdm.segments[1].comments == ("about object 2",)
+    assert cdm.object_sections[1].comments == ("about object 2",)
     assert "screening option A" not in cdm.header.comments
-    assert "about object 2" not in cdm.segments[0].comments
+    assert "about object 2" not in cdm.object_sections[0].comments
 
 
 def test_trailing_comments_stay_in_the_last_section() -> None:
     cdm = kvn.loads(B1.read_text(encoding="utf-8") + "COMMENT the end\n")
-    assert cdm.segments[1].comments[-1] == "the end"
+    assert cdm.object_sections[1].comments[-1] == "the end"
 
 
 def test_multi_line_comment_becomes_one_comment_line_each() -> None:

@@ -346,7 +346,7 @@ def test_fetch_cdm_as_json_gives_every_field_of_a_summary(
         "created": "2026-10-15T06:12:44.000",
         "tca": "2026-10-17T03:25:31.250",
         "emergency_reportable": True,
-        "min_range": 640.0,
+        "range_at_tca_m": 640.0,
         "pc": 2.5e-05,
         "object1": {
             "catalog_number": 900,

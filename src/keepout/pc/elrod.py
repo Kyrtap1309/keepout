@@ -1,7 +1,8 @@
 """2-D Pc by Gauss-Chebyshev quadrature of the error-function integral.
 
 The same 1-D integral as :mod:`keepout.pc.foster`, taken over the whole chord
-range ``u = R t``, ``t`` in ``[-1, 1]``, and written as
+range ``u = R t`` (``R`` the hard-body radius), ``t`` in ``[-1, 1]``, and
+written as
 
     Pc = R^2 * integral of [N(Rt) * M(h) / h] * sqrt(1 - t^2) dt,   h = R sqrt(1 - t^2)
 
@@ -50,7 +51,7 @@ ELROD_RTOL: Final = 1e-10
 def _terms(gaussian: PlaneGaussian, k: FloatArray, order: int) -> FloatArray:
     """``N(R cos theta) M(R sin theta) sin theta`` at ``theta = k pi / (order + 1)``."""
     theta = k * (math.pi / (order + 1))
-    radius = gaussian.radius
+    radius = gaussian.hard_body_radius
     sin_theta = np.sin(theta)
     terms: FloatArray = (
         gaussian.density_u(radius * np.cos(theta))
@@ -67,7 +68,7 @@ def _all_terms(gaussian: PlaneGaussian, order: int) -> FloatArray:
 
 def _rule_value(gaussian: PlaneGaussian, terms: FloatArray) -> float:
     """The rule of order ``terms.size`` from its terms (see the module docstring)."""
-    return gaussian.radius * math.pi / (terms.size + 1) * float(np.sum(terms))
+    return gaussian.hard_body_radius * math.pi / (terms.size + 1) * float(np.sum(terms))
 
 
 def _refined(gaussian: PlaneGaussian, terms: FloatArray) -> FloatArray:
@@ -83,7 +84,7 @@ def _refined(gaussian: PlaneGaussian, terms: FloatArray) -> FloatArray:
 def _resolving_order(gaussian: PlaneGaussian) -> int:
     """Order whose node spacing near the centre (~ pi R / (n + 1)) is below
     sigma_u / 2, of the form ``2^j - 1``."""
-    needed = 2.0 * math.pi * gaussian.radius / gaussian.sigma_u
+    needed = 2.0 * math.pi * gaussian.hard_body_radius / gaussian.sigma_u
     if needed <= START_ORDER + 1:
         return START_ORDER
     return (1 << math.ceil(math.log2(needed))) - 1

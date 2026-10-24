@@ -103,7 +103,7 @@ class EncounterPlane:
         return self.relative_velocity / self.relative_speed
 
     @property
-    def closest_approach_offset(self) -> float:
+    def distance_along_velocity(self) -> float:
         """Relative-position component along the relative velocity [m].
 
         Zero when the states are at the straight-line closest approach.

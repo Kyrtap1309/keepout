@@ -216,7 +216,7 @@ def dumps(cdm: Cdm) -> str:
     body = ElementTree.SubElement(root, "body")
     for tag, section in (
         ("relativeMetadataData", cdm.relative),
-        *(("segment", segment) for segment in cdm.segments),
+        *(("segment", segment) for segment in cdm.object_sections),
     ):
         _write_section(
             ElementTree.SubElement(body, tag), section.fields, section.kind, cdm.version

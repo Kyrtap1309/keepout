@@ -81,10 +81,10 @@ def test_screen_prints_json(tmp_path: Path) -> None:
     assert set(payload["skipped"][0]) == {"catalog_number", "role", "reason", "detail"}
     first, second = payload["events"]
     assert first["event_id"] == "52939/47826/2026-10-06T19:36:42.717332"
-    assert first["object1"] == {"designator": "52939", "name": "FLEET ONE"}
-    assert first["object2"]["designator"] == "47826"
-    assert first["miss_distance"] == pytest.approx(1028.74, abs=0.01)
-    assert first["relative_speed"] > 1000.0
+    assert first["object1"] == {"object_id": "52939", "name": "FLEET ONE"}
+    assert first["object2"]["object_id"] == "47826"
+    assert first["miss_distance_m"] == pytest.approx(1028.74, abs=0.01)
+    assert first["relative_speed_m_s"] > 1000.0
     assert first["cdm_file"] is None
     assert first["level"] == "green"
     assert first["action"] == "ignore"
@@ -102,8 +102,8 @@ def test_screen_json_says_the_covariances_are_assumed(tmp_path: Path) -> None:
     result = keepout(*screen_fixture(tmp_path, "--json"))
     assert result.exit_code == ExitCode.OK
     payload = json.loads(result.stdout)
-    assert payload["assumed_covariances"] == len(payload["events"]) == 2
-    assert all(event["assumed_covariances"] for event in payload["events"])
+    assert payload["assumed_covariance_events"] == len(payload["events"]) == 2
+    assert all(event["assumed_covariance"] for event in payload["events"])
 
 
 def test_screens_on_two_days_issue_successive_cdms_of_each_event(
@@ -126,7 +126,7 @@ def test_screens_on_two_days_issue_successive_cdms_of_each_event(
     assert [len(event["cdms"]) for event in events] == [2, 2]
     for event in events:
         older, newer = event["observations"]
-        assert older["time_to_tca"] == pytest.approx(newer["time_to_tca"] + 43200.0)
+        assert older["time_to_tca_s"] == pytest.approx(newer["time_to_tca_s"] + 43200.0)
 
 
 def test_screen_starts_now_by_default(
@@ -186,7 +186,7 @@ def test_screen_lists_a_fleet_satellite_it_could_not_screen(tmp_path: Path) -> N
     result = keepout(*args, "--json")
     assert result.exit_code == ExitCode.OK
     payload = json.loads(result.stdout)
-    assert [e["object1"]["designator"] for e in payload["events"]] == ["52939"]
+    assert [e["object1"]["object_id"] for e in payload["events"]] == ["52939"]
     (fleet_satellite,) = [s for s in payload["skipped"] if s["role"] == "primary"]
     assert fleet_satellite["catalog_number"] == 44476
     assert fleet_satellite["reason"] == "stale"

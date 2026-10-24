@@ -108,7 +108,7 @@ naming the window only when detecting its encounters would need more than
 (`Nc = 0`), `Nc > 1` (Pc set to 1), several encounters (below), a rate still
 above 1e-16 of its peak at the edge of an automatic window, and a time
 integral whose worst piece agrees to worse than both `rtol` and 1e-4 of `Nc`
-(`QUIET_AGREEMENT`; smaller misses cannot affect a result at the validation
+(`QUIET_DISAGREEMENT`; smaller misses cannot affect a result at the validation
 accuracy).
 
 **Several encounters, long encounters.** `Nc` counts every entry into the
@@ -129,24 +129,24 @@ Pc".
 
 ## Monte Carlo
 
-Each trial draws both TCA states from their equinoctial Gaussians and moves
-them by two-body motion. A trial is a collision when the relative distance
-**first drops below** `R` inside the window; trials already overlapping at the
+Each sample draws both TCA states from their equinoctial Gaussians and moves
+them by two-body motion. A sample is a collision when the relative distance
+**first drops below** `R` inside the window; samples already overlapping at the
 window start are not collisions in the window (CARA's convention: for Alfano
-case 9 they are 8.4% of the trials, matching Alfano's "instantaneous
+case 9 they are 8.4% of the samples, matching Alfano's "instantaneous
 probability" 0.0842, and CARA's 0.280 excludes them).
 
 Time is searched only inside the encounter segments of the 3D-Nc rate scan:
 outside them the collision rate is below 1e-16 of its peak. On the scan
-grid, a lower bound on each trial's distance between two points selects the
-trials whose closest approach is refined by Newton's method on `r.v = 0`
+grid, a lower bound on each sample's distance between two points selects the
+samples whose closest approach is refined by Newton's method on `r.v = 0`
 (slope `d(r.v)/dt = v.v + r.a`, with `a` the two-body relative
 acceleration). Because it
 uses that scan, `montecarlo` raises `PcConvergenceError` when the scan does
 (the rate cannot be computed, or its encounters cannot be detected within
 the point budget).
 
-Trials run in batches of 50 000 until the Clopper-Pearson interval
+Samples run in batches of 50 000 until the Clopper-Pearson interval
 (99% by default) has a half-width below `rtol = 0.1` of the estimate, or the
 budget of `max_samples = 1e7` is spent; `samples=` fixes the count and
 `seed=` makes a run reproducible. The interval is the result's `interval`
@@ -214,10 +214,10 @@ position: they take that object's velocity as exact.
 If `hall3d` raises `PcConvergenceError` after its encounter scan (the
 peak-overlap iteration failed where the rate matters, the rate cannot be
 computed at a quadrature node, or `Nc` is not finite), `auto` falls back to
-`montecarlo` with at most `AUTO_MC_SAMPLES` (1 000 000) trials and the fixed
+`montecarlo` with at most `AUTO_MC_SAMPLES` (1 000 000) samples and the fixed
 seed `AUTO_MC_SEED` (0), so the same conjunction always gives the same
 result; the diagnostic says so. The fallback reuses Hall's encounter scan
-rather than repeating it: the trials are searched in the segments Hall
+rather than repeating it: the samples are searched in the segments Hall
 found. A failure of the scan itself (its encounters need more than 20 001
 detection points, the rate is significant where the screen ruled it
 negligible, or it cannot be computed on the scan grid) is not covered: Monte
@@ -229,7 +229,8 @@ along the relative velocity; 2-D Pc uses the straight-line closest
 approach") are attached, in `auto` and with an explicit method alike,
 whenever the encounter plane is defined (non-zero relative velocity) and
 they fire, also for the maximum-Pc methods with a covariance unknown: the
-closest-approach offset does not depend on the covariances, and a duration
+distance from closest approach along the relative velocity does not depend
+on the covariances, and a duration
 computed from the known covariance alone is a lower bound on the true one,
 so a duration warning is still valid (it then says "at least about").
 `details["encounter_duration_s"]` is attached only when both covariances are

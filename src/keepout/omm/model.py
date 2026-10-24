@@ -1,7 +1,7 @@
 """In-memory Orbit Mean-Elements Message: one object's SGP4 mean elements.
 
 An :class:`Omm` holds what the 18th Space Defense Squadron publishes for one
-catalogued object as general perturbations (GP) data, read from CCSDS OMM
+cataloged object as general perturbations (GP) data, read from CCSDS OMM
 (CCSDS 502.0-B-3) or CelesTrak's CSV and JSON: the object's identity and its
 SGP4/SDP4 mean elements in SI units.
 :func:`keepout.propagation.satrec_of` initialises SGP4 from it exactly as
@@ -74,7 +74,7 @@ class InvalidElement(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class Omm:
-    """The SGP4 mean elements of one catalogued object (CCSDS OMM).
+    """The SGP4 mean elements of one cataloged object (CCSDS OMM).
 
     Units are SI except for ``bstar``, which SGP4 defines in inverse Earth
     radii. Mean elements belong to the SGP4/SDP4 theory and must be
@@ -150,15 +150,15 @@ class Omm:
             raise InvalidElement(
                 "classification", f"must be one character, got {self.classification!r}"
             )
-        _check_integer(self, "catalog_number", MAX_CATALOG_NUMBER)
-        _check_integer(self, "element_set_no", MAX_ELEMENT_SET_NO)
-        _check_integer(self, "rev_at_epoch")
+        _coerce_integer(self, "catalog_number", MAX_CATALOG_NUMBER)
+        _coerce_integer(self, "element_set_no", MAX_ELEMENT_SET_NO)
+        _coerce_integer(self, "rev_at_epoch")
         epoch: object = self.epoch  # checked: callers need not be type-checked
         if not (isinstance(epoch, Time) and epoch.isscalar):
             raise InvalidElement("epoch", "must be a scalar astropy Time")
         object.__setattr__(self, "epoch", self.epoch.utc)
         for name in _REALS:
-            _check_real(self, name)
+            _coerce_real(self, name)
         if self.mean_motion <= 0.0:
             raise InvalidElement("mean_motion", f"must be > 0, got {self.mean_motion}")
         if not 0.0 <= self.eccentricity < 1.0:
@@ -170,7 +170,7 @@ class Omm:
                 "inclination", f"must be in [0, pi], got {self.inclination}"
             )
 
-    def keywords(self, *, epoch_digits: int | None = None) -> dict[str, str]:
+    def keyword_texts(self, *, epoch_digits: int | None = None) -> dict[str, str]:
         """The message text of every keyword, in CCSDS units.
 
         Keys are in CelesTrak's CSV column order (see
@@ -267,7 +267,7 @@ def _epoch_text(epoch: Time, digits: int | None) -> str:
     return format_epoch(Time(epoch, precision=_MAX_EPOCH_DIGITS))
 
 
-def _check_integer(omm: Omm, name: str, maximum: int | None = None) -> None:
+def _coerce_integer(omm: Omm, name: str, maximum: int | None = None) -> None:
     value = getattr(omm, name)
     if isinstance(value, bool) or not isinstance(value, numbers.Integral):
         raise InvalidElement(name, f"must be an integer, got {value!r}")
@@ -278,7 +278,7 @@ def _check_integer(omm: Omm, name: str, maximum: int | None = None) -> None:
         raise InvalidElement(name, f"must {bound}, got {value}")
 
 
-def _check_real(omm: Omm, name: str) -> None:
+def _coerce_real(omm: Omm, name: str) -> None:
     value = getattr(omm, name)
     if isinstance(value, bool) or not isinstance(value, numbers.Real):
         raise InvalidElement(name, f"must be a real number, got {value!r}")

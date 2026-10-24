@@ -126,11 +126,11 @@ def overlap_failing_while_integrating(monkeypatch: pytest.MonkeyPatch) -> None:
     real_iteration = overlap_module._iterate_overlap
     integrating = False
 
-    def integral(rate: Rate, found: RateScan, *, rtol: float) -> RateIntegral:
+    def integral(rate: Rate, scan: RateScan, *, rtol: float) -> RateIntegral:
         nonlocal integrating
         integrating = True
         try:
-            return real_integral(rate, found, rtol=rtol)
+            return real_integral(rate, scan, rtol=rtol)
         finally:
             integrating = False
 
@@ -201,7 +201,7 @@ def rate_returning(monkeypatch: pytest.MonkeyPatch, value: float) -> None:
     """The collision rate is ``value`` wherever it is computed (not screened out)."""
 
     def constant(_: object, gaussians: Gaussians) -> FloatArray:
-        return np.full(gaussians.x1.shape[0], value)
+        return np.full(gaussians.primary_mean.shape[0], value)
 
     monkeypatch.setattr(rate_module.CollisionRate, "_rates", constant)
 
@@ -243,7 +243,7 @@ def time_integral_orders(
 
 
 def monte_carlo_batches(monkeypatch: pytest.MonkeyPatch, size: int) -> None:
-    """Monte Carlo runs its trials in batches of ``size``."""
+    """Monte Carlo runs its samples in batches of ``size``."""
     monkeypatch.setattr(montecarlo_module, "MC_BATCH", size)
 
 
@@ -263,9 +263,9 @@ def auto_monte_carlo(monkeypatch: pytest.MonkeyPatch, fake: Runner) -> None:
     monkeypatch.setattr(auto_module, "montecarlo_over_scan", fake)
 
 
-def auto_monte_carlo_budget(monkeypatch: pytest.MonkeyPatch, trials: int) -> None:
-    """``compute_pc``'s Monte Carlo fallback runs at most ``trials`` trials."""
-    monkeypatch.setattr(auto_module, "AUTO_MC_SAMPLES", trials)
+def auto_monte_carlo_budget(monkeypatch: pytest.MonkeyPatch, samples: int) -> None:
+    """``compute_pc``'s Monte Carlo fallback runs at most ``samples`` samples."""
+    monkeypatch.setattr(auto_module, "AUTO_MC_SAMPLES", samples)
 
 
 class _MisleadingLine(_SamplePairs):

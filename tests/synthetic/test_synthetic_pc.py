@@ -24,7 +24,7 @@ def with_model(approach: CloseApproach) -> Conjunction:
     primary = BY_NUMBER[approach.primary_number]
     secondary = BY_NUMBER[approach.secondary_number]
     return approach.to_conjunction(
-        hard_body_radius=10.0,
+        combined_hard_body_radius=10.0,
         primary_covariance=MODEL.covariance(primary, approach.tca),
         secondary_covariance=MODEL.covariance(secondary, approach.tca),
     )

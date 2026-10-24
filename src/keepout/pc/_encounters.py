@@ -41,15 +41,15 @@ class Encounters:
     """A conjunction's 3D-Nc collision rate and the scan locating its encounters.
 
     :func:`~keepout.pc.hall3d.hall3d` integrates the rate over the scan's
-    segments and :func:`~keepout.pc.montecarlo.montecarlo` samples trials
-    only inside them, so one scan serves both (``compute_pc`` falls back from
+    segments and :func:`~keepout.pc.montecarlo.montecarlo` samples only
+    inside them, so one scan serves both (``compute_pc`` falls back from
     one to the other).
 
     Parameters
     ----------
     rate
         The collision rate.
-    found
+    scan
         Its scan over the window.
     window_given
         Whether the window was passed rather than sized automatically.
@@ -59,7 +59,7 @@ class Encounters:
     """
 
     rate: CollisionRate
-    found: RateScan
+    scan: RateScan
     window_given: bool
     scan_fallback_count: int
 
@@ -70,7 +70,7 @@ class Encounters:
         return self.rate.fallbacks[: self.scan_fallback_count]
 
     @classmethod
-    def scan(
+    def locate(
         cls,
         conjunction: Conjunction,
         window: tuple[float, float] | None,
@@ -94,8 +94,8 @@ class Encounters:
             grid).
         """
         rate = collision_rate(conjunction)
-        found = encounter_scan(conjunction, rate, window)
-        return cls(rate, found, window is not None, len(rate.fallbacks))
+        scan = encounter_scan(conjunction, rate, window)
+        return cls(rate, scan, window is not None, len(rate.fallbacks))
 
 
 class UnusableOrbit(GeometryError):
@@ -142,7 +142,7 @@ def collision_rate(conjunction: Conjunction) -> CollisionRate:
     return CollisionRate(
         _orbit(conjunction, "primary"),
         _orbit(conjunction, "secondary"),
-        conjunction.hard_body_radius,
+        conjunction.combined_hard_body_radius,
     )
 
 
@@ -189,8 +189,8 @@ def encounter_scan(
         return locate(rate, (start, end), screened)
     half = straight_line_half_window(
         conjunction.relative_velocity,
-        rate.position_covariance,
-        conjunction.hard_body_radius,
+        rate.combined_position_covariance,
+        conjunction.combined_hard_body_radius,
     )
     period = min(rate.primary.period, rate.secondary.period)
     closest = min(
@@ -214,14 +214,14 @@ def straight_line_closest_time(conjunction: Conjunction) -> float:
     return -float(conjunction.relative_position @ velocity) / speed2
 
 
-def check_fallbacks(fallbacks: Sequence[tuple[float, float]], found: RateScan) -> None:
+def check_fallbacks(fallbacks: Sequence[tuple[float, float]], scan: RateScan) -> None:
     """A check that the peak-overlap iteration did not fail where the rate may matter.
 
     A failure inside an encounter segment, or within one grid step of it, is
     fatal whatever the mean-centred rate there (that rate is what the
     iteration replaces, and with a large along-track uncertainty it can be
     ~0 where the true rate is near its peak); points where the mean-centred
-    gap is negligible never reach the iteration. Elsewhere, in the far tail,
+    clearance is negligible never reach the iteration. Elsewhere, in the far tail,
     a failure is fatal only if the mean-centred rate exceeds
     :data:`FALLBACK_TOLERANCE` of the peak.
 
@@ -230,13 +230,13 @@ def check_fallbacks(fallbacks: Sequence[tuple[float, float]], found: RateScan) -
     PcConvergenceError
         If a failure in ``fallbacks`` is fatal by these rules.
     """
-    times, peak = found.times, found.peak
+    times, peak = scan.times, scan.peak
     zones = [
         (
             float(times[first] - (times[first + 1] - times[first])),
             float(times[last] + (times[last] - times[last - 1])),
         )
-        for first, last in found.index_ranges
+        for first, last in scan.index_ranges
         if last > first
     ]
     for t, value in fallbacks:

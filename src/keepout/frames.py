@@ -112,22 +112,22 @@ def _rtn_basis(position: FloatArray, velocity: FloatArray) -> FloatArray:
 
 
 def relative_position_rtn(
-    r: npt.ArrayLike, v: npt.ArrayLike, r_other: npt.ArrayLike
+    r: npt.ArrayLike, v: npt.ArrayLike, r_secondary: npt.ArrayLike
 ) -> FloatArray:
-    """Positions of other objects relative to an object, in the object's RTN.
+    """Positions of secondaries relative to a primary, in the primary's RTN.
 
-    The vectorised form of ``rtn_rotation(r, v) @ (r_other - r)`` (same
+    The vectorised form of ``rtn_rotation(r, v) @ (r_secondary - r)`` (same
     axes as :func:`rtn_rotation`), for many pairs and times at once: e.g.
     where a secondary is in the frame of the primary of a conjunction.
 
     Parameters
     ----------
     r
-        Inertial positions of the object [m], shape ``(..., 3)``.
+        Inertial positions of the primary [m], shape ``(..., 3)``.
     v
-        Inertial velocities of the object [m/s], shape ``(..., 3)``.
-    r_other
-        Inertial positions of the other objects [m], shape ``(..., 3)``, in
+        Inertial velocities of the primary [m/s], shape ``(..., 3)``.
+    r_secondary
+        Inertial positions of the secondaries [m], shape ``(..., 3)``, in
         the same frame.
 
     Returns
@@ -147,16 +147,16 @@ def relative_position_rtn(
     """
     position = _components(r, "r")
     velocity = _components(v, "v")
-    other = _components(r_other, "r_other")
+    secondary = _components(r_secondary, "r_secondary")
     try:
-        np.broadcast_shapes(position.shape, velocity.shape, other.shape)
+        np.broadcast_shapes(position.shape, velocity.shape, secondary.shape)
     except ValueError:
         raise ValueError(
-            f"r {position.shape}, v {velocity.shape} and r_other {other.shape} "
-            "do not broadcast"
+            f"r {position.shape}, v {velocity.shape} and r_secondary "
+            f"{secondary.shape} do not broadcast"
         ) from None
     result: FloatArray = np.einsum(
-        "...ij,...j->...i", _rtn_basis(position, velocity), other - position
+        "...ij,...j->...i", _rtn_basis(position, velocity), secondary - position
     )
     return result
 

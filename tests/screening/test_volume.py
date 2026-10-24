@@ -180,7 +180,7 @@ def test_points_on_and_off_the_boundary() -> None:
 
 @pytest.mark.parametrize("offsets", [[1.0, 2.0], 1.0])
 def test_offsets_need_three_components(offsets: list[float] | float) -> None:
-    with pytest.raises(ValueError, match="offsets must have 3 components"):
+    with pytest.raises(ValueError, match="rtn_positions must have 3 components"):
         DEFAULT_VOLUME.contains(offsets)
 
 

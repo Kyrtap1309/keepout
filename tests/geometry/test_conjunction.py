@@ -27,7 +27,7 @@ def test_conjunction_exposes_encounter_geometry() -> None:
 
 @pytest.mark.parametrize("radius", [0.0, -1.0, float("nan"), float("inf")])
 def test_radius_must_be_finite_and_positive(radius: float) -> None:
-    with pytest.raises(ValueError, match="hard_body_radius"):
+    with pytest.raises(ValueError, match="combined_hard_body_radius"):
         head_on(miss=30.0, sigma_x=10.0, sigma_z=20.0, radius=radius)
 
 

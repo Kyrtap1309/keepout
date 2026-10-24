@@ -108,8 +108,8 @@ def ccsds_text(text: str) -> Any:
 
 def assert_same_conjunction(actual: Conjunction, expected: Conjunction) -> None:
     """Same ids, radii, states (at the TCA) and covariances."""
-    assert actual.hard_body_radius == pytest.approx(
-        expected.hard_body_radius, rel=1e-12
+    assert actual.combined_hard_body_radius == pytest.approx(
+        expected.combined_hard_body_radius, rel=1e-12
     )
     for got, want in zip(
         (actual.primary, actual.secondary),
@@ -180,7 +180,7 @@ def test_the_header_takes_the_given_originator_id_recipient_and_comments() -> No
 def test_each_object_section_carries_its_metadata() -> None:
     cdm = example()
     first, second = cdm.object1, cdm.object2
-    assert (first.designator, first.name, first.international_designator) == (
+    assert (first.object_id, first.name, first.international_designator) == (
         "25544",
         "ISS (ZARYA)",
         "1998-067A",
@@ -199,7 +199,7 @@ def test_each_object_section_carries_its_metadata() -> None:
 def test_each_object_section_carries_its_state_radius_and_rtn_covariance() -> None:
     cdm = example()
     first, second = cdm.object1, cdm.object2
-    assert (first.hbr, second.hbr) == (5.0, 2.5)
+    assert (first.hard_body_radius, second.hard_body_radius) == (5.0, 2.5)
     np.testing.assert_array_equal(first.position, LEO_R)
     np.testing.assert_array_equal(second.velocity, SECONDARY_V)
     # LEO_R lies along x and LEO_V along y: the primary's RTN axes are GCRF's.
@@ -323,7 +323,7 @@ def without_radii() -> tuple[Conjunction, Cdm]:
 def test_without_radii_the_message_is_version_1() -> None:
     _, cdm = without_radii()
     assert cdm.version == "1.0"
-    assert (cdm.object1.hbr, cdm.object2.hbr) == (None, None)
+    assert (cdm.object1.hard_body_radius, cdm.object2.hard_body_radius) == (None, None)
 
 
 def test_a_version_1_message_is_valid_ccsds_xml() -> None:
@@ -347,7 +347,7 @@ def test_without_radii_the_conjunction_needs_the_combined_radius() -> None:
     item, cdm = without_radii()
     with pytest.raises(ValueError, match="no hard-body radius for 25544, 49863"):
         cdm.conjunction()
-    assert_same_conjunction(cdm.conjunction(hard_body_radius=7.5), item)
+    assert_same_conjunction(cdm.conjunction(combined_hard_body_radius=7.5), item)
 
 
 def test_a_version_1_message_round_trips() -> None:
@@ -355,7 +355,7 @@ def test_a_version_1_message_round_trips() -> None:
     read = xml.loads(xml.dumps(cdm))
     assert_equivalent(read, cdm)
     assert_equivalent(kvn.loads(kvn.dumps(cdm)), cdm)
-    assert_same_conjunction(read.conjunction(hard_body_radius=7.5), item)
+    assert_same_conjunction(read.conjunction(combined_hard_body_radius=7.5), item)
 
 
 def test_an_unknown_covariance_is_written_as_zeros() -> None:
@@ -372,7 +372,7 @@ def test_a_covariance_known_only_in_position_stays_so() -> None:
     secondary = dataclasses.replace(
         base.secondary, covariance=position.in_gcrf(base.secondary.state)
     )
-    item = Conjunction(base.primary, secondary, base.hard_body_radius)
+    item = Conjunction(base.primary, secondary, base.combined_hard_body_radius)
     cdm = make_cdm(item, ISS, DEBRIS, created=CREATED)
     np.testing.assert_allclose(
         cdm.object2.covariance_rtn[:3, :3], position.position, rtol=1e-12, atol=1e-6
@@ -539,7 +539,13 @@ def test_any_conjunction_round_trips_through_the_message(
     item: Conjunction, primary: ObjectMetadata, secondary: ObjectMetadata
 ) -> None:
     cdm = make_cdm(item, primary, secondary, created=CREATED)
-    radius = None if cdm.object1.hbr is not None else item.hard_body_radius
+    radius = (
+        None
+        if cdm.object1.hard_body_radius is not None
+        else item.combined_hard_body_radius
+    )
     for message in (cdm, kvn.loads(kvn.dumps(cdm)), xml.loads(xml.dumps(cdm))):
         assert_equivalent(message, cdm)
-        assert_same_conjunction(message.conjunction(hard_body_radius=radius), item)
+        assert_same_conjunction(
+            message.conjunction(combined_hard_body_radius=radius), item
+        )

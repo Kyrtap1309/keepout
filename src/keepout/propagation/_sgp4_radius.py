@@ -35,7 +35,7 @@ M - sin M0)``, linear in ``t`` up to a once-per-revolution term of at most
 Deep-space objects (period of 225 min or more) take their secular ``am``
 and ``em`` (drag, lunisolar secular rates, the 12 h and 24 h resonances)
 from SGP4 itself, at both ends of the span, every
-:data:`DEEP_SPACE_SAMPLING` minutes between and at the element epoch.
+:data:`DEEP_SPACE_SAMPLING_MIN` minutes between and at the element epoch.
 ``em`` is linear in ``t``, so its samples hold its largest value; ``am``
 moves between samples with SGP4's integration of the resonances (by at most
 2.9e-8 of itself on the public catalog of October 2026, against a 1 min
@@ -64,7 +64,7 @@ from sgp4.api import Satrec
 from keepout._types import BoolArray, FloatArray
 from keepout.units import KM
 
-DEEP_SPACE_SAMPLING: Final = 360.0
+DEEP_SPACE_SAMPLING_MIN: Final = 360.0
 """Longest time [min] between the samples of a deep-space object's secular
 semi-major axis and eccentricity."""
 
@@ -74,7 +74,7 @@ DEEP_SPACE_MARGIN: Final = 1e-6
 ROUNDING: Final = 1e-9
 """Relative widening of both bounds, for rounding."""
 
-SIMPLE_DRAG_PERIGEE: Final = 220.0
+SIMPLE_DRAG_PERIGEE_KM: Final = 220.0
 """Perigee altitude [km] below which SGP4 uses its simplified drag."""
 
 C1SS: Final = 2.9864797e-6
@@ -89,19 +89,19 @@ MIN_ECCENTRICITY: Final = 1e-6
 # The atmosphere model of ``sgp4init`` (Vallado et al., AIAA 2006-6753; Hoots
 # and Roehrich, Spacetrack Report #3): its density parameter ``s`` and
 # ``(q0 - s)^4``, altitudes [km] above the Earth's radius.
-S_PERIGEE_LIMIT: Final = 156.0
+S_PERIGEE_LIMIT_KM: Final = 156.0
 """Perigee altitude [km] below which ``s`` follows the perigee."""
 
-S_FLOOR_PERIGEE: Final = 98.0
-"""Perigee altitude [km] below which ``s`` is :data:`S_FLOOR`."""
+S_FLOOR_PERIGEE_KM: Final = 98.0
+"""Perigee altitude [km] below which ``s`` is :data:`S_FLOOR_KM`."""
 
-S_FLOOR: Final = 20.0
+S_FLOOR_KM: Final = 20.0
 """Lowest ``s`` altitude [km]."""
 
-S0: Final = 78.0
-"""Standard ``s`` altitude [km] (``s = perigee - S0`` below the limit)."""
+S0_KM: Final = 78.0
+"""Standard ``s`` altitude [km] (``s = perigee - S0_KM`` below the limit)."""
 
-Q0: Final = 120.0
+Q0_KM: Final = 120.0
 """Altitude [km] of the density parameter ``q0``."""
 
 
@@ -157,12 +157,12 @@ def drag_terms(satrecs: Sequence[Satrec]) -> DragTerms:
     con41, x1mth2 = _inclination_terms(_values(satrecs, "inclo"))
     omeosq = 1.0 - ecco**2
     perigee = ao * (1.0 - ecco)
-    simple = perigee < SIMPLE_DRAG_PERIGEE / radius + 1.0
+    simple = perigee < SIMPLE_DRAG_PERIGEE_KM / radius + 1.0
     altitude = (perigee - 1.0) * radius
-    low = altitude < S_PERIGEE_LIMIT
-    s = np.where(altitude < S_FLOOR_PERIGEE, S_FLOOR, altitude - S0)
-    sfour = np.where(low, s / radius + 1.0, S0 / radius + 1.0)
-    qzms24 = np.where(low, (Q0 - s) / radius, (Q0 - S0) / radius) ** 4
+    low = altitude < S_PERIGEE_LIMIT_KM
+    s = np.where(altitude < S_FLOOR_PERIGEE_KM, S_FLOOR_KM, altitude - S0_KM)
+    sfour = np.where(low, s / radius + 1.0, S0_KM / radius + 1.0)
+    qzms24 = np.where(low, (Q0_KM - s) / radius, (Q0_KM - S0_KM) / radius) ** 4
     tsi = 1.0 / (ao - sfour)
     eta = ao * ecco * tsi
     etasq = eta * eta
@@ -231,7 +231,7 @@ class _Secular(NamedTuple):
 
 
 def _near_earth(
-    satrecs: Sequence[Satrec], first: FloatArray, last: FloatArray
+    satrecs: Sequence[Satrec], tsince_first_min: FloatArray, tsince_last_min: FloatArray
 ) -> _Secular:
     """Secular range of near-Earth objects, from SGP4's drag polynomials."""
     terms = drag_terms(satrecs)
@@ -239,8 +239,8 @@ def _near_earth(
     ecco = _values(satrecs, "ecco")
     bstar = _values(satrecs, "bstar")
     inclo = _values(satrecs, "inclo")
-    x_lo = np.minimum(terms.cc1 * first, terms.cc1 * last)
-    x_hi = np.maximum(terms.cc1 * first, terms.cc1 * last)
+    x_lo = np.minimum(terms.cc1 * tsince_first_min, terms.cc1 * tsince_last_min)
+    x_hi = np.maximum(terms.cc1 * tsince_first_min, terms.cc1 * tsince_last_min)
     p_lo, p_hi = x_lo.copy(), x_hi.copy()
     for c, power in ((terms.c2, 2), (terms.c3, 3), (terms.c4, 4)):
         lowest, highest = _power_range(x_lo, x_hi, power)
@@ -249,7 +249,7 @@ def _near_earth(
     tempa_lo = 1.0 - p_hi
     tempa_hi = 1.0 - p_lo
     rate = bstar * terms.cc4
-    em_max = ecco - np.minimum(rate * first, rate * last)
+    em_max = ecco - np.minimum(rate * tsince_first_min, rate * tsince_last_min)
     em_max += np.where(terms.simple, 0.0, 2.0 * np.abs(bstar * terms.cc5))
     con41, x1mth2 = _inclination_terms(inclo)
     return _Secular(
@@ -264,13 +264,15 @@ def _near_earth(
 
 
 def _deep_space(
-    satrec: Satrec, first: float, last: float
+    satrec: Satrec, tsince_first_min: float, tsince_last_min: float
 ) -> tuple[float, float, float]:
     """``am_lo``, ``am_hi`` and ``ep_max`` of a deep-space object, from
     SGP4's secular elements sampled over the span (NaN if SGP4 fails)."""
-    count = math.ceil((last - first) / DEEP_SPACE_SAMPLING) + 1
-    times: list[float] = np.linspace(first, last, count).tolist()
-    if first < 0.0 < last:
+    count = (
+        math.ceil((tsince_last_min - tsince_first_min) / DEEP_SPACE_SAMPLING_MIN) + 1
+    )
+    times: list[float] = np.linspace(tsince_first_min, tsince_last_min, count).tolist()
+    if tsince_first_min < 0.0 < tsince_last_min:
         times.append(0.0)
     semi_major_axes = []
     eccentricities = []
@@ -289,7 +291,7 @@ def _deep_space(
 
 
 def radius_bounds(
-    satrecs: Sequence[Satrec], first: FloatArray, last: FloatArray
+    satrecs: Sequence[Satrec], tsince_first_min: FloatArray, tsince_last_min: FloatArray
 ) -> tuple[FloatArray, FloatArray]:
     """Bounds on the radius [m] SGP4 gives each object over a time span.
 
@@ -298,9 +300,9 @@ def radius_bounds(
     satrecs
         SGP4 records of the objects. Deep-space records are propagated, which
         changes their last results (``am``, ``em``, ...), not their elements.
-    first, last
+    tsince_first_min, tsince_last_min
         Start and end of the span [min from each object's epoch], shape
-        ``(N,)``, ``first <= last``.
+        ``(N,)``, ``tsince_first_min <= tsince_last_min``.
 
     Returns
     -------
@@ -310,24 +312,26 @@ def radius_bounds(
     """
     # Overflows and divisions by zero give non-finite bounds: no bounds.
     with np.errstate(all="ignore"):
-        return _bounds(satrecs, first, last)
+        return _bounds(satrecs, tsince_first_min, tsince_last_min)
 
 
 def _bounds(
-    satrecs: Sequence[Satrec], first: FloatArray, last: FloatArray
+    satrecs: Sequence[Satrec], tsince_first_min: FloatArray, tsince_last_min: FloatArray
 ) -> tuple[FloatArray, FloatArray]:
     deep = np.array([satrec.method == "d" for satrec in satrecs], dtype=bool)
     secular = _Secular(*(np.full(len(satrecs), math.nan) for _ in _Secular._fields))
     near = np.flatnonzero(~deep)
     if near.size:
         found = _near_earth(
-            [satrecs[i] for i in near.tolist()], first[near], last[near]
+            [satrecs[i] for i in near.tolist()],
+            tsince_first_min[near],
+            tsince_last_min[near],
         )
         for array, values in zip(secular, found, strict=True):
             array[near] = values
     for i in np.flatnonzero(deep).tolist():
         satrec = satrecs[i]
-        sampled = _deep_space(satrec, first[i], last[i])
+        sampled = _deep_space(satrec, tsince_first_min[i], tsince_last_min[i])
         secular.am_lo[i], secular.am_hi[i], secular.ep_max[i] = sampled
         secular.aycof[i] = 0.5 * abs(satrec.j3oj2)
         secular.con41_lo[i], secular.con41_hi[i], secular.x1mth2[i] = -1.0, 2.0, 1.0

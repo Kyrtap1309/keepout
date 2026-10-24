@@ -156,7 +156,9 @@ def test_pc_does_not_depend_on_which_object_is_primary(
     method: Method, conjunction: Conjunction
 ) -> None:
     swapped = Conjunction(
-        conjunction.secondary, conjunction.primary, conjunction.hard_body_radius
+        conjunction.secondary,
+        conjunction.primary,
+        conjunction.combined_hard_body_radius,
     )
     assert pc(swapped, method) == approx(pc(conjunction, method))
 
@@ -169,7 +171,7 @@ def test_pc_is_invariant_under_rotation_of_the_scene(
     rotated = Conjunction(
         rotate(conjunction.primary, rotation),
         rotate(conjunction.secondary, rotation),
-        conjunction.hard_body_radius,
+        conjunction.combined_hard_body_radius,
     )
     assert pc(rotated, method) == approx(pc(conjunction, method))
 

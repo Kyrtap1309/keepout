@@ -17,14 +17,14 @@ from keepout.state import StateVector, require_frame
 from keepout.units import elapsed_seconds
 
 __all__ = [
-    "EPOCH_TOLERANCE_S",
+    "EPOCH_TOLERANCE",
     "ObjectState",
     "ReportedObject",
     "gcrf_object_states",
     "require_same_epoch",
 ]
 
-EPOCH_TOLERANCE_S: Final = 1e-3
+EPOCH_TOLERANCE: Final = 1e-3
 """Largest epoch difference [s] treated as "the same epoch"."""
 
 
@@ -41,12 +41,12 @@ def require_same_epoch(first: Time, second: Time, what: str) -> None:
     Raises
     ------
     GeometryError
-        If the epochs differ by more than :data:`EPOCH_TOLERANCE_S`.
+        If the epochs differ by more than :data:`EPOCH_TOLERANCE`.
     """
     if first is second:
         return
     offset = abs(elapsed_seconds(second, first))
-    if offset > EPOCH_TOLERANCE_S:
+    if offset > EPOCH_TOLERANCE:
         raise GeometryError(f"{what} epochs differ by {offset:.3g} s")
 
 
@@ -57,7 +57,7 @@ class ObjectState:
     Parameters
     ----------
     object_id
-        Identifier, e.g. the catalogue number.
+        Identifier, e.g. the catalog number.
     state
         GCRF state at the time of closest approach.
     covariance
@@ -106,7 +106,7 @@ class ReportedObject:
     Parameters
     ----------
     object_id
-        Identifier, e.g. the catalogue number.
+        Identifier, e.g. the catalog number.
     state
         State at the time of closest approach, in any supported frame.
     covariance_rtn

@@ -41,7 +41,7 @@ class RangeMinimum:
         Position of the other object in the search's catalog.
     offset
         Time of closest approach [s since the start of the window].
-    distance
+    range_at_tca
         Range at TCA [m].
     r_primary, v_primary
         The primary's position [m] and velocity [m/s] at TCA, in the
@@ -58,7 +58,7 @@ class RangeMinimum:
     primary_index: int
     secondary_index: int
     offset: float
-    distance: float
+    range_at_tca: float
     r_primary: FloatArray
     v_primary: FloatArray
     r_secondary: FloatArray

@@ -577,9 +577,9 @@ class Match:
         return julian_seconds_between(self.cdm.tca, self.approach.tca)
 
     @property
-    def miss_distance(self) -> float | None:
+    def range_at_tca(self) -> float | None:
         """Range by keepout at its TCA [m]; ``None`` without an approach."""
-        return None if self.approach is None else self.approach.miss_distance
+        return None if self.approach is None else self.approach.range_at_tca
 
 
 def _match(job: tuple[PublicCdm, Omm, Omm]) -> Match:
@@ -681,9 +681,9 @@ def spread(values: Sequence[float]) -> Spread:
 def summarise(comparison: Comparison) -> ComparisonSummary:
     """Counts, and how keepout's approaches differ from the public CDMs."""
     misses = [
-        (match.cdm.min_range, miss)
+        (match.cdm.range_at_tca, miss)
         for match in comparison.matches
-        if (miss := match.miss_distance) is not None
+        if (miss := match.range_at_tca) is not None
     ]
     return {
         "cdms": len(comparison.matches) + comparison.outside_catalog,

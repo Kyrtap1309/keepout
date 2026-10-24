@@ -54,7 +54,7 @@ def _pc(observation: PcObservation | None) -> str:
 
 
 def events_table(events: Sequence[Assessed], title: str) -> Table:
-    """A table of the events: TCA, both objects' designators, miss distance,
+    """A table of the events: TCA, both objects' ids, miss distance,
     CDMs, the latest Pc before TCA, its risk level and the action."""
     rows = table(title)
     rows.add_column("TCA (UTC)", no_wrap=True)
@@ -68,7 +68,7 @@ def events_table(events: Sequence[Assessed], title: str) -> Table:
         level = item.assessment.level
         rows.add_row(
             minute(latest.tca),
-            f"{latest.object1.designator} / {latest.object2.designator}",
+            f"{latest.object1.object_id} / {latest.object2.object_id}",
             f"{latest.miss_distance:.0f}",
             str(len(item.event.cdms)),
             _pc(item.assessment.trend.latest_observation),
@@ -90,14 +90,14 @@ def reasons(events: Sequence[Assessed], least: Action) -> list[str]:
 
 
 def _cdm_object_json(cdm_object: CdmObject) -> dict[str, JsonOut]:
-    return {"designator": cdm_object.designator, "name": cdm_object.name}
+    return {"object_id": cdm_object.object_id, "name": cdm_object.name}
 
 
 def _observation_json(observation: PcObservation) -> dict[str, JsonOut]:
     result = observation.result
     return {
         "message_id": observation.message_id,
-        "time_to_tca": observation.time_to_tca,
+        "time_to_tca_s": observation.time_to_tca,
         "pc": observation.pc,
         "method": None if result is None else result.method,
         "error": observation.error,
@@ -118,7 +118,7 @@ def event_json(item: Assessed) -> dict[str, JsonOut]:
         "tca": isot(latest.tca),
         "object1": _cdm_object_json(latest.object1),
         "object2": _cdm_object_json(latest.object2),
-        "miss_distance": latest.miss_distance,
+        "miss_distance_m": latest.miss_distance,
         "cdms": [cdm.message_id for cdm in event.cdms],
         "pc": None if observation is None else observation.pc,
         "level": None if assessment.level is None else assessment.level.key,
@@ -127,5 +127,5 @@ def event_json(item: Assessed) -> dict[str, JsonOut]:
         "reasons": list(decision.reasons),
         "notes": list(trend.notes),
         "observations": [_observation_json(o) for o in trend.observations],
-        "assumed_covariances": event.assumed_covariance,
+        "assumed_covariance": event.assumed_covariance,
     }

@@ -36,10 +36,10 @@ def test_an_encounter_down_to_the_detection_level_is_found(phase: float) -> None
     # two nodes), must still get its own segment.
     weak_centre = 1234.5 + phase * DETECTION_SIGMAS * TAU
     strong, weak = bump(-800.0), bump(weak_centre)
-    found = locate(
+    scan = locate(
         lambda t: strong(t) + DETECTION_LEVEL * weak(t), WINDOW, whole_window()
     )
-    spans = [(found.times[lo], found.times[hi]) for lo, hi in found.index_ranges]
+    spans = [(scan.times[lo], scan.times[hi]) for lo, hi in scan.index_ranges]
     assert len(spans) == 2
     assert any(a <= weak_centre <= b for a, b in spans)
 
@@ -51,21 +51,21 @@ def test_an_encounter_anywhere_in_a_long_window_is_found_and_integrated(
     centre: float,
 ) -> None:
     rate = bump(centre)
-    found = locate(rate, WINDOW, whole_window())
-    assert len(found.index_ranges) == 1
-    assert found.times.size < 5000
-    lo, hi = found.index_ranges[0]
-    assert np.max(np.diff(found.times[lo : hi + 1])) <= CROSSING / 8 * (1 + 1e-9)
-    nc = integrate_segments(rate, found, rtol=1e-6).nc
+    scan = locate(rate, WINDOW, whole_window())
+    assert len(scan.index_ranges) == 1
+    assert scan.times.size < 5000
+    lo, hi = scan.index_ranges[0]
+    assert np.max(np.diff(scan.times[lo : hi + 1])) <= CROSSING / 8 * (1 + 1e-9)
+    nc = integrate_segments(rate, scan, rtol=1e-6).nc
     assert nc == pytest.approx(TAU * math.sqrt(2 * math.pi), rel=1e-9)
 
 
 def test_refinement_beyond_its_budget_is_coarser_not_an_error() -> None:
     # 400 s wide: crossing / 8 would need 3e5 points in the encounter.
     rate = bump(123.4, tau=40.0)
-    found = locate(rate, WINDOW, lambda w: [Candidate(*w, 0.01, 40.0)])
-    assert found.times.size <= MIN_SCAN_POINTS + MAX_REFINED_POINTS
-    nc = integrate_segments(rate, found, rtol=1e-6).nc
+    scan = locate(rate, WINDOW, lambda w: [Candidate(*w, 0.01, 40.0)])
+    assert scan.times.size <= MIN_SCAN_POINTS + MAX_REFINED_POINTS
+    nc = integrate_segments(rate, scan, rtol=1e-6).nc
     assert nc == pytest.approx(40.0 * math.sqrt(2 * math.pi), rel=1e-9)
 
 
@@ -94,8 +94,8 @@ def test_candidates_outside_the_window_are_not_scanned() -> None:
         ]
 
     rate = bump(0.0)
-    found = locate(rate, (-50.0, 50.0), screen)
-    assert found.window == (-50.0, 50.0)
-    assert len(found.index_ranges) == 1
-    nc = integrate_segments(rate, found, rtol=1e-6).nc
+    scan = locate(rate, (-50.0, 50.0), screen)
+    assert scan.window == (-50.0, 50.0)
+    assert len(scan.index_ranges) == 1
+    nc = integrate_segments(rate, scan, rtol=1e-6).nc
     assert nc == pytest.approx(TAU * math.sqrt(2 * math.pi), rel=1e-9)

@@ -30,28 +30,28 @@ period, for which the 2-D (straight-line) model is considered sound."""
 
 def straight_line_half_window(
     relative_velocity: FloatArray,
-    position_covariance: FloatArray,
-    radius: float,
-    sigmas: float = SIGMA_REACH,
+    combined_position_covariance: FloatArray,
+    hard_body_radius: float,
+    n_sigma: float = SIGMA_REACH,
 ) -> float:
     """Half-window of a straight-line encounter [s].
 
-    With ``sigma_v`` the combined position standard deviation along the
-    relative velocity, the rate is negligible beyond
-    ``(sigmas * sigma_v + R) / |v|`` (``sigmas`` defaults to
+    With ``sigma_along`` the combined position standard deviation along the
+    relative velocity and ``R`` the hard-body radius, the rate is negligible
+    beyond ``(n_sigma * sigma_along + R) / |v|`` (``n_sigma`` defaults to
     :data:`~keepout.pc._timeline.SIGMA_REACH`); infinite for zero relative velocity.
     """
     speed = float(np.linalg.norm(relative_velocity))
     if speed == 0.0:
         return math.inf
-    sigma = sigma_along(relative_velocity / speed, position_covariance)
-    return (sigmas * sigma + radius) / speed
+    sigma = sigma_along(relative_velocity / speed, combined_position_covariance)
+    return (n_sigma * sigma + hard_body_radius) / speed
 
 
 def encounter_duration(conjunction: Conjunction) -> float:
     """Time [s] the secondary needs to cross the combined uncertainty region.
 
-    ``2 (SIGMA_EXTENT * sigma_v + HBR) / |v_rel|``, with ``sigma_v`` the
+    ``2 (SIGMA_EXTENT * sigma_along + HBR) / |v_rel|``, with ``sigma_along`` the
     standard deviation of the combined 3x3 position covariance along the
     relative velocity: only that extent is crossed during the encounter.
     """
@@ -59,8 +59,8 @@ def encounter_duration(conjunction: Conjunction) -> float:
     return 2.0 * straight_line_half_window(
         plane.relative_velocity,
         plane.combined_covariance,
-        conjunction.hard_body_radius,
-        sigmas=SIGMA_EXTENT,
+        conjunction.combined_hard_body_radius,
+        n_sigma=SIGMA_EXTENT,
     )
 
 

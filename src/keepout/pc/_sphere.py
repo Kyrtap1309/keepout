@@ -104,32 +104,32 @@ def _azimuths(count: int) -> tuple[FloatArray, FloatArray]:
 
 
 def sphere_grids(
-    values: FloatArray,
+    variances: FloatArray,
     along: FloatArray,
-    radius: float,
+    hard_body_radius: float,
 ) -> list[SphereGrid]:
-    """Product rules on the unit sphere for ``m`` Gaussians ``N(radius * x;
-    mean, A)``, one per Gaussian.
+    """Product rules on the unit sphere for ``m`` Gaussians ``N(R x; mean, A)``,
+    one per Gaussian, ``R`` the hard-body radius.
 
     Each theta panel has :data:`PANEL_ORDER` Gauss-Legendre nodes; the phi
-    spacing is :data:`PHI_RESOLUTION` of (second sigma) / radius, with
+    spacing is :data:`PHI_RESOLUTION` of (second sigma) / ``R``, with
     between :data:`MIN_PHI` and :data:`MAX_PHI` nodes. Batched over the
     Gaussians; only the panels, whose number differs between them, are split
     at the end.
 
     Parameters
     ----------
-    values
+    variances
         Eigenvalues ``(m, 3)`` of the 3x3 position covariances [m^2],
         ascending.
     along
         Components ``(m,)`` of the means along their narrowest axes [m].
-    radius
-        Sphere radius [m].
+    hard_body_radius
+        Hard-body radius [m]: the radius of the sphere.
     """
-    sigmas = np.sqrt(np.clip(values, 0.0, None))
+    deviations = np.sqrt(np.clip(variances, 0.0, None))
     offsets = np.array([sign * width for width in BAND_WIDTHS for sign in (-1.0, 1.0)])
-    cosine = (along[:, None] + offsets * sigmas[:, :1]) / radius
+    cosine = (along[:, None] + offsets * deviations[:, :1]) / hard_body_radius
     poles = np.zeros((along.size, 1)), np.full((along.size, 1), math.pi)
     breaks = np.sort(
         np.concatenate([*poles, np.arccos(np.clip(cosine, -1.0, 1.0))], axis=1),
@@ -144,7 +144,9 @@ def sphere_grids(
     sin_theta = np.sin(theta)
     cos_theta = np.cos(theta)
     theta_weight = half * w * sin_theta
-    spacing = PHI_RESOLUTION * np.maximum(sigmas[:, 1], _MIN_SIGMA) / radius
+    spacing = (
+        PHI_RESOLUTION * np.maximum(deviations[:, 1], _MIN_SIGMA) / hard_body_radius
+    )
     counts = np.nan_to_num(
         np.clip(np.ceil(2.0 * math.pi / spacing), MIN_PHI, MAX_PHI), nan=MIN_PHI
     ).astype(np.intp)

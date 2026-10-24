@@ -109,5 +109,7 @@ def _outcome_json(outcome: Outcome) -> dict[str, JsonOut]:
         "error": verdict.error,
         "relative": verdict.relative,
         "passed": verdict.passed,
-        "ci": None if outcome.ci is None else list(outcome.ci),
+        "ci": None
+        if outcome.result.interval is None
+        else list(outcome.result.interval),
     }

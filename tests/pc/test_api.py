@@ -392,7 +392,7 @@ def both_unknown(base: Conjunction) -> Conjunction:
     return Conjunction(
         without_covariance(base.primary),
         without_covariance(base.secondary),
-        base.hard_body_radius,
+        base.combined_hard_body_radius,
     )
 
 
@@ -440,7 +440,7 @@ def test_maximum_pc_keeps_a_duration_warning(method: MethodChoice) -> None:
 
 
 @pytest.mark.parametrize("method", ["auto", "alfano"])
-def test_maximum_pc_keeps_the_closest_approach_offset_note(
+def test_maximum_pc_keeps_the_distance_along_velocity_note(
     method: MethodChoice,
 ) -> None:
     # The offset does not depend on the covariances.
@@ -503,13 +503,13 @@ def test_a_long_encounter_is_described_once(method: MethodChoice) -> None:
 def _scan_spy(monkeypatch: pytest.MonkeyPatch) -> list[Encounters]:
     """Record every encounter scan made through :mod:`keepout.pc.api`."""
     scans: list[Encounters] = []
-    real = Encounters.scan
+    real = Encounters.locate
 
     def spy(conjunction: Conjunction, window: tuple[float, float] | None) -> Encounters:
         scans.append(real(conjunction, window))
         return scans[-1]
 
-    monkeypatch.setattr(Encounters, "scan", spy)
+    monkeypatch.setattr(Encounters, "locate", spy)
     return scans
 
 
@@ -533,7 +533,7 @@ def test_auto_falls_back_to_monte_carlo_on_hall_s_scan(
     result = compute_pc(SLOW_ALONG_TRACK)
     assert result.method == "montecarlo"
     assert result.diagnostics[-1].endswith(
-        "; Monte Carlo used instead (seed 0, at most 1,000,000 trials)"
+        "; Monte Carlo used instead (seed 0, at most 1,000,000 samples)"
     )
     # Monte Carlo reuses Hall's scan; a fixed seed and a bounded budget keep
     # ``auto`` reproducible and bounded.
@@ -554,7 +554,7 @@ def test_fallback_matches_an_explicit_monte_carlo(
     assert result.method == "montecarlo"
     assert any(
         "peak-overlap iteration did not converge" in note
-        and note.endswith("Monte Carlo used instead (seed 0, at most 50,000 trials)")
+        and note.endswith("Monte Carlo used instead (seed 0, at most 50,000 samples)")
         for note in result.diagnostics
     )
     alone = montecarlo(conjunction, max_samples=MC_BATCH, seed=AUTO_MC_SEED)
@@ -607,7 +607,7 @@ def test_auto_refuses_zero_relative_velocity_with_an_unknown_covariance(
         without_covariance(item) if role in unknown else item
         for role, item in (("primary", base.primary), ("secondary", base.secondary))
     )
-    conjunction = Conjunction(primary, secondary, base.hard_body_radius)
+    conjunction = Conjunction(primary, secondary, base.combined_hard_body_radius)
     with pytest.raises(GeometryError, match=f"velocity is zero .* {message}"):
         compute_pc(conjunction)
 

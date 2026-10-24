@@ -16,7 +16,7 @@ from keepout import Conjunction
 
 cdm = keepout.cdm.load("event.cdm")  # KVN or XML, CDM 1.0 or 2.0
 primary, secondary = cdm.object_states()  # GCRF, SI units
-plane = Conjunction(primary, secondary, hard_body_radius=20.0).plane
+plane = Conjunction(primary, secondary, combined_hard_body_radius=20.0).plane
 print(plane.miss_distance, plane.covariance, primary.covariance.repairs)
 ```
 
@@ -26,7 +26,7 @@ print(plane.miss_distance, plane.covariance, primary.covariance.repairs)
 import keepout.cdm
 from keepout import compute_pc
 
-conjunction = keepout.cdm.load("event.cdm").conjunction(hard_body_radius=20.0)
+conjunction = keepout.cdm.load("event.cdm").conjunction(combined_hard_body_radius=20.0)
 result = compute_pc(conjunction)  # picks Foster, Hall 3D-Nc or a maximum Pc
 print(result.method, result.value, result.diagnostics)
 print(compute_pc(conjunction, "hall3d").details["nc"])  # a method by name
@@ -34,7 +34,7 @@ mc = compute_pc(conjunction, "montecarlo", samples=100_000, seed=1)
 print(mc.value, mc.interval)  # with its 99% confidence interval
 ```
 
-Without `hard_body_radius`, the sum of both objects' `HBR` (CDM 2.0) is used;
+Without `combined_hard_body_radius`, the sum of both objects' `HBR` (CDM 2.0) is used;
 keepout never falls back to a default radius.
 
 ## Risk of an event
@@ -69,7 +69,7 @@ iss = [omm for omm in catalog.omms if omm.catalog_number == 25544]
 result = screen(iss, catalog.omms, Time.now())  # the next 7 days, a 5 km sphere
 for approach in result.approaches:
     print(
-        approach.tca.isot, approach.secondary_number, f"{approach.miss_distance:.0f} m"
+        approach.tca.isot, approach.secondary_number, f"{approach.range_at_tca:.0f} m"
     )
 print(Counter(skipped.reason.value for skipped in result.skipped))  # sets left out
 ```

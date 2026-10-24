@@ -79,17 +79,17 @@ def test_the_cdm_names_both_objects_and_its_assumptions() -> None:
     assert cdm.header.comments == HEADER_COMMENTS
     assert abs((cdm.tca - tca).to_value("s")) < 1e-6
     fleet, other = cdm.object1, cdm.object2
-    assert (fleet.designator, fleet.name, fleet.international_designator) == (
+    assert (fleet.object_id, fleet.name, fleet.international_designator) == (
         "44476",
         "INTELSAT 39 (IS-39)",
         "2019-049B",
     )
-    assert (other.designator, other.name, other.international_designator) == (
+    assert (other.object_id, other.name, other.international_designator) == (
         "55841",
         "LUCH-5X (OLYMP-K 2)",
         "2023-031A",
     )
-    assert (fleet.hbr, other.hbr) == (20.0, 1.0)
+    assert (fleet.hard_body_radius, other.hard_body_radius) == (20.0, 1.0)
     for item, maneuverable, kind in ((fleet, "NO", "PAYLOAD"), (other, "N/A", None)):
         section = item.section
         assert section.get("MANEUVERABLE") == maneuverable
@@ -97,7 +97,7 @@ def test_the_cdm_names_both_objects_and_its_assumptions() -> None:
         assert section.get("COVARIANCE_METHOD") == "DEFAULT"
         assert section.get("EPHEMERIS_NAME") == "NONE"
         assert item.ref_frame == "GCRF"
-        omm = BY_NUMBER[int(item.designator)]
+        omm = BY_NUMBER[int(item.object_id)]
         assert section.comments == DEFAULT_MODEL.comments(omm, tca)
     relative = cdm.relative
     assert relative.get("START_SCREEN_PERIOD") == START
@@ -132,7 +132,7 @@ def test_the_cdm_holds_the_approach_with_the_model_covariances() -> None:
             assert item.covariance.position_only
         satellite = FLEET.find(approach.primary_number)
         assert satellite is not None
-        assert conjunction.hard_body_radius == satellite.hard_body_radius + 1.0
+        assert conjunction.combined_hard_body_radius == satellite.hard_body_radius + 1.0
 
 
 def test_each_event_is_assessed_from_its_cdm() -> None:
@@ -179,7 +179,7 @@ def test_fleet_satellites_that_meet_get_an_event_each() -> None:
     assert first.cdm.message_for == "SUPERVIEW NEO-2 03"
     other = first.cdm.object2
     assert other.name == "SUPERVIEW NEO-2 04"
-    assert other.hbr == 3.0
+    assert other.hard_body_radius == 3.0
     assert other.section.get("MANEUVERABLE") == "NO"
     assert other.section.get("OBJECT_TYPE") == "PAYLOAD"
     assert first.observation.pc == pytest.approx(mirrored.observation.pc, rel=1e-6)

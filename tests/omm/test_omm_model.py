@@ -49,7 +49,7 @@ def test_the_angle_unit_is_sgp4s() -> None:
 
 
 def test_keywords_give_back_the_message_values() -> None:
-    values = ISS_OMM.keywords()
+    values = ISS_OMM.keyword_texts()
     assert list(values) == list(KEYWORDS)
     assert values == {
         **ISS,
@@ -70,7 +70,7 @@ def test_satrec_is_the_record_sgp4_makes_from_the_message() -> None:
 def test_epochs_outside_the_leap_second_table_are_read_and_used(epoch: str) -> None:
     values = {**ISS, "EPOCH": epoch}
     omm = omm_from(values)
-    assert omm.keywords() == {**ISS_OMM.keywords(), "EPOCH": epoch}
+    assert omm.keyword_texts() == {**ISS_OMM.keyword_texts(), "EPOCH": epoch}
     assert_same_satrec(satrec_of(omm), sgp4_record(values))
 
 
@@ -82,7 +82,7 @@ def test_epochs_on_a_day_that_ends_in_a_utc_step_are_read_and_used(
 ) -> None:
     values = {**ISS, "EPOCH": epoch}
     omm = omm_from(values)
-    assert omm.keywords() == {**ISS_OMM.keywords(), "EPOCH": epoch}
+    assert omm.keyword_texts() == {**ISS_OMM.keyword_texts(), "EPOCH": epoch}
     assert_same_satrec(satrec_of(omm), sgp4_record(values))
 
 
@@ -97,7 +97,7 @@ def test_an_epoch_rounded_past_the_end_of_a_step_day_starts_the_next(
     epoch: str, sgp4_epoch: str
 ) -> None:
     omm = omm_from({**ISS, "EPOCH": epoch})
-    assert omm.keywords()["EPOCH"] == epoch
+    assert omm.keyword_texts()["EPOCH"] == epoch
     assert_same_satrec(satrec_of(omm), sgp4_record({**ISS, "EPOCH": sgp4_epoch}))
 
 
@@ -130,7 +130,7 @@ def test_satrec_rounds_the_epoch_to_microseconds() -> None:
 
 def test_satrec_is_the_record_sgp4_makes_from_the_keywords() -> None:
     for omm in load_fixture():
-        values = omm.keywords(epoch_digits=SGP4_EPOCH_DIGITS)
+        values = omm.keyword_texts(epoch_digits=SGP4_EPOCH_DIGITS)
         assert_same_satrec(satrec_of(omm), sgp4_record(values))
 
 
@@ -227,8 +227,8 @@ def test_the_written_epoch_does_not_depend_on_the_time_precision(
     precision: int,
 ) -> None:
     omm = dataclasses.replace(ISS_OMM, epoch=Time(ISS_OMM.epoch, precision=precision))
-    assert omm.keywords() == ISS_OMM.keywords()
-    assert omm.keywords()["EPOCH"] == ISS["EPOCH"]
+    assert omm.keyword_texts() == ISS_OMM.keyword_texts()
+    assert omm.keyword_texts()["EPOCH"] == ISS["EPOCH"]
     assert_same_satrec(satrec_of(omm), satrec_of(ISS_OMM))
 
 
@@ -244,14 +244,14 @@ def test_the_written_epoch_keeps_every_digit_to_the_nanosecond(
     text: str, written: str
 ) -> None:
     omm = dataclasses.replace(ISS_OMM, epoch=Time(text, scale="utc", precision=3))
-    assert omm.keywords()["EPOCH"] == written
+    assert omm.keyword_texts()["EPOCH"] == written
     assert parse_epoch(written) == omm.epoch
 
 
 def test_an_epoch_finer_than_nanoseconds_is_written_to_the_nanosecond() -> None:
     # One double of Julian date: no decimal of up to nine digits holds it.
     epoch = Time(ISS_OMM.epoch.jd, format="jd", scale="utc")
-    written = dataclasses.replace(ISS_OMM, epoch=epoch).keywords()["EPOCH"]
+    written = dataclasses.replace(ISS_OMM, epoch=epoch).keyword_texts()["EPOCH"]
     assert len(written.partition(".")[2]) == 9
     assert abs((parse_epoch(written) - epoch).sec) <= 0.5e-9
 
@@ -260,5 +260,5 @@ def test_keywords_round_the_epoch_to_the_requested_digits() -> None:
     omm = dataclasses.replace(
         ISS_OMM, epoch=Time("2026-10-06T00:20:47.8605126", scale="utc", precision=9)
     )
-    assert omm.keywords(epoch_digits=6)["EPOCH"] == "2026-10-06T00:20:47.860513"
-    assert omm.keywords(epoch_digits=0)["EPOCH"] == "2026-10-06T00:20:48"
+    assert omm.keyword_texts(epoch_digits=6)["EPOCH"] == "2026-10-06T00:20:47.860513"
+    assert omm.keyword_texts(epoch_digits=0)["EPOCH"] == "2026-10-06T00:20:48"

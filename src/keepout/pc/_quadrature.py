@@ -61,7 +61,7 @@ class RateIntegral:
         Where the rate is not negligible.
     scan
         The scan the integral was computed on (its window, peak and edge).
-    agreement
+    worst_disagreement
         Largest difference of the last two Clenshaw-Curtis rules of a piece
         that never agreed to ``rtol``, relative to ``nc`` (0 if every piece
         agreed; infinite if ``nc`` is 0 or a piece had a single order).
@@ -70,7 +70,7 @@ class RateIntegral:
     nc: float
     segments: tuple[Segment, ...]
     scan: RateScan
-    agreement: float = 0.0
+    worst_disagreement: float = 0.0
 
 
 @lru_cache(maxsize=8)
@@ -136,7 +136,7 @@ def _nested_integral(
     return value, difference
 
 
-def integrate_segments(rate: Rate, found: RateScan, *, rtol: float) -> RateIntegral:
+def integrate_segments(rate: Rate, scan: RateScan, *, rtol: float) -> RateIntegral:
     """The integral of ``rate`` over the segments of a scan.
 
     Each segment is split at the local maxima of the scan and every piece is
@@ -145,18 +145,19 @@ def integrate_segments(rate: Rate, found: RateScan, *, rtol: float) -> RateInteg
     """
     segments: list[Segment] = []
     shortfalls: list[float] = []
-    for first, last in found.index_ranges:
-        inner = found.values[first : last + 1]
+    for first, last in scan.index_ranges:
+        inner = scan.values[first : last + 1]
         maxima = (inner[1:-1] > inner[:-2]) & (inner[1:-1] >= inner[2:])
-        cuts = found.times[first + 1 + np.flatnonzero(maxima)][:MAX_BREAKPOINTS]
-        start, end = float(found.times[first]), float(found.times[last])
+        cuts = scan.times[first + 1 + np.flatnonzero(maxima)][:MAX_BREAKPOINTS]
+        start, end = float(scan.times[first]), float(scan.times[last])
         pieces = [
             _nested_integral(rate, a, b, rtol)
             for a, b in pairwise([start, *cuts.tolist(), end])
         ]
+        # Written ``not d <= ...`` so that a NaN difference counts as a shortfall.
         shortfalls += [d for v, d in pieces if not d <= rtol * abs(v)]
         segments.append(Segment(start, end, math.fsum(v for v, _ in pieces)))
     total = math.fsum(s.nc for s in segments)
     worst = max(shortfalls, default=0.0)
-    agreement = worst / abs(total) if total != 0.0 else (math.inf if worst else 0.0)
-    return RateIntegral(total, tuple(segments), found, agreement)
+    disagreement = worst / abs(total) if total != 0.0 else (math.inf if worst else 0.0)
+    return RateIntegral(total, tuple(segments), scan, disagreement)

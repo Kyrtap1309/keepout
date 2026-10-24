@@ -13,7 +13,7 @@ from keepout import ConjunctionEvent, assess
 
 cdms = [keepout.cdm.load(path) for path in Path("event").glob("*.cdm")]
 event = ConjunctionEvent.from_cdms(cdms)
-assessment = assess(event.observations(hard_body_radius=20.0))
+assessment = assess(event.observations(combined_hard_body_radius=20.0))
 print(assessment.decision.action.name)  # e.g. MONITOR
 for reason in assessment.decision.reasons:
     print("-", reason)
@@ -63,7 +63,7 @@ mitigates at 1e-4); they are a starting point, not a standard for every
 mission: `Thresholds(green_below=..., red_from=...)` sets your own.
 
 By default the comparison is **conservative**: a Monte Carlo Pc is compared
-by the upper end of its confidence interval, so 0 hits in too few trials is
+by the upper end of its confidence interval, so 0 hits in too few samples is
 not green. `Thresholds(basis="estimate")` compares the estimate itself.
 
 ## Trend

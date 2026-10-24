@@ -38,7 +38,7 @@ def main() -> None:
             approach.tca.isot[:16],
             approach.primary_number,
             approach.secondary_number,
-            f"{approach.miss_distance:.0f} m",
+            f"{approach.range_at_tca:.0f} m",
             "no Pc" if pc is None else f"Pc {pc:.1e}",
             event.action.name.lower(),
         )

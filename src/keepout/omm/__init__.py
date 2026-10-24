@@ -1,4 +1,4 @@
-"""Orbit Mean-Elements Messages: SGP4 mean elements of catalogued objects.
+"""Orbit Mean-Elements Messages: SGP4 mean elements of cataloged objects.
 
 :class:`Omm` holds one object's elements in SI units
 (:func:`keepout.propagation.satrec_of` initialises SGP4 with them);

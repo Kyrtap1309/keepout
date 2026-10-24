@@ -100,7 +100,7 @@ MC_TARGET_HITS: Final = 400
 """Expected collisions a Monte Carlo case is sized for (about +-13% at 99%)."""
 
 MC_SAMPLES: Final = (100_000, 4_000_000)
-"""Bounds on the trials of one Monte Carlo case."""
+"""Bounds on the samples of one Monte Carlo case."""
 
 MC_MIN_PC: Final = 1e-4
 """Smallest CARA Monte Carlo Pc compared: below it the trials needed exceed
@@ -112,7 +112,7 @@ interval is at confidence ``1 - MC_SUITE_ALPHA / n`` (Bonferroni)."""
 
 
 class MonteCarloSizing(TypedDict):
-    """Trials and seed of a Monte Carlo case (:func:`monte_carlo_options`)."""
+    """Samples and seed of a Monte Carlo case (:func:`monte_carlo_options`)."""
 
     samples: int
     seed: int
@@ -155,7 +155,7 @@ class ValidationCase:
         Passed to :func:`~keepout.pc.compute_pc`; each must be taken by
         every method of the case (its :attr:`~keepout.pc.MethodSpec.options`).
         Stored as a copy.
-    interval
+    reference_interval
         CARA's own confidence interval (Monte Carlo references), if any.
     informative
         A labelled value shown next to the result without pass/fail.
@@ -169,7 +169,7 @@ class ValidationCase:
     criterion: Criterion = TWO_D
     paper: float | None = None
     options: CaseOptions = field(default_factory=CaseOptions)
-    interval: tuple[float, float] | None = None
+    reference_interval: tuple[float, float] | None = None
     informative: tuple[str, float] | None = None
 
     def __post_init__(self) -> None:
@@ -184,7 +184,7 @@ class ValidationCase:
 def monte_carlo_options(
     suite: Suite, case_id: str, reference: float
 ) -> MonteCarloSizing:
-    """Trials and seed of a Monte Carlo case: about :data:`MC_TARGET_HITS`
+    """Samples and seed of a Monte Carlo case: about :data:`MC_TARGET_HITS`
     expected collisions within :data:`MC_SAMPLES`, and a seed fixed by the
     case's name so the report is reproducible."""
     wanted = MC_TARGET_HITS / reference if reference > 0.0 else MC_SAMPLES[1]
@@ -203,7 +203,7 @@ def _monte_carlo_case(
     case_id: str,
     conjunction: Conjunction,
     reference: float,
-    interval: tuple[float, float],
+    reference_interval: tuple[float, float],
     window: tuple[float, float] | None = None,
 ) -> ValidationCase:
     """A case judged by keepout's Monte Carlo interval, sized for its reference.
@@ -222,7 +222,7 @@ def _monte_carlo_case(
         methods=("montecarlo",),
         criterion=MONTE_CARLO,
         options=options,
-        interval=interval,
+        reference_interval=reference_interval,
     )
 
 
@@ -353,7 +353,7 @@ def load_non_pd_case(cache: Path | None = None) -> ValidationCase:
     (``testNonPositiveDefinite``, HBR 20 m).
     """
     path = cara.fetch(cara.NON_PD_CDM, cache=cache)
-    conjunction = cdm.load(path).conjunction(hard_body_radius=UNIT_TEST_HBR)
+    conjunction = cdm.load(path).conjunction(combined_hard_body_radius=UNIT_TEST_HBR)
     return ValidationCase(
         Suite.UNIT_TESTS,
         "non-PD covariance CDM",
@@ -410,7 +410,7 @@ def load_hall_2d3d_cases(cache: Path | None = None) -> list[ValidationCase]:
     pinned commit.
     """
     path = cara.fetch(cara.HALL_3D_CDM, cache=cache)
-    conjunction = cdm.load(path).conjunction(hard_body_radius=UNIT_TEST_HBR)
+    conjunction = cdm.load(path).conjunction(combined_hard_body_radius=UNIT_TEST_HBR)
     return [
         ValidationCase(
             Suite.UNIT_TESTS,

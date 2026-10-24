@@ -54,7 +54,7 @@ def test_a_close_approach_derives_its_geometry_from_the_states() -> None:
     assert APPROACH.tca == TCA
     assert APPROACH.tca.scale == "utc"
     np.testing.assert_array_equal(APPROACH.relative_position, MISS)
-    assert APPROACH.miss_distance == pytest.approx(math.hypot(100.0, 300.0), rel=1e-15)
+    assert APPROACH.range_at_tca == pytest.approx(math.hypot(100.0, 300.0), rel=1e-15)
     np.testing.assert_allclose(APPROACH.miss_rtn, MISS, atol=1e-9)
     assert not APPROACH.miss_rtn.flags.writeable
     np.testing.assert_array_equal(APPROACH.relative_velocity, RELATIVE)
@@ -91,7 +91,7 @@ def test_the_miss_vector_is_the_relative_position_in_rtn(
     scale = 1e-9 * max(float(np.linalg.norm(r)), 1.0)
     np.testing.assert_allclose(approach.miss_rtn, rtn_rotation(r, v) @ miss, atol=scale)
     assert np.linalg.norm(approach.miss_rtn) == pytest.approx(
-        approach.miss_distance, abs=scale
+        approach.range_at_tca, abs=scale
     )
 
 
@@ -119,23 +119,25 @@ def test_a_close_approach_needs_gcrf_states_at_one_epoch(
 
 
 def test_a_close_approach_becomes_a_conjunction_without_covariances() -> None:
-    conjunction = APPROACH.to_conjunction(hard_body_radius=20.0)
+    conjunction = APPROACH.to_conjunction(combined_hard_body_radius=20.0)
     assert conjunction.primary.object_id == "25544"
     assert conjunction.secondary.object_id == "48274"
     assert conjunction.primary.state is APPROACH.primary_state
     assert conjunction.secondary.state is APPROACH.secondary_state
     assert conjunction.unknown_covariance == ("primary", "secondary")
-    assert conjunction.hard_body_radius == 20.0
+    assert conjunction.combined_hard_body_radius == 20.0
     assert conjunction.tca == TCA
     # Closest at TCA: the miss distance on the encounter plane is the range.
-    assert conjunction.miss_distance == pytest.approx(APPROACH.miss_distance, rel=1e-9)
+    assert conjunction.miss_distance == pytest.approx(APPROACH.range_at_tca, rel=1e-9)
 
 
 def test_covariances_are_taken_in_gcrf_or_in_each_objects_rtn() -> None:
     rtn = make_covariance(np.diag([1e4, 4e4, 2.5e3, 1e-2, 4e-2, 1e-2]), "RTN", TCA)
     gcrf = make_covariance(np.diag([2e4, 3e4, 1e4, 1e-2, 1e-2, 1e-2]), "GCRF", TCA)
     conjunction = APPROACH.to_conjunction(
-        hard_body_radius=20.0, primary_covariance=rtn, secondary_covariance=gcrf
+        combined_hard_body_radius=20.0,
+        primary_covariance=rtn,
+        secondary_covariance=gcrf,
     )
     assert conjunction.primary.covariance is not None
     np.testing.assert_array_equal(
@@ -149,9 +151,13 @@ def test_covariances_are_taken_in_gcrf_or_in_each_objects_rtn() -> None:
 def test_a_conjunction_needs_covariances_at_tca_and_a_radius() -> None:
     later = make_covariance(np.eye(6), "GCRF", TCA + 1 * u.s)
     with pytest.raises(GeometryError, match="state and covariance epochs differ"):
-        APPROACH.to_conjunction(hard_body_radius=20.0, secondary_covariance=later)
-    with pytest.raises(ValueError, match="hard_body_radius must be finite and > 0"):
-        APPROACH.to_conjunction(hard_body_radius=0.0)
+        APPROACH.to_conjunction(
+            combined_hard_body_radius=20.0, secondary_covariance=later
+        )
+    with pytest.raises(
+        ValueError, match="combined_hard_body_radius must be finite and > 0"
+    ):
+        APPROACH.to_conjunction(combined_hard_body_radius=0.0)
     with pytest.raises(ValueError, match="no hard-body radius for 25544, 48274"):
         APPROACH.to_conjunction()
 
@@ -160,17 +166,17 @@ def test_a_conjunction_keeps_each_objects_radius() -> None:
     conjunction = APPROACH.to_conjunction(primary_radius=15.0, secondary_radius=0.0)
     assert conjunction.primary.hard_body_radius == 15.0
     assert conjunction.secondary.hard_body_radius == 0.0
-    assert conjunction.hard_body_radius == 15.0
+    assert conjunction.combined_hard_body_radius == 15.0
     # A combined radius given wins, as in Conjunction and Cdm.conjunction.
     given = APPROACH.to_conjunction(
-        hard_body_radius=30.0, primary_radius=15.0, secondary_radius=5.0
+        combined_hard_body_radius=30.0, primary_radius=15.0, secondary_radius=5.0
     )
-    assert given.hard_body_radius == 30.0
+    assert given.combined_hard_body_radius == 30.0
     assert given.secondary.hard_body_radius == 5.0
     with pytest.raises(ValueError, match="no hard-body radius for 48274"):
         APPROACH.to_conjunction(primary_radius=15.0)
     with pytest.raises(ValueError, match="hard_body_radius must be finite and >= 0"):
-        APPROACH.to_conjunction(hard_body_radius=20.0, secondary_radius=-1.0)
+        APPROACH.to_conjunction(combined_hard_body_radius=20.0, secondary_radius=-1.0)
 
 
 def approach_at(seconds: float, primary: int, secondary: int) -> CloseApproach:

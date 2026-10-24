@@ -52,14 +52,6 @@ class Outcome:
         object.__setattr__(self, "verdict", judge(self.case, self.result))
 
     @property
-    def ci(self) -> tuple[float, float] | None:
-        """Keepout's confidence interval, if the method gives one.
-
-        The result's :attr:`~keepout.pc.PcResult.interval`.
-        """
-        return self.result.interval
-
-    @property
     def passed(self) -> bool:
         """Whether the case's criterion is met."""
         return self.verdict.passed

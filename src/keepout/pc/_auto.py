@@ -32,7 +32,7 @@ __all__ = [
 ]
 
 AUTO_MC_SAMPLES: Final = 1_000_000
-"""Trial budget of ``auto``'s Monte Carlo fallback (seconds to a minute)."""
+"""Sample budget of ``auto``'s Monte Carlo fallback (seconds to a minute)."""
 
 AUTO_MC_SEED: Final = 0
 """Seed of ``auto``'s Monte Carlo fallback, so ``auto`` is reproducible."""
@@ -76,7 +76,7 @@ def auto(conjunction: Conjunction) -> tuple[PcResult, Assessment]:
     assessment = assess(conjunction)
     notes, details = assessment
     questionable = bool(notes)
-    plane, hard_body_radius = conjunction.plane, conjunction.hard_body_radius
+    plane, hard_body_radius = conjunction.plane, conjunction.combined_hard_body_radius
     # Rule 2: maximum Pc for unknown covariances.
     if len(unknown) == 2:
         return alfano(plane, hard_body_radius), assessment
@@ -87,7 +87,7 @@ def auto(conjunction: Conjunction) -> tuple[PcResult, Assessment]:
         if not position_only:
             # Rule 3: a questionable 2-D assumption, and the 3-D methods can run.
             pc_2d = foster(plane, hard_body_radius).value
-            encounters = Encounters.scan(conjunction, None)
+            encounters = Encounters.locate(conjunction, None)
             return _three_d(conjunction, encounters, notes, {**details, "pc_2d": pc_2d})
         # Rule 4, noting why the 3-D methods are not used.
         note = (
@@ -108,7 +108,7 @@ def _auto_without_plane(conjunction: Conjunction) -> tuple[PcResult, Assessment]
         If the 3-D methods cannot run.
     """
     try:
-        encounters = Encounters.scan(conjunction, None)
+        encounters = Encounters.locate(conjunction, None)
     except MissingCovariance as exc:
         raise GeometryError(
             f"{_NO_PLANE} and {_covariances_of(conjunction, exc.roles)} unknown"
@@ -134,7 +134,7 @@ def _three_d(
     except PcConvergenceError as exc:
         fallback = (
             f"{exc}; Monte Carlo used instead (seed {AUTO_MC_SEED}, at most "
-            f"{AUTO_MC_SAMPLES:,} trials)"
+            f"{AUTO_MC_SAMPLES:,} samples)"
         )
         result = montecarlo_over_scan(
             conjunction, encounters, max_samples=AUTO_MC_SAMPLES, seed=AUTO_MC_SEED
@@ -194,7 +194,7 @@ def applicability(conjunction: Conjunction, duration: float) -> tuple[str, ...]:
             "differ"
         )
     plane = conjunction.plane
-    along = abs(plane.closest_approach_offset)
+    along = abs(plane.distance_along_velocity)
     if along > TCA_OFFSET_LIMIT * float(np.linalg.norm(plane.relative_position)):
         warnings.append(
             f"states are {along:.3g} m from closest approach along the relative "

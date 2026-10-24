@@ -3,7 +3,7 @@
 A :class:`CloseApproach` is one local minimum of the distance between a
 primary and a catalog object inside the primary's screening volume: both
 objects' GCRF states at the time of closest approach (TCA), from which the
-miss distance, the miss vector in the primary's RTN frame and the relative
+range at TCA, the miss vector in the primary's RTN frame and the relative
 velocity follow. Screening on GP data finds geometry, not risk: GP element
 sets have no covariance, so :meth:`CloseApproach.to_conjunction` takes the
 covariances from elsewhere to build a :class:`~keepout.Conjunction` for a
@@ -28,7 +28,8 @@ from astropy.time import Time
 
 from keepout._pickling import reduce_with_mappings
 from keepout._types import FloatArray, override, read_only
-from keepout.conjunction import Conjunction, combined_hard_body_radius
+from keepout.conjunction import Conjunction
+from keepout.conjunction import combined_hard_body_radius as combined_radius_of
 from keepout.covariance import Covariance
 from keepout.frames import relative_position_rtn
 from keepout.objects import ObjectState, require_same_epoch
@@ -61,7 +62,7 @@ _ROLE_RANK: Final = {role: rank for rank, role in enumerate(ScreeningRole)}
 
 @dataclass(frozen=True, eq=False)
 class CloseApproach:
-    """A local minimum of the range of a primary and a catalog object.
+    """A local minimum of the range of a primary and a secondary.
 
     The two states are at the time of closest approach, in GCRF; everything
     else is derived from them.
@@ -71,17 +72,17 @@ class CloseApproach:
     primary_number
         Catalog number of the primary.
     secondary_number
-        Catalog number of the catalog object.
+        Catalog number of the secondary.
     primary_state
         The primary's GCRF state at TCA.
     secondary_state
-        The catalog object's GCRF state at the same epoch.
+        The secondary's GCRF state at the same epoch.
 
     Raises
     ------
     GeometryError
         If a state is not in GCRF, or the two epochs differ by more than
-        :data:`keepout.objects.EPOCH_TOLERANCE_S`.
+        :data:`keepout.objects.EPOCH_TOLERANCE`.
     """
 
     primary_number: int
@@ -115,8 +116,9 @@ class CloseApproach:
         return self.relative_motion.position
 
     @property
-    def miss_distance(self) -> float:
-        """Distance between the objects at TCA [m]."""
+    def range_at_tca(self) -> float:
+        """3-D range at TCA [m]: not the encounter-plane miss distance of
+        :attr:`keepout.Conjunction.miss_distance`."""
         return self.relative_motion.distance
 
     @cached_property
@@ -141,7 +143,7 @@ class CloseApproach:
     def to_conjunction(
         self,
         *,
-        hard_body_radius: float | None = None,
+        combined_hard_body_radius: float | None = None,
         primary_covariance: Covariance | None = None,
         secondary_covariance: Covariance | None = None,
         primary_radius: float | None = None,
@@ -151,7 +153,7 @@ class CloseApproach:
 
         Parameters
         ----------
-        hard_body_radius
+        combined_hard_body_radius
             Combined hard-body radius of the two objects [m]; if ``None``,
             the sum of ``primary_radius`` and ``secondary_radius``.
         primary_covariance, secondary_covariance
@@ -172,10 +174,10 @@ class CloseApproach:
         ------
         GeometryError
             If a covariance's epoch differs from the TCA by more than
-            :data:`keepout.objects.EPOCH_TOLERANCE_S`.
+            :data:`keepout.objects.EPOCH_TOLERANCE`.
         ValueError
             If the combined radius is not finite and positive, an object's
-            radius is negative or not finite, or ``hard_body_radius`` is
+            radius is negative or not finite, or ``combined_hard_body_radius`` is
             ``None`` and an object's radius is not given.
         """
         primary = _object_state(
@@ -187,7 +189,7 @@ class CloseApproach:
             secondary_covariance,
             secondary_radius,
         )
-        combined = combined_hard_body_radius(primary, secondary, hard_body_radius)
+        combined = combined_radius_of(primary, secondary, combined_hard_body_radius)
         return Conjunction(primary, secondary, combined)
 
 

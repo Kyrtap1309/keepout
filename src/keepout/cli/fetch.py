@@ -153,8 +153,8 @@ def fetch_cdm(*, cache_dir: CacheDir = None, as_json: JsonFlag = False) -> None:
         summaries.add_row(
             minute(cdm.tca),
             f"{cdm.object1.catalog_number} / {cdm.object2.catalog_number}",
-            f"{cdm.min_range:.0f}",
-            pc_text(cdm.probability),
+            f"{cdm.range_at_tca:.0f}",
+            pc_text(cdm.pc),
             "yes" if cdm.emergency_reportable else "no",
         )
     show(
@@ -195,8 +195,8 @@ def _public_cdm_json(cdm: PublicCdm) -> dict[str, JsonOut]:
         "created": isot(cdm.created),
         "tca": isot(cdm.tca),
         "emergency_reportable": cdm.emergency_reportable,
-        "min_range": cdm.min_range,
-        "pc": cdm.probability,
+        "range_at_tca_m": cdm.range_at_tca,
+        "pc": cdm.pc,
         "object1": dataclasses.asdict(cdm.object1),
         "object2": dataclasses.asdict(cdm.object2),
     }

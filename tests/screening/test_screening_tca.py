@@ -68,13 +68,13 @@ PRIMARIES = FIXTURE[::9]
 SOCRATES = [
     approach
     for approach in socrates_approaches()
-    if approach.primary in BY_NUMBER and approach.secondary in BY_NUMBER
+    if approach.primary_number in BY_NUMBER and approach.secondary_number in BY_NUMBER
 ]
 """The SOCRATES approaches of two fixture objects (31 fast, 1002 slow)."""
 CLOSE = sorted(
     {omm.catalog_number for omm in PRIMARIES}
-    | {approach.primary for approach in SOCRATES}
-    | {approach.secondary for approach in SOCRATES}
+    | {approach.primary_number for approach in SOCRATES}
+    | {approach.secondary_number for approach in SOCRATES}
 )
 """Primaries for the oracle tests: PRIMARIES and the objects of SOCRATES's
 approaches, which have many minima."""
@@ -214,7 +214,7 @@ def summary(result: SearchResult) -> list[object]:
             m.primary_index,
             m.secondary_index,
             m.offset,
-            m.distance,
+            m.range_at_tca,
             m.r_primary.tolist(),
             m.v_primary.tolist(),
             m.r_secondary.tolist(),
@@ -340,7 +340,7 @@ def test_a_pass_inside_the_volume_is_found_at_its_tca(
     (minimum,) = result.minima
     assert (minimum.primary_index, minimum.secondary_index) == (0, 0)
     assert minimum.offset == pytest.approx(tca, abs=precision)
-    assert minimum.distance == pytest.approx(3 * KM, abs=1e-6)
+    assert minimum.range_at_tca == pytest.approx(3 * KM, abs=1e-6)
     expected = (
         PRIMARY[0] + PRIMARY[1] * minimum.offset,
         PRIMARY[1],
@@ -457,7 +457,7 @@ def test_minima_closer_than_a_step_are_told_apart(radius: float) -> None:
     expected = (math.pi - phase) / rate + 200.0 * np.arange(18)
     assert DEFAULT_STEP == 120.0
     np.testing.assert_allclose([m.offset for m in found], expected, rtol=0, atol=1e-5)
-    np.testing.assert_allclose([m.distance for m in found], 1 * KM, rtol=1e-12)
+    np.testing.assert_allclose([m.range_at_tca for m in found], 1 * KM, rtol=1e-12)
 
 
 def test_every_pair_of_several_primaries_is_searched() -> None:
@@ -499,7 +499,7 @@ def test_a_failure_just_outside_the_window_is_not_the_objects(
     assert result.primary_failures == result.catalog_failures == {}
     (minimum,) = result.minima
     assert minimum.offset == pytest.approx(tca, abs=precision)
-    assert minimum.distance == pytest.approx(1 * KM, abs=1e-6)
+    assert minimum.range_at_tca == pytest.approx(1 * KM, abs=1e-6)
     # Every evaluation in the window, failing or not, is the same object's.
     assert search(fine).run().minima[0].offset == pytest.approx(
         minimum.offset, abs=precision
@@ -760,14 +760,14 @@ def in_rtn_ellipsoid(
     volume: ScreeningVolume,
     r: npt.NDArray[np.float64],
     v: npt.NDArray[np.float64],
-    r_other: npt.NDArray[np.float64],
+    r_secondary: npt.NDArray[np.float64],
 ) -> bool:
-    """Whether ``r_other`` lies in ``volume`` around a primary at ``r``, ``v``:
+    """Whether ``r_secondary`` lies in ``volume`` around a primary at ``r``, ``v``:
     the RTN axes and the ellipsoid worked out here, not by keepout."""
     radial = r / np.linalg.norm(r)
     normal = np.cross(r, v)
     normal /= np.linalg.norm(normal)
-    offset = r_other - r
+    offset = r_secondary - r
     rtn = np.array(
         [offset @ radial, offset @ np.cross(normal, radial), offset @ normal]
     )
@@ -832,7 +832,7 @@ def check_against_oracle(
         # The oracle's TCA of a slow pass is as flat as its range (~30 ms).
         fast = np.linalg.norm(v[1] - v[0]) >= 100.0
         assert match.offset == pytest.approx(best.offset, abs=1e-3 if fast else 0.5)
-        assert match.distance == pytest.approx(best.distance, abs=1e-3), best
+        assert match.range_at_tca == pytest.approx(best.distance, abs=1e-3), best
     for (primary, secondary), minima in found.items():
         for minimum in minima:
             # Far enough to see the range rise: 1e-5 m at 5 km.
@@ -844,8 +844,8 @@ def check_against_oracle(
                 start,
                 minimum.offset + np.array([-delta, 0.0, delta]),
             )
-            assert around[1] == pytest.approx(minimum.distance, abs=1e-6)
-            assert around[0] > minimum.distance < around[2]
+            assert around[1] == pytest.approx(minimum.range_at_tca, abs=1e-6)
+            assert around[0] > minimum.range_at_tca < around[2]
             assert 0.0 < minimum.offset <= duration
     return inside
 
@@ -900,7 +900,7 @@ def test_every_socrates_approach_of_the_fixture_is_found() -> None:
     first = min(approach.tca for approach in SOCRATES)
     start = first - HOUR * u.s
     duration = (max(approach.tca for approach in SOCRATES) - start).sec + HOUR
-    primaries = sorted({approach.primary for approach in SOCRATES})
+    primaries = sorted({approach.primary_number for approach in SOCRATES})
     result = fixture_search(primaries, start, duration, DEFAULT_VOLUME)[0].run()
     found: dict[tuple[int, int], list[RangeMinimum]] = {}
     for minimum in result.minima:
@@ -912,11 +912,11 @@ def test_every_socrates_approach_of_the_fixture_is_found() -> None:
     assert len(SOCRATES) == 1033
     for approach in SOCRATES:
         offset = (approach.tca - start).sec
-        candidates = found[(approach.primary, approach.secondary)]
+        candidates = found[(approach.primary_number, approach.secondary_number)]
         match = min(candidates, key=lambda m: abs(m.offset - offset))
         fast = approach.relative_speed >= FAST_SPEED
         assert match.offset == pytest.approx(offset, abs=1e-3 if fast else 0.5)
-        assert match.distance == pytest.approx(approach.miss_distance, abs=0.5)
+        assert match.range_at_tca == pytest.approx(approach.range_at_tca, abs=0.5)
 
 
 def test_a_docked_spacecraft_has_no_minimum() -> None:

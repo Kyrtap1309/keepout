@@ -291,11 +291,11 @@ def _within_window(
         format="jd",
         scale="utc",
     )
-    elapsed_at_start_s = (settings.start - epochs).to_value(u.s)
+    elapsed_at_start = (settings.start - epochs).to_value(u.s)
     current: list[Omm] = []
     skipped: list[SkippedObject] = []
-    for omm, elapsed_s in zip(omms, elapsed_at_start_s.tolist(), strict=True):
-        age, lead = elapsed_s + settings.duration, -elapsed_s
+    for omm, elapsed in zip(omms, elapsed_at_start.tolist(), strict=True):
+        age, lead = elapsed + settings.duration, -elapsed
         if age > max_age:
             detail = (
                 f"the window ends {age / DAY:.2f} days after the epoch "

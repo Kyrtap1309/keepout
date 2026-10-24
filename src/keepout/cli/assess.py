@@ -129,7 +129,8 @@ def assess_command(
     compute = computation(method_choice(method.value))
     assessed = [
         AssessedEvent(
-            event, assess(event.observations(compute=compute, hard_body_radius=hbr))
+            event,
+            assess(event.observations(compute=compute, combined_hard_body_radius=hbr)),
         )
         for event in group_events(messages)
     ]
@@ -137,9 +138,9 @@ def assess_command(
     manoeuvre = actions[Action.MANOEUVRE] > 0
     assumed = sum(item.event.assumed_covariance for item in assessed)
     payload: dict[str, JsonOut] = {
-        "cdms": len(messages),
+        "cdm_count": len(messages),
         "events": [event_json(item) for item in assessed],
-        "assumed_covariances": assumed,
+        "assumed_covariance_events": assumed,
         "manoeuvre": manoeuvre,
     }
     counted = ", ".join(

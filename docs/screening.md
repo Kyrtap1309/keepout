@@ -3,7 +3,7 @@
 Screening finds the close approaches of your satellites (the *primaries*)
 with a catalog of other objects over a window of days: every time a catalog
 object comes inside a *screening volume* around a primary, with its time of
-closest approach (TCA), miss distance and relative velocity. keepout screens
+closest approach (TCA), range at TCA and relative velocity. keepout screens
 the general perturbations (GP) element sets that USSPACECOM publishes, with
 SGP4, as CelesTrak's [SOCRATES](https://celestrak.org/SOCRATES/) does.
 
@@ -26,7 +26,7 @@ def main() -> None:
         print(
             approach.tca.isot,
             approach.secondary_number,
-            f"{approach.miss_distance:.0f} m",
+            f"{approach.range_at_tca:.0f} m",
             f"(R {radial:.0f}, T {transverse:.0f}, N {normal:.0f})",
             f"{approach.relative_speed:.0f} m/s",
         )
@@ -227,7 +227,7 @@ standard input (`python -`) cannot use workers.
 ### From an approach to a Pc
 
 A `CloseApproach` holds the catalog numbers and both GCRF states at TCA; the
-miss distance, the miss vector in the primary's RTN frame (`miss_rtn`), the
+range at TCA (`range_at_tca`), the miss vector in the primary's RTN frame (`miss_rtn`), the
 relative velocity and speed follow from them. `to_conjunction` turns an
 approach into a `Conjunction` for `compute_pc`, with a hard-body radius (the
 combined one, or each object's: `primary_radius` and `secondary_radius`)
@@ -249,9 +249,9 @@ start = Time("2026-10-06T00:00:00", scale="utc")
 result = screen(primaries, catalog, start, volume=ScreeningVolume.sfs_handbook)
 for number, volume in result.volumes.items():
     print(number, volume.label)
-closest = min(result.approaches, key=lambda approach: approach.miss_distance)
-print(closest.tca.isot, closest.secondary_number, f"{closest.miss_distance:.0f} m")
-conjunction = closest.to_conjunction(hard_body_radius=10.0)  # no covariance
+closest = min(result.approaches, key=lambda approach: approach.range_at_tca)
+print(closest.tca.isot, closest.secondary_number, f"{closest.range_at_tca:.0f} m")
+conjunction = closest.to_conjunction(combined_hard_body_radius=10.0)  # no covariance
 pc = compute_pc(conjunction)
 print(pc.method, f"{pc.value:.1e}")
 ```
@@ -326,7 +326,7 @@ some orbits across a regime boundary.
 ## Limits of GP data
 
 GP element sets are mean elements that the 18th Space Defense Squadron fits
-to its tracking and publishes for every catalogued object; they are what
+to its tracking and publishes for every cataloged object; they are what
 anyone can screen with. They are not precise orbits:
 
 - **No covariance.** GP data says nothing about its own uncertainty, so a

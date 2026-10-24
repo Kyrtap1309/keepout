@@ -234,4 +234,4 @@ def _json_object(omm: Omm) -> dict[str, str | int | float]:
 
 def _texts(omm: Omm) -> dict[str, str]:
     """Keyword texts of an object, the epoch to the microsecond."""
-    return omm.keywords(epoch_digits=SGP4_EPOCH_DIGITS)
+    return omm.keyword_texts(epoch_digits=SGP4_EPOCH_DIGITS)

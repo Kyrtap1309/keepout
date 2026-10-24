@@ -35,7 +35,7 @@ def time_to_tca(cdm: Cdm) -> float:
 
 
 def _pair(cdm: Cdm) -> tuple[str, str]:
-    return cdm.object1.designator, cdm.object2.designator
+    return cdm.object1.object_id, cdm.object2.object_id
 
 
 def _reported(cdm: Cdm) -> tuple[float | None, tuple[str, ...]]:
@@ -184,7 +184,7 @@ class ConjunctionEvent:
         *,
         compute: PcComputation = AUTO,
         policy: Policy = "repair",
-        hard_body_radius: float | None = None,
+        combined_hard_body_radius: float | None = None,
     ) -> tuple[PcObservation, ...]:
         """Keepout's Pc of every CDM, oldest first.
 
@@ -205,29 +205,31 @@ class ConjunctionEvent:
             CDM's observation.
         policy
             Covariance policy; see :func:`keepout.covariance.make_covariance`.
-        hard_body_radius
+        combined_hard_body_radius
             Combined radius [m]; if ``None``, the sum of both objects'
             ``HBR`` in each CDM.
 
         Raises
         ------
         HardBodyRadiusError
-            If ``hard_body_radius`` is ``None`` and a CDM lacks ``HBR`` for an
+            If ``combined_hard_body_radius`` is ``None`` and a CDM lacks ``HBR`` for an
             object (checked before any Pc is computed).
         """
-        if hard_body_radius is None:
+        if combined_hard_body_radius is None:
             missing = [
                 cdm.message_id
                 for cdm in self.cdms
-                if cdm.object1.hbr is None or cdm.object2.hbr is None
+                if cdm.object1.hard_body_radius is None
+                or cdm.object2.hard_body_radius is None
             ]
             if missing:
                 raise HardBodyRadiusError(
                     f"no HBR for both objects in {', '.join(missing)}: pass "
-                    "hard_body_radius= (combined, in metres)"
+                    "combined_hard_body_radius= (in metres)"
                 )
         return tuple(
-            _observe(cdm, compute, policy, hard_body_radius) for cdm in self.cdms
+            _observe(cdm, compute, policy, combined_hard_body_radius)
+            for cdm in self.cdms
         )
 
 
@@ -235,14 +237,16 @@ def _observe(
     cdm: Cdm,
     compute: PcComputation,
     policy: Policy,
-    hard_body_radius: float | None,
+    combined_hard_body_radius: float | None,
 ) -> PcObservation:
     """The observation of one CDM (see :meth:`ConjunctionEvent.observations`)."""
     reported, notes = _reported(cdm)
     when = time_to_tca(cdm)
     assumed = cdm.assumed_covariance
     try:
-        conjunction = cdm.conjunction(hard_body_radius=hard_body_radius, policy=policy)
+        conjunction = cdm.conjunction(
+            combined_hard_body_radius=combined_hard_body_radius, policy=policy
+        )
         result = compute(conjunction)
     except KeepoutError as exc:
         return PcObservation(

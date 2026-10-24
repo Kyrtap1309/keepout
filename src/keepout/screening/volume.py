@@ -177,38 +177,38 @@ class ScreeningVolume:
         """Whether the three semi-axes are equal."""
         return self.radial == self.transverse == self.normal
 
-    def contains(self, offsets: npt.ArrayLike) -> BoolArray:
+    def contains(self, rtn_positions: npt.ArrayLike) -> BoolArray:
         """Whether relative positions lie in the volume (boundary included).
 
         Parameters
         ----------
-        offsets
+        rtn_positions
             Positions relative to the primary in its RTN frame [m], shape
             ``(..., 3)``.
 
         Returns
         -------
         BoolArray
-            Shape ``(...)``; ``False`` where an offset is not finite.
+            Shape ``(...)``; ``False`` where a position is not finite.
 
         Raises
         ------
         ValueError
-            If ``offsets`` does not have 3 components on its last axis.
+            If ``rtn_positions`` does not have 3 components on its last axis.
         """
-        array = np.asarray(offsets, dtype=np.float64)
+        array = np.asarray(rtn_positions, dtype=np.float64)
         if array.ndim == 0 or array.shape[-1] != 3:
-            raise ValueError("offsets must have 3 components on their last axis")
+            raise ValueError("rtn_positions must have 3 components on their last axis")
         scaled = array / self.semi_axes
         inside: BoolArray = np.sum(scaled * scaled, axis=-1) <= 1.0
         return inside
 
     def contains_position(
-        self, r: npt.ArrayLike, v: npt.ArrayLike, r_other: npt.ArrayLike
+        self, r: npt.ArrayLike, v: npt.ArrayLike, r_secondary: npt.ArrayLike
     ) -> BoolArray:
-        """Whether other objects lie in the volume around a primary.
+        """Whether secondaries lie in the volume around a primary.
 
-        ``contains(relative_position_rtn(r, v, r_other))``: the inputs
+        ``contains(relative_position_rtn(r, v, r_secondary))``: the inputs
         broadcast as in :func:`keepout.frames.relative_position_rtn`, so
         many pairs and times are tested at once.
 
@@ -218,8 +218,8 @@ class ScreeningVolume:
             Inertial positions of the primary [m], shape ``(..., 3)``.
         v
             Inertial velocities of the primary [m/s], shape ``(..., 3)``.
-        r_other
-            Inertial positions of the other objects [m], ``(..., 3)``.
+        r_secondary
+            Inertial positions of the secondaries [m], ``(..., 3)``.
 
         Raises
         ------
@@ -228,7 +228,7 @@ class ScreeningVolume:
         GeometryError
             If a primary's position is zero or parallel to its velocity.
         """
-        return self.contains(relative_position_rtn(r, v, r_other))
+        return self.contains(relative_position_rtn(r, v, r_secondary))
 
 
 DEFAULT_VOLUME: Final = ScreeningVolume.sphere(

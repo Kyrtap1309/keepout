@@ -82,10 +82,10 @@ def apogee_perigee_filter(
     ValueError
         If ``volumes`` is a sequence of another length than ``primaries``.
     """
-    reach = np.array(
+    bounding_radii = np.array(
         [volume.bounding_radius for volume in per_primary(volumes, len(primaries))]
     )
-    highest = (primaries.highest + reach)[:, None]
-    lowest = (primaries.lowest - reach)[:, None]
+    highest = (primaries.highest + bounding_radii)[:, None]
+    lowest = (primaries.lowest - bounding_radii)[:, None]
     keep: BoolArray = (catalog.lowest <= highest) & (catalog.highest >= lowest)
     return keep

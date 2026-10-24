@@ -58,7 +58,7 @@ class SocratesApproach:
 
     Parameters
     ----------
-    primary, secondary
+    primary_number, secondary_number
         Catalog numbers of the two objects (``NORAD_CAT_ID_1``, ``_2``).
     since_epoch_primary, since_epoch_secondary
         Time from each object's element set epoch to TCA [s] (``DSE_1``,
@@ -68,7 +68,7 @@ class SocratesApproach:
         TCA [s]: how well the report gives the epochs.
     tca
         Time of closest approach (UTC).
-    miss_distance
+    range_at_tca
         Range at TCA [m] (``TCA_RANGE``, km in the report).
     relative_speed
         Relative speed at TCA [m/s] (``TCA_RELATIVE_SPEED``, km/s).
@@ -76,13 +76,13 @@ class SocratesApproach:
         The row as the report gives it, line ending included.
     """
 
-    primary: int
-    secondary: int
+    primary_number: int
+    secondary_number: int
     since_epoch_primary: float
     since_epoch_secondary: float
     since_epoch_tolerance: float
     tca: Time
-    miss_distance: float
+    range_at_tca: float
     relative_speed: float
     line: str
 
@@ -136,14 +136,14 @@ def _approach(record: dict[str, str], tca: Time, line: str) -> SocratesApproach:
     # The last digit of the DSE values [days], as the report rounds them.
     dse_digit = 10.0 ** -max(_decimals(record["DSE_1"]), _decimals(record["DSE_2"]))
     return SocratesApproach(
-        primary=int(record["NORAD_CAT_ID_1"]),
-        secondary=int(record["NORAD_CAT_ID_2"]),
+        primary_number=int(record["NORAD_CAT_ID_1"]),
+        secondary_number=int(record["NORAD_CAT_ID_2"]),
         since_epoch_primary=float(record["DSE_1"]) * DAY,
         since_epoch_secondary=float(record["DSE_2"]) * DAY,
         since_epoch_tolerance=0.5 * dse_digit * DAY + _TCA_TOLERANCE,
         tca=tca,
         # The report's km and km/s, in m and m/s.
-        miss_distance=float(record["TCA_RANGE"]) * KM,
+        range_at_tca=float(record["TCA_RANGE"]) * KM,
         relative_speed=float(record["TCA_RELATIVE_SPEED"]) * KM,
         line=line,
     )

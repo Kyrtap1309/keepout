@@ -43,6 +43,8 @@ __all__ = [
 ]
 
 SectionKind: TypeAlias = Literal["header", "relative", "segment"]
+"""The kind of a CDM section: the header, the relative metadata/data, or an
+object section (``"segment"``, the NDM/XML element name of an object section)."""
 
 VERSION_KEYWORD: Final = "CCSDS_CDM_VERS"
 """Keyword of the CDM version, the first of every message."""

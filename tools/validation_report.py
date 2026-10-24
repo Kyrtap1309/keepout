@@ -266,11 +266,11 @@ class Row:
     @classmethod
     def of(cls, outcome: Outcome) -> Row:
         """The row of an evaluated case."""
-        case, result, ci = outcome.case, outcome.result, outcome.ci
+        case, result, ci = outcome.case, outcome.result, outcome.result.interval
         return cls(
             suite=case.suite,
             case_id=case.case_id,
-            hard_body_radius=case.conjunction.hard_body_radius,
+            hard_body_radius=case.conjunction.combined_hard_body_radius,
             reference=case.reference,
             criterion=case.criterion,
             method=result.method,
@@ -279,7 +279,7 @@ class Row:
             relative=outcome.verdict.relative,
             passed=outcome.passed,
             paper=case.paper,
-            interval=case.interval,
+            interval=case.reference_interval,
             informative=case.informative,
             ci=ci,
             samples=int(result.details["samples"]) if ci else None,

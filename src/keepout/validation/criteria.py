@@ -46,14 +46,15 @@ class Criterion(Protocol):
         self,
         value: float,
         reference: float,
-        interval: tuple[float, float] | None = None,
+        result_interval: tuple[float, float] | None = None,
     ) -> Verdict:
-        """The verdict on ``value`` against ``reference``; ``interval`` is
-        the result's confidence interval, if it has one."""
+        """The verdict on ``value`` against ``reference``;
+        ``result_interval`` is the result's confidence interval, if it has
+        one."""
         ...
 
     def margin(
-        self, reference: float, interval: tuple[float, float] | None = None
+        self, reference: float, result_interval: tuple[float, float] | None = None
     ) -> float:
         """Absolute difference from ``reference`` the criterion allows."""
         ...
@@ -67,12 +68,12 @@ class Criterion(Protocol):
         previous: float,
         current: float,
         reference: float,
-        interval: tuple[float, float] | None = None,
+        result_interval: tuple[float, float] | None = None,
     ) -> bool:
         """Whether ``current`` repeats ``previous`` within
         :data:`REPRODUCIBILITY_FRACTION` of the :meth:`margin` at ``reference``.
         """
-        allowed = REPRODUCIBILITY_FRACTION * self.margin(reference, interval)
+        allowed = REPRODUCIBILITY_FRACTION * self.margin(reference, result_interval)
         return abs(current - previous) <= allowed
 
 
@@ -120,15 +121,15 @@ class BoundCriterion(Criterion):
         self,
         value: float,
         reference: float,
-        interval: tuple[float, float] | None = None,
+        result_interval: tuple[float, float] | None = None,
     ) -> Verdict:
-        """The verdict on ``value`` against ``reference`` (``interval`` is not
-        used).
+        """The verdict on ``value`` against ``reference`` (``result_interval``
+        is not used).
 
         The relative bound falls back to the absolute bound (0 if none)
         where the reference is below ``small`` or is 0.
         """
-        del interval  # a bound does not depend on it
+        del result_interval  # a bound does not depend on it
         difference = abs(value - reference)
         relative = self._relative_at(reference)
         if relative is not None:
@@ -140,10 +141,10 @@ class BoundCriterion(Criterion):
 
     @override
     def margin(
-        self, reference: float, interval: tuple[float, float] | None = None
+        self, reference: float, result_interval: tuple[float, float] | None = None
     ) -> float:
         """The bound that applies at ``reference``, as an absolute difference."""
-        del interval  # a bound does not depend on it
+        del result_interval  # a bound does not depend on it
         relative = self._relative_at(reference)
         if relative is not None:
             return relative * reference
@@ -182,23 +183,23 @@ class IntervalCriterion(Criterion):
         self,
         value: float,
         reference: float,
-        interval: tuple[float, float] | None = None,
+        result_interval: tuple[float, float] | None = None,
     ) -> Verdict:
         """The verdict on ``value`` against ``reference``: passed if
-        ``reference`` lies in ``interval``; the error is relative unless the
-        reference is 0."""
+        ``reference`` lies in ``result_interval``; the error is relative unless
+        the reference is 0."""
         difference = abs(value - reference)
-        low, high = _required(interval)
+        low, high = _required(result_interval)
         error = difference / reference if reference > 0.0 else difference
         return Verdict(error, reference > 0.0, low <= reference <= high)
 
     @override
     def margin(
-        self, reference: float, interval: tuple[float, float] | None = None
+        self, reference: float, result_interval: tuple[float, float] | None = None
     ) -> float:
-        """The half-width of the result's ``interval``."""
+        """The half-width of the result's ``result_interval``."""
         del reference  # the interval does not depend on it
-        low, high = _required(interval)
+        low, high = _required(result_interval)
         return 0.5 * (high - low)
 
     @override
@@ -207,10 +208,10 @@ class IntervalCriterion(Criterion):
         return "CARA's value within keepout's confidence interval"
 
 
-def _required(interval: tuple[float, float] | None) -> tuple[float, float]:
-    if interval is None:
+def _required(result_interval: tuple[float, float] | None) -> tuple[float, float]:
+    if result_interval is None:
         raise ValueError("an interval criterion needs the result's interval")
-    return interval
+    return result_interval
 
 
 TWO_D: Final = BoundCriterion(relative=1e-6, absolute=1e-15, small=1e-10)

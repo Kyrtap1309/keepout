@@ -91,8 +91,8 @@ def loads(text: str) -> Cdm:
             "a CDM needs a header, relative metadata (starting at TCA) and "
             "OBJECT1 and OBJECT2 sections"
         )
-    header, relative, *segments = (b.build() for b in building)
-    return build_cdm(header, relative, segments)
+    header, relative, *object_sections = (b.build() for b in building)
+    return build_cdm(header, relative, object_sections)
 
 
 def dumps(cdm: Cdm) -> str:
@@ -112,7 +112,7 @@ def dumps(cdm: Cdm) -> str:
         escaping).
     """
     lines: list[str] = []
-    for section in (cdm.header, cdm.relative, *cdm.segments):
+    for section in (cdm.header, cdm.relative, *cdm.object_sections):
         for field in section.fields:
             if field.keyword == COMMENT:
                 lines.extend(

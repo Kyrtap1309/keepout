@@ -39,16 +39,16 @@ def test_typed_accessors() -> None:
     assert cdm.miss_distance == 500.0
     assert cdm.collision_probability is None
     first = cdm.object1
-    assert first.designator == "10001"
+    assert first.object_id == "10001"
     assert first.name == "SAT 1"
     assert first.international_designator == "2000-001A"
     assert first.ref_frame == "EME2000"
-    assert first.hbr is None
+    assert first.hard_body_radius is None
     assert first.user_defined == {}
     np.testing.assert_array_equal(first.position, [7000e3, 0.0, 0.0])
     np.testing.assert_array_equal(first.velocity, [0.0, 7500.0, 0.0])
     np.testing.assert_array_equal(first.covariance_rtn, DIAGONAL_COVARIANCE)
-    assert cdm.object2.designator == "10002"
+    assert cdm.object2.object_id == "10002"
 
 
 @pytest.mark.parametrize(
@@ -79,13 +79,13 @@ def test_an_unknown_covariance_method_is_a_parse_error() -> None:
 def test_a_cdm_has_exactly_two_object_sections() -> None:
     cdm = minimal_cdm()
     with pytest.raises(ValueError, match="a CDM has 2 object sections, got 1"):
-        Cdm(cdm.header, cdm.relative, (cdm.segments[0],))  # type: ignore[arg-type]
+        Cdm(cdm.header, cdm.relative, (cdm.object_sections[0],))  # type: ignore[arg-type]
 
 
 def test_sections_must_have_their_kind() -> None:
     cdm = minimal_cdm()
     with pytest.raises(ValueError, match="header section has kind 'relative'"):
-        Cdm(cdm.relative, cdm.relative, cdm.segments)
+        Cdm(cdm.relative, cdm.relative, cdm.object_sections)
 
 
 def test_section_rejects_repeated_keywords() -> None:
@@ -159,8 +159,8 @@ def test_missing_required_keyword() -> None:
         minimal_cdm(segment2=without(segment_fields(2), "X_DOT"))
 
 
-def test_segments_must_be_labelled_in_order() -> None:
-    with pytest.raises(ValueError, match="segment 2 must have OBJECT = OBJECT2"):
+def test_object_sections_must_be_labelled_in_order() -> None:
+    with pytest.raises(ValueError, match="object section 2 must have OBJECT = OBJECT2"):
         minimal_cdm(segment2=replace(segment_fields(2), "OBJECT", "OBJECT1"))
 
 
@@ -220,7 +220,7 @@ def test_object_states() -> None:
         atol=1e-9,
     )
     # r = (0, 0, 500), v = (0, -7500, 7500): half of r lies along v.
-    plane = Conjunction(primary, secondary, hard_body_radius=1.0).plane
+    plane = Conjunction(primary, secondary, combined_hard_body_radius=1.0).plane
     assert plane.miss_distance == pytest.approx(500.0 / np.sqrt(2.0), rel=1e-12)
 
 
@@ -252,7 +252,7 @@ def test_hbr_and_user_defined() -> None:
         Field("X_OTHER", "1"),
     ]
     cdm = minimal_cdm(segment1=fields)
-    assert cdm.object1.hbr == 5.0
+    assert cdm.object1.hard_body_radius == 5.0
     assert cdm.object1.user_defined == {"USER_DEFINED_RUN_ID": "abc"}
     primary, _ = cdm.object_states()
     assert primary.hard_body_radius == 5.0
@@ -277,7 +277,7 @@ BARE_OBJECT = CdmObject(Section("segment", (Field("OBJECT", "OBJECT1"),)), EPOCH
 @pytest.mark.parametrize(
     ("read", "keyword"),
     [
-        (lambda: BARE_OBJECT.designator, "OBJECT_DESIGNATOR"),
+        (lambda: BARE_OBJECT.object_id, "OBJECT_DESIGNATOR"),
         (lambda: BARE_OBJECT.ref_frame, "REF_FRAME"),
         (lambda: BARE_OBJECT.position, "X"),
         (lambda: BARE_OBJECT.velocity, "X_DOT"),

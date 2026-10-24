@@ -31,7 +31,9 @@ PAIRS = {
 }
 """Pairs of the excerpt whose objects are in the test fixture."""
 
-ROWS = [a for a in read_socrates(EXCERPT) if (a.primary, a.secondary) in PAIRS]
+ROWS = [
+    a for a in read_socrates(EXCERPT) if (a.primary_number, a.secondary_number) in PAIRS
+]
 START = FIXTURE_START
 
 
@@ -99,7 +101,7 @@ def test_main_writes_then_checks(tmp_path: Path) -> None:
     assert (slow["compared"], slow["agree"]) == (22, 22)
     assert fast["worst"] is not None
     assert fast["worst"]["tca"] <= 1e-3
-    assert fast["worst"]["miss_distance"] <= 0.501
+    assert fast["worst"]["range_at_tca"] <= 0.501
     assert summary["differences"] == []
     assert summary["not_compared"] == {
         "outside_catalog": 40211,
@@ -124,8 +126,8 @@ def test_an_approach_beyond_the_tolerances_fails_the_report(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     lines = [a.line for a in ROWS]
-    changed = next(i for i, a in enumerate(ROWS) if a.primary == 58509)
-    distance = f"{ROWS[changed].miss_distance / 1e3 + 0.002:.3f}"
+    changed = next(i for i, a in enumerate(ROWS) if a.primary_number == 58509)
+    distance = f"{ROWS[changed].range_at_tca / 1e3 + 0.002:.3f}"
     lines[changed] = with_value(lines[changed], "TCA_RANGE", distance)
     args = arguments(tmp_path, data_dir(tmp_path, lines))
     assert report.main(args) == 1
@@ -146,7 +148,7 @@ def test_an_approach_far_from_keepouts_is_not_matched(tmp_path: Path) -> None:
     # SOCRATES's TCA moved by two minutes: keepout's approach is no longer
     # within the match window and is reported as keepout's only.
     lines = [a.line for a in ROWS]
-    changed = next(i for i, a in enumerate(ROWS) if a.primary == 44476)
+    changed = next(i for i, a in enumerate(ROWS) if a.primary_number == 44476)
     moved = (ROWS[changed].tca + 120 * u.s).iso
     lines[changed] = with_value(lines[changed], "TCA", moved)
     args = arguments(tmp_path, data_dir(tmp_path, lines))
@@ -203,18 +205,18 @@ def test_a_known_cause_explains_a_difference(
     match = comparison.matches[0]
     assert match.keepout is not None
     moved = dataclasses.replace(
-        match.socrates, miss_distance=match.socrates.miss_distance + 2.0
+        match.socrates, range_at_tca=match.socrates.range_at_tca + 2.0
     )
     changed = dataclasses.replace(
         comparison,
         matches=(report.Match(moved, match.keepout), *comparison.matches[1:]),
     )
-    known = {moved.primary: "Its element set differs."}
+    known = {moved.primary_number: "Its element set differs."}
     summary = report.summarise(changed, inputs, START, known)
-    assert [d["cause"] for d in summary["differences"]] == [moved.primary]
+    assert [d["cause"] for d in summary["differences"]] == [moved.primary_number]
     assert report.problems(summary, known) == []
     page = report.render_page(summary, known)
-    assert f"- **{moved.primary}**: Its element set differs." in page
+    assert f"- **{moved.primary_number}**: Its element set differs." in page
     assert "1 approach outside tolerance involve 1 object" in report.render_summary(
         summary, "page.md"
     )
@@ -250,8 +252,8 @@ def test_a_difference_keepout_did_not_report_is_looked_up(
     assert difference["keepout"]["tca_difference"] == pytest.approx(
         first.tca_difference, abs=1e-5
     )
-    assert difference["keepout"]["miss_distance"] == pytest.approx(
-        first.keepout.miss_distance, abs=1e-3
+    assert difference["keepout"]["range_at_tca"] == pytest.approx(
+        first.keepout.range_at_tca, abs=1e-3
     )
     page = report.render_page(summary, {})
     assert "(not reported: outside the volume)" in page
@@ -287,13 +289,13 @@ def test_tolerances_bound_each_value(comparison: report.Comparison) -> None:
     match = next(m for m in comparison.matches if report.group(m.socrates) == "fast")
     assert match.keepout is not None
     tolerance = report.TOLERANCES["fast"]
-    distance = match.keepout.miss_distance
+    distance = match.keepout.range_at_tca
     assert report.Match(
-        dataclasses.replace(match.socrates, miss_distance=distance + 0.5), match.keepout
+        dataclasses.replace(match.socrates, range_at_tca=distance + 0.5), match.keepout
     ).agrees()
     assert not report.Match(
         dataclasses.replace(
-            match.socrates, miss_distance=distance + tolerance.miss_distance + 1e-6
+            match.socrates, range_at_tca=distance + tolerance.range_at_tca + 1e-6
         ),
         match.keepout,
     ).agrees()
@@ -325,5 +327,5 @@ def test_the_range_change_is_undefined_without_a_range(
 
 def test_known_differences_are_those_of_the_excerpts_objects() -> None:
     assert report.known_differences(ROWS) == {}
-    row = dataclasses.replace(ROWS[0], secondary=100379)
+    row = dataclasses.replace(ROWS[0], secondary_number=100379)
     assert report.known_differences([row]) == {100379: report.KNOWN_DIFFERENCES[100379]}

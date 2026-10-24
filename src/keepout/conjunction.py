@@ -43,16 +43,17 @@ def combined_hard_body_radius(
     """
     if explicit is not None:
         return explicit
-    first, second = primary.hard_body_radius, secondary.hard_body_radius
-    if first is None or second is None:
+    primary_radius = primary.hard_body_radius
+    secondary_radius = secondary.hard_body_radius
+    if primary_radius is None or secondary_radius is None:
         missing = [
             o.object_id for o in (primary, secondary) if o.hard_body_radius is None
         ]
         raise HardBodyRadiusError(
             f"no hard-body radius for {', '.join(missing)}: pass "
-            "hard_body_radius= (combined, in metres) or give HBR for both objects"
+            "combined_hard_body_radius= (in metres) or give HBR for both objects"
         )
-    return first + second
+    return primary_radius + secondary_radius
 
 
 @dataclass(frozen=True, eq=False)
@@ -65,7 +66,7 @@ class Conjunction:
         The protected object.
     secondary
         The other object, at the same epoch.
-    hard_body_radius
+    combined_hard_body_radius
         Combined hard-body radius [m]: the radius of a sphere around the
         primary that the secondary's centre must enter for a collision.
 
@@ -74,16 +75,18 @@ class Conjunction:
     GeometryError
         If the epochs differ.
     ValueError
-        If ``hard_body_radius`` is not finite and positive.
+        If ``combined_hard_body_radius`` is not finite and positive.
     """
 
     primary: ObjectState
     secondary: ObjectState
-    hard_body_radius: float
+    combined_hard_body_radius: float
 
     def __post_init__(self) -> None:
-        radius = positive_float(self.hard_body_radius, "hard_body_radius")
-        object.__setattr__(self, "hard_body_radius", radius)
+        radius = positive_float(
+            self.combined_hard_body_radius, "combined_hard_body_radius"
+        )
+        object.__setattr__(self, "combined_hard_body_radius", radius)
         require_same_epoch(
             self.secondary.state.epoch,
             self.primary.state.epoch,

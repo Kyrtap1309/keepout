@@ -68,9 +68,9 @@ from keepout.units import DAY, KM, julian_seconds_between
 
 __all__ = [
     "FLOHRER_SIGMAS",
-    "GEO_HIGHEST_APOGEE",
-    "GEO_LOWEST_PERIGEE",
-    "LEO_HIGHEST_APOGEE",
+    "GEO_LOWER_ALTITUDE",
+    "GEO_UPPER_ALTITUDE",
+    "LEO_UPPER_ALTITUDE",
     "LEVIT_MARSHALL_RATE",
     "PUBLISHED_PARAMETERS",
     "SAFETY_FACTOR",
@@ -103,16 +103,19 @@ class OrbitRegime(enum.StrEnum):
     """Perigee altitude above 33 786 km and apogee altitude below 37 786 km."""
 
 
-LEO_HIGHEST_APOGEE: Final = 2000e3
-"""Apogee altitude [m] below which an orbit is LEO; also the perigee
-altitude that separates MEO (above) from GTO (below)."""
+LEO_UPPER_ALTITUDE: Final = 2000e3
+"""Altitude [m] of the LEO boundary: the apogee altitude below which an orbit
+is LEO, and the perigee altitude that separates MEO (above) from GTO
+(below)."""
 
-GEO_LOWEST_PERIGEE: Final = 33_786e3
-"""Perigee altitude [m] above which an orbit can be GEO; also the apogee
-altitude below which an orbit can be MEO and above which it can be GTO."""
+GEO_LOWER_ALTITUDE: Final = 33_786e3
+"""Altitude [m] of the lower GEO boundary: the perigee altitude above which an
+orbit can be GEO, and the apogee altitude below which an orbit can be MEO and
+above which it can be GTO."""
 
-GEO_HIGHEST_APOGEE: Final = 37_786e3
-"""Apogee altitude [m] below which an orbit can be GEO."""
+GEO_UPPER_ALTITUDE: Final = 37_786e3
+"""Altitude [m] of the upper GEO boundary: the apogee altitude below which an
+orbit can be GEO."""
 
 
 def orbit_regime(omm: Omm) -> OrbitRegime:
@@ -141,13 +144,13 @@ def orbit_regime(omm: Omm) -> OrbitRegime:
     shape = sgp4_shape(omm)
     radius = shape.earth_radius_km * KM
     perigee, apogee = shape.perigee_altitude * radius, shape.apogee_altitude * radius
-    if apogee < LEO_HIGHEST_APOGEE:
+    if apogee < LEO_UPPER_ALTITUDE:
         return OrbitRegime.LEO
-    if perigee > GEO_LOWEST_PERIGEE and apogee < GEO_HIGHEST_APOGEE:
+    if perigee > GEO_LOWER_ALTITUDE and apogee < GEO_UPPER_ALTITUDE:
         return OrbitRegime.GEO
-    if perigee > LEO_HIGHEST_APOGEE and apogee < GEO_LOWEST_PERIGEE:
+    if perigee > LEO_UPPER_ALTITUDE and apogee < GEO_LOWER_ALTITUDE:
         return OrbitRegime.MEO
-    if perigee < LEO_HIGHEST_APOGEE and apogee > GEO_LOWEST_PERIGEE:
+    if perigee < LEO_UPPER_ALTITUDE and apogee > GEO_LOWER_ALTITUDE:
         return OrbitRegime.GTO
     return OrbitRegime.HEO
 
@@ -210,7 +213,7 @@ FLOHRER_SIGMAS: Final[Mapping[OrbitRegime, RtnSigmas]] = MappingProxyType(
 )
 """Radial, along-track and cross-track 1-sigma position errors [m] of GP
 element sets near their epoch, per regime: Table 1 of Flohrer et al.
-(2009), the US SSN catalogue of 2008-01-01 (11 286 objects), each against a
+(2009), the US SSN catalog of 2008-01-01 (11 286 objects), each against a
 numerical orbit fitted to its own SGP4 states over 24 h centred on the
 epoch. In LEO the along-track sigma reaches about 600 m at high
 inclination; in the paper's own validation on radar-tracked objects the

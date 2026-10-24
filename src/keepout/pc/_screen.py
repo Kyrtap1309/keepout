@@ -48,26 +48,26 @@ SCREEN_CHUNK: Final = 4096
 """Screen cells evaluated in one vectorised call."""
 
 
-def _gap(gaussians: Gaussians, radius: float) -> FloatArray:
-    """Distance [m] from the hard-body sphere of ``radius`` to the mean
-    relative positions."""
+def _clearance(gaussians: Gaussians, hard_body_radius: float) -> FloatArray:
+    """Distance [m] from the hard-body sphere of ``hard_body_radius`` to the
+    mean relative positions."""
     distance = np.linalg.norm(gaussians.relative_position, axis=1)
-    gap: FloatArray = np.maximum(distance - radius, 0.0)
-    return gap
+    clearance: FloatArray = np.maximum(distance - hard_body_radius, 0.0)
+    return clearance
 
 
-def negligible(gaussians: Gaussians, radius: float) -> BoolArray:
+def negligible(gaussians: Gaussians, hard_body_radius: float) -> BoolArray:
     """Where the rate is taken as 0: the mean relative position farther from
     the hard-body sphere than :data:`NEGLIGIBLE_DISTANCE` allows."""
-    largest = np.linalg.eigvalsh(gaussians.position_covariance)[:, -1]
-    gap = _gap(gaussians, radius)
-    result: BoolArray = gap * gap > NEGLIGIBLE_DISTANCE * largest
+    largest = np.linalg.eigvalsh(gaussians.combined_position_covariance)[:, -1]
+    clearance = _clearance(gaussians, hard_body_radius)
+    result: BoolArray = clearance * clearance > NEGLIGIBLE_DISTANCE * largest
     return result
 
 
-def reach(largest_variance: float, radius: float) -> float:
+def reach(largest_variance: float, hard_body_radius: float) -> float:
     """Distance [m] beyond which :func:`negligible` holds."""
-    return math.sqrt(NEGLIGIBLE_DISTANCE * largest_variance) + radius
+    return math.sqrt(NEGLIGIBLE_DISTANCE * largest_variance) + hard_body_radius
 
 
 class ScreenCells(NamedTuple):
@@ -75,7 +75,7 @@ class ScreenCells(NamedTuple):
 
     Parameters
     ----------
-    gap
+    clearance
         Distance [m] from the hard-body sphere to the mean relative position.
     speed
         Mean relative speed [m/s].
@@ -88,7 +88,7 @@ class ScreenCells(NamedTuple):
         speed).
     """
 
-    gap: FloatArray
+    clearance: FloatArray
     speed: FloatArray
     largest: FloatArray
     crossing: FloatArray
@@ -98,16 +98,16 @@ class ScreenCells(NamedTuple):
 def screen(rate: CollisionRate, window: tuple[float, float]) -> list[Candidate]:
     """Candidate intervals of ``window``: where ``rate`` may not be 0.
 
-    The window is cut into cells. On each, the gap between the mean
-    positions (less the radius) is bounded from below by its value at the
-    cell centre minus how far two-body motion can close it within half a
-    cell: ``|dv| h/2 + a_max (h/2)^2 / 2``, with ``a_max`` the sum of the
-    two perigee accelerations. This is exact for the mean trajectories.
-    The largest position variance over a cell is taken as
+    The window is cut into cells. On each, the clearance between the mean
+    positions (their distance less the hard-body radius) is bounded from
+    below by its value at the cell centre minus how far two-body motion can
+    close it within half a cell: ``|dv| h/2 + a_max (h/2)^2 / 2``, with
+    ``a_max`` the sum of the two perigee accelerations. This is exact for
+    the mean trajectories. The largest position variance over a cell is taken as
     :data:`SCREEN_VARIANCE_MARGIN` times the largest at the cell and its
     two neighbours (it varies smoothly over a cell of at most
     :data:`SCREEN_PERIOD_FRACTION` of an orbit, and grows convexly along
-    track). Where even this bounded gap exceeds the reach of
+    track). Where even this bounded clearance exceeds the reach of
     :data:`NEGLIGIBLE_DISTANCE`, :func:`negligible` holds throughout the
     cell and the rate is exactly 0. The cell size is the time the mean
     relative position takes to cross that reach, within
@@ -125,7 +125,7 @@ def screen(rate: CollisionRate, window: tuple[float, float]) -> list[Candidate]:
     half = 0.5 * cell
     acceleration = rate.primary.max_acceleration + rate.secondary.max_acceleration
     closest = np.maximum(
-        cells.gap - cells.speed * half - 0.5 * acceleration * half * half, 0.0
+        cells.clearance - cells.speed * half - 0.5 * acceleration * half * half, 0.0
     )
     largest = cells.largest
     padded = np.concatenate([largest[:1], largest, largest[-1:]])
@@ -150,7 +150,7 @@ def _cell_count(rate: CollisionRate, window: tuple[float, float]) -> int:
     span = end - start
     centre = _screen_cells(rate, np.array([0.5 * (start + end)]))
     speed = float(centre.speed[0])
-    extent = reach(float(centre.largest[0]), rate.radius)
+    extent = reach(float(centre.largest[0]), rate.hard_body_radius)
     natural = extent / speed if speed > 0.0 else math.inf
     longest = SCREEN_PERIOD_FRACTION * min(rate.primary.period, rate.secondary.period)
     cell = max(span / SCREEN_MAX_CELLS, min(natural, span / SCREEN_MIN_CELLS, longest))
@@ -158,7 +158,7 @@ def _cell_count(rate: CollisionRate, window: tuple[float, float]) -> int:
 
 
 def _screen_cells(rate: CollisionRate, times: FloatArray) -> ScreenCells:
-    """Gap, relative speed, largest variance, crossing time and time width.
+    """Clearance, relative speed, largest variance, crossing time and time width.
 
     All at ``times``, from the mean-centred expansion that :func:`negligible`
     uses. The time width is the standard deviation ``1 / (|v| sqrt(u' A^-1
@@ -167,8 +167,8 @@ def _screen_cells(rate: CollisionRate, times: FloatArray) -> ScreenCells:
     """
     gaussians = rate.mean_centred(times)
     dv = gaussians.relative_velocity
-    a = gaussians.position_covariance
-    gap = _gap(gaussians, rate.radius)
+    a = gaussians.combined_position_covariance
+    clearance = _clearance(gaussians, rate.hard_body_radius)
     speed = np.linalg.norm(dv, axis=1)
     values, vectors = np.linalg.eigh(a)
     largest = values[:, -1]
@@ -180,6 +180,8 @@ def _screen_cells(rate: CollisionRate, times: FloatArray) -> ScreenCells:
         "ik,ik->i", along2, 1.0 / np.maximum(values, rate.floor_variance)
     )
     with np.errstate(divide="ignore"):
-        crossing = np.where(speed > 0.0, (sigma + rate.radius) / speed, math.inf)
+        crossing = np.where(
+            speed > 0.0, (sigma + rate.hard_body_radius) / speed, math.inf
+        )
         width = np.where(speed > 0.0, 1.0 / (speed * np.sqrt(precision)), math.inf)
-    return ScreenCells(gap, speed, largest, crossing, width)
+    return ScreenCells(clearance, speed, largest, crossing, width)

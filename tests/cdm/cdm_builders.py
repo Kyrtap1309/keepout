@@ -93,8 +93,8 @@ def without(fields: list[Field], keyword: str) -> list[Field]:
 
 def assert_equivalent(actual: Cdm, expected: Cdm) -> None:
     """Same sections, keywords, order and units; values equal to a few ulps."""
-    actual_sections = (actual.header, actual.relative, *actual.segments)
-    expected_sections = (expected.header, expected.relative, *expected.segments)
+    actual_sections = (actual.header, actual.relative, *actual.object_sections)
+    expected_sections = (expected.header, expected.relative, *expected.object_sections)
     for got, want in zip(actual_sections, expected_sections, strict=True):
         assert got.kind == want.kind
         assert [f.keyword for f in got.fields] == [f.keyword for f in want.fields]

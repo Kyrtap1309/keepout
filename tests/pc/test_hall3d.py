@@ -130,12 +130,12 @@ def test_the_encounter_scan_names_the_object_not_a_method() -> None:
     base = TYPICAL_HEAD_ON
     unknown = Conjunction(base.primary, without_covariance(base.secondary), 5.0)
     with pytest.raises(MissingCovariance) as missing:
-        Encounters.scan(unknown, None)
+        Encounters.locate(unknown, None)
     assert missing.value.roles == ("secondary",)
     assert str(missing.value) == "both covariances are needed; unknown: secondary"
     fast = object_state(LEO_R, np.array([0.0, 15000.0, 0.0]), np.eye(3))
     with pytest.raises(UnusableOrbit, match="unbound") as unusable:
-        Encounters.scan(Conjunction(base.primary, fast, 5.0), None)
+        Encounters.locate(Conjunction(base.primary, fast, 5.0), None)
     assert unusable.value.role == "secondary"
     for error in (missing.value, unusable.value):
         copy = pickle.loads(pickle.dumps(error))
@@ -362,7 +362,7 @@ def test_unmet_rtol_is_reported(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_small_rtol_shortfall_is_not_reported(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Orders 32 and 64 agree to far better than QUIET_AGREEMENT, not to 1e-15.
+    # Orders 32 and 64 agree to far better than QUIET_DISAGREEMENT, not to 1e-15.
     time_integral_orders(monkeypatch, largest=64)
     result = hall3d(TYPICAL_HEAD_ON, rtol=1e-15)
     assert result.diagnostics == ()

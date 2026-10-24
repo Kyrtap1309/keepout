@@ -127,7 +127,7 @@ def load_pc_method_inputs(cache: Path | None = None) -> list[PcMethodInput]:
             raise CaraFormatError(f"no pinned CDM for conjunction {conjunction_id}")
         path = cara.fetch(cara.PC_METHOD_CDMS[conjunction_id], cache=cache)
         conjunction = cdm.load(path).conjunction(
-            hard_body_radius=column_number(row, "HBR_m")
+            combined_hard_body_radius=column_number(row, "HBR_m")
         )
         inputs.append(PcMethodInput(conjunction_id, conjunction, row))
     return inputs

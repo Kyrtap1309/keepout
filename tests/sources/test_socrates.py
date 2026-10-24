@@ -27,11 +27,11 @@ def test_the_columns_are_the_reports() -> None:
 
 def test_a_report_is_read_in_si_units() -> None:
     docked, fast = read_socrates(REPORT)
-    assert (docked.primary, docked.secondary) == (25544, 100882)
+    assert (docked.primary_number, docked.secondary_number) == (25544, 100882)
     assert docked.since_epoch_primary == docked.since_epoch_secondary == 86400.0
     assert docked.since_epoch_tolerance == pytest.approx(43.2005)
     assert docked.tca == Time("2026-10-07T00:20:47.861", scale="utc")
-    assert docked.miss_distance == pytest.approx(4.0)
+    assert docked.range_at_tca == pytest.approx(4.0)
     assert docked.relative_speed == 0.0
     assert docked.line == DOCKED
     assert fast.relative_speed == 7500.0

@@ -176,8 +176,8 @@ def to_equinoctial(state: _Array, fr: RetrogradeFactor, mu: float = EARTH_MU) ->
     shape = _Shape.of(af, ag, root)
     sin_f = ag + (shape.c_ag * big_y - shape.cross * big_x) / (a * root)
     cos_f = af + (shape.c_af * big_x - shape.cross * big_y) / (a * root)
-    longitude = _atan2(sin_f, cos_f)
-    mean_longitude = longitude + ag * cos_f - af * sin_f
+    eccentric_longitude = _atan2(sin_f, cos_f)
+    mean_longitude = eccentric_longitude + ag * cos_f - af * sin_f
     return np.stack([np.sqrt(mu / a**3), af, ag, chi, psi, mean_longitude], -1)  # pyright: ignore[reportReturnType]
 
 
@@ -244,7 +244,7 @@ class _Apse(NamedTuple):
 
     eccentricity: FloatArray
     """``e = |(af, ag)|`` of the real parts."""
-    longitude: FloatArray
+    perigee_longitude: FloatArray
     """``varpi = atan2(ag, af)`` of the real parts [rad]."""
 
     @classmethod
@@ -275,21 +275,21 @@ def _eccentric_longitude(
     # converges for every e < 1 (Danby 1987).
     if apse is None:
         apse = _Apse.of(af, ag)
-    longitude = lam + 0.85 * apse.eccentricity * np.sign(
-        np.sin(np.real(lam) - apse.longitude)
+    eccentric_longitude = lam + 0.85 * apse.eccentricity * np.sign(
+        np.sin(np.real(lam) - apse.perigee_longitude)
     )
     # Promote to complex when the elements are (a complex-step derivative).
-    longitude = longitude + 0.0 * af
+    eccentric_longitude = eccentric_longitude + 0.0 * af
     for _ in range(KEPLER_MAX_ITERATIONS):
-        cos_f, sin_f = np.cos(longitude), np.sin(longitude)
-        residual = longitude + ag * cos_f - af * sin_f - lam
+        cos_f, sin_f = np.cos(eccentric_longitude), np.sin(eccentric_longitude)
+        residual = eccentric_longitude + ag * cos_f - af * sin_f - lam
         step = residual / (1.0 - ag * sin_f - af * cos_f)
-        longitude = longitude - step
+        eccentric_longitude = eccentric_longitude - step
         converged = (np.abs(step) < KEPLER_TOLERANCE) | (
             np.abs(residual) <= KEPLER_RESIDUAL_TOLERANCE
         )
         if np.all(converged):
-            return longitude
+            return eccentric_longitude
     raise GeometryError(
         "Kepler's equation did not converge in "
         f"{KEPLER_MAX_ITERATIONS} iterations; the elements are not a "
@@ -303,12 +303,12 @@ def _state(
     af: _Array,
     ag: _Array,
     shape: _Shape[_Array],
-    longitude: _Array,
+    eccentric_longitude: _Array,
     f: _Array,
     g: _Array,
 ) -> _Array:
     """Cartesian state from the eccentric longitude and the orbit's constants."""
-    cos_f, sin_f = np.cos(longitude), np.sin(longitude)
+    cos_f, sin_f = np.cos(eccentric_longitude), np.sin(eccentric_longitude)
     big_x = a * (shape.c_ag * cos_f + shape.cross * sin_f - af)
     big_y = a * (shape.c_af * sin_f + shape.cross * cos_f - ag)
     radius = a * (1.0 - af * cos_f - ag * sin_f)

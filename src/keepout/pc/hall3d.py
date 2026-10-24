@@ -8,7 +8,8 @@ which the secondary's centre enters the hard-body sphere around the primary
                N(R r; r_rel, A) * nu(r),
     nu(r) = sigma / sqrt(2 pi) * [exp(-x^2) - sqrt(pi) x erfc(x)],
 
-with the relative position mean ``r_rel`` and covariance ``A`` and the
+with ``R`` the combined hard-body radius, the relative position mean
+``r_rel`` and covariance ``A`` and the
 conditional relative-velocity statistics (``sigma``, ``x``) taken from a
 first-order expansion of two-body motion in equinoctial elements. The
 expansion is centred not on the mean orbits but on the states at the peak
@@ -48,7 +49,7 @@ from keepout.pc.result import PcResult
 
 __all__ = [
     "HALL_RTOL",
-    "QUIET_AGREEMENT",
+    "QUIET_DISAGREEMENT",
     "hall3d",
     "hall3d_over_scan",
     "is_long",
@@ -58,8 +59,8 @@ HALL_RTOL: Final = 1e-6
 """Default relative tolerance of the time integral: the agreement of two
 nested Clenshaw-Curtis rules."""
 
-QUIET_AGREEMENT: Final = 1e-4
-"""Time-integral agreement below which a missed ``rtol`` is not reported. It
+QUIET_DISAGREEMENT: Final = 1e-4
+"""Time-integral disagreement below which a missed ``rtol`` is not reported. It
 is per piece (the last two Clenshaw-Curtis rules of one piece of an
 encounter segment, relative to the total Nc) and 10 times inside Hall's
 tightest validation criterion (1e-3 relative to CARA), so it cannot affect
@@ -93,10 +94,10 @@ def _integral_notes(
             "edge (the window spans an orbital period): the encounter may be "
             "longer; pass window="
         )
-    if integral.agreement > max(rtol, QUIET_AGREEMENT):
+    if integral.worst_disagreement > max(rtol, QUIET_DISAGREEMENT):
         notes.append(
             f"the time integral did not reach rtol: its worst piece agrees to "
-            f"{integral.agreement:.1e} of Nc (rtol {rtol:.1e})"
+            f"{integral.worst_disagreement:.1e} of Nc (rtol {rtol:.1e})"
         )
     return notes
 
@@ -148,7 +149,7 @@ def hall3d(
     """
     require_positive(rtol, "rtol")
     require_known_covariance(conjunction.unknown_covariance, "hall3d")
-    encounters = Encounters.scan(conjunction, window)
+    encounters = Encounters.locate(conjunction, window)
     return hall3d_over_scan(conjunction, encounters, rtol=rtol)
 
 
@@ -182,17 +183,17 @@ def hall3d_over_scan(
         (within a grid step of an encounter segment, or where the rate is
         not negligible), or Nc is not finite.
     """
-    rate, found = encounters.rate, encounters.found
-    integral = integrate_segments(rate, found, rtol=rtol)
+    rate, scan = encounters.rate, encounters.scan
+    integral = integrate_segments(rate, scan, rtol=rtol)
     # Checked after integrating (Monte Carlo checks before sampling), so a
     # failure of the iteration at a quadrature node is caught too.
-    check_fallbacks(rate.fallbacks, found)
+    check_fallbacks(rate.fallbacks, scan)
     if not math.isfinite(integral.nc):
         raise PcConvergenceError(f"Hall 3D-Nc: Nc is not finite ({integral.nc})")
     details = {
         "nc": integral.nc,
-        "window_start_s": found.window[0],
-        "window_end_s": found.window[1],
+        "window_start_s": scan.window[0],
+        "window_end_s": scan.window[1],
         "encounters": float(len(integral.segments)),
         "largest_encounter_nc": max((s.nc for s in integral.segments), default=0.0),
         "evaluations": float(rate.evaluations),
@@ -249,8 +250,8 @@ def _entry_notes(
             notes.append(f"long encounter: {repeated}")
         if integral.scan.peak <= 0.0 and not window_given:
             extent = reach(
-                float(np.linalg.eigvalsh(rate.position_covariance)[-1]),
-                conjunction.hard_body_radius,
+                float(np.linalg.eigvalsh(rate.combined_position_covariance)[-1]),
+                conjunction.combined_hard_body_radius,
             )
             miss = conjunction.plane.miss_distance
             if miss <= extent:

@@ -114,7 +114,9 @@ COLUMNS: Final = tuple(_COLUMN_NAMES.split())
 FEATURES: Final = tuple(
     name for name in COLUMNS if name not in ("event_id", "mission_id", "c_object_type")
 )
-"""The numeric columns kept per CDM in :attr:`KelvinsEvent.features`."""
+"""The numeric columns kept per CDM in :attr:`KelvinsEvent.features`, in the
+table's units: :meth:`KelvinsEvent.column` gives ``"time_to_tca"`` in days,
+:attr:`KelvinsEvent.time_to_tca` in seconds."""
 
 _INDEX: Final = {name: index for index, name in enumerate(COLUMNS)}
 _FEATURE_INDEX: Final = {name: index for index, name in enumerate(FEATURES)}

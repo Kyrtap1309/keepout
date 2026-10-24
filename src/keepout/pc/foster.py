@@ -6,7 +6,8 @@ integral along the wide principal axis ``u``:
     Pc = integral over u of N(u; miss_u, sigma_u)
                             * P(|v - miss_v| within chord at u) du
 
-With ``u = R sin(theta)`` the integrand is smooth at the circle's edge, and
+With ``u = R sin(theta)`` (``R`` the hard-body radius) the integrand is
+smooth at the circle's edge, and
 only the band where the density is not negligible is integrated.
 """
 
@@ -60,7 +61,7 @@ def _band(gaussian: PlaneGaussian) -> tuple[float, float] | None:
 
     Returns ``None`` if the band misses the circle (Pc underflows to 0).
     """
-    radius = gaussian.radius
+    radius = gaussian.hard_body_radius
     low = max(gaussian.miss_u - TAIL_SIGMAS * gaussian.sigma_u, -radius)
     high = min(gaussian.miss_u + TAIL_SIGMAS * gaussian.sigma_u, radius)
     if low >= high:
@@ -75,7 +76,7 @@ def _chord_steps(gaussian: PlaneGaussian, low: float, high: float) -> list[float
     ``h = |miss_v|``, i.e. ``theta = +-acos(|miss_v| / R)``, which adaptive
     quadrature can step over; the step's centre and ends become breakpoints.
     """
-    radius = gaussian.radius
+    radius = gaussian.hard_body_radius
     points: set[float] = set()
     for k in (-STEP_SIGMAS, 0.0, STEP_SIGMAS):
         half_chord = abs(gaussian.miss_v) + k * gaussian.sigma_v
@@ -140,7 +141,7 @@ def gaussian_pc(gaussian: PlaneGaussian, *, rtol: float = FOSTER_RTOL) -> PcResu
         details = {"error_estimate": 0.0, "evaluations": 0.0}
         return PcResult(0.0, "foster", tuple(diagnostics), details)
     low, high = band
-    radius = gaussian.radius
+    radius = gaussian.hard_body_radius
 
     def integrand(theta: float) -> float:
         # u = R sin(theta), du = R cos(theta) dtheta, half-chord = R cos(theta).

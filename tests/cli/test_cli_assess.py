@@ -71,7 +71,7 @@ At least one event needs a manoeuvre (exit status 3).
     as_json = keepout("assess", *files, "--hbr", "1000", "--json")
     assert as_json.exit_code == ExitCode.MANOEUVRE
     payload = json.loads(as_json.stdout)
-    assert payload["cdms"] == 2
+    assert payload["cdm_count"] == 2
     assert payload["manoeuvre"] is True
     assert [event["action"] for event in payload["events"]] == [
         "manoeuvre",
@@ -96,7 +96,7 @@ def test_assess_follows_the_trend_of_an_event_over_its_cdms(tmp_path: Path) -> N
     assert event["cdms"] == [later.message_id, "UPDATE"]
     first, second = event["observations"]
     assert second["pc"] > first["pc"]
-    assert second["time_to_tca"] == pytest.approx(first["time_to_tca"] - 86400.0)
+    assert second["time_to_tca_s"] == pytest.approx(first["time_to_tca_s"] - 86400.0)
     assert event["trend"] == "rising"
 
 
@@ -233,9 +233,9 @@ def test_assess_labels_events_whose_covariances_are_assumed(tmp_path: Path) -> N
     as_json = keepout("assess", *files, "--hbr", "1000", "--json")
     assert as_json.exit_code == ExitCode.MANOEUVRE
     payload = json.loads(as_json.stdout)
-    assert payload["assumed_covariances"] == 1
-    assert [e["assumed_covariances"] for e in payload["events"]] == [True, False]
+    assert payload["assumed_covariance_events"] == 1
+    assert [e["assumed_covariance"] for e in payload["events"]] == [True, False]
     only = keepout("assess", files[1], "--hbr", "1000")
     assert "assumed covariances" not in only.stdout
     payload = json.loads(keepout("assess", files[1], "--json").stdout)
-    assert payload["assumed_covariances"] == 0
+    assert payload["assumed_covariance_events"] == 0

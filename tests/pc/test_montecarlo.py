@@ -94,10 +94,10 @@ def test_budget_exhausted_is_reported() -> None:
     assert result.details["samples"] == 2_000
     low, high = interval(result)
     assert low == 0.0 < high
-    assert result.diagnostics[0].startswith("Monte Carlo stopped at 2000 trials")
+    assert result.diagnostics[0].startswith("Monte Carlo stopped at 2000 samples")
 
 
-def test_trials_already_inside_at_the_window_start_do_not_count() -> None:
+def test_samples_already_inside_at_the_window_start_do_not_count() -> None:
     # The secondary sits inside the hard body at TCA; a window starting at
     # TCA begins with nearly every trial already overlapping.
     primary = object_state(LEO_R, LEO_V, 0.01 * np.eye(3))

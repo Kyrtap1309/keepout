@@ -219,8 +219,8 @@ def _repaired_correlation(scaled: FloatArray) -> tuple[FloatArray, list[str]]:
     values, vectors = spectrum.values, spectrum.vectors
     resolved = values > RANK_RTOL * max(float(values[-1]), 1.0)
     known, variances = vectors[:, resolved], values[resolved]
-    cross = cross @ known @ known.T
-    explained = (cross @ known / variances) @ (known.T @ cross.T)
+    resolved_cross = cross @ known @ known.T
+    explained = (resolved_cross @ known / variances) @ (known.T @ resolved_cross.T)
     conditional = _Clipped.of(symmetric_part(velocity - explained))
     if conditional.negatives:
         notes.append(
@@ -229,7 +229,10 @@ def _repaired_correlation(scaled: FloatArray) -> tuple[FloatArray, list[str]]:
             f"{conditional.lowest:.3g} in correlation units)"
         )
     repaired = np.block(
-        [[position, cross.T], [cross, symmetric_part(conditional.matrix + explained)]]
+        [
+            [position, resolved_cross.T],
+            [resolved_cross, symmetric_part(conditional.matrix + explained)],
+        ]
     )
     return repaired, notes
 

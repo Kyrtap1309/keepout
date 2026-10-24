@@ -60,7 +60,7 @@ ORIGINATOR: Final = "KEEPOUT"
 
 TCA_PRECISION: Final = 6
 """Fractional digits of the seconds of ``TCA`` (a microsecond: the states
-are at TCA well within :data:`keepout.objects.EPOCH_TOLERANCE_S`)."""
+are at TCA well within :data:`keepout.objects.EPOCH_TOLERANCE`)."""
 
 MESSAGE_ID_PRECISION: Final = 3
 """Fractional digits of the seconds of the times in a message id."""
@@ -235,7 +235,7 @@ def make_message_id(
     return f"{primary_id}_{secondary_id}_{_stamp(tca)}_{_stamp(created)}"
 
 
-def _radii(conjunction: Conjunction) -> tuple[float, float] | None:
+def _hard_body_radii(conjunction: Conjunction) -> tuple[float, float] | None:
     """Each object's ``HBR``, or None if neither object has a radius.
 
     Raises
@@ -244,18 +244,22 @@ def _radii(conjunction: Conjunction) -> tuple[float, float] | None:
         If only one object has a radius, or the two do not add up to the
         conjunction's combined radius: a CDM gives the radius per object.
     """
-    first = conjunction.primary.hard_body_radius
-    second = conjunction.secondary.hard_body_radius
-    if first is None and second is None:
+    primary = conjunction.primary.hard_body_radius
+    secondary = conjunction.secondary.hard_body_radius
+    if primary is None and secondary is None:
         return None
-    combined = conjunction.hard_body_radius
-    if first is None or second is None or not math.isclose(first + second, combined):
+    combined = conjunction.combined_hard_body_radius
+    if (
+        primary is None
+        or secondary is None
+        or not math.isclose(primary + secondary, combined)
+    ):
         raise ValueError(
             "a CDM gives the hard-body radius per object (HBR): the objects' "
-            f"radii {first} and {second} must add up to the combined radius "
+            f"radii {primary} and {secondary} must add up to the combined radius "
             f"{combined} m, or both be None"
         )
-    return first, second
+    return primary, secondary
 
 
 def _relative(conjunction: Conjunction) -> list[Field]:
@@ -301,8 +305,11 @@ def _screening(
     return fields
 
 
-def _segment(
-    index: int, item: ObjectState, metadata: ObjectMetadata, radius: float | None
+def _object_section(
+    index: int,
+    item: ObjectState,
+    metadata: ObjectMetadata,
+    hard_body_radius: float | None,
 ) -> Section:
     """Object section ``index`` in the field order of the CCSDS schema."""
     fields = [Field(COMMENT, text) for text in metadata.comments]
@@ -321,8 +328,8 @@ def _segment(
         Field("MANEUVERABLE", str(metadata.maneuverable)),
         Field("REF_FRAME", item.state.frame),
     ]
-    if radius is not None:
-        fields.append(Field("HBR", radius))
+    if hard_body_radius is not None:
+        fields.append(Field("HBR", hard_body_radius))
     state = item.state
     vector = (*state.r, *state.v)
     fields += [
@@ -345,8 +352,8 @@ def _segment(
 
 def make_cdm(
     conjunction: Conjunction,
-    primary: ObjectMetadata,
-    secondary: ObjectMetadata,
+    primary_metadata: ObjectMetadata,
+    secondary_metadata: ObjectMetadata,
     *,
     created: Time,
     originator: str = ORIGINATOR,
@@ -373,7 +380,7 @@ def make_cdm(
     conjunction
         The conjunction; ``conjunction.tca`` is the ``TCA``, written to the
         microsecond (:data:`TCA_PRECISION`).
-    primary, secondary
+    primary_metadata, secondary_metadata
         What the message says about each object.
     created
         ``CREATION_DATE``, as given (no clock is read, so that a message
@@ -409,7 +416,7 @@ def make_cdm(
         starts, a comment has more than one line or leading or trailing
         blanks, or a text field is empty.
     """
-    radii = _radii(conjunction)
+    radii = _hard_body_radii(conjunction)
     tca = _with_precision(conjunction.tca, TCA_PRECISION)
     if message_id is None:
         message_id = make_message_id(
@@ -435,12 +442,14 @@ def make_cdm(
         *_relative(conjunction),
         *_screening(screening_period, screening_volume),
     ]
-    first, second = (None, None) if radii is None else radii
+    primary_radius, secondary_radius = (None, None) if radii is None else radii
     return Cdm(
         Section("header", tuple(header)),
         Section("relative", tuple(relative)),
         (
-            _segment(1, conjunction.primary, primary, first),
-            _segment(2, conjunction.secondary, secondary, second),
+            _object_section(1, conjunction.primary, primary_metadata, primary_radius),
+            _object_section(
+                2, conjunction.secondary, secondary_metadata, secondary_radius
+            ),
         ),
     )

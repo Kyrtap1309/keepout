@@ -86,7 +86,7 @@ def test_min_rng_is_in_metres(
     # keepout's ranges on GP data are within a few hundred metres of MIN_RNG
     # read in metres; read in kilometres, MIN_RNG would be 1000 times larger
     # than both keepout's ranges and the 1 to 5 km exclusion volumes.
-    assert all(cdm.min_range <= 5e3 for cdm in cdms)
+    assert all(cdm.range_at_tca <= 5e3 for cdm in cdms)
     assert {cdm.object1.exclusion_volume for cdm in cdms} <= {"1.00", "3.00", "5.00"}
     difference = summary["range_difference"]["median"]
     assert difference is not None

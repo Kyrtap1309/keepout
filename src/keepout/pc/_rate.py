@@ -2,8 +2,9 @@
 
 The rate ``Ncdot(t)`` [1/s] is defined in :mod:`keepout.pc.hall3d`; it is
 shared by :func:`~keepout.pc.hall3d.hall3d`, which integrates it, and
-:func:`~keepout.pc.montecarlo.montecarlo`, which samples trials only where
-it is not negligible (:mod:`keepout.pc._encounters` locates them).
+:func:`~keepout.pc.montecarlo.montecarlo`, which samples only where
+it is not negligible (:mod:`keepout.pc._encounters` locates them). ``R`` is
+the combined hard-body radius.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ import numpy as np
 from scipy import special
 
 from keepout._linalg import from_eigen, take
-from keepout._types import FloatArray
+from keepout._types import BoolArray, FloatArray
 from keepout.errors import PcConvergenceError
 from keepout.pc._orbit import OrbitUncertainty
 from keepout.pc._overlap import RATE_ERRORS, Gaussians, peak_overlap
@@ -45,16 +46,16 @@ class CollisionRate:
     ----------
     primary, secondary
         The two orbits with their uncertainty.
-    radius
+    hard_body_radius
         Combined hard-body radius [m].
     """
 
     primary: OrbitUncertainty
     secondary: OrbitUncertainty
-    radius: float
+    hard_body_radius: float
     floor_variance: float = field(init=False)
     """Smallest position variance [m^2] used when inverting a covariance:
-    :data:`~keepout.pc._plane.SIGMA_FLOOR` of the radius, squared (as in
+    :data:`~keepout.pc._plane.SIGMA_FLOOR` of the hard-body radius, squared (as in
     2-D Pc and CARA's ``Fclip``), so a perfectly known object has a
     finite, tiny extent."""
     evaluations: int = field(default=0, init=False)
@@ -68,10 +69,10 @@ class CollisionRate:
     order evaluated."""
 
     def __post_init__(self) -> None:
-        self.floor_variance = (SIGMA_FLOOR * self.radius) ** 2
+        self.floor_variance = (SIGMA_FLOOR * self.hard_body_radius) ** 2
 
     @property
-    def position_covariance(self) -> FloatArray:
+    def combined_position_covariance(self) -> FloatArray:
         """Combined Cartesian position covariance at TCA [m^2]."""
         result: FloatArray = (
             self.primary.position_covariance + self.secondary.position_covariance
@@ -89,27 +90,23 @@ class CollisionRate:
         self.evaluations += times.size
         gaussians = self.mean_centred(times)
         values = np.zeros(times.size)
-        active = np.flatnonzero(~negligible(gaussians, self.radius))
+        active = np.flatnonzero(~negligible(gaussians, self.hard_body_radius))
         if active.size == 0:
             return values
         mean_centred = gaussians.take(active)
-        converged, ok = peak_overlap(
+        peak_centred, converged = peak_overlap(
             self.primary,
             self.secondary,
             times[active],
             self.floor_variance,
             mean_centred,
         )
-        source = Gaussians(
-            *(
-                np.where(ok.reshape(-1, *(1,) * (c.ndim - 1)), c, m)
-                for c, m in zip(converged, mean_centred, strict=True)
-            )
-        )
+        source = _where_rows(converged, peak_centred, mean_centred)
         values[active] = self._checked_rates(times[active], source)
+        failed = active[~converged]
         self.fallbacks.extend(
             (float(t_k), float(value))
-            for t_k, value in zip(times[active[~ok]], values[active[~ok]], strict=True)
+            for t_k, value in zip(times[failed], values[failed], strict=True)
         )
         return values
 
@@ -160,8 +157,8 @@ class CollisionRate:
         reordering it, e.g. in the principal axes of ``A``, moves the rate
         by up to ~1e-6 relative.
         """
-        mean = gaussians.x2 - gaussians.x1
-        covariance = gaussians.p1 + gaussians.p2
+        mean = gaussians.secondary_mean - gaussians.primary_mean
+        covariance = gaussians.primary_covariance + gaussians.secondary_covariance
         values, vectors = np.linalg.eigh(covariance[:, :3, :3])
         smallest = values[:, 0]
         floored_here = smallest < self.floor_variance
@@ -183,12 +180,22 @@ class CollisionRate:
             c - gain @ np.swapaxes(b, 1, 2),
         )
         along = np.einsum("mi,mi->m", vectors[:, :, 0], mean[:, :3])
-        grids = sphere_grids(floored, along, self.radius)
+        grids = sphere_grids(floored, along, self.hard_body_radius)
         rates = [
-            _sphere_integral(grid, relative.row(k), self.radius)
+            _sphere_integral(grid, relative.row(k), self.hard_body_radius)
             for k, grid in enumerate(grids)
         ]
         return np.array(rates, dtype=np.float64)
+
+
+def _where_rows(mask: BoolArray, if_true: Gaussians, if_false: Gaussians) -> Gaussians:
+    """``if_true`` at the times where ``mask`` holds, ``if_false`` elsewhere."""
+    return Gaussians(
+        *(
+            np.where(mask.reshape(-1, *(1,) * (a.ndim - 1)), a, b)
+            for a, b in zip(if_true, if_false, strict=True)
+        )
+    )
 
 
 class _Relative(NamedTuple):
@@ -217,7 +224,9 @@ class _Relative(NamedTuple):
         return take(self, k)
 
 
-def _sphere_integral(grid: SphereGrid, gaussian: _Relative, radius: float) -> float:
+def _sphere_integral(
+    grid: SphereGrid, gaussian: _Relative, hard_body_radius: float
+) -> float:
     """The rate [1/s] at one time: the flux through the hard-body sphere,
     integrated by the product rule ``grid``.
 
@@ -230,7 +239,7 @@ def _sphere_integral(grid: SphereGrid, gaussian: _Relative, radius: float) -> fl
     nodes, weights = grid.cartesian(gaussian.axes)
     # The mean is subtracted (and added below) column by column: the same
     # values as broadcasting it, faster for ``(k, 3)`` arrays.
-    offset = radius * nodes
+    offset = hard_body_radius * nodes
     for j in range(3):
         offset[:, j] -= r_mean[j]
     mahalanobis = np.einsum("ij,ij->i", offset @ gaussian.a_inverse, offset)
@@ -244,4 +253,4 @@ def _sphere_integral(grid: SphereGrid, gaussian: _Relative, radius: float) -> fl
         velocity[:, j] += v_mean[j]
     x = np.einsum("ij,ij->i", nodes, velocity) / (SQRT_2 * sigma)
     flux = sigma / SQRT_2PI * (np.exp(-x * x) - _SQRT_PI * x * special.erfc(x))
-    return radius**2 * float(np.sum(weights * density * flux))
+    return hard_body_radius**2 * float(np.sum(weights * density * flux))

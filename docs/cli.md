@@ -203,14 +203,15 @@ repository by `tools/validation_report.py`.
 instead of tables (strict JSON: no `NaN`), for scripts and other tools;
 errors still go to standard error with the same exit status. `screen` and
 `assess` describe each event in the same shape: `event_id`, `tca`,
-`object1` and `object2` (designator and name), `miss_distance` [m], `cdms`
+`object1` and `object2` (`object_id` and `name`), `miss_distance_m`, `cdms`
 (their `MESSAGE_ID`s), `pc`, `level` (`green`, `yellow`, `red` or `null`),
 `trend`, `action` (`ignore`, `monitor`, `prepare_manoeuvre` or
 `manoeuvre`), `reasons`, `notes` and `observations` (each CDM's
-`message_id`, `time_to_tca` [s], `pc`, `method`, `error`, `reported_pc`,
-`diagnostics` and `assumed_covariance`) and `assumed_covariances` (true when a CDM of the event
+`message_id`, `time_to_tca_s`, `pc`, `method`, `error`, `reported_pc`,
+`diagnostics` and `assumed_covariance`) and `assumed_covariance` (true when a CDM of the event
 has an object with `COVARIANCE_METHOD = DEFAULT`). Both commands also give
-`assumed_covariances` at the top: the number of such events, every event
-for `screen`. `screen` adds each approach's `relative_speed` [m/s] and
+`assumed_covariance_events` at the top: the number of such events, every event
+for `screen`. `screen` adds each approach's `relative_speed_m_s` and
 `cdm_file`, and lists the element sets it `skipped` with the reason;
-`assess` adds `manoeuvre` (true when it exits with status 3).
+`assess` adds `cdm_count` (the CDMs read) and `manoeuvre` (true when it
+exits with status 3).
