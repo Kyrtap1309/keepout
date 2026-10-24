@@ -30,16 +30,13 @@ from typing import Final, NamedTuple
 from sgp4.alpha5 import from_alpha5
 from sgp4.io import compute_checksum
 
-from keepout.ccsds.message import Located
+from keepout.ccsds.message import UNKNOWN, Located
 from keepout.errors import OmmParseError
-from keepout.omm._io import load_file, parse_record
+from keepout.omm._io import OMM, parse_record
 from keepout.omm.keywords import DEFAULTS
 from keepout.omm.model import Omm
 
-__all__ = ["UNKNOWN", "checksum", "load", "loads"]
-
-UNKNOWN: Final = "UNKNOWN"
-"""``OBJECT_NAME`` or ``OBJECT_ID`` of a TLE that does not give it."""
+__all__ = ["checksum", "load", "loads"]
 
 _LINES: Final = {
     "1": re.compile(
@@ -299,4 +296,4 @@ def load(path: str | Path) -> tuple[Omm, ...]:
     path
         File to read.
     """
-    return load_file(path, loads)
+    return OMM.load(path, loads)

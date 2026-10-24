@@ -7,13 +7,16 @@ import math
 import statistics
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from typing import Final
 
 from keepout._validation import require_at_least, require_positive
+from keepout.risk._text import days_text
 from keepout.risk.observation import PC_FLOOR, PcObservation
-from keepout.risk.thresholds import RiskLevel, Thresholds
+from keepout.risk.thresholds import DEFAULT_THRESHOLDS, RiskLevel, Thresholds
 from keepout.units import DAY
 
 __all__ = [
+    "DEFAULT_TREND_CONFIG",
     "Direction",
     "Trend",
     "TrendConfig",
@@ -61,6 +64,10 @@ class TrendConfig:
     def __post_init__(self) -> None:
         require_at_least(self.window, 2, "window")
         require_positive(self.steady_within, "steady_within")
+
+
+DEFAULT_TREND_CONFIG: Final = TrendConfig()
+"""The default trend configuration."""
 
 
 @dataclass(frozen=True, eq=False, slots=True)
@@ -121,13 +128,8 @@ def _chronological(
     return tuple(sorted(observations, key=_order))
 
 
-def _days(seconds: float) -> str:
-    """A duration in days, as keepout prints it: ``1.50 d``."""
-    return f"{seconds / DAY:.2f} d"
-
-
 def _label(observation: PcObservation) -> str:
-    when = f"{_days(observation.time_to_tca)} before TCA"
+    when = f"{days_text(observation.time_to_tca)} before TCA"
     if observation.message_id is None:
         return when
     return f"{observation.message_id} ({when})"
@@ -230,8 +232,8 @@ def _direction(
 def analyse_trend(
     observations: Iterable[PcObservation],
     *,
-    thresholds: Thresholds | None = None,
-    config: TrendConfig | None = None,
+    thresholds: Thresholds = DEFAULT_THRESHOLDS,
+    config: TrendConfig = DEFAULT_TREND_CONFIG,
 ) -> Trend:
     """The trend of an event's observations, in any order.
 
@@ -243,27 +245,23 @@ def analyse_trend(
     observations
         The event's observations.
     thresholds
-        Thresholds of the points' levels; :class:`Thresholds` defaults if
-        ``None``.
+        Thresholds of the points' levels.
     config
-        How the direction is decided; :class:`TrendConfig` defaults if
-        ``None``.
+        How the direction is decided.
 
     Raises
     ------
     ValueError
         If there are no observations.
     """
-    limits = thresholds if thresholds is not None else Thresholds()
-    settings = config if config is not None else TrendConfig()
     ordered = _chronological(observations)
     if not ordered:
         raise ValueError("a trend needs at least one observation")
-    points, notes = _points(ordered, limits)
-    fitted = points[-settings.window :]
+    points, notes = _points(ordered, thresholds)
+    fitted = points[-config.window :]
     if any(point.value < PC_FLOOR for point in fitted):
         notes.append(f"Pc below {PC_FLOOR:g} fitted at {PC_FLOOR:g}")
-    direction, slope, note = _direction(fitted, settings)
+    direction, slope, note = _direction(fitted, config)
     if note is not None:
         notes.append(note)
-    return Trend(ordered, tuple(points), direction, slope, tuple(notes), limits)
+    return Trend(ordered, tuple(points), direction, slope, tuple(notes), thresholds)

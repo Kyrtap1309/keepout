@@ -8,6 +8,7 @@ verified by SHA-256 and cached under
 
 from __future__ import annotations
 
+import contextlib
 import csv
 import re
 import urllib.parse
@@ -278,10 +279,8 @@ def load_xlsx(path: Path) -> list[dict[str, Cell]]:
         workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
     except (OSError, KeyError, ValueError, zipfile.BadZipFile, zlib.error) as exc:
         raise CaraFormatError(f"{path}: not a readable .xlsx workbook ({exc})") from exc
-    try:
+    with contextlib.closing(workbook):
         rows = list(workbook.worksheets[0].iter_rows(values_only=True))
-    finally:
-        workbook.close()
     if not rows or not any(rows[0]):
         raise CaraFormatError(f"{path}: no header row")
     cells = list(rows[0])

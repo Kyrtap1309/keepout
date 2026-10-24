@@ -17,7 +17,7 @@ from scipy import special
 
 from keepout._types import FloatArray, override
 from keepout._validation import require_positive
-from keepout.encounter import Role
+from keepout.encounter import EncounterPlane, Role
 from keepout.errors import CovarianceError, GeometryError
 from keepout.pc.result import Method
 
@@ -210,3 +210,35 @@ def plane_gaussian(
         radius=radius,
         diagnostics=tuple(diagnostics),
     )
+
+
+def plane_gaussian_of(
+    plane: EncounterPlane, radius: float, method: Method | None
+) -> PlaneGaussian:
+    """The :func:`plane_gaussian` of an encounter plane, for a 2-D method.
+
+    Parameters
+    ----------
+    plane
+        The encounter plane.
+    radius
+        Hard-body radius [m].
+    method
+        The method that needs both covariances, checked to be known first
+        (:func:`require_known_covariance`); ``None`` for a method that
+        checks the unknown covariances itself.
+
+    Raises
+    ------
+    MissingCovariance
+        If ``method`` is given and a covariance is unknown.
+    ValueError
+        If ``radius`` is not finite and positive.
+    GeometryError
+        If the miss vector is not finite.
+    CovarianceError
+        If the covariance is not finite or has no positive eigenvalue.
+    """
+    if method is not None:
+        require_known_covariance(plane.unknown_covariance, method)
+    return plane_gaussian(plane.miss_vector, plane.covariance, radius)

@@ -32,7 +32,7 @@ puts it on the singularity. Kepler's equation is solved by Newton's method
 from Danby's starting value, which converges for every eccentricity below 1;
 if it does not converge (e.g. NaN elements), `GeometryError` is raised.
 Jacobians are taken by the complex step, exact to machine precision
-(`complex_step_jacobian` raises `TypeError` if the function returns a real
+(`complex_step` raises `TypeError` if the function returns a real
 array, which would give a zero Jacobian).
 Both methods need elliptic orbits and 6x6 covariances; a covariance with a
 zero velocity block is allowed.

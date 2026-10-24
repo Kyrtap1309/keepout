@@ -3,19 +3,18 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Final, NamedTuple, TypeVar
+from typing import Any, Final, NamedTuple
 
 from astropy.time import Time
 
-from keepout.ccsds import files
 from keepout.ccsds.epochs import format_epoch
 from keepout.ccsds.keywords import parse_value
 from keepout.ccsds.message import Family, Located
 from keepout.errors import OmmParseError, OmmWriteError
 from keepout.omm.keywords import (
+    ATTRIBUTE_KEYWORDS,
     ATTRIBUTES,
     FIXED_METADATA,
     KEYWORDS,
@@ -25,26 +24,14 @@ from keepout.omm.keywords import (
 )
 from keepout.omm.model import InvalidElement, Omm
 
-_KEYWORD_OF: dict[str, str] = {attribute: key for key, attribute in ATTRIBUTES.items()}
-
-_T = TypeVar("_T")
-
-
 OMM: Final = Family(
-    "OMM", OmmParseError, OmmWriteError, keyword_width=len("MEAN_ELEMENT_THEORY")
+    "OMM",
+    OmmParseError,
+    OmmWriteError,
+    keyword_width=len("MEAN_ELEMENT_THEORY"),
+    unknown_is_text=True,
 )
-"""The OMM message family."""
-
-
-def load_file(path: str | Path, loads: Callable[[str], _T]) -> _T:
-    """A file parsed by ``loads``; see :func:`keepout.ccsds.files.read_file`.
-
-    Raises
-    ------
-    OmmParseError
-        If the file is broken gzip data or not UTF-8 text.
-    """
-    return files.load_file(path, loads, OMM)
+"""The OMM message family; keywords it does not keep are read as text."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,7 +132,7 @@ def parse_record(
     try:
         return Omm(**{ATTRIBUTES[key]: parsed[key] for key in ATTRIBUTES})
     except InvalidElement as exc:
-        raise make_error(str(exc), _KEYWORD_OF[exc.attribute]) from exc
+        raise make_error(str(exc), ATTRIBUTE_KEYWORDS[exc.attribute].name) from exc
 
 
 def check_version(

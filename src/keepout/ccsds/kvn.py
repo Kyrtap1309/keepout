@@ -9,7 +9,8 @@ section 4). The message readers and writers (:mod:`keepout.cdm.kvn`,
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Final
+from collections.abc import Callable, Iterator
+from typing import TYPE_CHECKING, Final, NamedTuple
 
 from keepout.ccsds.message import Located
 
@@ -17,7 +18,16 @@ if TYPE_CHECKING:
     from keepout.ccsds.keywords import Keyword
     from keepout.ccsds.message import Family
 
-__all__ = ["assignment", "comment", "format_line", "located_value", "split_unit"]
+__all__ = [
+    "KvnLine",
+    "assignment",
+    "comment",
+    "format_line",
+    "located_value",
+    "read_lines",
+    "require_started",
+    "split_unit",
+]
 
 _ASSIGNMENT: Final = re.compile(r"^(?P<keyword>[A-Z][A-Z0-9_]*)\s*=\s*(?P<value>.*)$")
 _UNIT: Final = re.compile(r"^(?P<value>.*?)\s*\[(?P<unit>[^\[\]]*)\]$")
@@ -74,8 +84,93 @@ def split_unit(text: str) -> tuple[str, str | None]:
     return match["value"].strip(), match["unit"].strip()
 
 
+class KvnLine(NamedTuple):
+    """A line of a KVN message that is not blank."""
+
+    number: int
+    """1-based line number."""
+    keyword: str | None
+    """The keyword of an assignment; None for a ``COMMENT`` line."""
+    text: str
+    """The value of an assignment (with its unit, if any), or the comment text."""
+
+
+def _no_record() -> int | None:
+    return None
+
+
+def read_lines(
+    text: str, family: Family, *, record: Callable[[], int | None] = _no_record
+) -> Iterator[KvnLine]:
+    """The comments and assignments of KVN ``text``, in order; blank lines
+    are skipped.
+
+    Parameters
+    ----------
+    text
+        The message text.
+    family
+        The message family, whose parse error a malformed line raises.
+    record
+        The 1-based message being read when a line is malformed, for the
+        error, in a text of several messages.
+
+    Raises
+    ------
+    CcsdsParseError
+        The family's, for a line that is neither a comment nor
+        ``KEYWORD = value``.
+    """
+    for number, raw in enumerate(text.splitlines(), start=1):
+        line = raw.strip()
+        if not line:
+            continue
+        remark = comment(line)
+        if remark is not None:
+            yield KvnLine(number, None, remark)
+            continue
+        assigned = assignment(line)
+        if assigned is None:
+            raise family.parse_error(
+                f"expected 'KEYWORD = value', got {line!r}",
+                record=record(),
+                line=number,
+            )
+        yield KvnLine(number, *assigned)
+
+
+def require_started(
+    line: KvnLine, family: Family, version_keyword: str, *, started: bool
+) -> None:
+    """A check that ``line`` comes after a message's first keyword,
+    ``version_keyword``.
+
+    Parameters
+    ----------
+    line
+        The line read.
+    family
+        The message family, whose parse error a misplaced line raises.
+    version_keyword
+        The keyword that starts each message of the family.
+    started
+        Whether a message has started before ``line``.
+
+    Raises
+    ------
+    CcsdsParseError
+        The family's, at ``line``, if no message has started.
+    """
+    if not started:
+        raise family.parse_error(
+            f"{version_keyword} must be the first keyword",
+            line=line.number,
+            keyword=line.keyword,
+        )
+
+
 def located_value(
-    spec: Keyword | None, text: str, line: int, *, unknown_is_text: bool
+    spec: Keyword | None, text: str, line: int, family: Family
 ) -> Located:
     """The value of an assignment, split from its unit unless it is text.
 
@@ -89,10 +184,13 @@ def located_value(
         The value of the assignment (see :func:`assignment`).
     line
         Line number of the assignment.
-    unknown_is_text
-        Whether a keyword without a table entry has a text value.
+    family
+        The message family; a keyword without a table entry has a text
+        value if its :attr:`~keepout.ccsds.message.Family.unknown_is_text`.
     """
-    if (spec is None and unknown_is_text) or (spec is not None and spec.kind == "str"):
+    if (spec is None and family.unknown_is_text) or (
+        spec is not None and spec.kind == "str"
+    ):
         return Located(text, None, line)
     value, unit = split_unit(text)
     return Located(value, unit, line)

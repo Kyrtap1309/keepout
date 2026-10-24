@@ -19,7 +19,7 @@ from typing import Final
 from scipy import integrate
 
 from keepout.encounter import EncounterPlane
-from keepout.pc._plane import PlaneGaussian, plane_gaussian, require_known_covariance
+from keepout.pc._plane import PlaneGaussian, plane_gaussian_of
 from keepout.pc.result import PcResult
 
 __all__ = [
@@ -123,8 +123,7 @@ def foster(
     """
     if not rtol >= MIN_RTOL:
         raise ValueError(f"rtol must be >= {MIN_RTOL:.3g}, got {rtol}")
-    require_known_covariance(plane.unknown_covariance, "foster")
-    gaussian = plane_gaussian(plane.miss_vector, plane.covariance, hard_body_radius)
+    gaussian = plane_gaussian_of(plane, hard_body_radius, "foster")
     return gaussian_pc(gaussian, rtol=rtol)
 
 

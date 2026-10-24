@@ -24,19 +24,17 @@ from types import MappingProxyType
 from typing import Final, Self
 
 import astropy.units as u
-import numpy as np
 from astropy.time import Time
 
 from keepout._pickling import reduce_with_mappings
 from keepout._types import FloatArray, override, read_only
 from keepout.conjunction import Conjunction, combined_hard_body_radius
 from keepout.covariance import Covariance
-from keepout.errors import GeometryError
 from keepout.frames import relative_position_rtn
 from keepout.objects import ObjectState, require_same_epoch
 from keepout.omm import Omm
 from keepout.screening.volume import ScreeningVolume
-from keepout.state import StateVector
+from keepout.state import RelativeMotion, StateVector, relative_motion, require_frame
 
 __all__ = [
     "CloseApproach",
@@ -57,7 +55,8 @@ class ScreeningRole(enum.StrEnum):
     """Given in the catalog."""
 
 
-_ROLES: Final = tuple(ScreeningRole)
+_ROLE_RANK: Final = {role: rank for rank, role in enumerate(ScreeningRole)}
+"""Each role's place in the order of skipped objects."""
 
 
 @dataclass(frozen=True, eq=False)
@@ -92,10 +91,7 @@ class CloseApproach:
 
     def __post_init__(self) -> None:
         for state in (self.primary_state, self.secondary_state):
-            if state.frame != "GCRF":
-                raise GeometryError(
-                    f"a close approach needs GCRF states, got {state.frame}"
-                )
+            require_frame(state, "GCRF", "a close approach")
         require_same_epoch(
             self.secondary_state.epoch,
             self.primary_state.epoch,
@@ -109,15 +105,19 @@ class CloseApproach:
         return tca
 
     @property
+    def relative_motion(self) -> RelativeMotion:
+        """The secondary's motion relative to the primary at TCA, in GCRF."""
+        return relative_motion(self.primary_state, self.secondary_state)
+
+    @property
     def relative_position(self) -> FloatArray:
         """Secondary minus primary position [m], in GCRF."""
-        position: FloatArray = self.secondary_state.r - self.primary_state.r
-        return position
+        return self.relative_motion.position
 
     @property
     def miss_distance(self) -> float:
         """Distance between the objects at TCA [m]."""
-        return float(np.linalg.norm(self.relative_position))
+        return self.relative_motion.distance
 
     @cached_property
     def miss_rtn(self) -> FloatArray:
@@ -131,13 +131,12 @@ class CloseApproach:
     @property
     def relative_velocity(self) -> FloatArray:
         """Secondary minus primary velocity [m/s], in GCRF."""
-        velocity: FloatArray = self.secondary_state.v - self.primary_state.v
-        return velocity
+        return self.relative_motion.velocity
 
     @property
     def relative_speed(self) -> float:
         """Relative speed at TCA [m/s]."""
-        return float(np.linalg.norm(self.relative_velocity))
+        return self.relative_motion.speed
 
     def to_conjunction(
         self,
@@ -221,7 +220,8 @@ class SkipReason(enum.StrEnum):
     """SGP4 reported an error inside the window."""
 
 
-_REASONS: Final = tuple(SkipReason)
+_REASON_RANK: Final = {reason: rank for rank, reason in enumerate(SkipReason)}
+"""Each reason's place in the order of skipped objects."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -265,11 +265,11 @@ def _chronological(approach: CloseApproach) -> tuple[float, float, int, int]:
 def _skip_order(skipped: SkippedObject) -> tuple[int, int, float, float, int]:
     epoch = skipped.elements.epoch
     return (
-        _ROLES.index(skipped.role),
+        _ROLE_RANK[skipped.role],
         skipped.catalog_number,
         float(epoch.jd1),
         float(epoch.jd2),
-        _REASONS.index(skipped.reason),
+        _REASON_RANK[skipped.reason],
     )
 
 

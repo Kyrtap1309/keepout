@@ -11,6 +11,7 @@ import pytest
 from astropy.time import Time
 from screening_data import FIXTURE_START, fixture_by_number, load_fixture
 
+from keepout.ccsds.message import UNKNOWN
 from keepout.cdm import kvn, make_message_id, xml
 from keepout.errors import FleetError
 from keepout.pc import computation, compute_pc
@@ -23,7 +24,7 @@ from keepout.synthetic import (
     OperatorResult,
     SyntheticCovarianceModel,
 )
-from keepout.synthetic.operator import DEFAULT_MODEL, HEADER_COMMENTS, UNKNOWN, run
+from keepout.synthetic.operator import DEFAULT_MODEL, HEADER_COMMENTS, run
 from keepout.units import DAY
 
 FIXTURE = load_fixture()

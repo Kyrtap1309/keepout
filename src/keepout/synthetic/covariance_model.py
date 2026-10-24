@@ -49,11 +49,13 @@ import enum
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Final, NamedTuple, assert_never
+from typing import Final, NamedTuple, Self
 
 import numpy as np
 from astropy.time import Time
 
+from keepout._pickling import reduce_with_mappings
+from keepout._types import override
 from keepout._validation import (
     non_negative_float,
     positive_float,
@@ -245,14 +247,14 @@ class SyntheticCovarianceModel:
 
     See the module's description for the model and its sources. Every
     parameter can be overridden, e.g. ``dataclasses.replace(model,
-    leo=RegimeParameters(100.0, 500.0, 100.0, 0.02))`` or
-    ``SyntheticCovarianceModel(safety_factor=1.0)``.
+    regimes={**model.regimes, OrbitRegime.LEO: RegimeParameters(100.0,
+    500.0, 100.0, 0.02)})`` or ``SyntheticCovarianceModel(safety_factor=1.0)``.
 
     Parameters
     ----------
-    leo, meo, gto, heo, geo
+    regimes
         Parameters of each :class:`OrbitRegime`, before the safety factor;
-        default :data:`PUBLISHED_PARAMETERS`.
+        default :data:`PUBLISHED_PARAMETERS`. Stored as a read-only copy.
     safety_factor
         Factor ``f`` on every sigma (and so on the rate) [-]; default
         :data:`SAFETY_FACTOR`.
@@ -260,35 +262,38 @@ class SyntheticCovarianceModel:
     Raises
     ------
     ValueError
-        If ``safety_factor`` is not finite and positive.
+        If ``regimes`` does not give exactly every regime, or
+        ``safety_factor`` is not finite and positive.
     """
 
-    leo: RegimeParameters = PUBLISHED_PARAMETERS[OrbitRegime.LEO]
-    meo: RegimeParameters = PUBLISHED_PARAMETERS[OrbitRegime.MEO]
-    gto: RegimeParameters = PUBLISHED_PARAMETERS[OrbitRegime.GTO]
-    heo: RegimeParameters = PUBLISHED_PARAMETERS[OrbitRegime.HEO]
-    geo: RegimeParameters = PUBLISHED_PARAMETERS[OrbitRegime.GEO]
+    regimes: Mapping[OrbitRegime, RegimeParameters] = PUBLISHED_PARAMETERS
     safety_factor: float = SAFETY_FACTOR
 
     def __post_init__(self) -> None:
+        regimes = dict(self.regimes)
+        if regimes.keys() != set(OrbitRegime):
+            given = ", ".join(map(str, regimes))
+            raise ValueError(
+                f"regimes must give every one of {', '.join(OrbitRegime)}, got {given}"
+            )
+        # In regime order, so that equal models hash alike.
+        ordered = {regime: regimes[regime] for regime in OrbitRegime}
+        object.__setattr__(self, "regimes", MappingProxyType(ordered))
         factor = positive_float(self.safety_factor, "safety_factor")
         object.__setattr__(self, "safety_factor", factor)
 
+    @override
+    def __hash__(self) -> int:
+        # The regimes' mapping proxy does not hash; its items do.
+        return hash((tuple(self.regimes.items()), self.safety_factor))
+
+    @override
+    def __reduce__(self) -> tuple[type[Self], tuple[object, ...]]:
+        return reduce_with_mappings(self)
+
     def parameters(self, regime: OrbitRegime) -> RegimeParameters:
         """The parameters of ``regime``, before the safety factor."""
-        match regime:
-            case OrbitRegime.LEO:
-                return self.leo
-            case OrbitRegime.MEO:
-                return self.meo
-            case OrbitRegime.GTO:
-                return self.gto
-            case OrbitRegime.HEO:
-                return self.heo
-            case OrbitRegime.GEO:
-                return self.geo
-            case _:
-                assert_never(regime)
+        return self.regimes[regime]
 
     def sigmas(self, omm: Omm, time: Time) -> RtnSigmas:
         """The model's position sigmas of an element set at a time.

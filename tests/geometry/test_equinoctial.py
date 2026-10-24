@@ -1,11 +1,14 @@
+from collections.abc import Callable
+from typing import Any
+
 import numpy as np
+import numpy.typing as npt
 import pytest
 from scipy.integrate import solve_ivp
 
 from keepout._types import ComplexArray, FloatArray
 from keepout.equinoctial import (
     complex_step,
-    complex_step_jacobian,
     propagate,
     retrograde_factor,
     to_cartesian,
@@ -14,6 +17,14 @@ from keepout.equinoctial import (
 )
 from keepout.errors import GeometryError
 from keepout.orbits import EARTH_MU
+
+
+def complex_step_jacobian(
+    function: Callable[[ComplexArray], npt.NDArray[Any]], x: npt.ArrayLike
+) -> FloatArray:
+    """The Jacobian of :func:`complex_step`."""
+    return complex_step(function, x)[1]
+
 
 LEO = np.array([7000e3, 100e3, -50e3, 10.0, 7400.0, 1200.0])
 # Retrograde and exactly equatorial (i = 180 deg): singular for fr = +1.

@@ -7,8 +7,9 @@ and :mod:`keepout.cdm.xml` read and write a specific one.
 
 from pathlib import Path
 
+from keepout.ccsds.files import strip_bom
 from keepout.cdm import kvn, xml
-from keepout.cdm._io import load_file
+from keepout.cdm._io import CDM
 from keepout.cdm.builder import (
     ORIGINATOR,
     Maneuverable,
@@ -46,7 +47,7 @@ def loads(text: str) -> Cdm:
     text
         The message.
     """
-    stripped = text.lstrip("\ufeff \t\r\n")
+    stripped = strip_bom(text).lstrip(" \t\r\n")
     return xml.loads(stripped) if stripped.startswith("<") else kvn.loads(stripped)
 
 
@@ -58,4 +59,4 @@ def load(path: str | Path) -> Cdm:
     path
         File to read (UTF-8, gzip-compressed or not).
     """
-    return load_file(path, loads)
+    return CDM.load(path, loads)

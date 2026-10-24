@@ -73,7 +73,7 @@ def test_a_failed_observation_has_an_error_and_no_pc() -> None:
         ({"ci_high": 2.0}, r"ci_high must be in \[0, 1\]"),
         ({"pc": None, "error": "x", "ci_high": 1e-3}, "ci_high needs pc"),
         ({"reported_pc": -1e-3}, r"reported_pc must be in \[0, 1\]"),
-        ({"kind": "guess"}, "kind must be one of"),
+        ({"kind": "guess"}, "unsupported kind"),
     ],
 )
 def test_invalid_observations_are_refused(

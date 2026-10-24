@@ -19,6 +19,7 @@ __all__ = [
     "SPEED_BOUND_MARGIN",
     "chord_sieve",
     "dot",
+    "floored_lowest",
     "speed_bounds",
     "speed_sieve",
 ]
@@ -54,6 +55,13 @@ def dot(a: FloatArray, b: FloatArray) -> FloatArray:
     return product
 
 
+def floored_lowest(bounds: RadiusBounds) -> FloatArray:
+    """Each object's lowest distance from the Earth's centre [m], taken at
+    least :data:`MIN_RADIUS`."""
+    lowest: FloatArray = np.maximum(bounds.lowest, MIN_RADIUS)
+    return lowest
+
+
 def speed_bounds(bounds: RadiusBounds) -> FloatArray:
     """Bounds on each object's speed from bounds on its distance to the Earth.
 
@@ -74,7 +82,7 @@ def speed_bounds(bounds: RadiusBounds) -> FloatArray:
     FloatArray
         Speed bounds [m/s], shape ``(N,)``.
     """
-    lowest = np.maximum(bounds.lowest, MIN_RADIUS)
+    lowest = floored_lowest(bounds)
     highest = np.maximum(bounds.highest, lowest)
     # highest / (lowest + highest), written to give 1 for an infinite highest.
     share = 1.0 / (1.0 + lowest / highest)
@@ -155,24 +163,31 @@ def _acceleration_and_range_bounds(
 
 
 def chord_sieve(
-    rho_start: FloatArray,
-    rho_end: FloatArray,
-    range_start: FloatArray,
-    range_end: FloatArray,
-    interval_length: FloatArray,
+    rho: FloatArray,
+    distance: FloatArray,
+    length: FloatArray,
     speed: FloatArray,
     lowest: FloatArray,
     reach: float,
+    passed: tuple[IndexArray, IndexArray],
 ) -> tuple[BoolArray, BoolArray]:
-    """Which intervals pass the chord sieve, and whether ``f`` is
-    monotone over each.
+    """Which of the intervals that passed the speed sieve pass the chord
+    sieve, and whether ``f`` is monotone over each.
 
-    Each entry is one interval of one pair that passed the speed sieve:
-    the relative positions and ranges at its ends, its length, the pair's
-    relative speed bound and the lowest radius of either object. ``reach``
-    is the volume's bounding radius. A pair at exactly the same position at
-    both ends is taken as one object and fails.
+    ``rho`` and ``distance`` are the relative positions and ranges of the
+    pairs (rows) on the grid, as :func:`speed_sieve` takes them, ``length``
+    the intervals' lengths, ``speed`` each pair's relative speed bound,
+    ``lowest`` the lowest radius of either object of each pair and
+    ``reach`` the volume's bounding radius; ``passed`` is what
+    :func:`speed_sieve` returned. A pair at exactly the same position at
+    both ends of an interval is taken as one object and fails.
     """
+    pair, interval = passed
+    rho_start, rho_end = rho[pair, interval], rho[pair, interval + 1]
+    range_start, range_end = distance[pair, interval], distance[pair, interval + 1]
+    interval_length = length[interval]
+    speed = speed[pair]
+    lowest = lowest[pair]
     chord = rho_end - rho_start
     squared = dot(chord, chord)
     along = np.zeros_like(squared)

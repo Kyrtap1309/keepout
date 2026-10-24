@@ -6,7 +6,7 @@ import validation_report as report
 from builders import case_with_reference
 
 from keepout.pc.result import PcResult
-from keepout.validation.criteria import MONTE_CARLO, Criterion
+from keepout.validation.criteria import MONTE_CARLO, BoundCriterion
 from keepout.validation.evaluation import Outcome, evaluate
 
 
@@ -14,7 +14,7 @@ def test_summary_and_page_report_failures() -> None:
     passing = case_with_reference(0.0, absolute_tolerance=1.0)
     failing = case_with_reference(0.5, case_id="bad")
     record = report.Record.of(evaluate([passing, failing]))
-    assert "| test | foster | 1 / 2 |" in report.render_summary(record.rows)
+    assert "| CARA unit tests | foster | 1 / 2 |" in report.render_summary(record.rows)
     page = report.render_page(record)
     assert page.startswith("# Validation against NASA CARA")
     assert "| bad | 5 |" in page
@@ -45,7 +45,7 @@ def test_main_writes_then_checks(
     args = ["--page", str(page), "--readme", str(readme)]
     assert report.main(["--check", *args]) == 1
     assert report.main(args) == 0
-    assert "| test | foster | 1 / 1 |" in readme.read_text(encoding="utf-8")
+    assert "| CARA unit tests | foster | 1 / 1 |" in readme.read_text(encoding="utf-8")
     assert report.main(["--check", *args]) == 0
 
 
@@ -56,7 +56,7 @@ def test_main_fails_when_a_case_fails(
     readme = empty_readme(tmp_path)
     status = report.main(["--page", str(tmp_path / "v.md"), "--readme", str(readme)])
     assert status == 1
-    assert "FAIL test case foster" in capsys.readouterr().out
+    assert "FAIL CARA unit tests case foster" in capsys.readouterr().out
 
 
 def test_a_case_without_a_paper_value_keeps_the_columns() -> None:
@@ -111,7 +111,9 @@ def test_monte_carlo_mode_writes_its_own_page_and_block(
     page = tmp_path / "mc.md"
     args = ["--monte-carlo", "--page", str(page), "--readme", str(readme)]
     assert report.main(args) == 0
-    assert "| test | montecarlo | 1 / 1 |" in readme.read_text(encoding="utf-8")
+    assert "| CARA unit tests | montecarlo | 1 / 1 |" in readme.read_text(
+        encoding="utf-8"
+    )
     assert page.read_text(encoding="utf-8").startswith("# Monte Carlo validation")
 
 
@@ -164,16 +166,16 @@ def test_a_result_within_the_reproducibility_is_reproduced() -> None:
 
 def test_a_result_beyond_the_reproducibility_is_not_reproduced() -> None:
     (difference,) = differences(monte_carlo_outcome(), monte_carlo_outcome(1.1e-4))
-    assert difference.startswith("test mc montecarlo: 2.2")
+    assert difference.startswith("CARA unit tests mc montecarlo: 2.2")
 
 
 def test_a_changed_verdict_is_not_reproduced() -> None:
     passing = case_with_reference(0.5, absolute_tolerance=1.0)
-    failing = dataclasses.replace(passing, criterion=Criterion(absolute=0.1))
+    failing = dataclasses.replace(passing, criterion=BoundCriterion(absolute=0.1))
     old = report.Record.of(evaluate([passing]))
     new = report.Record.of(evaluate([failing]))
     assert new.differences(old) == [
-        f"test case {method}: CARA data or verdict changed"
+        f"CARA unit tests case {method}: CARA data or verdict changed"
         for method in ("foster", "elrod")
     ]
 
@@ -225,6 +227,6 @@ def test_a_run_that_does_not_reproduce_fails_the_check_then_replaces_the_results
     assert run_monte_carlo(tmp_path, monkeypatch, 0.0) == 0
     capsys.readouterr()
     assert run_monte_carlo(tmp_path, monkeypatch, 1.1e-4, "--check") == 1
-    assert "not reproduced: test mc montecarlo" in capsys.readouterr().out
+    assert "not reproduced: CARA unit tests mc montecarlo" in capsys.readouterr().out
     assert run_monte_carlo(tmp_path, monkeypatch, 1.1e-4) == 0
     assert run_monte_carlo(tmp_path, monkeypatch, 1.1e-4, "--check") == 0

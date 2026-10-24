@@ -48,6 +48,7 @@ from typing import Final
 from astropy.time import Time
 
 from keepout._validation import require_single_time
+from keepout.ccsds.message import UNKNOWN
 from keepout.cdm import (
     ORIGINATOR,
     Cdm,
@@ -62,6 +63,8 @@ from keepout.events import ConjunctionEvent
 from keepout.omm import Omm, deduplicate
 from keepout.pc import AUTO, PcComputation
 from keepout.risk import (
+    DEFAULT_DECISION_CONFIG,
+    DEFAULT_THRESHOLDS,
     Action,
     Assessment,
     DecisionConfig,
@@ -84,7 +87,6 @@ from keepout.synthetic.fleet import Fleet
 __all__ = [
     "DEFAULT_MODEL",
     "HEADER_COMMENTS",
-    "UNKNOWN",
     "OperatorEvent",
     "OperatorResult",
     "run",
@@ -99,10 +101,6 @@ HEADER_COMMENTS: Final = (
     "Covariances are assumed (a model, not orbit determination)",
 )
 """Header comments of the operator's CDMs."""
-
-UNKNOWN: Final = "UNKNOWN"
-"""``OBJECT_NAME`` or ``INTERNATIONAL_DESIGNATOR`` of an object whose
-element set has none (CCSDS 508.0-B-1's value for an unknown designator)."""
 
 
 @dataclass(frozen=True, eq=False, slots=True)
@@ -179,8 +177,8 @@ class _Settings:
     created: Time
     originator: str
     compute: PcComputation
-    thresholds: Thresholds | None
-    decision_config: DecisionConfig | None
+    thresholds: Thresholds
+    decision_config: DecisionConfig
 
 
 def run(
@@ -195,8 +193,8 @@ def run(
     created: Time | None = None,
     originator: str = ORIGINATOR,
     compute: PcComputation = AUTO,
-    thresholds: Thresholds | None = None,
-    decision_config: DecisionConfig | None = None,
+    thresholds: Thresholds = DEFAULT_THRESHOLDS,
+    decision_config: DecisionConfig = DEFAULT_DECISION_CONFIG,
 ) -> OperatorResult:
     """A fleet screened against a catalog, a CDM issued per approach, each assessed.
 
@@ -229,7 +227,7 @@ def run(
         keeps the 2-D Pc for the model's position-only covariances.
     thresholds, decision_config
         Risk thresholds and decision point, as for
-        :func:`keepout.risk.assess`; defaults if ``None``.
+        :func:`keepout.risk.assess`.
 
     Returns
     -------
@@ -246,7 +244,7 @@ def run(
         is out of range (as :func:`~keepout.screening.screen`).
     """
     elements = tuple(catalog)
-    newest = {omm.catalog_number: omm for omm in deduplicate(elements).kept}
+    newest = deduplicate(elements).by_number
     missing = [number for number in fleet.catalog_numbers if number not in newest]
     if missing:
         raise FleetError(

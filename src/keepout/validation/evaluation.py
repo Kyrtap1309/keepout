@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from keepout._workers import process_pool, resolve_workers
 from keepout.pc import computation
 from keepout.pc.result import Method, PcResult
-from keepout.validation.cases import ValidationCase
+from keepout.validation.cases import Suite, ValidationCase
 from keepout.validation.criteria import Verdict
 
 __all__ = [
@@ -127,7 +127,7 @@ class MethodSummary:
         ``None`` if none is.
     """
 
-    suite: str
+    suite: Suite
     method: Method
     passed: int
     total: int
@@ -140,7 +140,7 @@ def summarise(outcomes: Iterable[Outcome]) -> tuple[MethodSummary, ...]:
     Suites are in the order they first appear, and so are the methods
     within a suite (the order of the summary in ``docs/validation.md``).
     """
-    suites: dict[str, dict[Method, list[Outcome]]] = {}
+    suites: dict[Suite, dict[Method, list[Outcome]]] = {}
     for outcome in outcomes:
         methods = suites.setdefault(outcome.case.suite, {})
         methods.setdefault(outcome.result.method, []).append(outcome)

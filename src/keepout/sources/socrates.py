@@ -21,6 +21,7 @@ from typing import Final
 
 from astropy.time import Time
 
+from keepout.ccsds.files import strip_bom
 from keepout.errors import SourceFormatError
 from keepout.omm import Omm
 from keepout.units import DAY, KM, julian_seconds_between
@@ -102,7 +103,7 @@ def read_socrates(text: str) -> tuple[SocratesApproach, ...]:
         values, or a value cannot be read.
     """
     header, *lines = text.splitlines(keepends=True) or [""]
-    columns = next(csv.reader([header.removeprefix("\ufeff")]), [])
+    columns = next(csv.reader([strip_bom(header)]), [])
     if tuple(columns) != COLUMNS:
         raise SourceFormatError(f"not a SOCRATES report header: {header.strip()!r}")
     rows = [next(csv.reader([line])) for line in lines]
@@ -111,27 +112,41 @@ def read_socrates(text: str) -> tuple[SocratesApproach, ...]:
             raise SourceFormatError(
                 f"line {number}: {len(row)} values, not {len(COLUMNS)}"
             )
+    records: list[dict[str, str]] = [
+        dict(zip(COLUMNS, row, strict=True)) for row in rows
+    ]
     try:
-        tcas = Time([row[6] for row in rows], format="iso", scale="utc")
+        tcas = Time([record["TCA"] for record in records], format="iso", scale="utc")
         return tuple(
-            SocratesApproach(
-                primary=int(row[0]),
-                secondary=int(row[3]),
-                since_epoch_primary=float(row[2]) * DAY,
-                since_epoch_secondary=float(row[5]) * DAY,
-                since_epoch_tolerance=(
-                    0.5 * 10.0 ** -max(_decimals(row[2]), _decimals(row[5])) * DAY
-                    + _TCA_TOLERANCE
-                ),
-                tca=tcas[index],
-                miss_distance=float(row[7]) * KM,
-                relative_speed=float(row[8]) * KM,
-                line=line,
-            )
-            for index, (row, line) in enumerate(zip(rows, lines, strict=True))
+            _approach(record, tcas[index], line)
+            for index, (record, line) in enumerate(zip(records, lines, strict=True))
         )
     except ValueError as exc:
         raise SourceFormatError(f"cannot read a SOCRATES report: {exc}") from exc
+
+
+def _approach(record: dict[str, str], tca: Time, line: str) -> SocratesApproach:
+    """The approach of one row, by column name, at its parsed ``tca``.
+
+    Raises
+    ------
+    ValueError
+        If a number cannot be read.
+    """
+    # The last digit of the DSE values [days], as the report rounds them.
+    dse_digit = 10.0 ** -max(_decimals(record["DSE_1"]), _decimals(record["DSE_2"]))
+    return SocratesApproach(
+        primary=int(record["NORAD_CAT_ID_1"]),
+        secondary=int(record["NORAD_CAT_ID_2"]),
+        since_epoch_primary=float(record["DSE_1"]) * DAY,
+        since_epoch_secondary=float(record["DSE_2"]) * DAY,
+        since_epoch_tolerance=0.5 * dse_digit * DAY + _TCA_TOLERANCE,
+        tca=tca,
+        # The report's km and km/s, in m and m/s.
+        miss_distance=float(record["TCA_RANGE"]) * KM,
+        relative_speed=float(record["TCA_RELATIVE_SPEED"]) * KM,
+        line=line,
+    )
 
 
 def _decimals(number: str) -> int:

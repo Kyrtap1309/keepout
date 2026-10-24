@@ -46,6 +46,7 @@ __all__ = [
     "computation",
     "compute_pc",
     "encounter_duration",
+    "require_options",
 ]
 
 MethodKind: TypeAlias = Literal["2d", "3d", "montecarlo", "maxpc"]
@@ -247,7 +248,7 @@ def _compute(
     conjunction: Conjunction, method: MethodChoice, options: Mapping[str, object]
 ) -> PcResult:
     """:func:`compute_pc` with its options as a mapping."""
-    _require_options(method, options)
+    require_options(method, options)
     if method == "auto":
         result, (notes, details) = auto(conjunction)
     else:
@@ -276,8 +277,15 @@ def _velocity_notes(conjunction: Conjunction, method: Method) -> tuple[str, ...]
     )
 
 
-def _require_options(method: MethodChoice, options: Mapping[str, object]) -> None:
+def require_options(method: MethodChoice, options: Mapping[str, object]) -> None:
     """A check that ``method`` is known and takes every option in ``options``.
+
+    Parameters
+    ----------
+    method
+        A method name or ``"auto"``.
+    options
+        Options to pass to the method, by name.
 
     Raises
     ------
@@ -342,7 +350,7 @@ class PcComputation:
     options: Mapping[str, object] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        _require_options(self.method, self.options)
+        require_options(self.method, self.options)
         object.__setattr__(self, "options", MappingProxyType(dict(self.options)))
 
     @override

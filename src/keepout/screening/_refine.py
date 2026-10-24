@@ -141,6 +141,7 @@ def _stencil_sum(rho: FloatArray, weights: FloatArray) -> FloatArray:
     return total
 
 
+@dataclass(eq=False, slots=True)
 class Pair:
     """One primary and one catalog object, evaluated at any times.
 
@@ -148,10 +149,10 @@ class Pair:
     start of the window, which is ``duration`` long.
     """
 
-    def __init__(self, sample: States, duration: float) -> None:
-        self.sample = sample
-        self.duration = duration
-        self._known_f: dict[float, float] = {}
+    sample: States
+    duration: float
+    _known_f: dict[float, float] = field(default_factory=dict, init=False)
+    """``f`` at each time it was computed at."""
 
     def states(
         self, stamps: FloatArray
@@ -278,14 +279,13 @@ def minima_inside_volume(
     failure that stopped the search for roots (``failed``).
     """
     bad = np.flatnonzero(np.any(errors != NO_ERROR, axis=0))
-    count = int(bad[0]) if bad.size > 0 else len(tcas)
-    r_primary, v_primary, r_secondary, v_secondary = (state[:count] for state in states)
-    inside = volume.contains_position(r_primary, v_primary, r_secondary)
-    if count < len(tcas):
-        rows = slice(count, count + 1)
+    if bad.size > 0:
+        rows = slice(int(bad[0]), int(bad[0]) + 1)
         require_no_failure(errors[0, rows], errors[1, rows], tcas[rows])
     if failed is not None:
         raise failed
+    r_primary, v_primary, r_secondary, v_secondary = states
+    inside = volume.contains_position(r_primary, v_primary, r_secondary)
     rho = r_secondary - r_primary
     distance = np.sqrt(dot(rho, rho))
     return [

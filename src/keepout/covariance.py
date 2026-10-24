@@ -12,9 +12,10 @@ from astropy.time import Time
 
 from keepout._linalg import from_eigen, symmetric_part
 from keepout._types import FloatArray, read_only
-from keepout.errors import CovarianceError, GeometryError, UnsupportedFrame
+from keepout._validation import require_choice
+from keepout.errors import CovarianceError, UnsupportedFrame
 from keepout.frames import inertial_to_rtn_covariance, rtn_to_inertial_covariance
-from keepout.state import StateVector
+from keepout.state import StateVector, require_frame
 
 __all__ = [
     "COVARIANCE_FRAMES",
@@ -41,6 +42,9 @@ Policy: TypeAlias = Literal["raise", "repair"]
 """What to do with an invalid covariance: raise, or repair with a diagnostic."""
 
 POLICIES: Final[tuple[Policy, ...]] = get_args(Policy)
+
+_FRAME: Final = "covariance frame"
+"""What a frame is, in the error for an unsupported one."""
 
 SYMMETRY_RTOL: Final = 1e-9
 """Allowed asymmetry of ``C[i, j]``, relative to ``sqrt(|C[i, i] C[j, j]|)``."""
@@ -292,22 +296,6 @@ def repair(matrix: npt.ArrayLike) -> tuple[FloatArray, tuple[str, ...]]:
     return fixed, tuple(diagnostics)
 
 
-def _require_gcrf(state: StateVector) -> None:
-    if state.frame != "GCRF":
-        raise GeometryError(
-            f"RTN axes must be built from a GCRF state, got {state.frame}; "
-            "convert with keepout.frames.to_gcrf"
-        )
-
-
-def _require_frame(frame: str) -> None:
-    if frame not in COVARIANCE_FRAMES:
-        raise UnsupportedFrame(
-            f"unsupported covariance frame {frame!r}; "
-            f"expected one of {', '.join(COVARIANCE_FRAMES)}"
-        )
-
-
 def _frozen(array: FloatArray) -> FloatArray:
     symmetric = symmetric_part(array)
     read_only(symmetric)
@@ -345,7 +333,7 @@ class Covariance:
     repairs: tuple[str, ...] = field(default=(), kw_only=True)
 
     def __post_init__(self) -> None:
-        _require_frame(self.frame)
+        require_choice(self.frame, COVARIANCE_FRAMES, _FRAME, UnsupportedFrame)
         array = _as_matrix(self.matrix)
         found = _problems(array)
         if found:
@@ -364,13 +352,10 @@ class Covariance:
         """A matrix and frame already known to be valid, wrapped without
         their checks."""
         covariance = object.__new__(cls)
-        for name, value in (
-            ("matrix", _frozen(matrix)),
-            ("frame", frame),
-            ("epoch", epoch),
-            ("repairs", repairs),
-        ):
-            object.__setattr__(covariance, name, value)
+        object.__setattr__(covariance, "matrix", _frozen(matrix))
+        object.__setattr__(covariance, "frame", frame)
+        object.__setattr__(covariance, "epoch", epoch)
+        object.__setattr__(covariance, "repairs", repairs)
         return covariance
 
     @classmethod
@@ -437,7 +422,7 @@ class Covariance:
         state: StateVector,
         rotate: Callable[[FloatArray, FloatArray, FloatArray], FloatArray],
     ) -> Covariance:
-        _require_gcrf(state)
+        require_frame(state, "GCRF", "RTN axes")
         if self.frame == target:
             return self
         matrix = rotate(self.matrix, state.r, state.v)
@@ -477,9 +462,8 @@ def make_covariance(
     ValueError
         If ``policy`` is not one of :data:`POLICIES`.
     """
-    if policy not in POLICIES:
-        raise ValueError(f"unknown covariance policy {policy!r}")
-    _require_frame(frame)
+    require_choice(policy, POLICIES, "covariance policy")
+    require_choice(frame, COVARIANCE_FRAMES, _FRAME, UnsupportedFrame)
     array = _as_matrix(matrix)
     if policy == "raise":
         return Covariance(array, frame, epoch)

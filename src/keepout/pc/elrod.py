@@ -31,7 +31,7 @@ import numpy as np
 from keepout._types import FloatArray
 from keepout._validation import require_at_least
 from keepout.encounter import EncounterPlane
-from keepout.pc._plane import PlaneGaussian, plane_gaussian, require_known_covariance
+from keepout.pc._plane import PlaneGaussian, plane_gaussian_of
 from keepout.pc.result import PcResult
 
 __all__ = ["ELROD_RTOL", "MAX_ORDER", "START_ORDER", "elrod"]
@@ -122,8 +122,7 @@ def elrod(
     """
     if order is not None:
         require_at_least(order, 1, "order")
-    require_known_covariance(plane.unknown_covariance, "elrod")
-    gaussian = plane_gaussian(plane.miss_vector, plane.covariance, hard_body_radius)
+    gaussian = plane_gaussian_of(plane, hard_body_radius, "elrod")
     diagnostics = list(gaussian.diagnostics)
     resolving = _resolving_order(gaussian)
     if order is not None:

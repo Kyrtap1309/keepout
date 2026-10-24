@@ -8,7 +8,7 @@ as a float, for a dataclass to store.
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeVar
 
 if TYPE_CHECKING:
     from astropy.time import Time
@@ -19,11 +19,14 @@ __all__ = [
     "non_negative_float",
     "positive_float",
     "require_at_least",
+    "require_choice",
     "require_non_negative",
     "require_positive",
     "require_probability",
     "require_single_time",
 ]
+
+_Choice = TypeVar("_Choice")
 
 
 def require_positive(value: float, name: str) -> None:
@@ -115,6 +118,39 @@ def non_negative_float(value: float, name: str) -> float:
     number = float(value)
     require_non_negative(number, name)
     return number
+
+
+def require_choice(
+    value: object,
+    choices: tuple[_Choice, ...],
+    what: str,
+    error: type[ValueError] = ValueError,
+) -> _Choice:
+    """``value`` as one of ``choices``, typed as they are (e.g. a
+    ``Literal``).
+
+    Parameters
+    ----------
+    value
+        The value given.
+    choices
+        The values allowed.
+    what
+        What the value is, for the error: ``"reference frame"``.
+    error
+        The error to raise, :class:`ValueError` or a subclass.
+
+    Raises
+    ------
+    ValueError
+        ``error``, ``unsupported <what> 'x'; expected one of a, b``, if
+        ``value`` is none of ``choices``.
+    """
+    for choice in choices:
+        if value == choice:
+            return choice
+    expected = ", ".join(map(str, choices))
+    raise error(f"unsupported {what} {value!r}; expected one of {expected}")
 
 
 def is_single_line(text: str) -> bool:

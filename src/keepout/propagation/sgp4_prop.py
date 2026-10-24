@@ -5,7 +5,7 @@ of one element set (:func:`satrec_of`)."""
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from datetime import UTC, datetime
 from typing import Final, Literal, NamedTuple, Self, TypeAlias
 
@@ -20,7 +20,7 @@ from keepout._validation import require_non_negative
 from keepout.ccsds.epochs import format_epoch, utc_fields
 from keepout.ccsds.keywords import message_number
 from keepout.errors import UnsupportedElements
-from keepout.omm.keywords import ATTRIBUTES, DEGREE, KEYWORDS, SGP4_EPHEMERIS_TYPE
+from keepout.omm.keywords import ATTRIBUTE_KEYWORDS, DEGREE, SGP4_EPHEMERIS_TYPE
 from keepout.omm.model import SGP4_EPOCH_DIGITS, Omm
 from keepout.propagation._sgp4_radius import brouwer_mean_motion, radius_bounds
 from keepout.propagation.base import (
@@ -61,11 +61,9 @@ _SGP4_EPOCH0: Final = datetime(1949, 12, 31, tzinfo=UTC)
 _NDOT_UNITS: Final = 1036800.0 / math.pi
 _NDDOT_UNITS: Final = 2985984000.0 / 2.0 / math.pi
 
-_SCALES: Final = {
-    attribute: KEYWORDS[keyword].scale for keyword, attribute in ATTRIBUTES.items()
-}
-"""Factor from message units to the :class:`~keepout.omm.Omm` attribute's,
-by attribute."""
+_HALF_DAY_MINUTES: Final = 720.0
+"""Minutes in half a day: n / 720 * pi is a mean motion in rev/day in
+rad/min, as :mod:`sgp4.omm` computes it."""
 
 PairStates: TypeAlias = Callable[[int, int], States]
 """The states of one pair, from its primary's and its secondary's positions
@@ -120,7 +118,8 @@ def satrec_of(omm: Omm) -> Satrec:
         _message_number(omm, "arg_of_pericenter") * DEGREE,
         _message_number(omm, "inclination") * DEGREE,
         _message_number(omm, "mean_anomaly") * DEGREE,
-        _message_number(omm, "mean_motion") / 720.0 * math.pi,
+        # rev/day -> rad/min
+        _message_number(omm, "mean_motion") / _HALF_DAY_MINUTES * math.pi,
         _message_number(omm, "ra_of_asc_node") * DEGREE,
     )
     return satrec
@@ -128,7 +127,7 @@ def satrec_of(omm: Omm) -> Satrec:
 
 def _message_number(omm: Omm, attribute: str) -> float:
     """The value of an attribute in the message's units, as written."""
-    return message_number(getattr(omm, attribute), _SCALES[attribute])
+    return message_number(getattr(omm, attribute), ATTRIBUTE_KEYWORDS[attribute].scale)
 
 
 def _sgp4_epoch(epoch: Time) -> float:
@@ -238,18 +237,57 @@ def _indices(indices: npt.ArrayLike, size: int) -> IndexArray:
     return array.astype(np.intp)
 
 
-def _initialised(
-    omms: Iterable[Omm],
-) -> Iterator[tuple[int, Omm, Satrec | UnsupportedElements]]:
-    """Each element set with its position and its SGP4 record, or the error
-    :func:`satrec_of` raised for it; one at a time, in order."""
+class _Partition(NamedTuple):
+    """Element sets split by whether SGP4 can be initialised with them."""
+
+    kept: list[int]
+    """Position of each initialised element set."""
+    omms: list[Omm]
+    """The initialised element sets."""
+    satrecs: list[Satrec]
+    """Their SGP4 records."""
+    rejected: list[tuple[int, UnsupportedElements]]
+    """Position of every other element set, with the error :func:`satrec_of`
+    raised for it."""
+
+
+def _partition(omms: Iterable[Omm]) -> _Partition:
+    """The element sets of ``omms`` initialised for SGP4 (each once) and those
+    that cannot be, in order."""
+    partition = _Partition([], [], [], [])
     for index, omm in enumerate(omms):
         try:
             satrec = satrec_of(omm)
         except UnsupportedElements as error:
-            yield index, omm, error
+            partition.rejected.append((index, error))
         else:
-            yield index, omm, satrec
+            partition.kept.append(index)
+            partition.omms.append(omm)
+            partition.satrecs.append(satrec)
+    return partition
+
+
+def _si_states(
+    errors: ErrorArray, r: FloatArray, v: FloatArray
+) -> tuple[ErrorArray, FloatArray, FloatArray]:
+    """SGP4's errors and states, km and km/s converted to m and m/s in place."""
+    r *= KM
+    v *= KM
+    return errors, r, v
+
+
+def _minutes_since_epoch(
+    jd: FloatArray | float,
+    fraction: FloatArray | float,
+    epoch: FloatArray,
+    epoch_fraction: FloatArray,
+) -> FloatArray:
+    """Minutes from each element epoch to a two-part UTC Julian date, as
+    ``Satrec.sgp4`` counts them."""
+    minutes: FloatArray = (jd - epoch) * _MINUTES_PER_DAY + (
+        fraction - epoch_fraction
+    ) * _MINUTES_PER_DAY
+    return minutes
 
 
 class Sgp4Propagator:
@@ -293,15 +331,14 @@ class Sgp4Propagator:
 
     def __init__(self, omms: Iterable[Omm]) -> None:
         elements = tuple(omms)
-        satrecs = []
-        for index, omm, satrec in _initialised(elements):
-            if isinstance(satrec, UnsupportedElements):
-                raise UnsupportedElements(
-                    f"element set {index} (catalog number {omm.catalog_number}) "
-                    f"cannot initialise SGP4: {satrec}"
-                ) from satrec
-            satrecs.append(satrec)
-        self._set(elements, tuple(satrecs))
+        partition = _partition(elements)
+        if partition.rejected:
+            index, error = partition.rejected[0]
+            raise UnsupportedElements(
+                f"element set {index} (catalog number "
+                f"{elements[index].catalog_number}) cannot initialise SGP4: {error}"
+            ) from error
+        self._set(elements, tuple(partition.satrecs))
 
     @classmethod
     def from_omms(
@@ -328,20 +365,10 @@ class Sgp4Propagator:
             Position in ``omms`` of every other element set, with the error
             :func:`satrec_of` raised for it.
         """
-        kept: list[int] = []
-        elements: list[Omm] = []
-        satrecs: list[Satrec] = []
-        rejected: list[tuple[int, UnsupportedElements]] = []
-        for index, omm, satrec in _initialised(omms):
-            if isinstance(satrec, UnsupportedElements):
-                rejected.append((index, satrec))
-                continue
-            kept.append(index)
-            elements.append(omm)
-            satrecs.append(satrec)
+        partition = _partition(omms)
         propagator = object.__new__(cls)
-        propagator._set(tuple(elements), tuple(satrecs))  # noqa: SLF001
-        return propagator, np.array(kept, dtype=np.intp), rejected
+        propagator._set(tuple(partition.omms), tuple(partition.satrecs))  # noqa: SLF001
+        return propagator, np.array(partition.kept, dtype=np.intp), partition.rejected
 
     def _set(self, omms: tuple[Omm, ...], satrecs: tuple[Satrec, ...]) -> None:
         self._omms = omms
@@ -422,9 +449,7 @@ class Sgp4Propagator:
             numbers in at most one dimension.
         """
         seconds = time_offsets(epoch, offsets)
-        errors, r, v = self._array.sgp4(*_utc_dates(epoch, seconds))
-        r *= KM
-        v *= KM
+        errors, r, v = _si_states(*self._array.sgp4(*_utc_dates(epoch, seconds)))
         return Ephemeris(epoch, seconds, r, v, errors, self.frame)
 
     def radius_bounds(self, start: Time, duration: float) -> RadiusBounds:
@@ -464,13 +489,8 @@ class Sgp4Propagator:
         jd, fraction = _utc_dates(start, time_offsets(start, [0.0, duration]))
         epoch = np.array([satrec.jdsatepoch for satrec in self._satrecs])
         epoch_fraction = np.array([satrec.jdsatepochF for satrec in self._satrecs])
-        # Minutes since each element epoch, as Satrec.sgp4 counts them.
-        first = (jd[0] - epoch) * _MINUTES_PER_DAY + (
-            fraction[0] - epoch_fraction
-        ) * _MINUTES_PER_DAY
-        last = (jd[1] - epoch) * _MINUTES_PER_DAY + (
-            fraction[1] - epoch_fraction
-        ) * _MINUTES_PER_DAY
+        first = _minutes_since_epoch(jd[0], fraction[0], epoch, epoch_fraction)
+        last = _minutes_since_epoch(jd[1], fraction[1], epoch, epoch_fraction)
         return RadiusBounds(*radius_bounds(self._satrecs, first, last))
 
 
@@ -521,10 +541,7 @@ class Sgp4Sampler:
         jd1, jd2 = self._jd1, self._jd2
 
         def states(seconds: FloatArray) -> tuple[ErrorArray, FloatArray, FloatArray]:
-            errors, r, v = array.sgp4(*_tai_to_utc(jd1, jd2, seconds))
-            r *= KM
-            v *= KM
-            return errors, r, v
+            return _si_states(*array.sgp4(*_tai_to_utc(jd1, jd2, seconds)))
 
         return states
 

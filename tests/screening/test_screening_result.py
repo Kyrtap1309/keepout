@@ -101,12 +101,12 @@ def test_the_miss_vector_is_the_relative_position_in_rtn(
         (
             StateVector(TCA, R_PRIMARY, V_PRIMARY, "TEME"),
             states()[1],
-            "needs GCRF states, got TEME",
+            "needs a GCRF state, got TEME",
         ),
         (
             states()[0],
             StateVector(TCA, R_PRIMARY, V_PRIMARY, "EME2000"),
-            "needs GCRF states, got EME2000",
+            "needs a GCRF state, got EME2000",
         ),
         (states()[0], states(TCA + 0.01 * u.s)[1], "epochs differ by 0.01 s"),
     ],

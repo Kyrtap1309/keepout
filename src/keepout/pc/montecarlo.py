@@ -21,7 +21,7 @@ from __future__ import annotations
 import itertools
 from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, NamedTuple
 
 import numpy as np
 
@@ -61,7 +61,7 @@ MC_BATCH: Final = 50_000
 NEWTON_STEPS: Final = 12
 """Newton iterations refining a closest approach between two grid points.
 
-The distance is tested at every iterate (see ``_Trials.closest_below``), so
+The distance is tested at every iterate (see ``_SamplePairs.closest_below``), so
 the count bounds the work rather than setting a convergence tolerance."""
 
 SPEED_BOUND_FACTOR: Final = 1.5
@@ -80,15 +80,17 @@ def _gravity(states: FloatArray) -> FloatArray:
     return acceleration
 
 
-class _Trials:
+class _SamplePairs(NamedTuple):
     """A batch of sampled orbit pairs and their relative motion."""
 
-    def __init__(self, first: Orbits, second: Orbits) -> None:
-        self.first, self.second = first, second
+    first: Orbits
+    """The first object's sampled orbits."""
+    second: Orbits
+    """The second object's, pair by pair."""
 
-    def subset(self, rows: IndexArray) -> _Trials:
+    def subset(self, rows: IndexArray) -> _SamplePairs:
         """The sample pairs ``rows``."""
-        return _Trials(self.first.subset(rows), self.second.subset(rows))
+        return _SamplePairs(self.first.subset(rows), self.second.subset(rows))
 
     def _states(
         self, t: float | FloatArray, rows: slice | IndexArray
@@ -149,7 +151,7 @@ class _GridPoint:
     speed: FloatArray
 
 
-def _grid(batch: _Trials, times: FloatArray) -> Iterator[_GridPoint]:
+def _grid(batch: _SamplePairs, times: FloatArray) -> Iterator[_GridPoint]:
     """The batch at each of ``times``, one grid point at a time."""
     for t in times:
         r, v = batch.motion(float(t))
@@ -157,7 +159,7 @@ def _grid(batch: _Trials, times: FloatArray) -> Iterator[_GridPoint]:
 
 
 def _entries_between(
-    batch: _Trials,
+    batch: _SamplePairs,
     earlier: _GridPoint,
     later: _GridPoint,
     radius: float,
@@ -182,7 +184,7 @@ def _entries_between(
     return rows[batch.closest_below(rows, earlier.t, later.t, radius)]
 
 
-def _collisions(batch: _Trials, found: RateScan, radius: float) -> tuple[int, int]:
+def _collisions(batch: _SamplePairs, found: RateScan, radius: float) -> tuple[int, int]:
     """Collisions (entries) and samples already inside at the window start."""
     r, _ = batch.motion(found.times[0])
     inside = np.linalg.norm(r, axis=1) < radius
@@ -293,8 +295,9 @@ def montecarlo(
     if samples is not None:
         require_at_least(samples, 1, "samples")
     require_positive(rtol, "rtol")
-    if not (max_samples >= 1 and 0.0 < confidence < 1.0):
-        raise ValueError("need max_samples >= 1 and 0 < confidence < 1")
+    require_at_least(max_samples, 1, "max_samples")
+    if not 0.0 < confidence < 1.0:
+        raise ValueError(f"confidence must be in (0, 1), got {confidence}")
     require_known_covariance(conjunction.unknown_covariance, "montecarlo")
     encounters = Encounters.scan(conjunction, window)
     return montecarlo_over_scan(
@@ -342,9 +345,9 @@ def montecarlo_over_scan(
     converged = False
     while done < budget:
         count = min(MC_BATCH, budget - done)
-        batch = _Trials(
-            Orbits(rate.primary.sample(rng, count), rate.primary.fr),
-            Orbits(rate.secondary.sample(rng, count), rate.secondary.fr),
+        batch = _SamplePairs(
+            Orbits.from_elements(rate.primary.sample(rng, count), rate.primary.fr),
+            Orbits.from_elements(rate.secondary.sample(rng, count), rate.secondary.fr),
         )
         new_hits, new_inside = _collisions(batch, found, conjunction.hard_body_radius)
         hits, inside, done = hits + new_hits, inside + new_inside, done + count

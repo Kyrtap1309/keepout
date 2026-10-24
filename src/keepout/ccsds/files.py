@@ -4,17 +4,29 @@ from __future__ import annotations
 
 import gzip
 import zlib
-from collections.abc import Callable
 from pathlib import Path
-from typing import Final, TypeVar
+from typing import TYPE_CHECKING, Final
 
-from keepout.ccsds.message import Family
+if TYPE_CHECKING:
+    from keepout.ccsds.message import Family
 
-__all__ = ["load_file", "read_file"]
+__all__ = ["BOM", "read_file", "strip_bom"]
 
 _GZIP_MAGIC: Final = b"\x1f\x8b"
 
-_T = TypeVar("_T")
+BOM: Final = "\ufeff"
+"""The Unicode byte-order mark, which some files start with."""
+
+
+def strip_bom(text: str) -> str:
+    """``text`` without its leading byte-order mark, if it has one.
+
+    Parameters
+    ----------
+    text
+        Decoded file text.
+    """
+    return text.removeprefix(BOM)
 
 
 def read_file(path: str | Path, family: Family) -> str:
@@ -45,8 +57,3 @@ def read_file(path: str | Path, family: Family) -> str:
         return data.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
         raise family.parse_error(f"{path}: not UTF-8 text: {exc}") from exc
-
-
-def load_file(path: str | Path, loads: Callable[[str], _T], family: Family) -> _T:
-    """A file parsed by ``loads``; see :func:`read_file`."""
-    return loads(read_file(path, family))

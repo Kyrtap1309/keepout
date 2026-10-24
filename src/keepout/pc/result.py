@@ -10,7 +10,7 @@ from typing import Final, Literal, Self, TypeAlias, get_args
 from keepout._methods import Method
 from keepout._pickling import reduce_with_mappings
 from keepout._types import override
-from keepout._validation import require_probability
+from keepout._validation import require_choice, require_probability
 
 __all__ = ["RESULT_KINDS", "Method", "PcResult", "ResultKind"]
 
@@ -67,8 +67,7 @@ class PcResult:
 
     def __post_init__(self) -> None:
         require_probability(self.value, "Pc")
-        if self.kind not in RESULT_KINDS:
-            raise ValueError(f"kind must be one of {RESULT_KINDS}, got {self.kind!r}")
+        require_choice(self.kind, RESULT_KINDS, "kind")
         if self.interval is not None:
             low, high = self.interval
             require_probability(low, "interval low")

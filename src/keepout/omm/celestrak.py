@@ -28,8 +28,9 @@ from pathlib import Path
 
 from keepout._types import JsonValue
 from keepout.ccsds.epochs import preparse_epochs
+from keepout.ccsds.files import strip_bom
 from keepout.errors import OmmParseError
-from keepout.omm._io import load_file, parse_record
+from keepout.omm._io import OMM, parse_record
 from keepout.omm.keywords import KEYWORDS
 from keepout.omm.model import SGP4_EPOCH_DIGITS, Omm
 
@@ -67,9 +68,7 @@ def loads_csv(text: str) -> tuple[Omm, ...]:
         keyword, a row has more or fewer values than the header, the CSV
         quoting is broken, or an object's values are invalid.
     """
-    reader = csv.reader(
-        io.StringIO(text.removeprefix("\ufeff"), newline=""), strict=True
-    )
+    reader = csv.reader(io.StringIO(strip_bom(text), newline=""), strict=True)
     try:
         header = next(reader, None)
     except csv.Error as exc:
@@ -143,7 +142,7 @@ def loads_json(text: str) -> tuple[Omm, ...]:
     """
     try:
         data: JsonValue = json.loads(
-            text.removeprefix("\ufeff"),
+            strip_bom(text),
             parse_float=str,
             parse_int=str,
             parse_constant=str,
@@ -175,7 +174,7 @@ def load_csv(path: str | Path) -> tuple[Omm, ...]:
     path
         File to read.
     """
-    return load_file(path, loads_csv)
+    return OMM.load(path, loads_csv)
 
 
 def load_json(path: str | Path) -> tuple[Omm, ...]:
@@ -186,7 +185,7 @@ def load_json(path: str | Path) -> tuple[Omm, ...]:
     path
         File to read.
     """
-    return load_file(path, loads_json)
+    return OMM.load(path, loads_json)
 
 
 def dumps_csv(omms: Iterable[Omm]) -> str:

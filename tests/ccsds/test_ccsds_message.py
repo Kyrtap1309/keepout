@@ -7,8 +7,10 @@ from keepout.ccsds import files, kvn, xml
 from keepout.ccsds.message import COMMENT, Family, KeywordValues, Located
 from keepout.errors import CdmParseError, CdmWriteError, OmmParseError, OmmWriteError
 
-CDM = Family("CDM", CdmParseError, CdmWriteError, keyword_width=8)
-OMM = Family("OMM", OmmParseError, OmmWriteError, keyword_width=4)
+CDM = Family(
+    "CDM", CdmParseError, CdmWriteError, keyword_width=8, unknown_is_text=False
+)
+OMM = Family("OMM", OmmParseError, OmmWriteError, keyword_width=4, unknown_is_text=True)
 FAMILIES = [CDM, OMM]
 
 

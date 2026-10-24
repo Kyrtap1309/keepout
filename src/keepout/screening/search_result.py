@@ -12,9 +12,10 @@ from keepout._types import FloatArray
 __all__ = ["ObjectFailure", "RangeMinimum", "SearchResult"]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, order=True, slots=True)
 class ObjectFailure:
-    """The earliest failed state of an object seen by a search.
+    """The earliest failed state of an object seen by a search; failures
+    are ordered by offset, then code.
 
     Parameters
     ----------
@@ -79,7 +80,7 @@ def keep_earliest(
     """An object's new failure, stored in ``failures`` in place of the one
     recorded unless that one is earlier (by offset, then code)."""
     known = failures.get(index)
-    if known is None or (failure.offset, failure.code) < (known.offset, known.code):
+    if known is None or failure < known:
         failures[index] = failure
 
 

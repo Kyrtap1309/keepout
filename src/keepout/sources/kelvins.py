@@ -32,7 +32,7 @@ import numpy as np
 
 from keepout._types import FloatArray, read_only
 from keepout.errors import KelvinsFormatError
-from keepout.risk.observation import PcObservation
+from keepout.risk.observation import PC_FLOOR, PcObservation
 from keepout.sources._http import Sink, http_stream, retrying
 from keepout.sources._store import cache_dir, has_digest, store
 from keepout.units import DAY
@@ -262,7 +262,7 @@ class KelvinsEvent:
                 PcObservation(
                     time_to_tca=float(seconds),
                     source=SOURCE,
-                    pc=10.0**RISK_FLOOR if floored else float(10.0**risk),
+                    pc=PC_FLOOR if floored else float(10.0**risk),
                     kind="below_floor" if floored else "estimate",
                     message_id=f"{self.event_id}/{index}",
                 )

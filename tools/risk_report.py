@@ -80,9 +80,9 @@ DIRECTIONS: Final = (
     Direction.FALLING,
     Direction.UNDETERMINED,
 )
-LEVELS: Final = (*(level.label for level in RiskLevel), NO_LEVEL)
+LEVELS: Final = (*(level.key for level in RiskLevel), NO_LEVEL)
 """Every :class:`~keepout.risk.RiskLevel`, as the report names it
-(:attr:`~keepout.risk.RiskLevel.label`), then :data:`NO_LEVEL`."""
+(:attr:`~keepout.risk.RiskLevel.key`), then :data:`NO_LEVEL`."""
 LABELS: Final[tuple[Label, ...]] = get_args(Label)
 
 PLOT_DAYS: Final = 7.5
@@ -100,7 +100,7 @@ COLOURS: Final[Mapping[RiskLevel, str]] = {
 
 def level_label(level: RiskLevel | None) -> str:
     """A level as one of :data:`LEVELS` (:data:`NO_LEVEL` for no Pc)."""
-    return NO_LEVEL if level is None else level.label
+    return NO_LEVEL if level is None else level.key
 
 
 class Settings(TypedDict):

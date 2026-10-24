@@ -42,7 +42,7 @@ def test_a_result_pickles() -> None:
 @pytest.mark.parametrize(
     ("fields", "message"),
     [
-        ({"kind": "guess"}, "kind must be one of"),
+        ({"kind": "guess"}, "unsupported kind"),
         ({"interval": (0.3, 0.2)}, "low <= high"),
         ({"interval": (-0.1, 0.2)}, r"interval low must be in \[0, 1\]"),
         ({"interval": (0.1, 1.5)}, r"interval high must be in \[0, 1\]"),

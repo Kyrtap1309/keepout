@@ -70,7 +70,7 @@ def auto(conjunction: Conjunction) -> tuple[PcResult, Assessment]:
         If the relative velocity is zero and the 3-D methods cannot run.
     """
     # Rule 1: no encounter plane, so a 3-D method.
-    if conjunction.relative_speed == 0.0:
+    if not conjunction.has_plane:
         return _auto_without_plane(conjunction)
     unknown = conjunction.unknown_covariance
     assessment = assess(conjunction)
@@ -158,7 +158,7 @@ def assess(conjunction: Conjunction) -> Assessment:
     kept with a covariance unknown (see :func:`applicability`); the duration
     detail is not, since it is then only a lower bound.
     """
-    if conjunction.relative_speed == 0.0:
+    if not conjunction.has_plane:
         return Assessment((), {})
     duration = encounter_duration(conjunction)
     notes = applicability(conjunction, duration)

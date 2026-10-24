@@ -20,7 +20,7 @@ from astropy.time import Time
 
 from keepout.ccsds.epochs import format_epoch, parse_epoch
 from keepout.ccsds.keywords import format_value
-from keepout.omm.keywords import ATTRIBUTES, KEYWORDS, SGP4_EPHEMERIS_TYPE
+from keepout.omm.keywords import ATTRIBUTE_KEYWORDS, KEYWORDS, SGP4_EPHEMERIS_TYPE
 
 __all__ = [
     "MAX_CATALOG_NUMBER",
@@ -38,17 +38,15 @@ MAX_CATALOG_NUMBER: Final = 999_999_999
 MAX_ELEMENT_SET_NO: Final = 9999
 """Largest ``ELEMENT_SET_NO`` (four digits, as in a TLE and the OMM schema)."""
 
-_REALS: Final = (
-    "mean_motion",
-    "eccentricity",
-    "inclination",
-    "ra_of_asc_node",
-    "arg_of_pericenter",
-    "mean_anomaly",
-    "bstar",
-    "mean_motion_dot",
-    "mean_motion_ddot",
+_REALS: Final = tuple(
+    name for name, keyword in ATTRIBUTE_KEYWORDS.items() if keyword.kind == "float"
 )
+"""The real-valued attributes, in table order."""
+
+_TEXTS: Final = tuple(
+    name for name, keyword in ATTRIBUTE_KEYWORDS.items() if keyword.kind == "str"
+)
+"""The text attributes, in table order."""
 
 SGP4_EPOCH_DIGITS: Final = 6
 """Fractional-second digits of the epoch :func:`sgp4.omm.initialize` reads:
@@ -145,7 +143,7 @@ class Omm:
     rev_at_epoch: int
 
     def __post_init__(self) -> None:
-        for name in ("object_name", "international_designator", "classification"):
+        for name in _TEXTS:
             if not isinstance(getattr(self, name), str):
                 raise InvalidElement(name, "must be a string")
         if len(self.classification) != 1:
@@ -197,9 +195,9 @@ class Omm:
             take.
         """
         values = {
-            keyword: format_value(KEYWORDS[keyword], getattr(self, attribute))[0]
-            for keyword, attribute in ATTRIBUTES.items()
-            if keyword != "EPOCH"
+            keyword.name: format_value(keyword, getattr(self, attribute))[0]
+            for attribute, keyword in ATTRIBUTE_KEYWORDS.items()
+            if keyword.name != "EPOCH"
         }
         values["EPOCH"] = _epoch_text(self.epoch, epoch_digits)
         values["EPHEMERIS_TYPE"] = str(SGP4_EPHEMERIS_TYPE)
@@ -215,6 +213,11 @@ class Deduplicated(NamedTuple):
     dropped: tuple[Omm, ...]
     """The other element sets, in input order; an exact copy of a set
     already kept or dropped is not listed again."""
+
+    @property
+    def by_number(self) -> dict[int, Omm]:
+        """The kept element sets by catalog number, in :attr:`kept` order."""
+        return {omm.catalog_number: omm for omm in self.kept}
 
 
 def deduplicate(omms: Iterable[Omm]) -> Deduplicated:
@@ -241,7 +244,7 @@ def deduplicate(omms: Iterable[Omm]) -> Deduplicated:
     order: list[Omm] = []
     for omm in omms:
         seen = distinct.setdefault(omm.catalog_number, [])
-        if any(omm == other for other in seen):
+        if omm in seen:
             continue
         seen.append(omm)
         order.append(omm)

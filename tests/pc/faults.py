@@ -16,13 +16,14 @@ orders of the time integral, the Monte Carlo batch size and the methods
 
 import importlib
 from collections.abc import Callable
-from typing import NamedTuple, Self
+from typing import NamedTuple, Self, cast
 
 import numpy as np
 import pytest
 from typing_extensions import override
 
 from keepout._types import BoolArray, FloatArray, IndexArray
+from keepout.equinoctial import Orbits
 from keepout.errors import GeometryError
 from keepout.pc import _auto as auto_module
 from keepout.pc import _encounters as encounters_module
@@ -34,7 +35,7 @@ from keepout.pc._overlap import Gaussians
 from keepout.pc._quadrature import RateIntegral
 from keepout.pc._timeline import Rate, RateScan, Screen
 from keepout.pc._timeline import locate_auto as real_locate_auto
-from keepout.pc.montecarlo import _Trials
+from keepout.pc.montecarlo import _SamplePairs
 from keepout.pc.result import PcResult
 
 # The package exports the functions hall3d and montecarlo under their
@@ -267,17 +268,16 @@ def auto_monte_carlo_budget(monkeypatch: pytest.MonkeyPatch, trials: int) -> Non
     monkeypatch.setattr(auto_module, "AUTO_MC_SAMPLES", trials)
 
 
-class _MisleadingLine(_Trials):
+class _MisleadingLine(_SamplePairs):
     """Relative motion ``r = (1, t - 0.1, 0)`` with a misleading acceleration.
 
     The acceleration ``(0, 20, 0)`` makes Newton's slope wrong, so from the
     interval's midpoint 0 (distance 1.005) it jumps to 2 and then creeps back
     by ~1/20 of the way per step: after every step it is still far from the
-    closest approach at 0.1.
+    closest approach at 0.1. It has no orbits: it overrides all it uses.
     """
 
-    def __init__(self) -> None:
-        pass
+    __slots__ = ()
 
     @override
     def subset(self, rows: IndexArray) -> Self:
@@ -304,4 +304,4 @@ def misleading_newton_search() -> ClosestBelow:
     acceleration misleads Newton's method (see :class:`_MisleadingLine`):
     it passes the closest approach at t = 0.1 (distance 1) but never settles
     there."""
-    return _MisleadingLine().closest_below
+    return _MisleadingLine(cast(Orbits, None), cast(Orbits, None)).closest_below

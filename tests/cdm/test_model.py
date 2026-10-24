@@ -96,7 +96,7 @@ def test_section_rejects_repeated_keywords() -> None:
     )
     with pytest.raises(DuplicateKeyword, match="repeats keyword MISS_DISTANCE") as info:
         Section("relative", fields)
-    assert (info.value.keyword, info.value.index) == ("MISS_DISTANCE", 2)
+    assert info.value.keyword == "MISS_DISTANCE"
 
 
 def test_comments_may_repeat() -> None:

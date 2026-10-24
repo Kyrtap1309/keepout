@@ -4,8 +4,14 @@ import pytest
 from builders import case_with_reference
 
 from keepout.pc.result import PcResult
-from keepout.validation.cases import ValidationCase
-from keepout.validation.criteria import HALL, MONTE_CARLO, TWO_D, Criterion
+from keepout.validation.cases import Suite, ValidationCase
+from keepout.validation.criteria import (
+    HALL,
+    MONTE_CARLO,
+    TWO_D,
+    BoundCriterion,
+    Criterion,
+)
 from keepout.validation.evaluation import (
     MethodSummary,
     Outcome,
@@ -61,7 +67,7 @@ def test_interval_criterion_uses_the_result_interval() -> None:
     [
         (TWO_D, "relative error at most 1e-06 (absolute error at most 1e-15"),
         (HALL, "relative error at most 0.001"),
-        (Criterion(absolute=5e-7), "absolute error at most 5e-07"),
+        (BoundCriterion(absolute=5e-7), "absolute error at most 5e-07"),
         (MONTE_CARLO, "within keepout's confidence interval"),
     ],
 )
@@ -121,24 +127,25 @@ def test_outcome_verdict_follows_its_value() -> None:
 
 
 def test_summarise_groups_by_suite_then_method_in_order() -> None:
-    def case(suite: str, reference: float, case_id: str) -> ValidationCase:
+    def case(suite: Suite, reference: float, case_id: str) -> ValidationCase:
         return dataclasses.replace(
             case_with_reference(reference, case_id=case_id), suite=suite
         )
 
     outcomes = evaluate(
         [
-            case("b", 1e-3, "relative"),
-            case("a", 0.0, "absolute"),
+            case(Suite.UNIT_TESTS, 1e-3, "relative"),
+            case(Suite.ALFANO, 0.0, "absolute"),
             dataclasses.replace(
-                case("b", 2e-3, "loose"), criterion=Criterion(relative=2.0)
+                case(Suite.UNIT_TESTS, 2e-3, "loose"),
+                criterion=BoundCriterion(relative=2.0),
             ),
         ]
     )
     assert summarise(outcomes) == (
-        MethodSummary("b", "foster", 1, 2, 1.0),
-        MethodSummary("b", "elrod", 1, 2, 1.0),
-        MethodSummary("a", "foster", 1, 1, None),
-        MethodSummary("a", "elrod", 1, 1, None),
+        MethodSummary(Suite.UNIT_TESTS, "foster", 1, 2, 1.0),
+        MethodSummary(Suite.UNIT_TESTS, "elrod", 1, 2, 1.0),
+        MethodSummary(Suite.ALFANO, "foster", 1, 1, None),
+        MethodSummary(Suite.ALFANO, "elrod", 1, 1, None),
     )
     assert summarise([]) == ()

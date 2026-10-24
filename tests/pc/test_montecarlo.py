@@ -125,8 +125,8 @@ def test_unknown_covariance_is_rejected() -> None:
     [
         ({"samples": 0}, "samples must be at least 1"),
         ({"rtol": 0.0}, "rtol must be finite and > 0"),
-        ({"max_samples": 0}, "need max_samples >= 1"),
-        ({"confidence": 1.0}, "0 < confidence < 1"),
+        ({"max_samples": 0}, "max_samples must be at least 1"),
+        ({"confidence": 1.0}, r"confidence must be in \(0, 1\), got 1.0"),
     ],
 )
 def test_bad_arguments_are_rejected(options: dict[str, float], message: str) -> None:

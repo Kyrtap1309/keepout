@@ -21,9 +21,12 @@ from keepout.ccsds.keywords import Keyword, ValueKind
 from keepout.units import DAY, KM
 
 __all__ = [
+    "ADDITIONAL_PARAMETERS",
     "COVARIANCE_AXES",
     "HEADER",
     "KEYWORDS",
+    "METADATA_GROUP",
+    "PHYSICAL_PARAMETERS",
     "POSITION_KEYWORDS",
     "RELATIVE",
     "REQUIRED",
@@ -169,10 +172,20 @@ _COVARIANCE: Final = tuple(
     for name, row, column in covariance_entries(len(COVARIANCE_AXES))
 )
 
+METADATA_GROUP: Final = ("metadata",)
+"""NDM/XML group of an object section's metadata."""
+
+ADDITIONAL_PARAMETERS: Final = "additionalParameters"
+"""NDM/XML group of an object's physical parameters in CDM 1.0 (CCSDS
+508.0-B-1), inside its ``data``."""
+
+PHYSICAL_PARAMETERS: Final = "physicalParameters"
+"""The CDM 2.0 name of :data:`ADDITIONAL_PARAMETERS`."""
+
 _RELATIVE_STATE: Final = ("relativeStateVector",)
-_METADATA: Final = ("metadata",)
+_METADATA: Final = METADATA_GROUP
 _OD: Final = ("data", "odParameters")
-_ADDITIONAL: Final = ("data", "additionalParameters")
+_ADDITIONAL: Final = ("data", ADDITIONAL_PARAMETERS)
 _STATE: Final = ("data", "stateVector")
 
 HEADER: Final = _table(

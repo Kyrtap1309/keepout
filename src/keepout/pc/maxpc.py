@@ -34,7 +34,10 @@ from scipy import optimize
 from keepout._types import FloatArray
 from keepout._validation import require_positive
 from keepout.encounter import EncounterPlane
-from keepout.pc._plane import plane_gaussian, require_known_covariance
+from keepout.pc._plane import (
+    plane_gaussian,
+    plane_gaussian_of,
+)
 from keepout.pc.foster import gaussian_pc
 from keepout.pc.result import PcResult
 
@@ -148,7 +151,7 @@ def frisbee(plane: EncounterPlane, hard_body_radius: float) -> PcResult:
             "frisbee needs exactly one unknown covariance; unknown: "
             f"{plane.unknown_covariance or 'none'}"
         )
-    gaussian = plane_gaussian(plane.miss_vector, plane.covariance, hard_body_radius)
+    gaussian = plane_gaussian_of(plane, hard_body_radius, None)
     k2 = gaussian.mahalanobis2
     miss = plane.miss_distance
     diagnostics = [
@@ -222,8 +225,7 @@ def dilution(plane: EncounterPlane, hard_body_radius: float) -> PcResult:
     CovarianceError
         If a covariance is unknown or the plane covariance is degenerate.
     """
-    require_known_covariance(plane.unknown_covariance, "dilution")
-    gaussian = plane_gaussian(plane.miss_vector, plane.covariance, hard_body_radius)
+    gaussian = plane_gaussian_of(plane, hard_body_radius, "dilution")
     nominal = gaussian_pc(gaussian).value
     miss = plane.miss_distance
     note = "maximum Pc over covariance scaling (dilution): an upper bound"

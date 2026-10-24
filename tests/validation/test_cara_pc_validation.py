@@ -9,14 +9,7 @@ from keepout.validation.cara_inputs import (
     load_pc_method_inputs,
 )
 from keepout.validation.cases import (
-    ALFANO,
-    ALFANO_3D,
-    ALFANO_MONTE_CARLO,
-    MAX_PC_UNIT_TESTS,
-    PC_METHOD_SET,
-    PC_METHOD_SET_3D,
-    PC_METHOD_SET_MONTE_CARLO,
-    UNIT_TESTS,
+    Suite,
     ValidationCase,
     alfano_monte_carlo_cases,
     load_all,
@@ -27,8 +20,8 @@ from keepout.validation.evaluation import Outcome, evaluate
 pytestmark = pytest.mark.validation
 
 QUICK_MONTE_CARLO = {
-    ALFANO_MONTE_CARLO: "3",
-    PC_METHOD_SET_MONTE_CARLO: "000025994_conj_000037558_20210324_151047",
+    Suite.ALFANO_MONTE_CARLO: "3",
+    Suite.PC_METHOD_SET_MONTE_CARLO: "000025994_conj_000037558_20210324_151047",
 }
 """One fast-encounter case per Monte Carlo suite, run with few trials on
 every push; tools/validation_report.py --monte-carlo runs them all nightly."""
@@ -48,12 +41,12 @@ def outcomes(cases: list[ValidationCase]) -> list[Outcome]:
 
 def test_every_case_is_loaded(cases: list[ValidationCase]) -> None:
     assert Counter(case.suite for case in cases) == {
-        ALFANO: 11,
-        ALFANO_3D: 12,
-        PC_METHOD_SET: 53,
-        PC_METHOD_SET_3D: 53,
-        UNIT_TESTS: 5,
-        MAX_PC_UNIT_TESTS: 6,
+        Suite.ALFANO: 11,
+        Suite.ALFANO_3D: 12,
+        Suite.PC_METHOD_SET: 53,
+        Suite.PC_METHOD_SET_3D: 53,
+        Suite.UNIT_TESTS: 5,
+        Suite.MAX_PC_UNIT_TESTS: 6,
     }
 
 
@@ -84,7 +77,7 @@ def test_slow_alfano_encounters_carry_the_2d_warning(outcomes: list[Outcome]) ->
     warned = {
         o.case.case_id
         for o in outcomes
-        if o.case.suite == ALFANO
+        if o.case.suite == Suite.ALFANO
         and any(
             d.startswith("2-D Pc assumptions questionable")
             for d in o.result.diagnostics

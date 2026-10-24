@@ -8,7 +8,7 @@ from typing import Final, NamedTuple
 
 import numpy as np
 
-from keepout._linalg import from_eigen
+from keepout._linalg import from_eigen, take
 from keepout._types import BoolArray, FloatArray, IndexArray
 from keepout.errors import GeometryError
 from keepout.pc._orbit import OrbitUncertainty
@@ -48,7 +48,7 @@ class Gaussians(NamedTuple):
 
     def take(self, index: int | slice | IndexArray | BoolArray) -> Gaussians:
         """The times ``index`` of a batch."""
-        return Gaussians(*(a[index] for a in self))
+        return take(self, index)
 
     @property
     def relative_position(self) -> FloatArray:

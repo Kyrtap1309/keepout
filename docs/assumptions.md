@@ -69,14 +69,16 @@ replaced:
 from astropy.time import Time
 
 import keepout.omm
-from keepout.synthetic import RegimeParameters, SyntheticCovarianceModel
+from keepout.synthetic import OrbitRegime, RegimeParameters, SyntheticCovarianceModel
 
 catalog = keepout.omm.load("tests/screening/data/celestrak-public.csv.gz")
 iss = next(omm for omm in catalog if omm.catalog_number == 25544)
 when = Time("2026-10-10T00:00:00", scale="utc")
 print("\n".join(SyntheticCovarianceModel().comments(iss, when)))
+default = SyntheticCovarianceModel()
+leo = RegimeParameters(50.0, 200.0, 50.0, transverse_rate=0.01)
 mine = SyntheticCovarianceModel(
-    leo=RegimeParameters(50.0, 200.0, 50.0, transverse_rate=0.01), safety_factor=1.0
+    regimes={**default.regimes, OrbitRegime.LEO: leo}, safety_factor=1.0
 )
 print(f"{mine.sigmas(iss, when).transverse:.0f} m")
 ```

@@ -238,17 +238,14 @@ def test_the_safety_factor_scales_every_sigma(
 CUSTOM = RegimeParameters(10.0, 20.0, 30.0, 0.0)
 
 OVERRIDDEN = {
-    OrbitRegime.LEO: dataclasses.replace(MODEL, leo=CUSTOM),
-    OrbitRegime.MEO: dataclasses.replace(MODEL, meo=CUSTOM),
-    OrbitRegime.GTO: dataclasses.replace(MODEL, gto=CUSTOM),
-    OrbitRegime.HEO: dataclasses.replace(MODEL, heo=CUSTOM),
-    OrbitRegime.GEO: dataclasses.replace(MODEL, geo=CUSTOM),
+    regime: dataclasses.replace(MODEL, regimes={**MODEL.regimes, regime: CUSTOM})
+    for regime in OrbitRegime
 }
 """The default model with :data:`CUSTOM` parameters for one regime."""
 
 
 @pytest.mark.parametrize("regime", OrbitRegime)
-def test_each_regime_field_gives_the_parameters_of_its_regime(
+def test_each_regime_entry_gives_the_parameters_of_its_regime(
     regime: OrbitRegime,
 ) -> None:
     model = OVERRIDDEN[regime]
@@ -256,6 +253,13 @@ def test_each_regime_field_gives_the_parameters_of_its_regime(
     for other in OrbitRegime:
         if other is not regime:
             assert model.parameters(other) == PUBLISHED_PARAMETERS[other]
+    assert pickle.loads(pickle.dumps(model)) == model
+
+
+def test_the_regimes_must_be_given_all() -> None:
+    partial = {OrbitRegime.LEO: CUSTOM}
+    with pytest.raises(ValueError, match="regimes must give every one of"):
+        SyntheticCovarianceModel(regimes=partial)
 
 
 @given(elements, ages, st.sampled_from(OrbitRegime))

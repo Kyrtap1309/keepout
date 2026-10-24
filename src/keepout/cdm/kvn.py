@@ -2,46 +2,19 @@
 
 from __future__ import annotations
 
-import dataclasses
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
-from keepout.ccsds.kvn import assignment, comment, format_line, located_value
-from keepout.ccsds.message import COMMENT, KeywordValues, Located
-from keepout.cdm._io import (
-    CDM,
-    build_cdm,
-    build_section,
-    dump_file,
-    field_of,
-    load_file,
-)
+from keepout.ccsds.kvn import format_line, located_value, read_lines, require_started
+from keepout.ccsds.message import COMMENT, Located
+from keepout.cdm._io import CDM, SectionBuilder, build_cdm
 from keepout.cdm.keywords import KEYWORDS, VERSION_KEYWORD, SectionKind
-from keepout.cdm.model import Cdm, Field, Section, format_field
+from keepout.cdm.model import Cdm, format_field
 from keepout.errors import CdmParseError
 
 __all__ = ["dump", "dumps", "load", "loads"]
 
 _LAYOUT: Final[tuple[SectionKind, ...]] = ("header", "relative", "segment", "segment")
-
-
-@dataclass
-class _Building:
-    """A section being read: its fields, its keywords' values."""
-
-    kind: SectionKind
-    fields: list[Field] = dataclasses.field(default_factory=list)
-    seen_keywords: KeywordValues = dataclasses.field(
-        default_factory=lambda: KeywordValues(CDM)
-    )
-
-    def add(self, keyword: str, value: Located) -> None:
-        self.seen_keywords.add(keyword, value)
-        self.fields.append(field_of(self.kind, keyword, value))
-
-    def build(self) -> Section:
-        return build_section(self.kind, self.fields)
 
 
 def _opened(kinds: list[SectionKind], keyword: str, line: int) -> SectionKind | None:
@@ -95,35 +68,22 @@ def loads(text: str) -> Cdm:
     CdmParseError
         If the message is malformed; the error names the line and keyword.
     """
-    building: list[_Building] = []
+    building: list[SectionBuilder] = []
     pending: list[Located] = []
-    for number, raw in enumerate(text.splitlines(), start=1):
-        line = raw.strip()
-        if not line:
+    for line in read_lines(text, CDM):
+        if line.keyword is None:
+            require_started(line, CDM, VERSION_KEYWORD, started=bool(building))
+            pending.append(Located(line.text, line=line.number))
             continue
-        remark = comment(line)
-        if remark is not None:
-            if not building:
-                raise CdmParseError(
-                    f"{VERSION_KEYWORD} must be the first keyword", line=number
-                )
-            pending.append(Located(remark, line=number))
-            continue
-        assigned = assignment(line)
-        if assigned is None:
-            raise CdmParseError(
-                f"expected 'KEYWORD = value', got {line!r}", line=number
-            )
-        keyword, value = assigned
-        opened = _opened([b.kind for b in building], keyword, number)
+        opened = _opened([b.kind for b in building], line.keyword, line.number)
         if opened is not None:
-            building.append(_Building(opened))
+            building.append(SectionBuilder(opened))
         current = building[-1]
         for held in pending:
             current.add(COMMENT, held)
         pending.clear()
-        spec = KEYWORDS[current.kind].get(keyword)
-        current.add(keyword, located_value(spec, value, number, unknown_is_text=False))
+        spec = KEYWORDS[current.kind].get(line.keyword)
+        current.add(line.keyword, located_value(spec, line.text, line.number, CDM))
     for held in pending:
         building[-1].add(COMMENT, held)
     if tuple(b.kind for b in building) != _LAYOUT:
@@ -174,7 +134,7 @@ def load(path: str | Path) -> Cdm:
     path
         File to read.
     """
-    return load_file(path, loads)
+    return CDM.load(path, loads)
 
 
 def dump(cdm: Cdm, path: str | Path) -> None:
@@ -187,4 +147,4 @@ def dump(cdm: Cdm, path: str | Path) -> None:
     path
         File to write.
     """
-    dump_file(cdm, path, dumps)
+    Path(path).write_text(dumps(cdm), encoding="utf-8")

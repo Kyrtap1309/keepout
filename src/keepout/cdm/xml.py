@@ -16,23 +16,18 @@ from pathlib import Path
 from typing import Final
 from xml.etree import ElementTree
 
-from keepout.ccsds.message import (
-    COMMENT,
-    USER_DEFINED,
-    USER_DEFINED_PREFIX,
-    KeywordValues,
-    Located,
-)
+from keepout.ccsds.message import COMMENT, USER_DEFINED, USER_DEFINED_PREFIX, Located
 from keepout.ccsds.xml import XSI, add_leaf, local, parse, single, tostring, values
-from keepout.cdm._io import (
-    CDM,
-    build_cdm,
-    build_section,
-    dump_file,
-    field_of,
-    load_file,
+from keepout.cdm._io import CDM, SectionBuilder, build_cdm
+from keepout.cdm.keywords import (
+    ADDITIONAL_PARAMETERS,
+    KEYWORDS,
+    METADATA_GROUP,
+    PHYSICAL_PARAMETERS,
+    VERSION_1_0,
+    VERSION_KEYWORD,
+    SectionKind,
 )
-from keepout.cdm.keywords import KEYWORDS, VERSION_1_0, VERSION_KEYWORD, SectionKind
 from keepout.cdm.model import Cdm, Field, Section, format_field
 from keepout.errors import CdmParseError
 
@@ -52,7 +47,7 @@ _GROUPS: Final = frozenset(
         for spec in table.values()
         for name in spec.group
     }
-    | {"physicalParameters", *_USER_GROUP}
+    | {PHYSICAL_PARAMETERS, *_USER_GROUP}
 )
 """Grouping elements; they are structure even when empty."""
 
@@ -63,12 +58,10 @@ def _section(
     path: str,
     leading: Sequence[tuple[str, Located]] = (),
 ) -> Section:
-    seen_keywords = KeywordValues(CDM)
-    fields: list[Field] = []
+    builder = SectionBuilder(kind, Located("", path=path))
     for keyword, value in (*leading, *values(element, path, CDM, _GROUPS)):
-        seen_keywords.add(keyword, value)
-        fields.append(field_of(kind, keyword, value))
-    return build_section(kind, fields, Located("", path=path))
+        builder.add(keyword, value)
+    return builder.build()
 
 
 def loads(text: str) -> Cdm:
@@ -124,10 +117,9 @@ def _groups(
     (trailing comments the group of the last field).
     """
     table = KEYWORDS[kind]
-    physical = (
-        "physicalParameters" if version.startswith("2") else "additionalParameters"
-    )
-    group: tuple[str, ...] = ("metadata",) if kind == "segment" else ()
+    # CDM 2.x renamed the group of the physical parameters.
+    physical = PHYSICAL_PARAMETERS if version.startswith("2") else ADDITIONAL_PARAMETERS
+    group: tuple[str, ...] = METADATA_GROUP if kind == "segment" else ()
     groups: list[tuple[str, ...]] = []
     comments = 0
     for field in fields:
@@ -137,7 +129,7 @@ def _groups(
         spec = table.get(field.keyword)
         if spec is not None:
             group = tuple(
-                physical if name == "additionalParameters" else name
+                physical if name == ADDITIONAL_PARAMETERS else name
                 for name in spec.group
             )
         elif kind == "segment" and field.keyword.startswith(USER_DEFINED_PREFIX):
@@ -241,7 +233,7 @@ def load(path: str | Path) -> Cdm:
     path
         File to read.
     """
-    return load_file(path, loads)
+    return CDM.load(path, loads)
 
 
 def dump(cdm: Cdm, path: str | Path) -> None:
@@ -254,4 +246,4 @@ def dump(cdm: Cdm, path: str | Path) -> None:
     path
         File to write.
     """
-    dump_file(cdm, path, dumps)
+    Path(path).write_text(dumps(cdm), encoding="utf-8")

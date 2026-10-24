@@ -7,9 +7,10 @@ from dataclasses import dataclass
 from typing import Final, Literal, TypeAlias, get_args
 
 from keepout._types import OrderedEnum
+from keepout._validation import require_choice
 from keepout.risk.observation import PcObservation
 
-__all__ = ["BASES", "Basis", "RiskLevel", "Thresholds"]
+__all__ = ["BASES", "DEFAULT_THRESHOLDS", "Basis", "RiskLevel", "Thresholds"]
 
 
 class RiskLevel(OrderedEnum):
@@ -21,11 +22,6 @@ class RiskLevel(OrderedEnum):
     """Pc between the two thresholds."""
     RED = 2
     """Pc at or above :attr:`Thresholds.red_from`."""
-
-    @property
-    def label(self) -> str:
-        """The level in words, as keepout prints it: ``yellow``."""
-        return self.key
 
 
 Basis: TypeAlias = Literal["conservative", "estimate"]
@@ -74,8 +70,7 @@ class Thresholds:
                 "thresholds need 0 < green_below < red_from <= 1, got "
                 f"green_below={self.green_below}, red_from={self.red_from}"
             )
-        if self.basis not in BASES:
-            raise ValueError(f"basis must be one of {BASES}, got {self.basis!r}")
+        require_choice(self.basis, BASES, "basis")
 
     def value_of(self, observation: PcObservation) -> float:
         """The value of ``observation`` compared with the thresholds.
@@ -98,3 +93,7 @@ class Thresholds:
         if value >= self.green_below:
             return RiskLevel.YELLOW
         return RiskLevel.GREEN
+
+
+DEFAULT_THRESHOLDS: Final = Thresholds()
+"""The default thresholds."""

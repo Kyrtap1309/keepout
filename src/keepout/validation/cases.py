@@ -6,6 +6,7 @@ and from the numbers of its unit tests (:mod:`keepout.validation.unit_tests`).
 
 from __future__ import annotations
 
+import enum
 import math
 import zlib
 from collections.abc import Mapping, Sequence
@@ -17,7 +18,7 @@ from keepout import cdm
 from keepout.conjunction import Conjunction
 from keepout.covariance import Covariance, make_covariance
 from keepout.errors import CaraFormatError
-from keepout.pc.api import METHODS
+from keepout.pc.api import METHODS, require_options
 from keepout.pc.result import Method
 from keepout.sources import cara
 from keepout.sources.cara_legacy import load_legacy_objects
@@ -35,6 +36,7 @@ from keepout.validation.criteria import (
     HALL_PC_SET,
     MONTE_CARLO,
     TWO_D,
+    BoundCriterion,
     Criterion,
 )
 from keepout.validation.unit_tests import (
@@ -49,21 +51,14 @@ from keepout.validation.unit_tests import (
 )
 
 __all__ = [
-    "ALFANO",
-    "ALFANO_3D",
-    "ALFANO_MONTE_CARLO",
-    "MAX_PC_UNIT_TESTS",
     "MC_MIN_PC",
     "MC_SAMPLES",
     "MC_SUITE_ALPHA",
     "MC_TARGET_HITS",
-    "PC_METHOD_SET",
-    "PC_METHOD_SET_3D",
-    "PC_METHOD_SET_MONTE_CARLO",
     "TWO_D_METHODS",
-    "UNIT_TESTS",
     "CaseOptions",
     "MonteCarloSizing",
+    "Suite",
     "ValidationCase",
     "alfano_3d_cases",
     "alfano_cases",
@@ -86,15 +81,20 @@ TWO_D_METHODS: Final[tuple[Method, ...]] = tuple(
 )
 """The 2-D methods (:data:`~keepout.pc.METHODS`), which the 2-D cases compare."""
 
-ALFANO: Final = "Alfano (2009)"
-ALFANO_3D: Final = "Alfano (2009), 3-D"
-ALFANO_MONTE_CARLO: Final = "Alfano (2009), Monte Carlo"
-PC_METHOD_SET: Final = "CARA Pc method test set"
-PC_METHOD_SET_3D: Final = "CARA Pc method test set, 3-D"
-PC_METHOD_SET_MONTE_CARLO: Final = "CARA Pc method test set, Monte Carlo"
-UNIT_TESTS: Final = "CARA unit tests"
-MAX_PC_UNIT_TESTS: Final = "CARA unit tests, maximum Pc"
-"""Suite names (:attr:`ValidationCase.suite`), as the report titles them."""
+
+class Suite(enum.StrEnum):
+    """The collections of validation cases (:attr:`ValidationCase.suite`);
+    each value is the suite's name, as the report titles it."""
+
+    ALFANO = "Alfano (2009)"
+    ALFANO_3D = "Alfano (2009), 3-D"
+    ALFANO_MONTE_CARLO = "Alfano (2009), Monte Carlo"
+    PC_METHOD_SET = "CARA Pc method test set"
+    PC_METHOD_SET_3D = "CARA Pc method test set, 3-D"
+    PC_METHOD_SET_MONTE_CARLO = "CARA Pc method test set, Monte Carlo"
+    UNIT_TESTS = "CARA unit tests"
+    MAX_PC_UNIT_TESTS = "CARA unit tests, maximum Pc"
+
 
 MC_TARGET_HITS: Final = 400
 """Expected collisions a Monte Carlo case is sized for (about +-13% at 99%)."""
@@ -138,7 +138,7 @@ class ValidationCase:
     Parameters
     ----------
     suite
-        Name of the case collection, e.g. :data:`ALFANO`.
+        The case collection, e.g. :attr:`Suite.ALFANO`.
     case_id
         Identifier within the suite.
     conjunction
@@ -161,7 +161,7 @@ class ValidationCase:
         A labelled value shown next to the result without pass/fail.
     """
 
-    suite: str
+    suite: Suite
     case_id: str
     conjunction: Conjunction
     reference: float
@@ -174,16 +174,16 @@ class ValidationCase:
 
     def __post_init__(self) -> None:
         for method in self.methods:
-            refused = self.options.keys() - METHODS[method].options
-            if refused:
-                raise ValueError(
-                    f"case {self.suite}/{self.case_id}: {method} takes no "
-                    f"options {sorted(refused)}"
-                )
+            try:
+                require_options(method, self.options)
+            except TypeError as exc:
+                raise ValueError(f"case {self.suite}/{self.case_id}: {exc}") from exc
         object.__setattr__(self, "options", self.options.copy())
 
 
-def monte_carlo_options(suite: str, case_id: str, reference: float) -> MonteCarloSizing:
+def monte_carlo_options(
+    suite: Suite, case_id: str, reference: float
+) -> MonteCarloSizing:
     """Trials and seed of a Monte Carlo case: about :data:`MC_TARGET_HITS`
     expected collisions within :data:`MC_SAMPLES`, and a seed fixed by the
     case's name so the report is reproducible."""
@@ -199,7 +199,7 @@ def _window(windows: Mapping[int, float], number: int) -> tuple[float, float]:
 
 
 def _monte_carlo_case(
-    suite: str,
+    suite: Suite,
     case_id: str,
     conjunction: Conjunction,
     reference: float,
@@ -238,7 +238,7 @@ def alfano_cases(alfano: Sequence[AlfanoInput]) -> list[ValidationCase]:
             continue
         cases.append(
             ValidationCase(
-                ALFANO,
+                Suite.ALFANO,
                 str(item.number),
                 item.conjunction,
                 reference,
@@ -259,7 +259,7 @@ def alfano_3d_cases(
     """
     return [
         ValidationCase(
-            ALFANO_3D,
+            Suite.ALFANO_3D,
             str(item.number),
             item.conjunction,
             column_number(item.results, "CARA_Pc3D"),
@@ -277,7 +277,7 @@ def alfano_monte_carlo_cases(
     """Alfano (2009) cases 1-12 with CARA's two-body Monte Carlo reference."""
     return [
         _monte_carlo_case(
-            ALFANO_MONTE_CARLO,
+            Suite.ALFANO_MONTE_CARLO,
             str(item.number),
             item.conjunction,
             column_number(item.results, "CARA_PcMC"),
@@ -300,7 +300,7 @@ def pc_method_cases(pc_method: Sequence[PcMethodInput]) -> list[ValidationCase]:
     """
     return [
         ValidationCase(
-            PC_METHOD_SET,
+            Suite.PC_METHOD_SET,
             item.conjunction_id,
             item.conjunction,
             column_number(item.row, "Pc2D"),
@@ -317,7 +317,7 @@ def pc_method_3d_cases(pc_method: Sequence[PcMethodInput]) -> list[ValidationCas
     """
     return [
         ValidationCase(
-            PC_METHOD_SET_3D,
+            Suite.PC_METHOD_SET_3D,
             item.conjunction_id,
             item.conjunction,
             column_number(item.row, "Nc3D"),
@@ -335,7 +335,7 @@ def pc_method_monte_carlo_cases(
     """Test-set conjunctions whose CARA Monte Carlo Pc is at least ``MC_MIN_PC``."""
     return [
         _monte_carlo_case(
-            PC_METHOD_SET_MONTE_CARLO,
+            Suite.PC_METHOD_SET_MONTE_CARLO,
             item.conjunction_id,
             item.conjunction,
             reference,
@@ -355,11 +355,11 @@ def load_non_pd_case(cache: Path | None = None) -> ValidationCase:
     path = cara.fetch(cara.NON_PD_CDM, cache=cache)
     conjunction = cdm.load(path).conjunction(hard_body_radius=UNIT_TEST_HBR)
     return ValidationCase(
-        UNIT_TESTS,
+        Suite.UNIT_TESTS,
         "non-PD covariance CDM",
         conjunction,
         0.0,
-        criterion=Criterion(absolute=1e-10),
+        criterion=BoundCriterion(absolute=1e-10),
     )
 
 
@@ -374,7 +374,7 @@ def elrod_similar_to_3d_case() -> ValidationCase:
         lambda matrix: Covariance.from_position(matrix[:3, :3], "GCRF", NOMINAL_EPOCH)
     )
     return ValidationCase(
-        UNIT_TESTS, "Elrod testSimilarTo3D", conjunction, ELROD_SIMILAR_TO_3D_PC
+        Suite.UNIT_TESTS, "Elrod testSimilarTo3D", conjunction, ELROD_SIMILAR_TO_3D_PC
     )
 
 
@@ -391,7 +391,7 @@ def hall_similar_to_2d_case() -> ValidationCase:
         lambda matrix: make_covariance(matrix, "GCRF", NOMINAL_EPOCH)
     )
     return ValidationCase(
-        UNIT_TESTS,
+        Suite.UNIT_TESTS,
         "Hall testSimilarTo2D",
         conjunction,
         HALL_SIMILAR_TO_2D_PC,
@@ -413,13 +413,13 @@ def load_hall_2d3d_cases(cache: Path | None = None) -> list[ValidationCase]:
     conjunction = cdm.load(path).conjunction(hard_body_radius=UNIT_TEST_HBR)
     return [
         ValidationCase(
-            UNIT_TESTS,
+            Suite.UNIT_TESTS,
             "Hall test2D3DDisagreement (2-D)",
             conjunction,
             HALL_2D3D_PC_2D,
         ),
         ValidationCase(
-            UNIT_TESTS,
+            Suite.UNIT_TESTS,
             "Hall test2D3DDisagreement (3-D)",
             conjunction,
             HALL_2D3D_PC_3D,
@@ -441,12 +441,12 @@ def load_max_pc_cases(cache: Path | None = None) -> list[ValidationCase]:
     )
     cases = [
         ValidationCase(
-            MAX_PC_UNIT_TESTS,
+            Suite.MAX_PC_UNIT_TESTS,
             f"Frisbee example, HBR {radius:g} m",
             Conjunction(primary, secondary, radius),
             reference,
             methods=("frisbee",),
-            criterion=Criterion(absolute=5e-7),
+            criterion=BoundCriterion(absolute=5e-7),
         )
         for radius, reference in FRISBEE_REFERENCES
     ]
@@ -454,12 +454,12 @@ def load_max_pc_cases(cache: Path | None = None) -> list[ValidationCase]:
         objects = load_legacy_objects(cara.fetch(cara.DILUTION_CDMS[name], cache=cache))
         cases.append(
             ValidationCase(
-                MAX_PC_UNIT_TESTS,
+                Suite.MAX_PC_UNIT_TESTS,
                 f"Omitron {name}",
                 Conjunction(*objects, radius),
                 reference,
                 methods=("dilution",),
-                criterion=Criterion(relative=5e-3),
+                criterion=BoundCriterion(relative=5e-3),
             )
         )
     return cases

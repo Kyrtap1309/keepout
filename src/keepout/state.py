@@ -3,16 +3,26 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Final, Literal, TypeAlias, get_args
+from typing import Final, Literal, NamedTuple, TypeAlias, get_args
 
+import numpy as np
 import numpy.typing as npt
 from astropy.time import Time
 
 from keepout._linalg import as_vector
 from keepout._types import FloatArray
-from keepout.errors import UnsupportedFrame
+from keepout._validation import require_choice
+from keepout.errors import GeometryError, UnsupportedFrame
 
-__all__ = ["REF_FRAMES", "RefFrame", "StateVector", "as_ref_frame"]
+__all__ = [
+    "REF_FRAMES",
+    "RefFrame",
+    "RelativeMotion",
+    "StateVector",
+    "as_ref_frame",
+    "relative_motion",
+    "require_frame",
+]
 
 RefFrame: TypeAlias = Literal["GCRF", "EME2000", "ITRF", "TEME"]
 """Reference frames a state vector can be expressed in."""
@@ -33,12 +43,7 @@ def as_ref_frame(name: str | None) -> RefFrame:
     UnsupportedFrame
         If ``name`` is not one of :data:`REF_FRAMES`.
     """
-    for frame in REF_FRAMES:
-        if name == frame:
-            return frame
-    raise UnsupportedFrame(
-        f"unsupported reference frame {name!r}; expected one of {', '.join(REF_FRAMES)}"
-    )
+    return require_choice(name, REF_FRAMES, "reference frame", UnsupportedFrame)
 
 
 @dataclass(frozen=True, eq=False, init=False, slots=True)
@@ -78,3 +83,57 @@ class StateVector:
         object.__setattr__(self, "r", as_vector(r, "r"))
         object.__setattr__(self, "v", as_vector(v, "v"))
         object.__setattr__(self, "frame", as_ref_frame(frame))
+
+
+def require_frame(state: StateVector, frame: RefFrame, what: str) -> None:
+    """A check that ``state`` is in ``frame``.
+
+    Parameters
+    ----------
+    state
+        The state to check.
+    frame
+        The frame it must be in.
+    what
+        What needs the state, for the error: ``"a close approach"``.
+
+    Raises
+    ------
+    GeometryError
+        If ``state`` is in another frame.
+    """
+    if state.frame != frame:
+        hint = "; convert with keepout.frames.to_gcrf" if frame == "GCRF" else ""
+        raise GeometryError(f"{what} needs a {frame} state, got {state.frame}{hint}")
+
+
+class RelativeMotion(NamedTuple):
+    """A secondary object's motion relative to a primary, in their frame."""
+
+    position: FloatArray
+    """Secondary minus primary position [m]."""
+    velocity: FloatArray
+    """Secondary minus primary velocity [m/s]."""
+
+    @property
+    def distance(self) -> float:
+        """Length of :attr:`position` [m]."""
+        return float(np.linalg.norm(self.position))
+
+    @property
+    def speed(self) -> float:
+        """Length of :attr:`velocity` [m/s]."""
+        return float(np.linalg.norm(self.velocity))
+
+
+def relative_motion(primary: StateVector, secondary: StateVector) -> RelativeMotion:
+    """The motion of ``secondary`` relative to ``primary`` (same frame).
+
+    Parameters
+    ----------
+    primary, secondary
+        The two states.
+    """
+    position: FloatArray = secondary.r - primary.r
+    velocity: FloatArray = secondary.v - primary.v
+    return RelativeMotion(position, velocity)

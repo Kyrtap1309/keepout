@@ -9,12 +9,13 @@ it is not negligible (:mod:`keepout.pc._encounters` locates them).
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass, field
 from typing import Final, NamedTuple
 
 import numpy as np
 from scipy import special
 
-from keepout._linalg import from_eigen
+from keepout._linalg import from_eigen, take
 from keepout._types import FloatArray
 from keepout.errors import PcConvergenceError
 from keepout.pc._orbit import OrbitUncertainty
@@ -32,10 +33,13 @@ _TINY_VARIANCE: Final = 1e-300
 the mean radial velocity in the flux."""
 
 
+@dataclass(eq=False, slots=True)
 class CollisionRate:
     """Hall's 3D-Nc collision rate ``Ncdot(t)`` [1/s] of a conjunction.
 
-    Called with an array of times [s from TCA], it returns the rate at each.
+    Called with an array of times [s from TCA], it returns the rate at each,
+    counting its evaluations and noting where the floor and the fallback
+    engaged.
 
     Parameters
     ----------
@@ -45,22 +49,26 @@ class CollisionRate:
         Combined hard-body radius [m].
     """
 
-    def __init__(
-        self, primary: OrbitUncertainty, secondary: OrbitUncertainty, radius: float
-    ) -> None:
-        self.primary, self.secondary, self.radius = primary, secondary, radius
-        self.floor_variance = (SIGMA_FLOOR * radius) ** 2
-        """Smallest position variance [m^2] used when inverting a covariance:
-        :data:`~keepout.pc._plane.SIGMA_FLOOR` of the radius, squared (as in
-        2-D Pc and CARA's ``Fclip``), so a perfectly known object has a
-        finite, tiny extent."""
-        self.evaluations = 0
-        self.smallest_floored_variance = math.inf
-        """Smallest combined position variance [m^2] raised to
-        :attr:`floor_variance` by :meth:`_rates` (infinite if the floor never
-        engaged)."""
-        self.fallbacks: list[tuple[float, float]] = []
-        """Times [s] and rates where the peak-overlap iteration failed."""
+    primary: OrbitUncertainty
+    secondary: OrbitUncertainty
+    radius: float
+    floor_variance: float = field(init=False)
+    """Smallest position variance [m^2] used when inverting a covariance:
+    :data:`~keepout.pc._plane.SIGMA_FLOOR` of the radius, squared (as in
+    2-D Pc and CARA's ``Fclip``), so a perfectly known object has a
+    finite, tiny extent."""
+    evaluations: int = field(default=0, init=False)
+    """Times the rate was evaluated at."""
+    smallest_floored_variance: float = field(default=math.inf, init=False)
+    """Smallest combined position variance [m^2] raised to
+    :attr:`floor_variance` by :meth:`_rates` (infinite if the floor never
+    engaged)."""
+    fallbacks: list[tuple[float, float]] = field(default_factory=list, init=False)
+    """Times [s] and rates where the peak-overlap iteration failed, in the
+    order evaluated."""
+
+    def __post_init__(self) -> None:
+        self.floor_variance = (SIGMA_FLOOR * self.radius) ** 2
 
     @property
     def position_covariance(self) -> FloatArray:
@@ -206,7 +214,7 @@ class _Relative(NamedTuple):
 
     def row(self, k: int) -> _Relative:
         """The time ``k`` of the batch."""
-        return _Relative(*(a[k] for a in self))
+        return take(self, k)
 
 
 def _sphere_integral(grid: SphereGrid, gaussian: _Relative, radius: float) -> float:

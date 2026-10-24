@@ -11,13 +11,17 @@ a repeated keyword the same way in every family.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Final, NamedTuple
+from pathlib import Path
+from typing import Final, NamedTuple, TypeVar
 
+from keepout.ccsds.files import read_file
 from keepout.errors import CcsdsParseError, KeepoutError
 
 __all__ = [
     "COMMENT",
+    "UNKNOWN",
     "USER_DEFINED",
     "USER_DEFINED_PREFIX",
     "Family",
@@ -28,6 +32,11 @@ __all__ = [
 COMMENT: Final = "COMMENT"
 """The keyword of a comment; it may repeat."""
 
+UNKNOWN: Final = "UNKNOWN"
+"""The value CCSDS gives a text keyword that is not known, such as the
+``OBJECT_NAME`` or ``OBJECT_ID`` an element set lacks, or an
+``ORIGINATOR`` not stated."""
+
 USER_DEFINED: Final = "USER_DEFINED"
 """The NDM/XML element of a user-defined parameter, named by its
 ``parameter`` attribute."""
@@ -35,6 +44,8 @@ USER_DEFINED: Final = "USER_DEFINED"
 USER_DEFINED_PREFIX: Final = "USER_DEFINED_"
 """Start of the keyword of a user-defined parameter: ``USER_DEFINED_NAME``
 in KVN, ``<USER_DEFINED parameter="NAME">`` in XML."""
+
+_T = TypeVar("_T")
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,12 +62,27 @@ class Family:
         Raised for a value a format cannot hold.
     keyword_width
         Width KVN keywords are padded to, aligning the ``=`` of a message.
+    unknown_is_text
+        Whether a KVN keyword the family's table does not know has a text
+        value (kept whole, brackets included) rather than a ``value [unit]``.
     """
 
     name: str
     parse_error: type[CcsdsParseError]
     write_error: type[KeepoutError]
     keyword_width: int
+    unknown_is_text: bool
+
+    def load(self, path: str | Path, loads: Callable[[str], _T]) -> _T:
+        """The message file ``path`` parsed by ``loads``; see
+        :func:`keepout.ccsds.files.read_file`.
+
+        Raises
+        ------
+        CcsdsParseError
+            The family's, if the file is broken gzip data or not UTF-8 text.
+        """
+        return loads(read_file(path, self))
 
 
 class Located(NamedTuple):

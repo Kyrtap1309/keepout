@@ -24,6 +24,7 @@ from keepout._validation import (
     require_probability,
 )
 from keepout.errors import SourceFormatError
+from keepout.sources._format import refuse_format
 from keepout.sources.catalog import Retrieval
 
 __all__ = [
@@ -157,14 +158,9 @@ def read_public_cdms(data: bytes) -> tuple[PublicCdm, ...]:
     try:
         records: JsonValue = json.loads(data.decode("utf-8"))
     except ValueError as exc:
-        raise SourceFormatError(
-            f"Space-Track did not send JSON ({exc}); it starts with {data[:60]!r}"
-        ) from exc
+        refuse_format("Space-Track", "JSON", data, exc)
     if not isinstance(records, list):
-        raise SourceFormatError(
-            f"Space-Track did not send an array of cdm_public rows; it starts "
-            f"with {data[:60]!r}"
-        )
+        refuse_format("Space-Track", "an array of cdm_public rows", data)
     cdms: list[PublicCdm] = []
     for number, record in enumerate(records, start=1):
         try:

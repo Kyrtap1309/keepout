@@ -3,34 +3,18 @@ parse errors."""
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
-from pathlib import Path
+from collections.abc import Sequence
 from typing import Final
 
-from keepout.ccsds import files
-from keepout.ccsds.message import COMMENT, Family, Located
+from keepout.ccsds.message import COMMENT, Family, KeywordValues, Located
 from keepout.cdm.keywords import SectionKind
 from keepout.cdm.model import Cdm, Field, Section, parse_field
 from keepout.errors import CdmParseError, CdmWriteError
 
-CDM: Final = Family("CDM", CdmParseError, CdmWriteError, keyword_width=30)
+CDM: Final = Family(
+    "CDM", CdmParseError, CdmWriteError, keyword_width=30, unknown_is_text=False
+)
 """The CDM message family."""
-
-
-def load_file(path: str | Path, loads: Callable[[str], Cdm]) -> Cdm:
-    """A message file parsed by ``loads``; see :func:`keepout.ccsds.files.read_file`.
-
-    Raises
-    ------
-    CdmParseError
-        If the file is broken gzip data or not UTF-8 text.
-    """
-    return files.load_file(path, loads, CDM)
-
-
-def dump_file(cdm: Cdm, path: str | Path, dumps: Callable[[Cdm], str]) -> None:
-    """A message formatted by ``dumps``, written as UTF-8."""
-    Path(path).write_text(dumps(cdm), encoding="utf-8")
 
 
 def field_of(kind: SectionKind, keyword: str, value: Located) -> Field:
@@ -51,23 +35,51 @@ def field_of(kind: SectionKind, keyword: str, value: Located) -> Field:
         ) from exc
 
 
-def build_section(
-    kind: SectionKind, fields: Sequence[Field], at: Located | None = None
-) -> Section:
-    """The section of ``fields``; their keywords are already known not to
-    repeat (:class:`~keepout.ccsds.message.KeywordValues`).
+class SectionBuilder:
+    """A section being read: its fields so far, each keyword checked not to
+    repeat as it is added (:class:`~keepout.ccsds.message.KeywordValues`).
 
-    Raises
-    ------
-    CdmParseError
-        At ``at`` if the section is invalid (no location if ``at`` is
-        ``None``).
+    Parameters
+    ----------
+    kind
+        Kind of the section.
+    at
+        Where the section is in the message, for the error of an invalid
+        section; no location if ``None``.
     """
-    try:
-        return Section(kind, tuple(fields))
-    except ValueError as exc:
-        where = at or Located("")
-        raise CdmParseError(str(exc), line=where.line, path=where.path) from exc
+
+    __slots__ = ("_fields", "_seen", "at", "kind")
+
+    def __init__(self, kind: SectionKind, at: Located | None = None) -> None:
+        self.kind: Final = kind
+        self.at: Final = at
+        self._fields: list[Field] = []
+        self._seen = KeywordValues(CDM)
+
+    def add(self, keyword: str, value: Located) -> None:
+        """The field ``keyword``'s ``value`` gives, appended.
+
+        Raises
+        ------
+        CdmParseError
+            At ``value``, if ``keyword`` repeats or the value is invalid.
+        """
+        self._seen.add(keyword, value)
+        self._fields.append(field_of(self.kind, keyword, value))
+
+    def build(self) -> Section:
+        """The section of the fields added.
+
+        Raises
+        ------
+        CdmParseError
+            At :attr:`at`, if the section is invalid.
+        """
+        try:
+            return Section(self.kind, tuple(self._fields))
+        except ValueError as exc:
+            where = self.at or Located("")
+            raise CdmParseError(str(exc), line=where.line, path=where.path) from exc
 
 
 def build_cdm(header: Section, relative: Section, segments: Sequence[Section]) -> Cdm:

@@ -4,20 +4,21 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Final, Literal, TypeAlias, get_args
+from typing import Final, Literal, TypeAlias
 
-from keepout._validation import require_probability
-from keepout.pc.result import PcResult
+from keepout._validation import require_choice, require_probability
+from keepout.pc.result import RESULT_KINDS, PcResult, ResultKind
 
 __all__ = ["PC_FLOOR", "PC_KINDS", "PcKind", "PcObservation"]
 
-PcKind: TypeAlias = Literal["estimate", "upper_bound", "below_floor"]
-"""What a Pc value means: an ``"estimate"`` of the probability; an
-``"upper_bound"`` (a maximum Pc, used when a covariance is unknown); or
-``"below_floor"``, when the source reports only that the probability is at
-most the value given (ESA's Kelvins data floors log10 Pc at -30)."""
+PcKind: TypeAlias = ResultKind | Literal["below_floor"]
+"""What a Pc value means: a :data:`~keepout.pc.ResultKind` (an
+``"estimate"`` of the probability, or an ``"upper_bound"``: a maximum Pc,
+used when a covariance is unknown); or ``"below_floor"``, when the source
+reports only that the probability is at most the value given (ESA's Kelvins
+data floors log10 Pc at -30)."""
 
-PC_KINDS: Final[tuple[PcKind, ...]] = get_args(PcKind)
+PC_KINDS: Final[tuple[PcKind, ...]] = (*RESULT_KINDS, "below_floor")
 """Every :data:`PcKind`."""
 
 PC_FLOOR: Final = 1e-30
@@ -91,8 +92,7 @@ class PcObservation:
             raise ValueError("give exactly one of pc and error")
         if self.error == "":
             raise ValueError("error must not be empty")
-        if self.kind not in PC_KINDS:
-            raise ValueError(f"kind must be one of {PC_KINDS}, got {self.kind!r}")
+        require_choice(self.kind, PC_KINDS, "kind")
         if self.pc is not None:
             require_probability(self.pc, "pc")
             object.__setattr__(self, "pc", float(self.pc) + 0.0)

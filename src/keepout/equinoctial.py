@@ -24,11 +24,13 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any, Final, Generic, Literal, NamedTuple, TypeAlias, TypeVar
 
 import numpy as np
 import numpy.typing as npt
 
+from keepout._linalg import take
 from keepout._types import ComplexArray, FloatArray, IndexArray
 from keepout.errors import GeometryError
 from keepout.orbits import EARTH_MU
@@ -42,7 +44,6 @@ __all__ = [
     "Orbits",
     "RetrogradeFactor",
     "complex_step",
-    "complex_step_jacobian",
     "propagate",
     "retrograde_factor",
     "semi_major_axis",
@@ -319,63 +320,96 @@ def _state(
     return np.concatenate([position, velocity], -1)  # pyright: ignore[reportReturnType]
 
 
+@dataclass(frozen=True, eq=False, slots=True)
 class Orbits:
     """Real elliptic orbits, prepared for evaluation at many times.
 
     Everything but the mean longitude is constant along two-body motion, so
-    it is computed once; :meth:`cartesian` then only solves Kepler's
-    equation. The states equal ``to_cartesian(propagate(elements, t), fr)``.
+    it is computed once (:meth:`from_elements`); :meth:`cartesian` then only
+    solves Kepler's equation. The states equal
+    ``to_cartesian(propagate(elements, t), fr)``.
 
-    Parameters
-    ----------
-    elements
-        Real equinoctial elements at TCA, shape ``(m, 6)``.
-    fr
-        Retrograde factor.
-    mu
-        Gravitational parameter [m^3/s^2].
+    Every field has one row per orbit.
     """
 
-    def __init__(
-        self, elements: FloatArray, fr: RetrogradeFactor, mu: float = EARTH_MU
-    ) -> None:
-        self.elements = np.asarray(elements, dtype=np.float64)
-        n, af, ag, chi, psi = (self.elements[:, k] for k in range(5))
-        self._n, self._af, self._ag = n, af, ag
-        self._a = semi_major_axis(n, mu)
-        self._shape = _Shape.of(af, ag)
-        self._apse = _Apse.of(af, ag)
-        self._f, self._g = _basis(chi, psi, fr)
+    elements: FloatArray
+    """Real equinoctial elements at TCA, shape ``(m, 6)``."""
+    n: FloatArray
+    """Mean motion [rad/s]."""
+    af: FloatArray
+    """Equinoctial ``af``."""
+    ag: FloatArray
+    """Equinoctial ``ag``."""
+    a: FloatArray
+    """Semi-major axis [m]."""
+    shape: _Shape[FloatArray]
+    """Coefficients of the in-plane state."""
+    apse: _Apse
+    """Eccentricity and longitude of perigee, for the Kepler start."""
+    f: FloatArray
+    """First in-plane basis vector, ``(m, 3)``."""
+    g: FloatArray
+    """Second in-plane basis vector, ``(m, 3)``."""
+
+    @classmethod
+    def from_elements(
+        cls, elements: FloatArray, fr: RetrogradeFactor, mu: float = EARTH_MU
+    ) -> Orbits:
+        """The orbits of equinoctial elements.
+
+        Parameters
+        ----------
+        elements
+            Real equinoctial elements at TCA, shape ``(m, 6)``.
+        fr
+            Retrograde factor.
+        mu
+            Gravitational parameter [m^3/s^2].
+        """
+        elements = np.asarray(elements, dtype=np.float64)
+        n, af, ag, chi, psi = (elements[:, k] for k in range(5))
+        f, g = _basis(chi, psi, fr)
+        return cls(
+            elements,
+            n,
+            af,
+            ag,
+            semi_major_axis(n, mu),
+            _Shape.of(af, ag),
+            _Apse.of(af, ag),
+            f,
+            g,
+        )
 
     def subset(self, rows: slice | IndexArray) -> Orbits:
         """The orbits ``rows``, with their constants taken, not recomputed."""
-        orbits = object.__new__(Orbits)
-        for name in ("elements", "_n", "_af", "_ag", "_a", "_f", "_g"):
-            setattr(orbits, name, getattr(self, name)[rows])
-        for name, value in (
-            ("_shape", _Shape(*(c[rows] for c in self._shape))),
-            ("_apse", _Apse(*(c[rows] for c in self._apse))),
-        ):
-            setattr(orbits, name, value)
-        return orbits
+        return Orbits(
+            self.elements[rows],
+            self.n[rows],
+            self.af[rows],
+            self.ag[rows],
+            self.a[rows],
+            take(self.shape, rows),
+            take(self.apse, rows),
+            self.f[rows],
+            self.g[rows],
+        )
 
     def cartesian(
         self, t: float | FloatArray, rows: slice | IndexArray = slice(None)
     ) -> FloatArray:
         """States ``(k, 6)`` of the orbits ``rows`` at ``t`` [s from TCA]."""
-        n, af, ag = self._n[rows], self._af[rows], self._ag[rows]
+        n, af, ag = self.n[rows], self.af[rows], self.ag[rows]
         lam = self.elements[rows, 5] + n * np.asarray(t)
-        shape = _Shape(*(c[rows] for c in self._shape))
-        apse = _Apse(*(c[rows] for c in self._apse))
         state: FloatArray = _state(
             n,
-            self._a[rows],
+            self.a[rows],
             af,
             ag,
-            shape,
-            _eccentric_longitude(lam, af, ag, apse),
-            self._f[rows],
-            self._g[rows],
+            take(self.shape, rows),
+            _eccentric_longitude(lam, af, ag, take(self.apse, rows)),
+            self.f[rows],
+            self.g[rows],
         )
         return state
 
@@ -444,15 +478,3 @@ def complex_step(
     real: FloatArray = np.real(value[..., 0, :])
     jacobian: FloatArray = np.swapaxes(np.imag(value), -1, -2) / step
     return real, jacobian
-
-
-def complex_step_jacobian(
-    function: Callable[[ComplexArray], npt.NDArray[Any]],
-    x: npt.ArrayLike,
-    step: float = COMPLEX_STEP,
-) -> FloatArray:
-    """Jacobian of a real-analytic vector function by the complex step.
-
-    The Jacobian of :func:`complex_step`, which see.
-    """
-    return complex_step(function, x, step)[1]

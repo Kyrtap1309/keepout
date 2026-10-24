@@ -17,8 +17,9 @@ import importlib
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
+from keepout.ccsds.files import strip_bom
 from keepout.errors import OmmParseError
-from keepout.omm._io import load_file
+from keepout.omm._io import OMM
 from keepout.omm.keywords import VERSION_KEYWORD
 from keepout.omm.model import Deduplicated, Omm, deduplicate
 
@@ -88,7 +89,7 @@ def loads(text: str) -> tuple[Omm, ...]:
     """
     from keepout.omm import celestrak, kvn, tle, xml
 
-    body = text.removeprefix("\ufeff")
+    body = strip_bom(text)
     start = body.lstrip()
     first, *second = start.splitlines()[:2] or [""]
     if start.startswith("<"):
@@ -121,4 +122,4 @@ def load(path: str | Path) -> tuple[Omm, ...]:
     OmmParseError
         If the file is broken gzip data, not UTF-8 text, or not OMM data.
     """
-    return load_file(path, loads)
+    return OMM.load(path, loads)

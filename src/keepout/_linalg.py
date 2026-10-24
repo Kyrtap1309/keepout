@@ -2,12 +2,30 @@
 
 from __future__ import annotations
 
+from typing import Any, TypeVar
+
 import numpy as np
 import numpy.typing as npt
 
 from keepout._types import FloatArray, read_only
 
-__all__ = ["as_vector", "from_eigen", "symmetric_part"]
+__all__ = ["as_vector", "from_eigen", "symmetric_part", "take"]
+
+_Record = TypeVar("_Record", bound=tuple[Any, ...])
+
+
+def take(record: _Record, index: Any) -> _Record:  # noqa: ANN401 (any NumPy index)
+    """The rows ``index`` of every array of ``record``, as the same named tuple.
+
+    Parameters
+    ----------
+    record
+        A named tuple of arrays indexed alike, e.g. one row per time.
+    index
+        Any NumPy index of their first axis: an int, a slice, integer or
+        boolean arrays.
+    """
+    return type(record)(*(array[index] for array in record))
 
 
 def as_vector(value: npt.ArrayLike, name: str) -> FloatArray:

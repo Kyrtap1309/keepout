@@ -18,6 +18,7 @@ from typing import Final
 
 from astropy.time import Time
 
+from keepout.ccsds.message import COMMENT
 from keepout.cdm.keywords import STATE_KEYWORDS, covariance_matrix
 from keepout.errors import CaraFormatError, UnsupportedFrame
 from keepout.objects import ObjectState, ReportedObject, gcrf_object_states
@@ -36,7 +37,7 @@ def _fields(lines: list[str]) -> dict[str, str]:
     fields: dict[str, str] = {}
     for line in lines:
         match = _LINE.match(line)
-        if match and match.group(1) != "COMMENT":
+        if match and match.group(1) != COMMENT:
             fields.setdefault(match.group(1), match.group(2))
     return fields
 

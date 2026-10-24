@@ -28,6 +28,7 @@ import numpy as np
 from astropy.time import Time
 
 from keepout._validation import is_single_line
+from keepout.ccsds.message import COMMENT
 from keepout.cdm.keywords import (
     STATE_KEYWORDS,
     VERSION_1_0,
@@ -35,7 +36,7 @@ from keepout.cdm.keywords import (
     VERSION_KEYWORD,
     covariance_entries,
 )
-from keepout.cdm.model import COMMENT, Cdm, CovarianceMethod, Field, Section
+from keepout.cdm.model import Cdm, CovarianceMethod, Field, Section
 from keepout.conjunction import Conjunction
 from keepout.frames import rtn_rotation
 from keepout.objects import ObjectState

@@ -53,16 +53,21 @@ class Encounters:
         Its scan over the window.
     window_given
         Whether the window was passed rather than sized automatically.
-    scan_fallbacks
-        Times [s] and rates where the peak-overlap iteration failed during
-        the scan; ``rate.fallbacks`` also collects later failures (at Hall's
-        quadrature nodes).
+    scan_fallback_count
+        How many of ``rate.fallbacks`` the scan gave: the rate collects later
+        failures too (at Hall's quadrature nodes).
     """
 
     rate: CollisionRate
     found: RateScan
     window_given: bool
-    scan_fallbacks: tuple[tuple[float, float], ...]
+    scan_fallback_count: int
+
+    @property
+    def scan_fallbacks(self) -> list[tuple[float, float]]:
+        """Times [s] and rates where the peak-overlap iteration failed
+        during the scan."""
+        return self.rate.fallbacks[: self.scan_fallback_count]
 
     @classmethod
     def scan(
@@ -90,7 +95,7 @@ class Encounters:
         """
         rate = collision_rate(conjunction)
         found = encounter_scan(conjunction, rate, window)
-        return cls(rate, found, window is not None, tuple(rate.fallbacks))
+        return cls(rate, found, window is not None, len(rate.fallbacks))
 
 
 class UnusableOrbit(GeometryError):
@@ -149,7 +154,7 @@ def _orbit(conjunction: Conjunction, role: Role) -> OrbitUncertainty:
     UnusableOrbit
         If the orbit has no equinoctial elements.
     """
-    item = conjunction.primary if role == "primary" else conjunction.secondary
+    item = conjunction.object_of(role)
     try:
         return OrbitUncertainty.of(item)
     except GeometryError as error:

@@ -72,7 +72,7 @@ def events_table(events: Sequence[Assessed], title: str) -> Table:
             f"{latest.miss_distance:.0f}",
             str(len(item.event.cdms)),
             _pc(item.assessment.trend.latest_observation),
-            "-" if level is None else level.label,
+            "-" if level is None else level.key,
             item.assessment.decision.action.label,
         )
     return rows

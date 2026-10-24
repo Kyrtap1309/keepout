@@ -129,6 +129,12 @@ def _values(satrecs: Sequence[Satrec], name: str) -> FloatArray:
     return np.array([getattr(satrec, name) for satrec in satrecs], dtype=np.float64)
 
 
+def _inclination_terms(inclo: FloatArray) -> tuple[FloatArray, FloatArray]:
+    """SGP4's ``con41 = 3 cos^2 i - 1`` and ``x1mth2 = 1 - cos^2 i``."""
+    cosio2 = np.cos(inclo) ** 2
+    return 3.0 * cosio2 - 1.0, 1.0 - cosio2
+
+
 def brouwer_mean_motion(satrec: Satrec) -> float:
     """SGP4's un-Kozai'd mean motion [rad/min] (``Satrec.no`` is Kozai's)."""
     return float(satrec.xke / satrec.a**1.5)
@@ -148,9 +154,7 @@ def drag_terms(satrecs: Sequence[Satrec]) -> DragTerms:
     no = np.array([brouwer_mean_motion(satrec) for satrec in satrecs])
     j2 = _values(satrecs, "j2")
     radius = _values(satrecs, "radiusearthkm")
-    cosio2 = np.cos(_values(satrecs, "inclo")) ** 2
-    con41 = 3.0 * cosio2 - 1.0
-    x1mth2 = 1.0 - cosio2
+    con41, x1mth2 = _inclination_terms(_values(satrecs, "inclo"))
     omeosq = 1.0 - ecco**2
     perigee = ao * (1.0 - ecco)
     simple = perigee < SIMPLE_DRAG_PERIGEE / radius + 1.0
@@ -247,8 +251,7 @@ def _near_earth(
     rate = bstar * terms.cc4
     em_max = ecco - np.minimum(rate * first, rate * last)
     em_max += np.where(terms.simple, 0.0, 2.0 * np.abs(bstar * terms.cc5))
-    cosio2 = np.cos(inclo) ** 2
-    con41 = 3.0 * cosio2 - 1.0
+    con41, x1mth2 = _inclination_terms(inclo)
     return _Secular(
         am_lo=np.where(tempa_lo > 0.0, ao * tempa_lo**2, math.nan),
         am_hi=ao * tempa_hi**2,
@@ -256,7 +259,7 @@ def _near_earth(
         aycof=np.abs(0.5 * _values(satrecs, "j3oj2") * np.sin(inclo)),
         con41_lo=con41,
         con41_hi=con41,
-        x1mth2=1.0 - cosio2,
+        x1mth2=x1mth2,
     )
 
 

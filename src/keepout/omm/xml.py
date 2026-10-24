@@ -26,7 +26,7 @@ from xml.etree import ElementTree
 
 from astropy.time import Time
 
-from keepout.ccsds.message import COMMENT, KeywordValues
+from keepout.ccsds.message import COMMENT, UNKNOWN, KeywordValues
 from keepout.ccsds.xml import XSI, add_leaf, local, parse, single, tostring, values
 from keepout.errors import OmmParseError
 from keepout.omm._io import (
@@ -34,7 +34,6 @@ from keepout.omm._io import (
     ccsds_values,
     check_version,
     creation_date_text,
-    load_file,
     parse_record,
 )
 from keepout.omm.keywords import DEFAULTS, VERSION, VERSION_KEYWORD
@@ -133,13 +132,13 @@ def load(path: str | Path) -> tuple[Omm, ...]:
     path
         File to read.
     """
-    return load_file(path, loads)
+    return OMM.load(path, loads)
 
 
 def dumps(
     omms: Iterable[Omm],
     *,
-    originator: str = "UNKNOWN",
+    originator: str = UNKNOWN,
     creation_date: Time | None = None,
 ) -> str:
     """OMMs as an NDM/XML ``<ndm>`` of version 3.0 ``<omm>`` elements.

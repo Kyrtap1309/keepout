@@ -6,7 +6,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from functools import cached_property
 
-import numpy as np
 from astropy.time import Time
 
 from keepout._types import FloatArray
@@ -14,6 +13,7 @@ from keepout._validation import positive_float
 from keepout.encounter import EncounterPlane, Role, encounter_plane
 from keepout.errors import HardBodyRadiusError
 from keepout.objects import ObjectState, require_same_epoch
+from keepout.state import RelativeMotion, relative_motion
 
 __all__ = ["Conjunction", "combined_hard_body_radius"]
 
@@ -118,10 +118,15 @@ class Conjunction:
         return ("primary", self.primary), ("secondary", self.secondary)
 
     @property
+    def relative_motion(self) -> RelativeMotion:
+        """The secondary's motion relative to the primary, in the states'
+        frame."""
+        return relative_motion(self.primary.state, self.secondary.state)
+
+    @property
     def relative_position(self) -> FloatArray:
         """Secondary minus primary position [m], in the states' frame."""
-        position: FloatArray = self.secondary.state.r - self.primary.state.r
-        return position
+        return self.relative_motion.position
 
     @property
     def relative_velocity(self) -> FloatArray:
@@ -129,18 +134,26 @@ class Conjunction:
 
         Defined at zero relative speed too, unlike :attr:`plane`.
         """
-        velocity: FloatArray = self.secondary.state.v - self.primary.state.v
-        return velocity
+        return self.relative_motion.velocity
 
     @property
     def relative_speed(self) -> float:
         """Relative speed [m/s]."""
-        return float(np.linalg.norm(self.relative_velocity))
+        return self.relative_motion.speed
+
+    @property
+    def has_plane(self) -> bool:
+        """Whether the encounter :attr:`plane` is defined: the relative speed
+        is not zero."""
+        return self.relative_speed != 0.0
+
+    def object_of(self, role: Role) -> ObjectState:
+        """The object with ``role``."""
+        return self.primary if role == "primary" else self.secondary
 
     def label(self, role: Role) -> str:
         """``"primary (12345)"``: the role and object id, for messages."""
-        item = self.primary if role == "primary" else self.secondary
-        return f"{role} ({item.object_id})"
+        return f"{role} ({self.object_of(role).object_id})"
 
     @property
     def unknown_covariance(self) -> tuple[Role, ...]:

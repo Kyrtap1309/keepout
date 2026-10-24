@@ -13,7 +13,7 @@ from keepout._validation import require_non_negative
 from keepout.covariance import Covariance, Policy, make_covariance
 from keepout.errors import GeometryError
 from keepout.frames import to_gcrf_all
-from keepout.state import StateVector
+from keepout.state import StateVector, require_frame
 from keepout.units import elapsed_seconds
 
 __all__ = [
@@ -82,12 +82,11 @@ class ObjectState:
 
     def __post_init__(self) -> None:
         covariance = self.covariance
-        if self.state.frame != "GCRF" or (
-            covariance is not None and covariance.frame != "GCRF"
-        ):
+        require_frame(self.state, "GCRF", "ObjectState")
+        if covariance is not None and covariance.frame != "GCRF":
             raise GeometryError(
-                "ObjectState needs a GCRF state and covariance; convert with "
-                "keepout.frames.to_gcrf and Covariance.in_gcrf"
+                "ObjectState needs a GCRF covariance, got "
+                f"{covariance.frame}; convert with Covariance.in_gcrf"
             )
         if covariance is not None:
             require_same_epoch(

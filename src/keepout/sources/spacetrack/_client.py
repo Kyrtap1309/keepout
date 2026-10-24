@@ -18,13 +18,12 @@ from keepout._types import JsonValue, override
 from keepout.errors import (
     AuthError,
     HttpStatusError,
-    OmmParseError,
     RateLimited,
-    SourceFormatError,
     SourceUnavailable,
 )
 from keepout.omm.celestrak import loads_json
 from keepout.omm.model import Omm
+from keepout.sources._format import omm_reader
 from keepout.sources._store import cache_dir
 from keepout.sources.cache import cached_fetch
 from keepout.sources.catalog import Catalog, CatalogPart, Retrieval
@@ -57,11 +56,8 @@ __all__ = [
 _RATE_LIMIT_TEXT: Final = b"violated your query rate limit"
 """What Space-Track's answer says when a query broke the per-minute limit."""
 
-_EXCERPT: Final = 200
-"""Characters of a server answer quoted in an error message."""
-
-_FORMAT_EXCERPT: Final = 60
-"""Bytes of an answer quoted when it is not the expected format."""
+_ANSWER_EXCERPT_CHARS: Final = 200
+"""Characters of a server answer quoted in the error of a refused request."""
 
 _T = TypeVar("_T")
 
@@ -389,11 +385,11 @@ class SpaceTrackClient:
         text = body.decode("utf-8", "replace")
         credentials = self._credentials
         excerpt = (
-            redacted_excerpt(credentials, text, _EXCERPT)
+            redacted_excerpt(credentials, text, _ANSWER_EXCERPT_CHARS)
             if credentials is not None
-            else text[:_EXCERPT]
+            else text[:_ANSWER_EXCERPT_CHARS]
         ).strip()
-        return f"{excerpt} ..." if len(text) > _EXCERPT else excerpt
+        return f"{excerpt} ..." if len(text) > _ANSWER_EXCERPT_CHARS else excerpt
 
 
 def _allowance(query: Query) -> str:
@@ -405,6 +401,9 @@ def _allowance(query: Query) -> str:
     )
 
 
+_read_gp: Final = omm_reader(loads_json, "Space-Track", "OMM JSON")
+
+
 def read_catalog(data: bytes) -> tuple[Omm, ...]:
     """The element sets of a Space-Track ``gp`` answer in JSON.
 
@@ -414,13 +413,7 @@ def read_catalog(data: bytes) -> tuple[Omm, ...]:
         If ``data`` is not UTF-8 OMM JSON (e.g. an error object instead of
         an array).
     """
-    try:
-        return loads_json(data.decode("utf-8"))
-    except (UnicodeDecodeError, OmmParseError) as exc:
-        raise SourceFormatError(
-            f"Space-Track did not send OMM JSON ({exc}); "
-            f"it starts with {data[:_FORMAT_EXCERPT]!r}"
-        ) from exc
+    return _read_gp(data)
 
 
 def fetch_public_cdms(

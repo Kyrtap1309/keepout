@@ -160,7 +160,7 @@ def test_rotated_covariance_is_frozen_and_symmetric() -> None:
 
 
 def test_unknown_policy_is_rejected() -> None:
-    with pytest.raises(ValueError, match="unknown covariance policy 'ignore'"):
+    with pytest.raises(ValueError, match="unsupported covariance policy 'ignore'"):
         # The wrong literal is the point of the test.
         make_covariance(VALID, "RTN", EPOCH, policy="ignore")  # type: ignore[arg-type]
 

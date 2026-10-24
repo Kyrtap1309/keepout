@@ -20,8 +20,8 @@ from keepout.pc.result import PcResult
 from keepout.risk import PcKind, PcObservation
 from keepout.state import StateVector
 from keepout.units import DAY
-from keepout.validation.cases import ValidationCase
-from keepout.validation.criteria import TWO_D, Criterion
+from keepout.validation.cases import Suite, ValidationCase
+from keepout.validation.criteria import TWO_D, BoundCriterion
 
 CDM_DATA = Path(__file__).parent / "cdm" / "data"
 """Reference CDM files shared by the CDM and validation tests."""
@@ -179,10 +179,12 @@ def case_with_reference(
     bound.
     """
     criterion = (
-        TWO_D if absolute_tolerance is None else Criterion(absolute=absolute_tolerance)
+        TWO_D
+        if absolute_tolerance is None
+        else BoundCriterion(absolute=absolute_tolerance)
     )
     return ValidationCase(
-        "test",
+        Suite.UNIT_TESTS,
         case_id,
         head_on(1000.0, 10.0, 10.0, 5.0),
         reference,

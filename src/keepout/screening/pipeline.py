@@ -265,7 +265,7 @@ def _deduplicated(
 ) -> tuple[tuple[Omm, ...], list[SkippedObject]]:
     """The newest element set of each object, and the older ones left out."""
     unique = deduplicate(omms)
-    newest = {omm.catalog_number: omm for omm in unique.kept}
+    newest = unique.by_number
     skipped: list[SkippedObject] = []
     for omm in unique.dropped:
         used = newest[omm.catalog_number].epoch.isot

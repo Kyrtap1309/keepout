@@ -5,23 +5,26 @@ from __future__ import annotations
 import math
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from typing import Final
 
 from keepout._defaults import DECISION_POINT
 from keepout._types import OrderedEnum
 from keepout._validation import require_positive
+from keepout.risk._text import days_text
 from keepout.risk.observation import PC_FLOOR, PcObservation
-from keepout.risk.thresholds import RiskLevel, Thresholds
+from keepout.risk.thresholds import DEFAULT_THRESHOLDS, RiskLevel, Thresholds
 from keepout.risk.trend import (
+    DEFAULT_TREND_CONFIG,
     Direction,
     Trend,
     TrendConfig,
     TrendPoint,
-    _days,
     analyse_trend,
 )
 from keepout.units import DAY
 
 __all__ = [
+    "DEFAULT_DECISION_CONFIG",
     "Action",
     "Assessment",
     "Decision",
@@ -74,6 +77,10 @@ class DecisionConfig:
         require_positive(self.decision_point, "decision_point")
 
 
+DEFAULT_DECISION_CONFIG: Final = DecisionConfig()
+"""The default decision point."""
+
+
 @dataclass(frozen=True, eq=False, slots=True)
 class Decision:
     """A recommended action and why.
@@ -91,22 +98,31 @@ class Decision:
     reasons: tuple[str, ...]
 
 
-def _describe(point: TrendPoint, *, before_a_failure: bool = False) -> str:
-    """The point's Pc, level and time; ``before_a_failure`` phrases it as the
-    latest observation with a Pc, followed by one without."""
+def _describe_latest(point: TrendPoint) -> str:
+    """The latest point's Pc, level and time."""
+    return _with_qualifiers(f"latest Pc {point.value:.2e} is {point.level.key}", point)
+
+
+def _describe_before_failure(point: TrendPoint) -> str:
+    """The point's Pc, level and time, as the latest observation with a Pc,
+    followed by one without."""
+    text = (
+        f"the latest observation with a Pc was {point.level.key}: Pc {point.value:.2e}"
+    )
+    return _with_qualifiers(text, point)
+
+
+def _with_qualifiers(text: str, point: TrendPoint) -> str:
+    """``text`` about the point's Pc, followed by what kind of value it is
+    and its time before TCA."""
     observation = point.observation
-    level = point.level.label
-    if before_a_failure:
-        text = f"the latest observation with a Pc was {level}: Pc {point.value:.2e}"
-    else:
-        text = f"latest Pc {point.value:.2e} is {level}"
     if point.value != observation.pc:
         text += " (upper end of the Monte Carlo confidence interval)"
     if observation.kind == "upper_bound":
         text += " (an upper bound: a covariance is unknown)"
     elif observation.kind == "below_floor":
         text += " (at most this: below the source's reporting floor)"
-    return f"{text}, {_days(point.time_to_tca)} before TCA"
+    return f"{text}, {days_text(point.time_to_tca)} before TCA"
 
 
 def _concerns(point: TrendPoint) -> list[str]:
@@ -139,7 +155,7 @@ def _red(
 ) -> Decision:
     """The decision on a red event, judged ``time_to_tca`` seconds before TCA."""
     decision_point_text = (
-        f"the decision point ({_days(config.decision_point)} before TCA)"
+        f"the decision point ({days_text(config.decision_point)} before TCA)"
     )
     if time_to_tca <= config.decision_point:
         within = f"within {decision_point_text}"
@@ -148,7 +164,9 @@ def _red(
     return Decision(Action.PREPARE_MANOEUVRE, (*reasons, timing, *concerns))
 
 
-def decide(trend: Trend, *, config: DecisionConfig | None = None) -> Decision:
+def decide(
+    trend: Trend, *, config: DecisionConfig = DEFAULT_DECISION_CONFIG
+) -> Decision:
     """The recommended action for an event's trend.
 
     Rules, on the latest observation before TCA:
@@ -174,24 +192,28 @@ def decide(trend: Trend, *, config: DecisionConfig | None = None) -> Decision:
     trend
         The event's trend.
     config
-        The decision point; :class:`DecisionConfig` defaults if ``None``.
+        The decision point.
     """
-    config = config if config is not None else DecisionConfig()
-    thresholds = trend.thresholds
     latest = trend.latest_observation
     if latest is None:
         return Decision(
             Action.MONITOR, ("no observation before TCA: nothing to decide on",)
         )
     point = trend.latest
-    if not latest.ok:
-        reasons = [f"latest observation has no Pc: {latest.error}"]
-        if point is None or point.level is not RiskLevel.RED:
-            return Decision(Action.MONITOR, tuple(reasons))
-        reasons += [_describe(point, before_a_failure=True), _trend_reason(trend)]
-        return _red(latest.time_to_tca, config, reasons, _concerns(point))
-    assert point is not None  # noqa: S101 (the latest observation has a Pc)
-    reasons = [_describe(point), _trend_reason(trend)]
+    # With a Pc, the latest observation is the latest point.
+    if latest.ok and point is not None:
+        return _decide_on(point, trend, config)
+    reasons = [f"latest observation has no Pc: {latest.error}"]
+    if point is None or point.level is not RiskLevel.RED:
+        return Decision(Action.MONITOR, tuple(reasons))
+    reasons += [_describe_before_failure(point), _trend_reason(trend)]
+    return _red(latest.time_to_tca, config, reasons, _concerns(point))
+
+
+def _decide_on(point: TrendPoint, trend: Trend, config: DecisionConfig) -> Decision:
+    """:func:`decide` when the latest observation, ``point``, has a Pc."""
+    thresholds = trend.thresholds
+    reasons = [_describe_latest(point), _trend_reason(trend)]
     concerns = _concerns(point)
     if point.level is RiskLevel.RED:
         return _red(point.time_to_tca, config, reasons, concerns)
@@ -245,9 +267,9 @@ class Assessment:
 def assess(
     observations: Iterable[PcObservation],
     *,
-    thresholds: Thresholds | None = None,
-    trend_config: TrendConfig | None = None,
-    decision_config: DecisionConfig | None = None,
+    thresholds: Thresholds = DEFAULT_THRESHOLDS,
+    trend_config: TrendConfig = DEFAULT_TREND_CONFIG,
+    decision_config: DecisionConfig = DEFAULT_DECISION_CONFIG,
 ) -> Assessment:
     """The assessment of an event from its observations, in any order.
 
@@ -257,12 +279,11 @@ def assess(
         The event's observations, e.g. from
         :meth:`~keepout.events.ConjunctionEvent.observations`.
     thresholds
-        Risk thresholds; :class:`~keepout.risk.thresholds.Thresholds`
-        defaults if ``None``.
+        Risk thresholds.
     trend_config
-        How the trend's direction is decided; defaults if ``None``.
+        How the trend's direction is decided.
     decision_config
-        The decision point; defaults if ``None``.
+        The decision point.
 
     Raises
     ------

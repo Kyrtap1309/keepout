@@ -156,7 +156,7 @@ def is_long(conjunction: Conjunction) -> bool:
     """Whether the encounter is long (see
     :func:`~keepout.pc._duration.long_encounter`), so that a sample can leave
     the hard-body sphere and enter it again."""
-    if conjunction.relative_speed == 0.0:
+    if not conjunction.has_plane:
         return False
     return long_encounter(conjunction, encounter_duration(conjunction)) is not None
 
@@ -242,7 +242,7 @@ def _entry_notes(
         "Nc counts repeated entries into the hard-body sphere, so it is an "
         "upper bound on Pc"
     )
-    if conjunction.relative_speed == 0.0:
+    if not conjunction.has_plane:
         notes.append(f"relative velocity is zero: {repeated}")
     else:
         if is_long(conjunction):

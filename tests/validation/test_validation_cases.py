@@ -29,7 +29,7 @@ from keepout.validation.cases import (
     MC_MIN_PC,
     MC_SAMPLES,
     MC_SUITE_ALPHA,
-    PC_METHOD_SET,
+    Suite,
     alfano_3d_cases,
     alfano_cases,
     alfano_monte_carlo_cases,
@@ -43,7 +43,7 @@ from keepout.validation.cases import (
     pc_method_cases,
     pc_method_monte_carlo_cases,
 )
-from keepout.validation.criteria import HALL, HALL_PC_SET, MONTE_CARLO
+from keepout.validation.criteria import HALL, HALL_PC_SET, MONTE_CARLO, BoundCriterion
 from keepout.validation.evaluation import evaluate
 
 
@@ -192,7 +192,7 @@ def test_malformed_alfano_reference_is_a_format_error(
 def test_non_pd_case_uses_cara_reference_and_tolerance() -> None:
     case = load_non_pd_case()
     assert case.conjunction.hard_body_radius == 20.0
-    assert (case.reference, case.criterion.absolute) == (0.0, 1e-10)
+    assert (case.reference, case.criterion) == (0.0, BoundCriterion(absolute=1e-10))
 
 
 def offline_alfano_3d(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -241,19 +241,23 @@ def test_alfano_monte_carlo_cases_carry_the_cara_interval(
 
 
 def test_monte_carlo_options_are_bounded_and_reproducible() -> None:
-    assert monte_carlo_options("s", "1", 0.5)["samples"] == MC_SAMPLES[0]
-    assert monte_carlo_options("s", "1", 1e-5)["samples"] == MC_SAMPLES[1]
-    assert monte_carlo_options("s", "1", 1e-3) == monte_carlo_options("s", "1", 1e-3)
-    assert monte_carlo_options("s", "1", 1e-3) != monte_carlo_options("s", "2", 1e-3)
+    assert monte_carlo_options(Suite.UNIT_TESTS, "1", 0.5)["samples"] == MC_SAMPLES[0]
+    assert monte_carlo_options(Suite.UNIT_TESTS, "1", 1e-5)["samples"] == MC_SAMPLES[1]
+    assert monte_carlo_options(Suite.UNIT_TESTS, "1", 1e-3) == monte_carlo_options(
+        Suite.UNIT_TESTS, "1", 1e-3
+    )
+    assert monte_carlo_options(Suite.UNIT_TESTS, "1", 1e-3) != monte_carlo_options(
+        Suite.UNIT_TESTS, "2", 1e-3
+    )
 
 
 def test_a_case_refuses_options_its_methods_do_not_take() -> None:
     case = case_with_reference(1e-3)
     with pytest.raises(
-        ValueError, match=r"test/case: foster takes no options \['window'\]"
+        ValueError, match=r"CARA unit tests/case: foster takes no option \['window'\]"
     ):
         dataclasses.replace(case, options={"window": (-1.0, 1.0)})
-    with pytest.raises(ValueError, match=r"hall3d takes no options \['seed'\]"):
+    with pytest.raises(ValueError, match=r"hall3d takes no option \['seed'\]"):
         dataclasses.replace(
             case,
             methods=("hall3d", "montecarlo"),
@@ -303,7 +307,11 @@ def test_pc_method_2d_cases(monkeypatch: pytest.MonkeyPatch, offline_b1: None) -
     monkeypatch.setattr(cara, "PC_METHOD_CDMS", {"A": B1_KVN})
     monkeypatch.setattr(cara, "load_xlsx", lambda path: [row])
     (case,) = pc_method_cases(load_pc_method_inputs())
-    assert (case.suite, case.case_id, case.reference) == (PC_METHOD_SET, "A", 3e-4)
+    assert (case.suite, case.case_id, case.reference) == (
+        Suite.PC_METHOD_SET,
+        "A",
+        3e-4,
+    )
     assert case.conjunction.hard_body_radius == 20.0
     assert case.methods == ("foster", "elrod")
 
@@ -353,8 +361,8 @@ def test_max_pc_cases_follow_cara_unit_tests(monkeypatch: pytest.MonkeyPatch) ->
     found = load_max_pc_cases()
     assert [c.methods for c in found] == [("frisbee",)] * 2 + [("dilution",)] * 4
     assert seen[0] == (True, False)
-    assert found[0].criterion.absolute == 5e-7
-    assert found[2].criterion.relative == 5e-3
+    assert found[0].criterion == BoundCriterion(absolute=5e-7)
+    assert found[2].criterion == BoundCriterion(relative=5e-3)
     assert found[0].conjunction.unknown_covariance == ("secondary",)
 
 

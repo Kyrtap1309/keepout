@@ -95,7 +95,7 @@ from __future__ import annotations
 import contextlib
 import math
 from collections.abc import Sequence
-from typing import Final
+from typing import Final, NamedTuple
 
 import numpy as np
 import numpy.typing as npt
@@ -136,6 +136,7 @@ from keepout.screening._sieve import (
     SPEED_BOUND_MARGIN,
     chord_sieve,
     dot,
+    floored_lowest,
     speed_bounds,
     speed_sieve,
 )
@@ -188,6 +189,22 @@ def time_grid(duration: float, step: float = DEFAULT_STEP) -> FloatArray:
     grid = np.linspace(0.0, duration, count)
     read_only(grid)
     return grid
+
+
+class _PrimaryChunk(NamedTuple):
+    """One primary and the catalog objects it is paired with, over a chunk
+    of the grid."""
+
+    row: int
+    """Position of the primary."""
+    r_primary: FloatArray
+    """The primary's positions at ``times`` [m], shape ``(T, 3)``."""
+    r_secondaries: FloatArray
+    """Its catalog objects' positions at ``times`` [m], shape ``(S, T, 3)``."""
+    secondaries: IndexArray
+    """Their positions in the catalog."""
+    times: FloatArray
+    """Offsets of the chunk's grid points [s]."""
 
 
 class ApproachSearch:
@@ -265,8 +282,8 @@ class ApproachSearch:
         self._pairs = mask
         self._speed_primary = speed_bounds(primary_bounds)
         self._speed_catalog = speed_bounds(catalog_bounds)
-        self._lowest_primary = np.maximum(primary_bounds.lowest, MIN_RADIUS)
-        self._lowest_catalog = np.maximum(catalog_bounds.lowest, MIN_RADIUS)
+        self._lowest_primary = floored_lowest(primary_bounds)
+        self._lowest_catalog = floored_lowest(catalog_bounds)
         self._reach = np.array([volume.bounding_radius for volume in self._volumes])
 
     def run(self, *, max_states: int = CHUNK_STATES) -> SearchResult:
@@ -331,30 +348,25 @@ class ApproachSearch:
                 failures.catalog, columns, catalog.errors, catalog.offsets
             )
             for i, row in enumerate(rows):
-                self._add_passing_intervals(
-                    intervals_by_pair,
+                chunk = _PrimaryChunk(
                     int(row),
                     primaries.r[i],
                     catalog.r[own[i]],
                     columns[own[i]],
                     primaries.offsets,
                 )
+                self._add_passing_intervals(intervals_by_pair, chunk)
         return intervals_by_pair
 
     def _add_passing_intervals(
         self,
         intervals_by_pair: dict[tuple[int, int], list[Interval]],
-        row: int,
-        r_primary: FloatArray,
-        r_others: FloatArray,
-        others: IndexArray,
-        times: FloatArray,
+        chunk: _PrimaryChunk,
     ) -> None:
         """The intervals of one primary's pairs over a chunk that pass the
         sieves, added to ``intervals_by_pair``."""
-        secondaries, starts, monotone = self._sieve(
-            row, r_primary, r_others, others, times
-        )
+        secondaries, starts, monotone = self._sieve(chunk)
+        times = chunk.times
         for secondary, first, last, is_monotone in zip(
             secondaries.tolist(),
             times[starts].tolist(),
@@ -362,41 +374,30 @@ class ApproachSearch:
             monotone.tolist(),
             strict=True,
         ):
-            intervals_by_pair.setdefault((row, secondary), []).append(
+            intervals_by_pair.setdefault((chunk.row, secondary), []).append(
                 Interval(first, last, is_monotone)
             )
 
-    def _sieve(
-        self,
-        row: int,
-        r_primary: FloatArray,
-        r_others: FloatArray,
-        others: IndexArray,
-        times: FloatArray,
-    ) -> tuple[IndexArray, IndexArray, BoolArray]:
+    def _sieve(self, chunk: _PrimaryChunk) -> tuple[IndexArray, IndexArray, BoolArray]:
         """The intervals of one primary's pairs that pass both sieves.
 
         Returns the catalog positions and interval indices (within
-        ``times``) that pass, and whether ``f`` is monotone over each.
+        ``chunk.times``) that pass, and whether ``f`` is monotone over each.
         """
-        rho = r_others - r_primary
+        row, secondaries = chunk.row, chunk.secondaries
+        rho = chunk.r_secondaries - chunk.r_primary
         distance = np.sqrt(dot(rho, rho))
-        length = np.diff(times)
-        speed = self._speed_primary[row] + self._speed_catalog[others]
+        length = np.diff(chunk.times)
+        speed = self._speed_primary[row] + self._speed_catalog[secondaries]
+        lowest = np.minimum(
+            self._lowest_primary[row], self._lowest_catalog[secondaries]
+        )
         reach = self._reach[row]
         pair, interval = speed_sieve(distance, length, speed, reach)
-        secondaries = others[pair]
         keep, monotone = chord_sieve(
-            rho[pair, interval],
-            rho[pair, interval + 1],
-            distance[pair, interval],
-            distance[pair, interval + 1],
-            length[interval],
-            speed[pair],
-            np.minimum(self._lowest_primary[row], self._lowest_catalog[secondaries]),
-            reach,
+            rho, distance, length, speed, lowest, reach, (pair, interval)
         )
-        return secondaries[keep], interval[keep], monotone[keep]
+        return secondaries[pair][keep], interval[keep], monotone[keep]
 
     def _refine(
         self,

@@ -73,7 +73,7 @@ def test_invalid_thresholds_are_refused(changes: dict[str, Any]) -> None:
 
 
 def test_unknown_basis_is_refused() -> None:
-    with pytest.raises(ValueError, match="basis must be one of"):
+    with pytest.raises(ValueError, match="unsupported basis"):
         Thresholds(basis="optimistic")  # type: ignore[arg-type]
 
 
@@ -97,7 +97,7 @@ def test_a_higher_pc_is_never_a_lower_level(
 
 
 def test_a_level_is_labelled_in_lower_case() -> None:
-    assert [level.label for level in RiskLevel] == ["green", "yellow", "red"]
+    assert [level.key for level in RiskLevel] == ["green", "yellow", "red"]
 
 
 def test_a_level_has_a_stable_key_for_data() -> None:

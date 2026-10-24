@@ -46,6 +46,7 @@ from generated import (
 )
 
 from keepout._workers import DEFAULT_WORKERS
+from keepout.ccsds.message import UNKNOWN
 from keepout.cdm import kvn
 from keepout.omm import Omm, deduplicate
 from keepout.pc import dilution
@@ -60,7 +61,7 @@ from keepout.synthetic import (
     load_fleet,
     orbit_regime,
 )
-from keepout.synthetic.operator import UNKNOWN, run
+from keepout.synthetic.operator import run
 from keepout.units import DAY, KM
 
 PAGE: Final = REPO / "docs/synthetic-operator.md"
@@ -180,7 +181,7 @@ def window_start(manifest: snapshot.Manifest) -> Time:
 
 def _level(event: OperatorEvent) -> str | None:
     level = event.assessment.level
-    return None if level is None else level.label
+    return None if level is None else level.key
 
 
 def _satellite(satellite: FleetSatellite, omm: Omm, approaches: int) -> Satellite:

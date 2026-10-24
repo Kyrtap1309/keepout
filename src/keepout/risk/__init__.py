@@ -6,6 +6,7 @@ others (ESA's Kelvins data).
 """
 
 from keepout.risk.decision import (
+    DEFAULT_DECISION_CONFIG,
     Action,
     Assessment,
     Decision,
@@ -14,8 +15,9 @@ from keepout.risk.decision import (
     decide,
 )
 from keepout.risk.observation import PC_FLOOR, PcKind, PcObservation
-from keepout.risk.thresholds import Basis, RiskLevel, Thresholds
+from keepout.risk.thresholds import DEFAULT_THRESHOLDS, Basis, RiskLevel, Thresholds
 from keepout.risk.trend import (
+    DEFAULT_TREND_CONFIG,
     Direction,
     Trend,
     TrendConfig,
@@ -24,6 +26,9 @@ from keepout.risk.trend import (
 )
 
 __all__ = [
+    "DEFAULT_DECISION_CONFIG",
+    "DEFAULT_THRESHOLDS",
+    "DEFAULT_TREND_CONFIG",
     "PC_FLOOR",
     "Action",
     "Assessment",

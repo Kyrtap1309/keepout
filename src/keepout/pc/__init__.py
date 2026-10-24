@@ -17,6 +17,7 @@ from keepout.pc.api import (
     PcComputation,
     computation,
     compute_pc,
+    require_options,
 )
 from keepout.pc.elrod import elrod
 from keepout.pc.foster import foster
@@ -44,4 +45,5 @@ __all__ = [
     "frisbee",
     "hall3d",
     "montecarlo",
+    "require_options",
 ]

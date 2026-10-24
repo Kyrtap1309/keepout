@@ -21,15 +21,13 @@ from pathlib import Path
 
 from astropy.time import Time
 
-from keepout.ccsds.kvn import assignment, comment, format_line, located_value
-from keepout.ccsds.message import KeywordValues
-from keepout.errors import OmmParseError
+from keepout.ccsds.kvn import format_line, located_value, read_lines, require_started
+from keepout.ccsds.message import UNKNOWN, KeywordValues
 from keepout.omm._io import (
     OMM,
     ccsds_values,
     check_version,
     creation_date_text,
-    load_file,
     parse_record,
 )
 from keepout.omm.keywords import DEFAULTS, KEYWORDS, VERSION, VERSION_KEYWORD
@@ -61,35 +59,19 @@ def loads(text: str) -> tuple[Omm, ...]:
     """
     # Each message's first line and values, keyed by keyword.
     messages: list[tuple[int, KeywordValues]] = []
-    for number, raw in enumerate(text.splitlines(), start=1):
-        line = raw.strip()
-        if not line:
-            continue
-        assigned = assignment(line)
-        keyword = assigned[0] if assigned else None
-        if assigned and keyword == VERSION_KEYWORD:
+    # The message being read, 1-based, for the error of a malformed line.
+    for line in read_lines(text, OMM, record=lambda: len(messages) or None):
+        if line.keyword == VERSION_KEYWORD:
             record = len(messages) + 1
-            check_version(assigned[1], record=record, line=number)
-            messages.append((number, KeywordValues(OMM, record=record)))
+            check_version(line.text, record=record, line=line.number)
+            messages.append((line.number, KeywordValues(OMM, record=record)))
             continue
-        if not messages:
-            raise OmmParseError(
-                f"{VERSION_KEYWORD} must be the first keyword",
-                line=number,
-                keyword=keyword,
-            )
-        if comment(line) is not None:
+        require_started(line, OMM, VERSION_KEYWORD, started=bool(messages))
+        if line.keyword is None:
             continue
-        if assigned is None:
-            raise OmmParseError(
-                f"expected 'KEYWORD = value', got {line!r}",
-                record=len(messages),  # the message being read, 1-based
-                line=number,
-            )
-        keyword, value = assigned
-        spec = KEYWORDS.get(keyword)
+        spec = KEYWORDS.get(line.keyword)
         messages[-1][1].add(
-            keyword, located_value(spec, value, number, unknown_is_text=True)
+            line.keyword, located_value(spec, line.text, line.number, OMM)
         )
     return tuple(
         parse_record({**DEFAULTS, **found.values}, record=record, line=start)
@@ -105,13 +87,13 @@ def load(path: str | Path) -> tuple[Omm, ...]:
     path
         File to read.
     """
-    return load_file(path, loads)
+    return OMM.load(path, loads)
 
 
 def dumps(
     omms: Iterable[Omm],
     *,
-    originator: str = "UNKNOWN",
+    originator: str = UNKNOWN,
     creation_date: Time | None = None,
 ) -> str:
     """OMMs as KVN (version 3.0), one message per object, with units.

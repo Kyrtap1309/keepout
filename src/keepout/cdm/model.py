@@ -38,7 +38,6 @@ from keepout.objects import ObjectState, ReportedObject, gcrf_object_states
 from keepout.state import StateVector, as_ref_frame
 
 __all__ = [
-    "COMMENT",
     "KEYWORD_PATTERN",
     "USER_DEFINED_PREFIX",
     "Cdm",
@@ -79,15 +78,11 @@ class DuplicateKeyword(ValueError):
         Section kind.
     keyword
         The repeated keyword.
-    index
-        Position of the repeat in the section's fields, so that readers can
-        report where it is in the message.
     """
 
-    def __init__(self, kind: SectionKind, keyword: str, index: int) -> None:
+    def __init__(self, kind: SectionKind, keyword: str) -> None:
         super().__init__(f"{kind} section repeats keyword {keyword}")
         self.keyword = keyword
-        self.index = index
 
 
 @dataclass(frozen=True, slots=True)
@@ -192,7 +187,7 @@ class Section:
             raise ValueError(f"unknown section kind {self.kind!r}")
         table = KEYWORDS[self.kind]
         seen: set[str] = set()
-        for index, field in enumerate(self.fields):
+        for field in self.fields:
             if not KEYWORD_PATTERN.fullmatch(field.keyword):
                 raise ValueError(
                     f"keyword {field.keyword!r} must be upper-case letters, digits "
@@ -200,7 +195,7 @@ class Section:
                 )
             if field.keyword != COMMENT:
                 if field.keyword in seen:
-                    raise DuplicateKeyword(self.kind, field.keyword, index)
+                    raise DuplicateKeyword(self.kind, field.keyword)
                 seen.add(field.keyword)
             spec = table.get(field.keyword)
             kind: ValueKind = "str" if spec is None else spec.kind
@@ -399,6 +394,12 @@ class CdmObject:
         read_only(matrix)
         return matrix
 
+    @property
+    def state_covariance_rtn(self) -> FloatArray:
+        """The position-velocity block of :attr:`covariance_rtn` (6x6, its
+        first rows and columns), unvalidated; read-only."""
+        return self.covariance_rtn[:6, :6]
+
     def state(self) -> StateVector:
         """State vector at TCA in ``ref_frame``.
 
@@ -422,7 +423,7 @@ class CdmObject:
             :func:`keepout.covariance.make_covariance`.
         """
         return make_covariance(
-            self.covariance_rtn[:6, :6], "RTN", self.tca, policy=policy
+            self.state_covariance_rtn, "RTN", self.tca, policy=policy
         )
 
     @property
@@ -432,7 +433,7 @@ class CdmObject:
         Operators send an all-zero covariance when they have none; it means
         "unknown", not "perfectly known".
         """
-        return bool(np.any(self.covariance_rtn[:6, :6]))
+        return bool(np.any(self.state_covariance_rtn))
 
     def reported(self) -> ReportedObject:
         """The object as reported: state in ``ref_frame``, 6x6 RTN covariance.
@@ -448,7 +449,7 @@ class CdmObject:
         return ReportedObject(
             self.designator,
             self.state(),
-            self.covariance_rtn[:6, :6] if self.has_covariance else None,
+            self.state_covariance_rtn if self.has_covariance else None,
             self.hbr,
         )
 

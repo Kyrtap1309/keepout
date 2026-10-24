@@ -48,9 +48,10 @@ from pathlib import Path
 from typing import Final, TypeVar
 
 from keepout._defaults import CELESTRAK_TTL
-from keepout.errors import HttpStatusError, OmmParseError, SourceFormatError
+from keepout.ccsds.files import strip_bom
+from keepout.errors import HttpStatusError, SourceFormatError
 from keepout.omm.celestrak import loads_csv
-from keepout.omm.model import Omm
+from keepout.sources._format import omm_reader, refuse_format
 from keepout.sources._http import Downloader, http_download
 from keepout.sources._store import cache_dir
 from keepout.sources.cache import Unchanged, cached_fetch
@@ -103,9 +104,6 @@ _GROUP_NAME: Final = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 
 _SOCRATES_COLUMN: Final = COLUMNS[0]
 """A column of the SOCRATES CSV header, to recognise the report."""
-
-_EXCERPT: Final = 60
-"""Bytes of a download quoted when it is not what was expected."""
 
 _T = TypeVar("_T")
 
@@ -190,7 +188,14 @@ def fetch_group(
     group = _group_name(name)
     url = group_url(group)
     target = _root(cache) / "gp" / f"{group}.csv"
-    omms, retrieval = _fetch(url, target, _gp_reader(url), max_age, download, now)
+    omms, retrieval = _fetch(
+        url,
+        target,
+        omm_reader(loads_csv, url, "CelesTrak OMM CSV"),
+        max_age,
+        download,
+        now,
+    )
     return CatalogPart(group, omms, retrieval)
 
 
@@ -294,29 +299,17 @@ def _root(cache: Path | None) -> Path:
     return cache_dir(cache) / "celestrak"
 
 
-def _gp_reader(url: str) -> Callable[[bytes], tuple[Omm, ...]]:
-    def read(data: bytes) -> tuple[Omm, ...]:
-        try:
-            return loads_csv(data.decode("utf-8"))
-        except (UnicodeDecodeError, OmmParseError) as exc:
-            raise SourceFormatError(
-                f"{url} did not send CelesTrak OMM CSV ({exc}); "
-                f"it starts with {data[:_EXCERPT]!r}"
-            ) from exc
-
-    return read
-
-
 def _read_socrates(data: bytes) -> str:
     try:
         text = data.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise SourceFormatError(f"{SOCRATES_URL} did not send UTF-8 text") from exc
-    header = text.removeprefix("\ufeff").partition("\n")[0]
+    header = strip_bom(text).partition("\n")[0]
     if _SOCRATES_COLUMN not in header.split(","):
-        raise SourceFormatError(
-            f"{SOCRATES_URL} did not send a SOCRATES report (no "
-            f"{_SOCRATES_COLUMN} column); it starts with {data[:_EXCERPT]!r}"
+        refuse_format(
+            SOCRATES_URL,
+            f"a SOCRATES report (no {_SOCRATES_COLUMN} column)",
+            data,
         )
     return text
 

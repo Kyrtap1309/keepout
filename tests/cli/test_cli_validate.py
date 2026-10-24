@@ -12,8 +12,8 @@ from keepout.pc.result import PcResult
 from keepout.sources.cara import CARA_COMMIT
 from keepout.validation import cases as loading
 from keepout.validation import evaluation
-from keepout.validation.cases import ValidationCase
-from keepout.validation.criteria import Criterion
+from keepout.validation.cases import Suite, ValidationCase
+from keepout.validation.criteria import BoundCriterion
 from keepout.validation.evaluation import Outcome
 
 PASSING = case_with_reference(0.0, case_id="zero", absolute_tolerance=1e-10)
@@ -45,7 +45,9 @@ def test_validate_prints_the_summary_and_passes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     relative = dataclasses.replace(
-        case_with_reference(1e-3), suite="other", criterion=Criterion(relative=1.0)
+        case_with_reference(1e-3),
+        suite=Suite.ALFANO,
+        criterion=BoundCriterion(relative=1.0),
     )
     use(monkeypatch, PASSING, relative)
     result = keepout("validate", "--workers", "1")
@@ -53,12 +55,12 @@ def test_validate_prints_the_summary_and_passes(
     assert result.stderr == ""
     assert result.stdout.replace(CARA_COMMIT[:12], "<commit>") == snapshot("""\
 Validation against NASA CARA
-Suite  Method  Cases passed  Worst relative error
-─────────────────────────────────────────────────
-test   foster  1 / 1                            -
-test   elrod   1 / 1                            -
-other  foster  1 / 1                      1.0e+00
-other  elrod   1 / 1                      1.0e+00
+Suite            Method  Cases passed  Worst relative error
+───────────────────────────────────────────────────────────
+CARA unit tests  foster  1 / 1                            -
+CARA unit tests  elrod   1 / 1                            -
+Alfano (2009)    foster  1 / 1                      1.0e+00
+Alfano (2009)    elrod   1 / 1                      1.0e+00
 4 of 4 comparisons passed (CARA commit <commit>).
 """)
 
@@ -69,10 +71,11 @@ def test_validate_fails_with_status_1_and_names_the_failures(
     use(monkeypatch, PASSING, FAILING)
     result = keepout("validate", "--workers", "1")
     assert result.exit_code == ExitCode.ERROR
-    assert "FAIL test / half / foster: 0.000000e+00 vs CARA 5.000000e-01" in (
-        result.stdout
+    assert (
+        "FAIL CARA unit tests / half / foster: 0.000000e+00 vs CARA 5.000000e-01"
+        in result.stdout
     )
-    assert "FAIL test / half / elrod" in result.stdout
+    assert "FAIL CARA unit tests / half / elrod" in result.stdout
     assert "2 of 4 comparisons passed" in result.stdout
     assert result.stderr == "Error: 2 of 4 comparisons failed\n"
 
@@ -86,14 +89,14 @@ def test_validate_json(monkeypatch: pytest.MonkeyPatch) -> None:
     assert (data["monte_carlo"], data["comparisons"], data["failed"]) == (False, 4, 2)
     assert data["summary"] == [
         {
-            "suite": "test",
+            "suite": "CARA unit tests",
             "method": "foster",
             "passed": 1,
             "total": 2,
             "worst_relative_error": 1.0,
         },
         {
-            "suite": "test",
+            "suite": "CARA unit tests",
             "method": "elrod",
             "passed": 1,
             "total": 2,
@@ -101,7 +104,7 @@ def test_validate_json(monkeypatch: pytest.MonkeyPatch) -> None:
         },
     ]
     assert data["outcomes"][2] == {
-        "suite": "test",
+        "suite": "CARA unit tests",
         "case_id": "half",
         "method": "foster",
         "reference": 0.5,

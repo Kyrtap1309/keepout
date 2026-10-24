@@ -36,12 +36,12 @@ from keepout.pc import METHODS
 from keepout.pc.result import Method
 from keepout.sources.cara import CARA_COMMIT
 from keepout.validation.cases import load_all, load_monte_carlo_cases
-from keepout.validation.criteria import Criterion
+from keepout.validation.criteria import BoundCriterion, Criterion, IntervalCriterion
 from keepout.validation.evaluation import Outcome, evaluate
 
 TOOL: Final = "tools/validation_report.py"
 
-PAPER: Final = Criterion(relative=1e-3)
+PAPER: Final = BoundCriterion(relative=1e-3)
 """Agreement with Alfano's published values (as in CARA's own tests)."""
 
 PAPER_METHOD: Final[Method] = "foster"
@@ -139,6 +139,33 @@ class CriterionJson(TypedDict):
     absolute: float | None
     small: float
     interval: bool
+
+
+def _criterion_json(criterion: Criterion) -> CriterionJson:
+    """A criterion as JSON: its bounds, or ``interval`` true."""
+    if isinstance(criterion, BoundCriterion):
+        return {
+            "relative": criterion.relative,
+            "absolute": criterion.absolute,
+            "small": criterion.small,
+            "interval": False,
+        }
+    return {"relative": None, "absolute": None, "small": 0.0, "interval": True}
+
+
+def _criterion(data: CriterionJson) -> Criterion:
+    """The criterion :func:`_criterion_json` gave.
+
+    Raises
+    ------
+    ValueError
+        If the criterion is invalid, e.g. an interval with bounds.
+    """
+    if not data["interval"]:
+        return BoundCriterion(data["relative"], data["absolute"], data["small"])
+    if (data["relative"], data["absolute"], data["small"]) != (None, None, 0.0):
+        raise ValueError("an interval criterion takes no error bounds")
+    return IntervalCriterion()
 
 
 class RowJson(TypedDict):
@@ -272,7 +299,7 @@ class Row:
             case_id=data["case_id"],
             hard_body_radius=data["hard_body_radius"],
             reference=data["reference"],
-            criterion=Criterion(**data["criterion"]),
+            criterion=_criterion(data["criterion"]),
             method=data["method"],
             value=data["value"],
             error=data["error"],
@@ -287,7 +314,9 @@ class Row:
 
     def to_json(self) -> dict[str, Any]:
         """The row as JSON values."""
-        return dataclasses.asdict(self)
+        values = dataclasses.asdict(self)
+        values["criterion"] = _criterion_json(self.criterion)
+        return values
 
     def difference(self, previous: Row) -> str | None:
         """Why this row does not repeat ``previous`` (``None`` if it does).
