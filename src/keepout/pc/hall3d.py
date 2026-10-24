@@ -5,11 +5,11 @@ which the secondary's centre enters the hard-body sphere around the primary
 (eqs. 51e, 52):
 
     Ncdot(t) = R^2 * integral over the unit sphere of
-               N(R r; r_rel, A) * nu(r),
-    nu(r) = sigma / sqrt(2 pi) * [exp(-x^2) - sqrt(pi) x erfc(x)],
+               N(R n; r_rel, A) * nu(n),
+    nu(n) = sigma / sqrt(2 pi) * [exp(-x^2) - sqrt(pi) x erfc(x)],
 
-with ``R`` the combined hard-body radius, the relative position mean
-``r_rel`` and covariance ``A`` and the
+with ``n`` the unit normal, ``R`` the combined hard-body radius, the
+relative position mean ``r_rel`` and covariance ``A`` and the
 conditional relative-velocity statistics (``sigma``, ``x``) taken from a
 first-order expansion of two-body motion in equinoctial elements. The
 expansion is centred not on the mean orbits but on the states at the peak

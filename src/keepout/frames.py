@@ -46,8 +46,8 @@ __all__ = [
 _J2000_JD: Final = 2451545.0
 # GCRS -> mean J2000 (EME2000) frame bias; constant, so any date gives it.
 FRAME_BIAS: Final[FloatArray] = np.array(erfa.bp06(_J2000_JD, 0.0)[0], dtype=np.float64)
-read_only(FRAME_BIAS)
 """Rotation from GCRF to EME2000 (``x_eme2000 = FRAME_BIAS @ x_gcrf``)."""
+read_only(FRAME_BIAS)
 
 PARALLEL_RTOL: Final = 1e-12
 """Relative size below which a vector's component perpendicular to another

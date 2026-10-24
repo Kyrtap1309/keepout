@@ -61,7 +61,7 @@ NEGLIGIBLE_VARIANCE: Final = 1e-200
 """Variance, relative to the largest absolute entry, below which it is taken
 as 0 when forming the correlation matrix. Dividing by its square root would
 otherwise overflow; real covariances span far less (a mm/s velocity next to
-a 10 km position is 1e-16)."""
+a 10 km position is 1e-14)."""
 
 
 RANK_RTOL: Final = 1e-8
@@ -197,10 +197,11 @@ class _Clipped(NamedTuple):
 def _repaired_correlation(scaled: FloatArray) -> tuple[FloatArray, list[str]]:
     """A symmetric correlation matrix made positive semi-definite, minimally.
 
-    The position block ``P`` is repaired only if it is itself invalid. The
-    velocity block is then rebuilt from the conditional velocity covariance
-    ``S = V - B P^+ B^T`` (the Schur complement, which is what the 3-D
-    methods use), with the negative eigenvalues of ``S`` clipped. A valid
+    The position block ``P`` is replaced by its clipped form if any of its
+    eigenvalues is negative, but noted only when one is below ``-PSD_RTOL``.
+    The velocity block is then rebuilt from the conditional velocity
+    covariance ``S = V - B P^+ B^T`` (the Schur complement, which is what the
+    3-D methods use), with the negative eigenvalues of ``S`` clipped. The
     position block, and with it 2-D Pc, is therefore never changed by a
     defect in the velocity terms.
     """

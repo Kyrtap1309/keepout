@@ -219,7 +219,8 @@ def _power_range(
 
 
 class _Secular(NamedTuple):
-    """What the radius bound needs of each object, Earth radii."""
+    """What the radius bound needs of each object (``am_*`` in Earth radii, the
+    rest dimensionless)."""
 
     am_lo: FloatArray
     am_hi: FloatArray
@@ -239,6 +240,7 @@ def _near_earth(
     ecco = _values(satrecs, "ecco")
     bstar = _values(satrecs, "bstar")
     inclo = _values(satrecs, "inclo")
+    # x = cc1 t is linear in t: its range is spanned by the span's ends.
     x_lo = np.minimum(terms.cc1 * tsince_first_min, terms.cc1 * tsince_last_min)
     x_hi = np.maximum(terms.cc1 * tsince_first_min, terms.cc1 * tsince_last_min)
     p_lo, p_hi = x_lo.copy(), x_hi.copy()
@@ -249,6 +251,7 @@ def _near_earth(
     tempa_lo = 1.0 - p_hi
     tempa_hi = 1.0 - p_lo
     rate = bstar * terms.cc4
+    # em = e0 - B* cc4 t, largest at an end, plus the 2 |B* cc5| periodic term.
     em_max = ecco - np.minimum(rate * tsince_first_min, rate * tsince_last_min)
     em_max += np.where(terms.simple, 0.0, 2.0 * np.abs(bstar * terms.cc5))
     con41, x1mth2 = _inclination_terms(inclo)
@@ -318,6 +321,8 @@ def radius_bounds(
 def _bounds(
     satrecs: Sequence[Satrec], tsince_first_min: FloatArray, tsince_last_min: FloatArray
 ) -> tuple[FloatArray, FloatArray]:
+    """:func:`radius_bounds` without the floating-point error state; the
+    bounds of the module docstring, from each object's :class:`_Secular`."""
     deep = np.array([satrec.method == "d" for satrec in satrecs], dtype=bool)
     secular = _Secular(*(np.full(len(satrecs), math.nan) for _ in _Secular._fields))
     near = np.flatnonzero(~deep)
@@ -340,6 +345,7 @@ def _bounds(
     pl_min = am_lo * (1.0 - el_max**2)
     temp1 = 0.5 * _values(satrecs, "j2") / pl_min
     temp2 = temp1 / pl_min
+    # Extremes of 1 - 1.5 temp2 betal con41 over 0 < betal <= 1 and con41.
     f_lo = 1.0 - 1.5 * temp2 * np.maximum(con41_hi, 0.0)
     f_hi = 1.0 - 1.5 * temp2 * np.minimum(con41_lo, 0.0)
     lowest = am_lo * (1.0 - el_max) * f_lo - 0.5 * temp1 * x1mth2

@@ -3,7 +3,13 @@
 Both 2-D methods integrate the Gaussian over the hard-body circle. In the
 principal axes the density separates: along the wide axis ``u`` it is a 1-D
 Gaussian, and across the circle's chord at ``u`` the narrow-axis mass is a
-difference of error functions (Chan 2008, ch. 4).
+difference of error functions (Chan 2008, ch. 4). With ``R`` the hard-body
+radius and ``h = sqrt(R^2 - u^2)`` the half chord, that chord mass is
+
+    M(h) = P(-h < v < h),   v ~ N(miss_v, sigma_v^2)
+
+(:meth:`PlaneGaussian.chord_mass`), and ``Pc`` is the integral of
+``N(u; miss_u, sigma_u^2) M(h)`` over ``-R < u < R``.
 """
 
 from __future__ import annotations

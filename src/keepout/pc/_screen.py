@@ -58,7 +58,12 @@ def _clearance(gaussians: Gaussians, hard_body_radius: float) -> FloatArray:
 
 def negligible(gaussians: Gaussians, hard_body_radius: float) -> BoolArray:
     """Where the rate is taken as 0: the mean relative position farther from
-    the hard-body sphere than :data:`NEGLIGIBLE_DISTANCE` allows."""
+    the hard-body sphere than :data:`NEGLIGIBLE_DISTANCE` allows.
+
+    The distance is measured against the largest combined position variance,
+    so it is a lower bound on the Mahalanobis distance in every direction:
+    no point of the sphere is nearer the mean than ``clearance`` in metres.
+    """
     largest = np.linalg.eigvalsh(gaussians.combined_position_covariance)[:, -1]
     clearance = _clearance(gaussians, hard_body_radius)
     result: BoolArray = clearance * clearance > NEGLIGIBLE_DISTANCE * largest

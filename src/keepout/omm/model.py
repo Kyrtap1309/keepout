@@ -257,7 +257,8 @@ def deduplicate(omms: Iterable[Omm]) -> Deduplicated:
 
 
 def _epoch_text(epoch: Time, digits: int | None) -> str:
-    """CCSDS text of an epoch, whatever its ``precision`` (see :meth:`Omm.keywords`)."""
+    """CCSDS text of an epoch, whatever its ``precision`` (see
+    :meth:`Omm.keyword_texts`)."""
     if digits is not None:
         return format_epoch(Time(epoch, precision=digits))
     for fewest in range(SGP4_EPOCH_DIGITS, _MAX_EPOCH_DIGITS):

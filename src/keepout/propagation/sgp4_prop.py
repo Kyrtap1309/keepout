@@ -75,7 +75,7 @@ def satrec_of(omm: Omm) -> Satrec:
 
     It is the record :func:`sgp4.omm.initialize` makes from the message the
     elements were read from, bit for bit: every number is converted back to
-    the message's value exactly (see :meth:`keepout.omm.Omm.keywords`; this
+    the message's value exactly (see :meth:`keepout.omm.Omm.keyword_texts`; this
     holds for numbers of up to 15 significant digits, and CelesTrak writes
     at most 10). Only the epoch is rounded to whole microseconds, the
     resolution :func:`sgp4.omm.initialize` reads; CelesTrak's epochs have
@@ -134,7 +134,7 @@ def _sgp4_epoch(epoch: Time) -> float:
     """Days from 1949-12-31 0h UTC that :func:`sgp4.omm.initialize` reads.
 
     That is, of the epoch's text rounded to microseconds (see
-    :meth:`keepout.omm.Omm.keywords`); read from the text itself only where
+    :meth:`keepout.omm.Omm.keyword_texts`); read from the text itself only where
     it is not plain ``YYYY-MM-DDThh:mm:ss.ffffff`` from ERFA (see
     :func:`~keepout.ccsds.epochs.utc_fields`).
 

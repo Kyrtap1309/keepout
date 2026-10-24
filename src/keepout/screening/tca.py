@@ -17,7 +17,8 @@ no point of the volume is farther):
 
 1. *Speed sieve.* Each object's speed is below :func:`speed_bounds` (the
    speed at perigee of the most eccentric orbit inside the object's radius
-   bounds, plus :data:`SPEED_BOUND_MARGIN`), so the relative speed is below ``V =
+   bounds, widened by the relative margin :data:`SPEED_BOUND_MARGIN` and by
+   :data:`GRAVITY_MARGIN` on ``mu``), so the relative speed is below ``V =
    v_p + v_s`` and every point of the interval is within ``V (t - ta)`` of
    ``rho_a`` and ``V (tb - t)`` of ``rho_b``. A point inside ``R`` needs
    ``|rho_a| + |rho_b| <= 2 R + V h``, and the range never exceeds

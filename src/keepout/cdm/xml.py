@@ -157,6 +157,9 @@ def _write_section(
     kind: SectionKind,
     version: str,
 ) -> None:
+    # A stack of the open group elements: keep the prefix this field's group
+    # path shares with the previous one, so consecutive fields of a group land
+    # in the same element, and open the rest.
     names: list[str] = []
     elements = [parent]
     for field, group in zip(fields, _groups(fields, kind, version), strict=True):

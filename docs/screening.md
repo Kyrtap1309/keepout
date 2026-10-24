@@ -89,8 +89,8 @@ The client follows CelesTrak's
 [usage policy](https://celestrak.org/usage-policy.php), which blocks clients
 that ignore it:
 
-- A download is cached (under `keepout.sources._store.cache_dir()`, or
-  `$KEEPOUT_CACHE_DIR`) and reused for at least two hours (`TTL`, CelesTrak's
+- A download is cached (under `$KEEPOUT_CACHE_DIR`, else the user cache
+  directory, e.g. `~/.cache/keepout` on Linux) and reused for at least two hours (`TTL`, CelesTrak's
   update interval) without asking CelesTrak again.
 - CelesTrak answers a repeated download of unchanged data with HTTP 403. The
   cached copy is then current and is returned; without one,

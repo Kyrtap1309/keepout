@@ -114,6 +114,8 @@ def _single_overlap(
     mean_centred: Gaussians,
     k: int,
 ) -> tuple[Gaussians, bool]:
+    """:func:`_iterate_overlap` at the time ``times[k]`` alone; the
+    mean-centred Gaussians, not converged, if it raises."""
     one = mean_centred.take(slice(k, k + 1))
     try:
         gaussians, converged = _iterate_overlap(
@@ -131,7 +133,16 @@ def _iterate_overlap(
     floor: float,
     mean_centred: Gaussians,
 ) -> tuple[Gaussians, BoolArray]:
-    """The peak-overlap iteration on a batch of times; may raise."""
+    """The peak-overlap iteration on a batch of times; may raise.
+
+    The peak is the maximiser of the product of the two position densities,
+    their precision-weighted mean ``(A1^-1 + A2^-1)^-1 (A1^-1 x1 + A2^-1
+    x2)``. Each object's state is then conditioned on being at the peak and
+    re-expanded there (Hall 2021, sec. VII.B), until the peak moves by at most
+    :data:`OVERLAP_TOLERANCE` (step 7). A converged row is frozen into the
+    result and dropped from the batch; rows that never converge keep the
+    mean-centred Gaussians.
+    """
     result = Gaussians(*(a.copy() for a in mean_centred))
     converged = np.zeros(times.size, dtype=bool)
     rows = np.arange(times.size)

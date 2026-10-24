@@ -55,12 +55,13 @@ unit relative velocity, ``A`` the combined position covariance) convolved
 with the passage through the hard-body sphere, which only widens it. An
 encounter whose peak is at least :data:`DETECTION_LEVEL` of the largest peak
 is therefore above :data:`RATE_FLOOR` of it over at least
-``2 tau sqrt(2 ln(DETECTION_LEVEL / RATE_FLOOR))`` = 12.1 ``tau``; a grid half
-that wide puts at least one node inside it. The guarantee rests on ``tau``
-being the minimum over the candidate interval (:attr:`Candidate.width`, the
-smallest over its screen cells) and on the straight-line model; the factor 2
-for the departure of curved two-body motion from a straight line is a
-heuristic margin, not a bound. A missed encounter contributes at most
+``2 tau sqrt(2 ln(DETECTION_LEVEL / RATE_FLOOR))`` = 12.1 ``tau``, and a
+grid of that spacing already puts a node inside it. The guarantee rests on
+``tau`` being the minimum over the candidate interval
+(:attr:`Candidate.width`, the smallest over its screen cells) and on the
+straight-line model; the grid is half that wide (the leading ``0.5``) as a
+margin for the departure of curved two-body motion from a straight line, a
+heuristic, not a bound. A missed encounter contributes at most
 ~``DETECTION_LEVEL`` of the Nc of the largest one."""
 
 REFINE_CROSSING_FRACTION: Final = 1.0 / 8.0

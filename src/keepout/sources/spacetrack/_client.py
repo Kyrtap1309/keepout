@@ -207,7 +207,8 @@ class SpaceTrackClient:
         ----------
         max_age
             Seconds a cached copy is used; the ``gp`` interval of
-            :data:`CLASS_INTERVALS` (1 h) if ``None``, and not less.
+            :data:`~keepout.sources.spacetrack.CLASS_INTERVALS` (1 h) if
+            ``None``, and not less.
 
         Returns
         -------
@@ -231,7 +232,8 @@ class SpaceTrackClient:
         ----------
         max_age
             Seconds a cached copy is used; the ``cdm_public`` interval of
-            :data:`CLASS_INTERVALS` (8 h) if ``None``, and not less.
+            :data:`~keepout.sources.spacetrack.CLASS_INTERVALS` (8 h) if
+            ``None``, and not less.
 
         Raises
         ------
@@ -437,7 +439,8 @@ def fetch_public_cdms(
         Cache root; :func:`~keepout.sources._store.cache_dir` if ``None``.
     max_age
         Seconds a cached copy is used; the ``cdm_public`` interval of
-        :data:`CLASS_INTERVALS` (8 h) if ``None``, and not less.
+        :data:`~keepout.sources.spacetrack.CLASS_INTERVALS` (8 h) if
+        ``None``, and not less.
     credentials
         The account; from the environment if ``None`` and needed.
     transport
@@ -478,7 +481,8 @@ def fetch_catalog(
         Cache root; :func:`~keepout.sources._store.cache_dir` if ``None``.
     max_age
         Seconds a cached copy is used; the ``gp`` interval of
-        :data:`CLASS_INTERVALS` (1 h) if ``None``, and not less.
+        :data:`~keepout.sources.spacetrack.CLASS_INTERVALS` (1 h) if
+        ``None``, and not less.
     credentials
         The account; from the environment if ``None`` and needed.
     transport
@@ -532,7 +536,7 @@ def _utc(unix: float) -> str:
 
 
 def _duration(seconds: float) -> str:
-    """A wait for a message, rounded up: ``1 h 05 min``, ``12 min``, ``40 s``."""
+    """A wait for a message, rounded up: ``1 h 05 min``, ``12 min 00 s``, ``40 s``."""
     whole = math.ceil(seconds)
     hours, rest = divmod(whole, int(HOUR))
     minutes, secs = divmod(rest, int(MINUTE))

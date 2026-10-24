@@ -29,7 +29,8 @@ perigees turn, plus SGP4's periodic terms) leaves the filter little to add,
 because two near-circular orbits (92 % of the near-Earth catalog has e <
 0.01) come about as close as their altitudes, which the apogee/perigee
 filter already tests. Pairs that pass the apogee/perigee filter go straight
-to the time sieve.
+to :class:`~keepout.screening.tca.ApproachSearch` (its speed and chord
+sieves).
 
 References
 ----------

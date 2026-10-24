@@ -230,10 +230,11 @@ def _sphere_integral(
     """The rate [1/s] at one time: the flux through the hard-body sphere,
     integrated by the product rule ``grid``.
 
-    At each node ``n`` of the unit sphere: the density ``N(R n; r, A)``
-    times the flux ``E[max(-n . u, 0)]`` of the relative velocity ``u``
-    conditioned on the position, Gaussian with mean ``v + G (R n - r)`` and
-    variance ``n' C n``.
+    At each node ``n`` of the unit sphere: the density ``N(R n; r_rel, A)``
+    times the flux ``nu(n) = E[max(-n . u, 0)]`` of the relative velocity
+    ``u`` conditioned on the position (the integrand of
+    :mod:`keepout.pc.hall3d`), with ``n . u`` Gaussian of mean ``n . (v_rel +
+    G (R n - r_rel))`` and variance ``n' C n``.
     """
     r_mean, v_mean = gaussian.mean[:3], gaussian.mean[3:]
     nodes, weights = grid.cartesian(gaussian.axes)
@@ -252,5 +253,6 @@ def _sphere_integral(
     for j in range(3):
         velocity[:, j] += v_mean[j]
     x = np.einsum("ij,ij->i", nodes, velocity) / (SQRT_2 * sigma)
+    # E[max(-Y, 0)], Y ~ N(m, s^2) = s phi(m/s) - m Phi(-m/s), x = m / (sqrt2 s).
     flux = sigma / SQRT_2PI * (np.exp(-x * x) - _SQRT_PI * x * special.erfc(x))
     return hard_body_radius**2 * float(np.sum(weights * density * flux))

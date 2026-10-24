@@ -297,8 +297,11 @@ def alfano(plane: EncounterPlane, hard_body_radius: float) -> PcResult:
         return PcResult(
             0.5, "alfano", (note, edge), {"sigma_m": 0.0}, kind="upper_bound"
         )
+    # log1p(2R/(d-R)) = ln((d+R)/(d-R)), accurate when d >> R.
     sigma = math.sqrt(2.0 * miss * radius / math.log1p(2.0 * radius / (miss - radius)))
     scale = math.sqrt(2.0) * sigma
+    # A line-like covariance has all its mass on the miss line, so Pc is the
+    # 1-D mass of N(0, sigma^2) over the chord [d - R, d + R].
     value = 0.5 * (
         math.erfc((miss - radius) / scale) - math.erfc((miss + radius) / scale)
     )

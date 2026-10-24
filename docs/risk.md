@@ -22,7 +22,7 @@ for reason in assessment.decision.reasons:
 ## Events and observations
 
 A `ConjunctionEvent` holds the CDMs of one encounter: the same two objects
-(`OBJECT1` and `OBJECT2` by designator) and TCAs within `tca_tolerance`
+(`OBJECT1` and `OBJECT2` by `OBJECT_DESIGNATOR`) and TCAs within `tca_tolerance`
 (600 s by default). It refuses CDMs that do not belong together: other
 objects, a repeated `MESSAGE_ID`, TCAs further apart or different
 `CONJUNCTION_ID` values. `group_events` sorts a pile of CDMs into events.
