@@ -47,7 +47,7 @@ from __future__ import annotations
 
 import enum
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Final, NamedTuple, Self
 
@@ -269,7 +269,10 @@ class SyntheticCovarianceModel:
         ``safety_factor`` is not finite and positive.
     """
 
-    regimes: Mapping[OrbitRegime, RegimeParameters] = PUBLISHED_PARAMETERS
+    # A factory, as 3.11 dataclasses reject an unhashable mapping proxy as default.
+    regimes: Mapping[OrbitRegime, RegimeParameters] = field(
+        default_factory=lambda: PUBLISHED_PARAMETERS
+    )
     safety_factor: float = SAFETY_FACTOR
 
     def __post_init__(self) -> None:

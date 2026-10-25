@@ -367,7 +367,7 @@ class Sgp4Propagator:
         """
         partition = _partition(omms)
         propagator = object.__new__(cls)
-        propagator._set(tuple(partition.omms), tuple(partition.satrecs))  # noqa: SLF001
+        propagator._set(tuple(partition.omms), tuple(partition.satrecs))
         return propagator, np.array(partition.kept, dtype=np.intp), partition.rejected
 
     def _set(self, omms: tuple[Omm, ...], satrecs: tuple[Satrec, ...]) -> None:
@@ -420,7 +420,7 @@ class Sgp4Propagator:
         """
         chosen = _indices(indices, len(self))
         subset = object.__new__(type(self))
-        subset._set(  # noqa: SLF001
+        subset._set(
             tuple(self._omms[i] for i in chosen),
             tuple(self._satrecs[i] for i in chosen),
         )
