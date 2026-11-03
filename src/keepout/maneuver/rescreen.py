@@ -6,8 +6,9 @@ primary against a catalog twice over a window from the burn, without the burn
 and with it (:class:`~keepout.propagation.ManeuveredPropagator`), and reports
 the approaches that only the burn has, and the ones it brings closer. An
 approach of a secondary is the same one, moved, while the baseline has an
-approach of that secondary within 10 minutes (the TCA tolerance of an
-event).
+approach of that secondary within the event's TCA tolerance
+(:attr:`~keepout.events.ConjunctionEvent.tca_tolerance`, 10 minutes by
+default).
 
 A burn can also bring the event's own pair back. The planner looks for the
 new TCA only near the old one, so in a slow encounter the two objects can
@@ -34,7 +35,7 @@ Element sets have no covariance, so the Pc of an approach reported here rests
 on an **assumed** one (:mod:`keepout.synthetic.covariance_model`): the Pc of
 ``compute`` (``"auto"`` by default, as the synthetic operator's) on the
 model's covariance of both objects at its TCA, with the plan's combined
-hard-body radius, on the basis of the thresholds.
+hard-body radius, on the basis of the plan's thresholds.
 """
 
 from __future__ import annotations
@@ -47,7 +48,7 @@ import astropy.units as u
 import numpy as np
 from astropy.time import Time
 
-from keepout._defaults import SCREENING_DURATION, TCA_TOLERANCE
+from keepout._defaults import SCREENING_DURATION
 from keepout._text import before_tca
 from keepout._validation import require_non_negative
 from keepout.errors import ManeuverError, PropagationError
@@ -62,7 +63,7 @@ from keepout.propagation import (
     Sgp4Propagator,
     describe_error,
 )
-from keepout.risk import DEFAULT_THRESHOLDS, RiskLevel, Thresholds
+from keepout.risk import RiskLevel, Thresholds
 from keepout.screening import (
     DEFAULT_VOLUME,
     CloseApproach,
@@ -94,7 +95,7 @@ class NewApproach:
     approach
         The approach, with the burn.
     pc
-        Its Pc on assumed covariances, on the basis of the thresholds.
+        Its Pc on assumed covariances, on the basis of the plan's thresholds.
     level
         Its risk level.
     """
@@ -118,13 +119,13 @@ class RescreenResult:
         The approaches matched to the baseline whose range at TCA fell, by any
         amount, in chronological order: each against the baseline's approach
         of that secondary nearest in time. The event's own approach, that
-        secondary's within 10 minutes of the event's TCA, is not among them
+        secondary's within the TCA tolerance of the event, is not among them
         when it was screened: ``event_range`` has it. Without
         ``secondary_screened`` it cannot be told apart, so it may appear
         here.
     event_returns
         The new and closer approaches of the event's secondary further than
-        10 minutes from the event's TCA whose Pc is at or above the plan's
+        the TCA tolerance from the event's TCA whose Pc is at or above the plan's
         ``target_pc``, in chronological order: the burn brings the pair back
         elsewhere above the bar it was planned to clear. The event's own
         target is the bar for its own pair, whatever the risk level;
@@ -356,13 +357,13 @@ def _skipped_objects(result: ScreeningResult) -> int:
     )
 
 
-def _within_tolerance(one: Time, other: Time) -> bool:
-    """Whether two TCAs are of one approach."""
-    return abs(elapsed_seconds(one, other)) <= TCA_TOLERANCE
+def _within_tolerance(one: Time, other: Time, tolerance: float) -> bool:
+    """Whether two TCAs are of one approach, ``tolerance`` [s] apart at most."""
+    return abs(elapsed_seconds(one, other)) <= tolerance
 
 
 def _matched(
-    approach: CloseApproach, baseline: ScreeningResult
+    approach: CloseApproach, baseline: ScreeningResult, tolerance: float
 ) -> CloseApproach | None:
     """The baseline's approach of the same secondary nearest in time, within
     the tolerance; ``None`` if there is none, so that this one is new."""
@@ -370,7 +371,7 @@ def _matched(
         known
         for known in baseline.approaches
         if known.secondary_number == approach.secondary_number
-        and _within_tolerance(known.tca, approach.tca)
+        and _within_tolerance(known.tca, approach.tca, tolerance)
     ]
     return min(
         matches,
@@ -408,10 +409,13 @@ def _classified(
     baseline: ScreeningResult,
     is_the_event: Callable[[CloseApproach], bool],
     assessed: _Assessor,
+    tolerance: float,
 ) -> tuple[tuple[NewApproach, ...], tuple[NewApproach, ...]]:
     """The approaches only ``after`` has, and those it has closer than
     ``baseline``, but the event's own."""
-    matched = [(found, _matched(found, baseline)) for found in after.approaches]
+    matched = [
+        (found, _matched(found, baseline, tolerance)) for found in after.approaches
+    ]
     new = tuple(assessed(found) for found, known in matched if known is None)
     closer = tuple(
         assessed(found)
@@ -432,7 +436,6 @@ def rescreen(
     volume: ScreeningVolume | VolumeRule = DEFAULT_VOLUME,
     model: SyntheticCovarianceModel = DEFAULT_MODEL,
     compute: PcComputation = AUTO,
-    thresholds: Thresholds = DEFAULT_THRESHOLDS,
     workers: int | None = 1,
 ) -> RescreenResult:
     """The approaches a burn brings, from a screening with and without it.
@@ -447,8 +450,8 @@ def rescreen(
         are the catalog numbers of the primary and the secondary.
     option
         The burn, ``burn_lead`` before the event's TCA. The window must hold
-        that TCA and 10 minutes either side (the TCA tolerance of an event),
-        so the baseline of a plan, with no lead, cannot be re-screened.
+        that TCA and the event's TCA tolerance either side, so the baseline
+        of a plan, with no lead, cannot be re-screened.
     catalog
         Element sets to screen against; must hold the event's primary. Without
         its secondary the rest is still screened
@@ -461,9 +464,6 @@ def rescreen(
         The covariance model of both objects of a new approach.
     compute
         The Pc method of a new approach, from :func:`~keepout.pc.computation`.
-    thresholds
-        Whose basis turns a result into the Pc of a new approach, and its
-        risk level.
     workers
         Number of processes to screen in, or ``None`` for the default (see
         :func:`~keepout.screening.screen`: a script calling with more than 1
@@ -484,8 +484,8 @@ def rescreen(
 
         - the primary's designator is not a catalog number;
         - the catalog has no element set of the primary;
-        - the window does not hold the event's TCA and 10 minutes either
-          side;
+        - the window does not hold the event's TCA and its TCA tolerance
+          either side;
         - SGP4 reports an error for the primary anywhere in the window
           (checked every minute and at the window's end).
 
@@ -509,11 +509,12 @@ def rescreen(
     newest = deduplicate(elements).by_number
     primary = _primary_elements(event, newest)
     lead = option.burn_lead
+    tolerance = event.tca_tolerance
     burn = f"burn of {option.delta_v:g} m/s {before_tca(lead)}"
-    if not TCA_TOLERANCE <= lead <= duration - TCA_TOLERANCE:
+    if not tolerance <= lead <= duration - tolerance:
         raise ManeuverError(
             f"event {event.event_id}: a window of {duration / DAY:g} days from a "
-            f"{burn} does not hold the event's TCA and {TCA_TOLERANCE:g} s "
+            f"{burn} does not hold the event's TCA and {tolerance:g} s "
             "either side of it"
         )
 
@@ -546,7 +547,7 @@ def rescreen(
 
     def is_the_event(approach: CloseApproach) -> bool:
         return approach.secondary_number == secondary and _within_tolerance(
-            approach.tca, tca
+            approach.tca, tca, tolerance
         )
 
     assessed = _Assessor(
@@ -554,9 +555,9 @@ def rescreen(
         newest,
         model,
         compute,
-        thresholds,
+        plan.thresholds,
     )
-    new, closer = _classified(after, baseline, is_the_event, assessed)
+    new, closer = _classified(after, baseline, is_the_event, assessed, tolerance)
     # By its designator, not only when screened: an approach of the secondary
     # in one screening alone is still that pair.
     returns = tuple(
@@ -565,7 +566,7 @@ def rescreen(
             (*new, *closer), key=lambda item: elapsed_seconds(tca, item.approach.tca)
         )
         if item.approach.secondary_number == pair
-        and not _within_tolerance(item.approach.tca, tca)
+        and not _within_tolerance(item.approach.tca, tca, tolerance)
         and item.pc >= plan.target_pc
     )
     return RescreenResult(

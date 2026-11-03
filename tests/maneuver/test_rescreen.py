@@ -355,14 +355,12 @@ def test_an_approach_of_the_secondary_far_from_the_event_gives_no_event_range() 
     assert result.event_range is None
 
 
-def test_another_secondary_at_the_same_time_is_new(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_another_secondary_at_the_same_time_is_new() -> None:
     # With a tolerance of 19 h, 57087's approach moved by 17 h is the same one.
     # The baseline's approach of 57087, 14 h from 62118's, says nothing of 62118.
-    module = importlib.import_module("keepout.maneuver.rescreen")
-    monkeypatch.setattr(module, "TCA_TOLERANCE", 19 * HOUR)
-    plan = plan_of(CROSSING)
+    crossing = plan_of(CROSSING)
+    event = dataclasses.replace(crossing.event, tca_tolerance=19 * HOUR)
+    plan = dataclasses.replace(crossing, event=event)
     assert by_secondary(rescreen(plan, burn(plan, -0.1), FIXTURE)) == [CREATED]
 
 
@@ -526,7 +524,8 @@ def test_closer_red_approach_is_a_conflict() -> None:
     assert closer.level is not RiskLevel.RED
     assert not plain.conflict
     thresholds = Thresholds(green_below=closer.pc / 10.0, red_from=closer.pc)
-    result = rescreen(plan, closer_burn(0.003), FIXTURE, thresholds=thresholds)
+    strict = dataclasses.replace(plan, thresholds=thresholds)
+    result = rescreen(strict, closer_burn(0.003), FIXTURE)
     assert result.new_approaches == ()
     assert result.closer_approaches[0].level is RiskLevel.RED
     assert result.conflict
@@ -553,8 +552,9 @@ def test_a_closer_approach_is_compared_with_the_baselines_nearest_in_time() -> N
     known = dataclasses.replace(
         screen([BY_NUMBER[CROSSING]], [], START, DAY), approaches=(far, near)
     )
-    assert module._matched(at(event, 0.0), known) is near
-    assert module._matched(at(event, TCA_TOLERANCE + 11.0), known) is None
+    assert module._matched(at(event, 0.0), known, TCA_TOLERANCE) is near
+    beyond = at(event, TCA_TOLERANCE + 11.0)
+    assert module._matched(beyond, known, TCA_TOLERANCE) is None
 
 
 def counted_screen(
@@ -606,10 +606,11 @@ def test_primary_left_out_only_with_the_burn_is_an_error(
 
 
 def test_a_new_red_approach_is_a_conflict_and_not_clean() -> None:
-    plan = plan_of(CROSSING)
+    crossing = plan_of(CROSSING)
     # 57087 at 473 m, 4.7 h after the approach without the burn: Pc 1.88e-6.
     thresholds = Thresholds(green_below=1e-7, red_from=1e-6)
-    result = rescreen(plan, burn(plan, -0.03), FIXTURE, thresholds=thresholds)
+    plan = dataclasses.replace(crossing, thresholds=thresholds)
+    result = rescreen(plan, burn(plan, -0.03), FIXTURE)
     (new,) = result.new_approaches
     assert new.approach.secondary_number == RECURRING
     assert new.approach.range_at_tca == pytest.approx(473.0, abs=1.0)
@@ -964,8 +965,8 @@ def test_new_approaches_take_the_pc_method_and_basis_given() -> None:
     assert expected.interval is not None
     assert conservative.pc == expected.interval[1]
     # The estimate basis takes the value, below the interval's upper end.
-    estimate = Thresholds(basis="estimate")
+    on_estimate = dataclasses.replace(plan, thresholds=Thresholds(basis="estimate"))
     (central,) = rescreen(
-        plan, burn(plan, -0.03), FIXTURE, compute=compute, thresholds=estimate
+        on_estimate, burn(plan, -0.03), FIXTURE, compute=compute
     ).new_approaches
     assert central.pc == expected.value < expected.interval[1]

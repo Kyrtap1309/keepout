@@ -64,8 +64,8 @@ time to grow so close to TCA. `BurnGrid` changes any of these, and
 
 The default target, 1e-5, is ten times below the red
 threshold `red_from` (1e-4). The margin leaves the event clearly out of the
-red rather than just under it. The target is compared on the thresholds'
-basis. On the default, conservative basis a Monte Carlo Pc counts by the
+red rather than just under it. The target is compared on the basis of the
+plan's `thresholds`, which `evaluate_burn` and `rescreen` use too. On the default, conservative basis a Monte Carlo Pc counts by the
 upper end of its confidence interval.
 
 Every cell uses Foster's Pc, whatever the event's own method. Foster takes

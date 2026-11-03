@@ -736,7 +736,8 @@ def test_evaluate_burn_uses_the_thresholds_basis(plan: ManeuverPlan) -> None:
     wide = dataclasses.replace(plan, confirmation=Wide("foster"))
     assert evaluate_burn(wide, burn_lead=7 * HOUR, delta_v=1e-3).pc == 0.25
     estimate = Thresholds(basis="estimate")
-    pc = evaluate_burn(wide, burn_lead=7 * HOUR, delta_v=1e-3, thresholds=estimate).pc
+    on_estimate = dataclasses.replace(wide, thresholds=estimate)
+    pc = evaluate_burn(on_estimate, burn_lead=7 * HOUR, delta_v=1e-3).pc
     # Wide's estimate is Foster's value, untouched.
     foster = dataclasses.replace(plan, confirmation=FOSTER)
     assert pc == evaluate_burn(foster, burn_lead=7 * HOUR, delta_v=1e-3).pc

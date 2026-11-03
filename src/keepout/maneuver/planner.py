@@ -217,6 +217,10 @@ class ManeuverPlan:
         The conjunction of its latest CDM.
     target_pc
         The Pc a burn must stay below.
+    thresholds
+        Whose :attr:`~keepout.risk.Thresholds.basis` turns a result into the
+        Pc compared with ``target_pc``; :func:`evaluate_burn` and
+        :func:`~keepout.maneuver.rescreen` use them too.
     baseline
         The event without a burn: the Pc of ``conjunction``, ``delta_v`` 0.
     confirmation
@@ -250,6 +254,7 @@ class ManeuverPlan:
     event: ConjunctionEvent
     conjunction: Conjunction
     target_pc: float
+    thresholds: Thresholds
     baseline: ManeuverOption
     confirmation: PcComputation
     burn_leads: FloatArray
@@ -746,6 +751,7 @@ def plan_maneuver(
             event=event,
             conjunction=conjunction,
             target_pc=target_pc,
+            thresholds=thresholds,
             baseline=baseline,
             confirmation=confirmation,
             burn_leads=empty,
@@ -779,6 +785,7 @@ def plan_maneuver(
         event=event,
         conjunction=conjunction,
         target_pc=target_pc,
+        thresholds=thresholds,
         baseline=baseline,
         confirmation=confirmation,
         burn_leads=leads,
@@ -801,9 +808,9 @@ def evaluate_burn(
     *,
     burn_lead: float,
     delta_v: float,
-    thresholds: Thresholds = DEFAULT_THRESHOLDS,
 ) -> ManeuverOption:
-    """One burn of a plan's event, on or off its grid, by the plan's confirmation.
+    """One burn of a plan's event, on or off its grid, by the plan's confirmation
+    and on the basis of its thresholds.
 
     Parameters
     ----------
@@ -813,8 +820,6 @@ def evaluate_burn(
         Time of the burn before TCA [s], >= 0.
     delta_v
         Signed Δv along the velocity [m/s].
-    thresholds
-        Whose basis turns the result into the option's Pc.
 
     Returns
     -------
@@ -860,5 +865,5 @@ def evaluate_burn(
         delta_v=delta_v,
         range_at_tca=float(cells.ranges[0, 0]),
         target_pc=plan.target_pc,
-        thresholds=thresholds,
+        thresholds=plan.thresholds,
     )
