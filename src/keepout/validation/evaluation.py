@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 from keepout._workers import process_pool, resolve_workers
-from keepout.pc import computation
+from keepout.pc import PcComputation
 from keepout.pc.result import Method, PcResult
 from keepout.validation.cases import Suite, ValidationCase
 from keepout.validation.criteria import Verdict
@@ -63,7 +63,7 @@ def run(case: ValidationCase, method: Method) -> PcResult:
     :class:`ValidationCase` checks that its methods take its options, so
     each method is given all of them.
     """
-    return computation(method, **case.options)(case.conjunction)
+    return PcComputation(method, case.options)(case.conjunction)
 
 
 def evaluate(

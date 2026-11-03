@@ -7,7 +7,16 @@ import inspect
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Final, Literal, Self, TypeAlias, cast, overload
+from typing import (
+    TYPE_CHECKING,
+    Final,
+    Literal,
+    Self,
+    TypeAlias,
+    TypedDict,
+    cast,
+    overload,
+)
 
 from keepout._methods import MethodChoice
 from keepout._pickling import reduce_with_mappings
@@ -31,6 +40,11 @@ from keepout.pc.maxpc import alfano, dilution, frisbee
 from keepout.pc.montecarlo import montecarlo
 from keepout.pc.result import Method, PcResult
 
+if TYPE_CHECKING:
+    # typing.Unpack types **kwargs from Python 3.12; typing_extensions stays
+    # out of the dependencies.
+    from typing_extensions import Unpack
+
 __all__ = [
     "AUTO",
     "AUTO_MC_SAMPLES",
@@ -39,9 +53,13 @@ __all__ = [
     "METHODS",
     "SIGMA_EXTENT",
     "TCA_OFFSET_LIMIT",
+    "ElrodOptions",
+    "FosterOptions",
+    "Hall3dOptions",
     "MethodChoice",
     "MethodKind",
     "MethodSpec",
+    "MonteCarloOptions",
     "PcComputation",
     "applicability",
     "computation",
@@ -119,49 +137,62 @@ METHODS: Final[Mapping[Method, MethodSpec]] = MappingProxyType(
 """Every Pc method by name: the one table of what each is and takes."""
 
 
-@overload
-def compute_pc(conjunction: Conjunction, method: Literal["auto"] = ...) -> PcResult: ...
+class FosterOptions(TypedDict, total=False):
+    """The options of :func:`~keepout.pc.foster`."""
+
+    rtol: float
+
+
+class ElrodOptions(TypedDict, total=False):
+    """The options of :func:`~keepout.pc.elrod`."""
+
+    order: int | None
+
+
+class Hall3dOptions(TypedDict, total=False):
+    """The options of :func:`~keepout.pc.hall3d`."""
+
+    window: tuple[float, float] | None
+    rtol: float
+
+
+class MonteCarloOptions(TypedDict, total=False):
+    """The options of :func:`~keepout.pc.montecarlo`."""
+
+    window: tuple[float, float] | None
+    samples: int | None
+    rtol: float
+    max_samples: int
+    confidence: float
+    seed: int | None
 
 
 @overload
 def compute_pc(
-    conjunction: Conjunction, method: Literal["foster"], *, rtol: float = ...
+    conjunction: Conjunction,
+    method: Literal["auto", "frisbee", "dilution", "alfano"] = ...,
 ) -> PcResult: ...
-
-
 @overload
 def compute_pc(
-    conjunction: Conjunction, method: Literal["elrod"], *, order: int | None = ...
+    conjunction: Conjunction,
+    method: Literal["foster"],
+    **options: Unpack[FosterOptions],
 ) -> PcResult: ...
-
-
 @overload
 def compute_pc(
-    conjunction: Conjunction, method: Literal["frisbee", "dilution", "alfano"]
+    conjunction: Conjunction, method: Literal["elrod"], **options: Unpack[ElrodOptions]
 ) -> PcResult: ...
-
-
 @overload
 def compute_pc(
     conjunction: Conjunction,
     method: Literal["hall3d"],
-    *,
-    window: tuple[float, float] | None = ...,
-    rtol: float = ...,
+    **options: Unpack[Hall3dOptions],
 ) -> PcResult: ...
-
-
 @overload
 def compute_pc(
     conjunction: Conjunction,
     method: Literal["montecarlo"],
-    *,
-    window: tuple[float, float] | None = ...,
-    samples: int | None = ...,
-    rtol: float = ...,
-    max_samples: int = ...,
-    confidence: float = ...,
-    seed: int | None = ...,
+    **options: Unpack[MonteCarloOptions],
 ) -> PcResult: ...
 
 
@@ -206,8 +237,10 @@ def compute_pc(
         1-60 s and the Monte Carlo fallback up to about a minute.
     **options
         The keyword-only parameters of an explicitly chosen method (e.g.
-        ``rtol``, ``order``, ``window``, ``samples``, ``seed``), as typed by
-        the overloads; none with ``"auto"`` or the maximum-Pc methods.
+        ``rtol``, ``order``, ``window``, ``samples``, ``seed``), as
+        :class:`FosterOptions`, :class:`ElrodOptions`, :class:`Hall3dOptions`
+        and :class:`MonteCarloOptions` type them; none with ``"auto"`` or the
+        maximum-Pc methods.
 
     Returns
     -------
@@ -394,11 +427,33 @@ class PcComputation:
             return self
         if self.method != "auto":
             raise ValueError(f"a {result.method} result is not one of {self.method}'s")
-        return computation(result.method, **auto_options(result.method))
+        return PcComputation(result.method, auto_options(result.method))
 
 
 AUTO: Final = PcComputation()
 """``"auto"`` without options: :func:`compute_pc`'s default."""
+
+
+@overload
+def computation(
+    method: Literal["auto", "frisbee", "dilution", "alfano"] = ...,
+) -> PcComputation: ...
+@overload
+def computation(
+    method: Literal["foster"], **options: Unpack[FosterOptions]
+) -> PcComputation: ...
+@overload
+def computation(
+    method: Literal["elrod"], **options: Unpack[ElrodOptions]
+) -> PcComputation: ...
+@overload
+def computation(
+    method: Literal["hall3d"], **options: Unpack[Hall3dOptions]
+) -> PcComputation: ...
+@overload
+def computation(
+    method: Literal["montecarlo"], **options: Unpack[MonteCarloOptions]
+) -> PcComputation: ...
 
 
 def computation(method: MethodChoice = "auto", **options: object) -> PcComputation:

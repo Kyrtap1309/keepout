@@ -38,6 +38,7 @@ from keepout.pc import (
     METHODS,
     PcResult,
     alfano,
+    api,
     computation,
     compute_pc,
     dilution,
@@ -106,8 +107,20 @@ def _keyword_only(function: Callable[..., object]) -> dict[str, str]:
     }
 
 
-def test_overloads_follow_the_methods_options() -> None:
-    # Each overload lists its methods' keyword-only parameters, with their
+def _typed_options(overload: Callable[..., object]) -> dict[str, str]:
+    """The options an overload types, from its ``**options: Unpack[...]``."""
+    for parameter in inspect.signature(overload).parameters.values():
+        if parameter.kind is inspect.Parameter.VAR_KEYWORD:
+            unpacked = re.fullmatch(r"Unpack\[(\w+)\]", parameter.annotation)
+            assert unpacked is not None
+            options = getattr(api, unpacked[1]).__annotations__
+            return {key: value.__forward_arg__ for key, value in options.items()}
+    return {}
+
+
+@pytest.mark.parametrize("function", [compute_pc, computation])
+def test_overloads_follow_the_methods_options(function: Callable[..., object]) -> None:
+    # Each overload types its methods' keyword-only parameters, with their
     # types, so that mypy rejects an option the method does not take.
     functions: dict[str, Callable[..., PcResult]] = {
         "foster": foster,
@@ -119,10 +132,10 @@ def test_overloads_follow_the_methods_options() -> None:
         "montecarlo": montecarlo,
     }
     typed: dict[str, dict[str, str]] = {}
-    for overload in typing.get_overloads(compute_pc):
+    for overload in typing.get_overloads(function):
         literal = str(inspect.signature(overload).parameters["method"].annotation)
         for name in re.findall(r"'(\w+)'|\"(\w+)\"", literal):
-            typed["".join(name)] = _keyword_only(overload)
+            typed["".join(name)] = _typed_options(overload)
     assert typed == {"auto": {}} | {
         name: _keyword_only(function) for name, function in functions.items()
     }
@@ -132,6 +145,12 @@ def test_overloads_follow_the_methods_options() -> None:
     assert {name: set(spec.options) for name, spec in METHODS.items()} == {
         name: set(_keyword_only(function)) for name, function in functions.items()
     }
+
+
+def test_a_misspelt_option_fails_the_type_check_and_the_call() -> None:
+    # warn_unused_ignores fails mypy if the overloads stop catching it.
+    with pytest.raises(TypeError, match=r"foster takes no option \['rtoll'\]"):
+        computation("foster", rtoll=1e-9)  # type: ignore[call-overload]
 
 
 def test_the_registry_says_what_each_method_is() -> None:
@@ -187,7 +206,7 @@ def test_a_computation_checks_its_options_at_once(
     method: str, options: dict[str, object], error: type[Exception], message: str
 ) -> None:
     with pytest.raises(error, match=message):
-        computation(method, **options)  # type: ignore[arg-type]
+        computation(method, **options)  # type: ignore[call-overload]
 
 
 def test_unknown_method_is_rejected_naming_every_method() -> None:
