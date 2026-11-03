@@ -13,7 +13,7 @@ from keepout._defaults import SCREENING_DURATION, SOCRATES_RADIUS
 from keepout.cli.catalog_input import CatalogFile, catalog_input, require_one_catalog
 from keepout.cli.events import event_json, events_table, reasons
 from keepout.cli.options import CacheDir, JsonFlag, SourceOption, Workers, positive
-from keepout.cli.output import JsonOut, isot, plural, show, utc
+from keepout.cli.output import ASSUMED_COVARIANCES, JsonOut, isot, plural, show, utc
 from keepout.units import DAY, KM
 
 # The library is imported in the command: keepout --help need not load the
@@ -221,10 +221,7 @@ def _summary(
             "future epochs, SGP4 failures; --json lists them)."
         )
     tail += reasons(result.events, Action.MONITOR)
-    tail.append(
-        "Covariances are assumed (keepout's model of GP element set errors), "
-        "not orbit determination."
-    )
+    tail.append(ASSUMED_COVARIANCES)
     if cdm_dir is not None:
         tail.append(f"{plural(len(files), 'CDM')} written to {cdm_dir}")
     events = result.events

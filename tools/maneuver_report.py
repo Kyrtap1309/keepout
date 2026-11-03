@@ -72,8 +72,10 @@ from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 from screening_benchmark import cpu_model
-from synthetic_operator_report import FLEET, window_start
+from synthetic_operator_report import FLEET, level_key, shown, window_start
 
+from keepout._defaults import TCA_TOLERANCE
+from keepout._methods import Method
 from keepout._types import FloatArray
 from keepout._workers import DEFAULT_WORKERS, ONE_THREAD
 from keepout.cdm import Cdm, load
@@ -81,10 +83,12 @@ from keepout.events import ConjunctionEvent, group_events, time_to_tca
 from keepout.maneuver import (
     DEFAULT_BURN_GRID,
     TARGET_PC,
+    BurnDirection,
     ManeuverOption,
     ManeuverPlan,
     NewApproach,
     RescreenResult,
+    judge,
     plan_maneuver,
     rescreen,
 )
@@ -94,7 +98,7 @@ from keepout.screening import DEFAULT_DURATION, DEFAULT_VOLUME
 from keepout.sources import cara
 from keepout.synthetic import OperatorEvent, OperatorResult, load_fleet
 from keepout.synthetic.operator import run
-from keepout.units import DAY, HOUR
+from keepout.units import DAY, HOUR, MINUTE
 from keepout.validation.cara_inputs import column_number
 
 PAGE: Final = REPO / "docs/maneuver-report.md"
@@ -114,6 +118,9 @@ CDM's combined hard-body radius [m]."""
 THRESHOLDS: Final = Thresholds()
 DEMONSTRATION_TARGET: Final = THRESHOLDS.green_below
 """The target of the re-screen demonstration: green."""
+
+TOLERANCE: Final = f"{TCA_TOLERANCE / MINUTE:g} minutes"
+"""How far apart the TCAs of one approach may be, for the page."""
 
 LOWEST_LOG_PC: Final = -12.0
 """The heatmap's colour scale stops here: lower Pc share its lightest colour."""
@@ -145,7 +152,7 @@ class Option(TypedDict):
     delta_v: float
     pc: float
     range_at_tca: float
-    method: str
+    method: Method
     meets_target: bool
 
 
@@ -227,6 +234,8 @@ class Demonstration(TypedDict):
     action: str
     plan: Plan | None
     rescreens: list[Rescreen]
+    recommendable: bool
+    """Whether ``keepout maneuver`` would recommend a burn (exit status 0)."""
 
 
 class Settings(TypedDict):
@@ -267,14 +276,14 @@ class Summary(TypedDict):
     timings: Timings | None
 
 
-def _hours(seconds: float) -> float:
+def _round_hours(seconds: float) -> float:
     return round(seconds / HOUR, 2)
 
 
 def option_summary(option: ManeuverOption) -> Option:
     """A burn, rounded as the report writes it."""
     return {
-        "burn_lead_hours": _hours(option.burn_lead),
+        "burn_lead_hours": _round_hours(option.burn_lead),
         "delta_v": significant(option.delta_v),
         "pc": significant(option.pc),
         "range_at_tca": round(option.range_at_tca, 1),
@@ -299,7 +308,7 @@ def plan_summary(plan: ManeuverPlan) -> Plan:
         "secondary_name": cdm.object2.name,
         "tca": cdm.tca.utc.isot,
         "created": cdm.creation_date.utc.isot,
-        "hours_to_tca": _hours(time_to_tca(cdm)),
+        "hours_to_tca": _round_hours(time_to_tca(cdm)),
         "relative_speed": round(plan.conjunction.relative_speed, 3),
         "primary_drag_term": cdm.object1.cd_area_over_mass,
         "target_pc": plan.target_pc,
@@ -321,8 +330,8 @@ def grid_settings() -> Grid:
     """The default grid of burns."""
     grid = DEFAULT_BURN_GRID
     return {
-        "earliest_lead_hours": _hours(grid.earliest_lead),
-        "latest_lead_hours": _hours(grid.latest_lead),
+        "earliest_lead_hours": _round_hours(grid.earliest_lead),
+        "latest_lead_hours": _round_hours(grid.latest_lead),
         "steps_per_orbit": grid.steps_per_orbit,
         "smallest_delta_v": grid.smallest_delta_v,
         "largest_delta_v": grid.largest_delta_v,
@@ -342,16 +351,11 @@ def _approach(item: NewApproach) -> Approach:
     }
 
 
-def direction(option: ManeuverOption) -> str:
-    """The direction of a burn along the velocity."""
-    return "prograde" if option.delta_v > 0.0 else "retrograde"
-
-
 def rescreen_summary(result: RescreenResult) -> Rescreen:
     """A re-screen's numbers."""
     start, end = result.window
     return {
-        "direction": direction(result.option),
+        "direction": str(result.option.direction),
         "start": start.utc.isot,
         "end": end.utc.isot,
         "catalog_objects": result.catalog_objects,
@@ -378,11 +382,6 @@ def demonstration_event(result: OperatorResult) -> OperatorEvent | None:
     return max(yellow, key=lambda event: event.observation.pc or 0.0, default=None)
 
 
-def _level(event: OperatorEvent) -> str | None:
-    level = event.assessment.level
-    return None if level is None else level.key
-
-
 def demonstrate(
     catalog: Sequence[Omm], start: Time, fleet: Path, workers: int
 ) -> tuple[OperatorEvent | None, ManeuverPlan | None, list[RescreenResult]]:
@@ -403,43 +402,27 @@ def demonstrate(
     plan = plan_maneuver(
         chosen.event, target_pc=DEMONSTRATION_TARGET, thresholds=THRESHOLDS
     )
-    options = [item for item in (plan.prograde, plan.retrograde) if item is not None]
-    results = [rescreen(plan, item, catalog, workers=workers) for item in options]
+    results = [rescreen(plan, item, catalog, workers=workers) for item in plan.options]
     return chosen, plan, results
-
-
-def shown(path: Path) -> str:
-    """``path`` as the page names it: from the repository's root if inside
-    it, else as given."""
-    resolved = path.resolve()
-    if resolved.is_relative_to(REPO):
-        return resolved.relative_to(REPO).as_posix()
-    return path.as_posix()
 
 
 def timed_plan(
     event: ConjunctionEvent, radius: float, repeat: int
 ) -> tuple[ManeuverPlan, list[float], list[float]]:
-    """The event's plan, made ``repeat`` times, with the lowest and highest
-    wall and CPU time of the runs [s], to 0.1 s.
+    """The event's plan, made ``repeat`` times (at least once), with the
+    lowest and highest wall and CPU time of the runs [s], to 0.1 s."""
 
-    Raises
-    ------
-    ValueError
-        If ``repeat`` is below 1.
-    """
-    walls: list[float] = []
-    cpus: list[float] = []
-    plan = None
-    for _ in range(repeat):
+    def timed() -> tuple[ManeuverPlan, float, float]:
         wall, cpu = time.perf_counter(), time.process_time()
         plan = plan_maneuver(
             event, combined_hard_body_radius=radius, thresholds=THRESHOLDS
         )
-        walls.append(time.perf_counter() - wall)
-        cpus.append(time.process_time() - cpu)
-    if plan is None:
-        raise ValueError(f"repeat must be at least 1, got {repeat}")
+        return plan, time.perf_counter() - wall, time.process_time() - cpu
+
+    runs = [timed() for _ in range(max(repeat, 1))]
+    plan = runs[-1][0]
+    walls = [wall for _, wall, _ in runs]
+    cpus = [cpu for _, _, cpu in runs]
     return (
         plan,
         [round(min(walls), 1), round(max(walls), 1)],
@@ -487,10 +470,11 @@ def _alt_text(plan: Plan) -> str:
 def _option_row(name: str, option: Option | None) -> tuple[str, ...]:
     if option is None:
         return (name, "-", "-", "none on the grid", "-", "-")
-    lead = "-" if option["delta_v"] == 0.0 else f"{option['burn_lead_hours']:.1f} h"
-    delta_v = (
-        "-" if option["delta_v"] == 0.0 else f"{delta_v_text(option['delta_v'])} m/s"
-    )
+    if option["delta_v"] == 0.0:
+        lead = delta_v = "-"
+    else:
+        lead = f"{option['burn_lead_hours']:.1f} h"
+        delta_v = f"{delta_v_text(option['delta_v'])} m/s"
     return (
         name,
         lead,
@@ -528,7 +512,7 @@ def _event_table(plan: Plan) -> list[str]:
     return table(
         ("", ""),
         [
-            ("Primary (burns)", _object(plan["primary"], plan["primary_name"])),
+            ("Primary (burns)", primary_text(plan)),
             ("Secondary", _object(plan["secondary"], plan["secondary_name"])),
             ("TCA (UTC)", second_text(plan["tca"])),
             (
@@ -571,19 +555,16 @@ def _return_lines(item: Rescreen, target: float) -> list[str]:
 
 
 def _rescreen_lines(item: Rescreen, secondary: str, target: float) -> list[str]:
+    view = (
+        "on the element sets (SGP4, not the CDM's orbit) the event's "
+        f"secondary {secondary}"
+    )
     if not item["secondary_screened"]:
         event = f"the event's secondary {secondary} was not screened"
     elif item["event_range"] is None:
-        event = (
-            f"on the element sets (SGP4, not the CDM's orbit) the event's "
-            f"secondary {secondary} has no approach within 10 minutes of the "
-            "CDM's TCA"
-        )
+        event = f"{view} has no approach within {TOLERANCE} of the CDM's TCA"
     else:
-        event = (
-            f"on the element sets (SGP4, not the CDM's orbit) the event's "
-            f"secondary {secondary} passes at {item['event_range']:.0f} m"
-        )
+        event = f"{view} passes at {item['event_range']:.0f} m"
     found = len(item["new_approaches"]) + len(item["closer_approaches"])
     closer = plural(
         len(item["closer_approaches"]), "closer approach", "closer approaches"
@@ -604,15 +585,16 @@ def _rescreen_lines(item: Rescreen, secondary: str, target: float) -> list[str]:
     ]
 
 
-def _outcome(rescreens: Sequence[Rescreen], plan: Plan, secondary: str) -> list[str]:
-    """What the re-screens make of the options, as ``keepout maneuver`` would."""
+def _outcome(demo: Demonstration, plan: Plan, secondary: str) -> list[str]:
+    """What the re-screens make of the options, as ``keepout maneuver`` does."""
+    rescreens = demo["rescreens"]
     returning = [item["direction"] for item in rescreens if item["event_returns"]]
     if not returning:
         return []
     several = len(returning) > 1
     burns = f"{' and the '.join(returning)} burn{'s' if several else ''}"
     clean = [item["direction"] for item in rescreens if item["clean"]]
-    if clean:
+    if demo["recommendable"]:
         verdict = (
             f"The {' and the '.join(clean)} option is clean, so "
             "`keepout maneuver` exits with status 0 and shows both, the one "
@@ -631,7 +613,7 @@ def _outcome(rescreens: Sequence[Rescreen], plan: Plan, secondary: str) -> list[
             f"but bring{'' if several else 's'} the event's own secondary "
             f"{secondary} back at another time, above the target "
             f"{pc_text(plan['target_pc'])}. The planner looks for the new TCA "
-            "only within a twentieth of an orbit of the old one, and in an "
+            "only near the old one, and in an "
             f"encounter this slow ({plan['relative_speed']:.1f} m/s) a burn "
             "moves the next close approach of the same two objects by hours: "
             f"only the re-screen shows it. {verdict}"
@@ -687,16 +669,17 @@ def _demonstration(summary: Summary) -> list[str]:
     secondary = plan["secondary"].lstrip("0")
     for item in demo["rescreens"]:
         lines += _rescreen_lines(item, secondary, plan["target_pc"])
-    lines += _outcome(demo["rescreens"], plan, secondary)
+    lines += _outcome(demo, plan, secondary)
     lines += [
         "",
         (
             "A new approach is one the run without the burn does not have within "
-            "10 minutes of its TCA; a closer approach is one it has at a larger "
-            "range. Their Pc is Foster's on the synthetic covariance model, "
-            "an assumption. The re-screen searches for no other option: a burn "
-            "that clears one event but brings another is for the analyst to "
-            "weigh (see [Manoeuvre planning](maneuver.md#re-screen))."
+            f"{TOLERANCE} of its TCA; a closer approach is one it has at a larger "
+            "range. Their Pc is the synthetic operator's (`auto`) on its "
+            "covariance model, an assumption. The re-screen searches for no "
+            "other option: a burn that clears one event but brings another is "
+            "for the analyst to weigh (see "
+            "[Manoeuvre planning](maneuver.md#re-screen))."
         ),
     ]
     return lines
@@ -708,15 +691,18 @@ def _span(values: Sequence[float]) -> str:
     return f"{low:.1f} s" if low == high else f"{low:.1f} to {high:.1f} s"
 
 
-def radius_text(settings: Settings) -> str:
-    """Where the combined hard-body radius comes from, for the page."""
+def radius_text(settings: Settings, *, short: bool = False) -> str:
+    """Where the combined hard-body radius comes from: for the page, or
+    ``short`` for the README."""
     radius = f"HBR {settings['hard_body_radius']:g} m"
-    if settings["hard_body_radius_source"] == "cara":
-        return (
-            f"{radius}, CARA's value for this CDM (column `{HBR_COLUMN}` of "
-            f"`{cara.PC_METHOD_TABLE.path}` at the same commit)"
-        )
-    return f"{radius}, given with `--hbr`"
+    if settings["hard_body_radius_source"] == "given":
+        return f"{radius}, given with `--hbr`"
+    if short:
+        return f"{radius}, CARA's value"
+    return (
+        f"{radius}, CARA's value for this CDM (column `{HBR_COLUMN}` of "
+        f"`{cara.PC_METHOD_TABLE.path}` at the same commit)"
+    )
 
 
 def _timing_line(timings: Timings | None, plan: Plan) -> str:
@@ -845,18 +831,13 @@ def render_page(summary: Summary, images: str) -> str:
 def render_summary(summary: Summary, images: str) -> str:
     """The README block: the heatmap and the minimum burns."""
     settings, plan = summary["settings"], summary["event"]
-    source = (
-        "CARA's value"
-        if settings["hard_body_radius_source"] == "cara"
-        else "given with `--hbr`"
-    )
     return "\n".join(
         [
             (
                 f"The burns of {primary_text(plan)} that clear a "
                 f"{_level_text(settings, plan)} event, CARA test CDM "
-                f"`{settings['cdm']}` ({plan['tca'][:4]} test data; HBR "
-                f"{settings['hard_body_radius']:g} m, {source}; "
+                f"`{settings['cdm']}` ({plan['tca'][:4]} test data; "
+                f"{radius_text(settings, short=True)}; "
                 "[report](docs/maneuver-report.md)):"
             ),
             "",
@@ -909,8 +890,9 @@ def _scale(plan: ManeuverPlan) -> _Scale:
     )
 
 
-def _mark(axes: Axes, option: ManeuverOption, sign: float) -> None:
+def _mark(axes: Axes, option: ManeuverOption, direction: BurnDirection) -> None:
     """The option of a panel: a ringed dot and its label."""
+    sign = direction.sign
     lead = option.burn_lead / HOUR
     size = abs(option.delta_v)
     axes.scatter(
@@ -936,10 +918,14 @@ def _mark(axes: Axes, option: ManeuverOption, sign: float) -> None:
 
 
 def _panel(
-    axes: Axes, plan: ManeuverPlan, scale: _Scale, sign: float, cmap: Colormap
+    axes: Axes,
+    plan: ManeuverPlan,
+    scale: _Scale,
+    direction: BurnDirection,
+    cmap: Colormap,
 ) -> QuadMesh:
     """One direction's cells, the target contour and the option."""
-    columns = np.flatnonzero(np.sign(plan.delta_v) == sign)
+    columns = np.flatnonzero(np.sign(plan.delta_v) == direction.sign)
     columns = columns[np.argsort(np.abs(plan.delta_v[columns]))]
     magnitudes = np.abs(plan.delta_v[columns])
     values = scale.log_pc[:, columns]
@@ -970,11 +956,11 @@ def _panel(
             linewidths=2.0,
             linestyles="solid",
         )
-    option = plan.prograde if sign > 0 else plan.retrograde
+    option = plan.option(direction)
     if option is not None:
-        _mark(axes, option, sign)
+        _mark(axes, option, direction)
     axes.set_xscale("log")
-    axes.set_title("prograde" if sign > 0 else "retrograde", color=INK)
+    axes.set_title(direction, color=INK)
     axes.set_xlabel("|Δv| along the velocity (m/s)", color=MUTED)
     axes.tick_params(colors=MUTED)
     for spine in axes.spines.values():
@@ -1020,8 +1006,8 @@ def plot(plan: ManeuverPlan, title: str, path: Path) -> None:
         grid = figure.add_gridspec(1, 3, width_ratios=(1.0, 1.0, 0.05), wspace=0.12)
         left = figure.add_subplot(grid[0, 0])
         right = figure.add_subplot(grid[0, 1], sharey=left)
-        _panel(left, plan, scale, -1.0, cmap)
-        mesh = _panel(right, plan, scale, 1.0, cmap)
+        _panel(left, plan, scale, BurnDirection.RETROGRADE, cmap)
+        mesh = _panel(right, plan, scale, BurnDirection.PROGRADE, cmap)
         left.invert_xaxis()
         left.set_ylabel("burn time before TCA (h)", color=MUTED)
         right.tick_params(labelleft=False)
@@ -1040,16 +1026,12 @@ def plot(plan: ManeuverPlan, title: str, path: Path) -> None:
         )
 
 
-def heatmap_title(plan: ManeuverPlan) -> str:
+def heatmap_title(plan: Plan) -> str:
     """The title of a plan's heatmap."""
-    cdm = plan.event.latest
-    names = (
-        _object(cdm.object1.object_id, cdm.object1.name),
-        _object(cdm.object2.object_id, cdm.object2.name),
-    )
+    secondary = _object(plan["secondary"], plan["secondary_name"])
     return (
-        f"{names[0]} vs {names[1]}\nTCA {minute_text(cdm.tca.utc.isot)} UTC, "
-        f"Pc {plan.baseline.pc:.2e} without a burn"
+        f"{primary_text(plan)} vs {secondary}\nTCA {minute_text(plan['tca'])} UTC, "
+        f"Pc {plan['baseline']['pc']:.2e} without a burn"
     )
 
 
@@ -1096,16 +1078,7 @@ def positive_radius(text: str) -> float:
     return value
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    """The entry point writing (or with ``--check`` verifying) the manoeuvre
-    report.
-
-    Returns
-    -------
-    int
-        0 on success; 1 if, with ``--check``, a file is out of date or the
-        heatmap is missing.
-    """
+def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog=TOOL)
     parser.add_argument("--check", action="store_true", help="fail if out of date")
     parser.add_argument(
@@ -1131,7 +1104,58 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--repeat", type=positive, default=3, help="runs of the timed plan"
     )
-    args = parser.parse_args(argv)
+    return parser
+
+
+def demonstration_summary(
+    catalog: Sequence[Omm], manifest: snapshot.Manifest, fleet: Path, workers: int
+) -> Demonstration:
+    """The re-screen demonstration's numbers, on the frozen catalog."""
+    start = window_start(manifest)
+    chosen, plan, results = demonstrate(catalog, start, fleet, workers)
+    pc = None if chosen is None else chosen.observation.pc
+    return {
+        "fleet": shown(fleet),
+        "retrieved": snapshot.retrieval_day(manifest),
+        "start": start.utc.isot,
+        "days": DEFAULT_DURATION / DAY,
+        "volume": DEFAULT_VOLUME.label,
+        "pc": None if pc is None else significant(pc),
+        "level": None if chosen is None else level_key(chosen),
+        "action": "-" if chosen is None else chosen.action.label,
+        "plan": None if plan is None else plan_summary(plan),
+        "rescreens": [rescreen_summary(result) for result in results],
+        "recommendable": judge(
+            [(result.option, result) for result in results]
+        ).recommendable,
+    }
+
+
+def measured_timings(repeat: int, wall: list[float], cpu: list[float]) -> Timings:
+    """The timings of the plan, with where they were measured."""
+    return {
+        "cpu_model": cpu_model(),
+        "logical_cpus": os.cpu_count() or 1,
+        "python": platform.python_version(),
+        "date": datetime.datetime.now(datetime.UTC).date().isoformat(),
+        "one_thread": all(os.environ.get(name) == "1" for name in ONE_THREAD),
+        "runs": repeat,
+        "wall": wall,
+        "cpu": cpu,
+    }
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """The entry point writing (or with ``--check`` verifying) the manoeuvre
+    report.
+
+    Returns
+    -------
+    int
+        0 on success; 1 if, with ``--check``, a file is out of date or the
+        heatmap is missing.
+    """
+    args = _parser().parse_args(argv)
 
     path = args.cdm or cara.fetch(cara.PC_METHOD_CDMS[CDM_ID])
     event, name = load_event(path)
@@ -1143,38 +1167,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         radius, source = args.hbr, "given"
     plan, wall, cpu = timed_plan(event, radius, 1 if args.check else args.repeat)
 
-    manifest = snapshot.read_manifest(args.data)
-    catalog = snapshot.read_catalog(args.data)
-    start = window_start(manifest)
-    chosen, demo_plan, results = demonstrate(catalog, start, args.fleet, args.workers)
-    demonstration: Demonstration = {
-        "fleet": shown(args.fleet),
-        "retrieved": snapshot.retrieval_day(manifest),
-        "start": start.utc.isot,
-        "days": DEFAULT_DURATION / DAY,
-        "volume": DEFAULT_VOLUME.label,
-        "pc": None
-        if chosen is None or chosen.observation.pc is None
-        else significant(chosen.observation.pc),
-        "level": None if chosen is None else _level(chosen),
-        "action": "-" if chosen is None else chosen.action.label,
-        "plan": None if demo_plan is None else plan_summary(demo_plan),
-        "rescreens": [rescreen_summary(result) for result in results],
-    }
-    timings: Timings | None
-    if args.check:
-        timings = read_timings(args.page.with_suffix(".json"))
-    else:
-        timings = {
-            "cpu_model": cpu_model(),
-            "logical_cpus": os.cpu_count() or 1,
-            "python": platform.python_version(),
-            "date": datetime.datetime.now(datetime.UTC).date().isoformat(),
-            "one_thread": all(os.environ.get(name) == "1" for name in ONE_THREAD),
-            "runs": args.repeat,
-            "wall": wall,
-            "cpu": cpu,
-        }
+    demonstration = demonstration_summary(
+        snapshot.read_catalog(args.data),
+        snapshot.read_manifest(args.data),
+        args.fleet,
+        args.workers,
+    )
+    timings = (
+        read_timings(args.page.with_suffix(".json"))
+        if args.check
+        else measured_timings(args.repeat, wall, cpu)
+    )
     summary: Summary = {
         "settings": {
             "cdm": name,
@@ -1207,7 +1210,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             status = 1
         return status
     args.images.mkdir(parents=True, exist_ok=True)
-    plot(plan, heatmap_title(plan), heatmap)
+    plot(plan, heatmap_title(summary["event"]), heatmap)
     print(f"wrote {heatmap}")
     return status
 

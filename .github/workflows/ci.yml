@@ -55,7 +55,8 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: uv sync --locked
-      - run: uv run pytest -n auto --cov --cov-report=term-missing
+      # -m replaces the default marker filter: the slow tests run here too.
+      - run: uv run pytest -n auto -m "not validation" --cov --cov-report=term-missing
         env:
           HYPOTHESIS_PROFILE: ci
 

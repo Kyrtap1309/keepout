@@ -207,7 +207,7 @@ Note: 2-D Pc assumptions questionable: the encounter lasts about 2.51e+03 s, 2.9
 Note: the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used
 Note: every Pc rests on an assumed covariance (COVARIANCE_METHOD = DEFAULT)
 Note: drag is off: the CDM gives the primary no positive CD_AREA_OVER_MASS
-Note: relative speed 1.99 m/s is below 100 m/s: the planner looks for the new TCA only within a twentieth of an orbit of TCA, so after a burn the pair can meet again hours away, at a Pc no cell shows; only a re-screen shows it (inside that window the new TCA was measured up to 28 m off at 10 m/s)
+Note: relative speed 1.99 m/s is below 100 m/s: the planner looks for the new TCA only within 1/20 of an orbit of TCA, so after a burn the pair can meet again hours away, at a Pc no cell shows; only a re-screen shows it (inside that window the new TCA was measured up to 28 m off at 10 m/s)
 Note: 240 of 930 cells have no Pc and are never options: 240 without a closest approach to trust, 0 where Foster's Pc failed
 Note: prograde: 2-D Pc assumptions questionable: the encounter lasts about 8.4e+03 s, 9.7% of the primary's orbital period (limit 1%); a 3-D Pc may differ
 Note: retrograde: 2-D Pc assumptions questionable: the encounter lasts about 7.17e+03 s, 8.3% of the primary's orbital period (limit 1%); a 3-D Pc may differ

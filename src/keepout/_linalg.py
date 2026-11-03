@@ -9,7 +9,7 @@ import numpy.typing as npt
 
 from keepout._types import FloatArray, read_only
 
-__all__ = ["as_vector", "from_eigen", "symmetric_part", "take"]
+__all__ = ["as_axis", "as_vector", "from_eigen", "symmetric_part", "take"]
 
 _Record = TypeVar("_Record", bound=tuple[Any, ...])
 
@@ -49,6 +49,23 @@ def as_vector(value: npt.ArrayLike, name: str) -> FloatArray:
     if not np.all(np.isfinite(array)):
         raise ValueError(f"{name} must be finite")
     read_only(array)
+    return array
+
+
+def as_axis(values: npt.ArrayLike, name: str) -> FloatArray:
+    """Finite numbers along one axis, as a float64 array of shape ``(N,)``,
+    N >= 1.
+
+    Raises
+    ------
+    ValueError
+        If they are empty, not one-dimensional or not finite.
+    """
+    array = np.asarray(values, dtype=np.float64)
+    if array.ndim != 1 or array.size == 0:
+        raise ValueError(f"{name} must be a non-empty 1-D array, got {array.shape}")
+    if not np.all(np.isfinite(array)):
+        raise ValueError(f"{name} must be finite")
     return array
 
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, TypeAlias
+from typing import TYPE_CHECKING, Annotated, NamedTuple, TypeAlias
 
 import typer
 
@@ -14,7 +14,7 @@ from keepout.sources.catalog import CATALOG_SOURCES, DEFAULT_SOURCE, CatalogSour
 if TYPE_CHECKING:
     from keepout.omm import Omm
 
-__all__ = ["CatalogFile", "catalog_input", "require_one_catalog"]
+__all__ = ["CatalogFile", "CatalogInput", "catalog_input", "require_one_catalog"]
 
 CatalogFile: TypeAlias = Annotated[
     Path | None,
@@ -29,6 +29,14 @@ CatalogFile: TypeAlias = Annotated[
     ),
 ]
 """``--catalog``: a local catalog file instead of a source."""
+
+
+class CatalogInput(NamedTuple):
+    """The element sets a command screens against."""
+
+    omms: tuple[Omm, ...]
+    label: str
+    """How the summary names them: the file, or the source's title."""
 
 
 def require_one_catalog(catalog: Path | None, source: CatalogSourceName | None) -> None:
@@ -47,12 +55,11 @@ def require_one_catalog(catalog: Path | None, source: CatalogSourceName | None) 
 
 def catalog_input(
     catalog: Path | None, source: CatalogSourceName | None, cache_dir: Path | None
-) -> tuple[tuple[Omm, ...], str]:
-    """The element sets to screen against, from ``--catalog`` or a source,
-    and how the summary names them."""
+) -> CatalogInput:
+    """The element sets to screen against, from ``--catalog`` or a source."""
     if catalog is not None:
         from keepout.omm import load
 
-        return load(catalog), str(catalog)
+        return CatalogInput(load(catalog), str(catalog))
     described = CATALOG_SOURCES[source or DEFAULT_SOURCE]
-    return described.fetch(cache_dir).omms, described.title
+    return CatalogInput(described.fetch(cache_dir).omms, described.title)

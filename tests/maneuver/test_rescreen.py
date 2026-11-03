@@ -35,13 +35,14 @@ from keepout.maneuver import (
     ManeuverPlan,
     NewApproach,
     RescreenResult,
+    judge,
     plan_maneuver,
     rescreen,
 )
 from keepout.omm import Omm, deduplicate
 from keepout.pc import computation
 from keepout.propagation import describe_error
-from keepout.propagation.manoeuvred import ManoeuvredPropagator
+from keepout.propagation.maneuvered import ManeuveredPropagator
 from keepout.risk import DEFAULT_THRESHOLDS, RiskLevel, Thresholds
 from keepout.screening import (
     CloseApproach,
@@ -52,7 +53,7 @@ from keepout.screening import (
     SkipReason,
     screen,
 )
-from keepout.screening.tca import DERIVATIVE_STEP
+from keepout.screening.tca import SEARCH_REACH
 from keepout.synthetic import Fleet, FleetSatellite, SyntheticCovarianceModel
 from keepout.synthetic.operator import DEFAULT_MODEL, run
 from keepout.units import DAY, HOUR, elapsed_seconds
@@ -200,7 +201,7 @@ def no_screening(monkeypatch: pytest.MonkeyPatch) -> None:
 
     module = importlib.import_module("keepout.maneuver.rescreen")
     monkeypatch.setattr(module, "screen", refuse)
-    monkeypatch.setattr(ManoeuvredPropagator, "__init__", refuse)
+    monkeypatch.setattr(ManeuveredPropagator, "__init__", refuse)
 
 
 @pytest.fixture
@@ -210,7 +211,7 @@ def no_integration(monkeypatch: pytest.MonkeyPatch) -> None:
     def refuse(*args: object, **kwargs: object) -> None:
         raise AssertionError("integrated a burn of a primary that was not screened")
 
-    monkeypatch.setattr(ManoeuvredPropagator, "__init__", refuse)
+    monkeypatch.setattr(ManeuveredPropagator, "__init__", refuse)
 
 
 def test_zero_burn_has_no_new_approaches() -> None:
@@ -282,8 +283,8 @@ def test_approach_within_tca_tolerance_is_not_new() -> None:
         FIXTURE,
         START,
         7 * DAY,
-        adjust_primaries=lambda base: ManoeuvredPropagator(
-            base, START, 0.01, 7 * DAY + 2 * DERIVATIVE_STEP
+        adjust_primaries=lambda base: ManeuveredPropagator(
+            base, START, 0.01, 7 * DAY + SEARCH_REACH
         ),
     )
     (before,) = baseline.approaches
@@ -864,3 +865,79 @@ def test_result_does_not_depend_on_workers() -> None:
     together = rescreened(CROSSING, -0.1)
     apart = rescreen(plan, burn(plan, -0.1), FIXTURE, workers=2)
     assert fingerprint(apart) == fingerprint(together)
+
+
+def judged(*, red: bool = False, back: bool = False) -> RescreenResult:
+    """A re-screen of a burn whose one new approach is red or green, and
+    which brings the event's pair back or not."""
+    found = rescreened(CROSSING, -0.03)
+    (new,) = found.new_approaches
+    level = RiskLevel.RED if red else RiskLevel.GREEN
+    return dataclasses.replace(
+        found,
+        new_approaches=(dataclasses.replace(new, level=level),),
+        event_returns=(new,) if back else (),
+    )
+
+
+def test_no_burn_cannot_be_recommended() -> None:
+    verdict = judge([])
+    assert (verdict.burns, verdict.recommendable) == (0, False)
+
+
+def test_a_burn_missing_the_target_cannot_be_recommended() -> None:
+    plan = plan_of(CROSSING)
+    missing = dataclasses.replace(burn(plan, -0.03), meets_target=False)
+    verdict = judge([(missing, None), (burn(plan, 0.03), judged())])
+    assert verdict.missed_target
+    assert not verdict.recommendable
+
+
+@pytest.mark.parametrize("other", [None, "clean"])
+def test_one_clean_or_unscreened_burn_is_enough(other: str | None) -> None:
+    plan = plan_of(CROSSING)
+    second = None if other is None else judged()
+    verdict = judge(
+        [(burn(plan, -0.03), judged(red=True, back=True)), (burn(plan, 0.03), second)]
+    )
+    assert verdict.recommendable
+    assert not verdict.brings_red
+    assert not verdict.brings_pair_back
+
+
+def test_every_burn_with_a_red_approach_or_a_return_cannot_be_recommended() -> None:
+    plan = plan_of(CROSSING)
+    verdict = judge(
+        [
+            (burn(plan, -0.03), judged(red=True)),
+            (burn(plan, 0.03), judged(back=True)),
+        ]
+    )
+    assert (verdict.burns, verdict.brings_red, verdict.brings_pair_back) == (
+        2,
+        True,
+        True,
+    )
+    assert not verdict.missed_target
+    assert not verdict.recommendable
+
+
+def test_new_approaches_take_the_pc_method_and_basis_given() -> None:
+    plan = plan_of(CROSSING)
+    (new,) = rescreened(CROSSING, -0.03).new_approaches
+    approach = new.approach
+    conjunction = approach.to_conjunction(
+        combined_hard_body_radius=plan.conjunction.combined_hard_body_radius,
+        primary_covariance=DEFAULT_MODEL.covariance(BY_NUMBER[CROSSING], approach.tca),
+        secondary_covariance=DEFAULT_MODEL.covariance(
+            BY_NUMBER[RECURRING], approach.tca
+        ),
+    )
+    # A Monte Carlo interval whose upper end the conservative basis takes.
+    compute = computation("montecarlo", samples=20_000, seed=1)
+    (conservative,) = rescreen(
+        plan, burn(plan, -0.03), FIXTURE, compute=compute
+    ).new_approaches
+    upper = compute(conjunction).interval
+    assert upper is not None
+    assert conservative.pc == upper[1]

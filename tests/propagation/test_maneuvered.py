@@ -16,7 +16,7 @@ from keepout.propagation import (
     CowellPropagator,
     Ephemeris,
     ForceModel,
-    ManoeuvredPropagator,
+    ManeuveredPropagator,
     Propagator,
     Sgp4Propagator,
     earth_pole,
@@ -40,14 +40,14 @@ FAILING: Final = 45711
 """SGP4 fails for it 23 h 12 min after :data:`START`."""
 
 
-def manoeuvred(
+def maneuvered(
     delta_v: float = 0.1,
     *,
     base: Propagator = LEO,
     burn_time: Time = START,
     horizon: float = 7 * DAY,
-) -> ManoeuvredPropagator:
-    return ManoeuvredPropagator(base, burn_time, delta_v, horizon)
+) -> ManeuveredPropagator:
+    return ManeuveredPropagator(base, burn_time, delta_v, horizon)
 
 
 def assert_same_states(left: Ephemeris, right: Ephemeris) -> None:
@@ -84,44 +84,40 @@ def cowell_difference(
 
 
 def test_is_a_propagator_in_the_frame_of_its_base() -> None:
-    propagator = manoeuvred()
+    propagator = maneuvered(horizon=HOUR)
     assert isinstance(propagator, Propagator)
     assert propagator.frame == "TEME"
     assert len(propagator) == 1
-    assert repr(propagator) == "ManoeuvredPropagator(1 objects)"
+    assert repr(propagator) == "ManeuveredPropagator(1 objects)"
 
 
 def test_states_before_the_burn_equal_base() -> None:
     burn_time = START + 2 * u.day
-    propagator = manoeuvred(burn_time=burn_time)
+    propagator = maneuvered(burn_time=burn_time)
     before = np.arange(-DAY, 2 * DAY, 311.0)
     assert_same_states(
         propagator.propagate(START, before), LEO.propagate(START, before)
     )
 
 
-def test_the_burn_changes_the_velocity_at_its_time_only() -> None:
-    delta_v = 0.25
+@pytest.mark.parametrize("delta_v", [0.25, -0.25])
+def test_the_burn_changes_the_velocity_at_its_time_only(delta_v: float) -> None:
     burn_time = START + DAY * u.s
-    at_burn = manoeuvred(delta_v, burn_time=burn_time).propagate(burn_time, 0.0)
+    at_burn = maneuvered(delta_v, burn_time=burn_time, horizon=HOUR).propagate(
+        burn_time, 0.0
+    )
     base = LEO.propagate(burn_time, 0.0)
     assert np.array_equal(at_burn.r, base.r)
     change = (at_burn.v - base.v)[0, 0]
-    assert np.linalg.norm(change) == pytest.approx(delta_v, abs=1e-9)
+    assert np.linalg.norm(change) == pytest.approx(abs(delta_v), abs=1e-9)
     # Along the velocity, whose GCRF direction is a hair from the TEME one.
     assert np.dot(change, base.v[0, 0]) / np.linalg.norm(base.v) == pytest.approx(
         delta_v, abs=1e-5
     )
 
 
-def test_a_negative_delta_v_goes_against_the_velocity() -> None:
-    at_burn = manoeuvred(-0.25).propagate(START, 0.0)
-    base = LEO.propagate(START, 0.0)
-    assert np.dot((at_burn.v - base.v)[0, 0], base.v[0, 0]) < 0.0
-
-
 def test_zero_delta_v_equals_base_everywhere() -> None:
-    propagator = manoeuvred(0.0, burn_time=START + DAY * u.s)
+    propagator = maneuvered(0.0, burn_time=START + DAY * u.s)
     assert_same_states(propagator.propagate(START, GRID), LEO.propagate(START, GRID))
     bounds, base = (
         propagator.radius_bounds(START, 7 * DAY),
@@ -159,10 +155,10 @@ def difference_errors(
 @pytest.mark.parametrize(
     ("number", "delta_v", "span", "limit"),
     [
-        (68377, -0.1, 7 * DAY, 1.0),
+        pytest.param(68377, -0.1, 7 * DAY, 1.0, marks=pytest.mark.slow),
         (68377, 1.0, DAY, 1.0),
         (HEO, 1.0, DAY, 1.0),
-        (68377, 1.0, 7 * DAY, 1.0),
+        pytest.param(68377, 1.0, 7 * DAY, 1.0, marks=pytest.mark.slow),
         # e > 0.3 at the top of the grid: the integrator and the 60 s spline at
         # perigee reach 2.24 m, the worst of the 38 such orbits of the fixture
         # (HEO_WORST), against a volume of kilometres.
@@ -176,7 +172,7 @@ def test_difference_matches_cowell(
 ) -> None:
     base = Sgp4Propagator([BY_NUMBER[number]])
     burn_time = START + HOUR * u.s
-    propagator = manoeuvred(delta_v, base=base, burn_time=burn_time, horizon=span)
+    propagator = maneuvered(delta_v, base=base, burn_time=burn_time, horizon=span)
     middles = np.arange(30.0, span, 60.0)
     position, velocity = difference_errors(
         propagator, base, burn_time, delta_v, middles
@@ -194,7 +190,7 @@ def test_a_base_in_gcrf_is_not_rotated() -> None:
     state = np.concatenate((r, v))[None]
     base = CowellPropagator(START, state, [force], (0.0, 2 * DAY))
     burn_time, delta_v = START + HOUR * u.s, 1.0
-    propagator = manoeuvred(delta_v, base=base, burn_time=burn_time, horizon=DAY)
+    propagator = maneuvered(delta_v, base=base, burn_time=burn_time, horizon=DAY)
     assert propagator.frame == "GCRF"
     before = np.arange(0.0, HOUR, 97.0)
     assert_same_states(
@@ -207,7 +203,7 @@ def test_a_base_in_gcrf_is_not_rotated() -> None:
 
 @pytest.mark.parametrize("delta_v", [1.0, -1.0, 0.01])
 def test_radius_bounds_hold_the_states(delta_v: float) -> None:
-    propagator = manoeuvred(delta_v)
+    propagator = maneuvered(delta_v)
     bounds = propagator.radius_bounds(START, 7 * DAY)
     radii = np.linalg.norm(propagator.propagate(START, GRID).r, axis=2)
     assert bounds.lowest[0] <= radii.min()
@@ -219,7 +215,7 @@ def test_radius_bounds_hold_the_states(delta_v: float) -> None:
 
 def test_radius_bounds_widen_by_the_difference_of_their_span_only() -> None:
     delta_v = 0.1
-    propagator = manoeuvred(delta_v, burn_time=START + DAY * u.s)
+    propagator = maneuvered(delta_v, burn_time=START + DAY * u.s)
     before = propagator.radius_bounds(START, DAY / 2.0)
     base = LEO.radius_bounds(START, DAY / 2.0)
     assert np.array_equal(before.lowest, base.lowest)
@@ -233,7 +229,7 @@ def test_radius_bounds_widen_by_the_difference_of_their_span_only() -> None:
 
 def test_radius_bounds_hold_the_spline_between_its_nodes() -> None:
     # A step as long as a third of an orbit leaves peaks between the nodes.
-    propagator = ManoeuvredPropagator(LEO, START, 1.0, DAY, step=1800.0)
+    propagator = ManeuveredPropagator(LEO, START, 1.0, DAY, step=1800.0)
     reference = LEO.propagate(START, np.arange(0.0, DAY, 7.0))
     states = propagator.propagate(START, reference.offsets)
     largest = np.linalg.norm(states.r - reference.r, axis=2).max()
@@ -243,14 +239,14 @@ def test_radius_bounds_hold_the_spline_between_its_nodes() -> None:
 
 def test_lowest_bound_is_never_negative() -> None:
     # Half an orbit's worth of 2 km/s moves the object by more than its radius.
-    bounds = manoeuvred(2000.0).radius_bounds(START, 7 * DAY)
+    bounds = maneuvered(2000.0).radius_bounds(START, 7 * DAY)
     assert bounds.lowest[0] == 0.0
     assert bounds.highest[0] > LEO.radius_bounds(START, 7 * DAY).highest[0]
 
 
 def test_errors_of_base_pass_through() -> None:
     base = Sgp4Propagator([BY_NUMBER[FAILING]])
-    propagator = manoeuvred(0.1, base=base, horizon=2 * DAY)
+    propagator = maneuvered(0.1, base=base, horizon=2 * DAY)
     offsets = np.arange(0.0, 2 * DAY, 600.0)
     states, expected = (
         propagator.propagate(START, offsets),
@@ -271,19 +267,19 @@ def test_errors_of_base_pass_through() -> None:
 def test_a_failed_state_at_the_burn_is_refused() -> None:
     base = Sgp4Propagator([BY_NUMBER[FAILING]])
     with pytest.raises(PropagationError, match="no state to burn from"):
-        manoeuvred(0.1, base=base, burn_time=START + 2 * u.day, horizon=DAY)
+        maneuvered(0.1, base=base, burn_time=START + 2 * u.day, horizon=DAY)
 
 
 def test_an_orbit_brought_down_by_the_burn_is_refused() -> None:
     with pytest.raises(PropagationError, match="fell below the Earth's surface"):
-        manoeuvred(-3000.0)
+        maneuvered(-3000.0)
 
 
 def test_subset_and_chunks_give_identical_numbers() -> None:
-    propagator = manoeuvred(0.1, burn_time=START + DAY * u.s)
+    propagator = maneuvered(0.1, burn_time=START + DAY * u.s)
     whole = propagator.propagate(START, GRID)
     same = propagator.subset(np.array([0]))
-    assert isinstance(same, ManoeuvredPropagator)
+    assert isinstance(same, ManeuveredPropagator)
     assert_same_states(same.propagate(START, GRID), whole)
     doubled = propagator.subset(np.array([0, 0]))
     assert len(doubled) == 2
@@ -304,38 +300,39 @@ def test_subset_and_chunks_give_identical_numbers() -> None:
 
 
 def test_subset_refuses_what_its_base_refuses() -> None:
+    propagator = maneuvered(horizon=HOUR)
     with pytest.raises(IndexError):
-        manoeuvred().subset(np.array([1]))
+        propagator.subset(np.array([1]))
     with pytest.raises(ValueError, match="integers"):
-        manoeuvred().subset(np.array([0.5]))
+        propagator.subset(np.array([0.5]))
 
 
-def test_manoeuvred_propagator_pickles() -> None:
-    propagator = manoeuvred(0.1, burn_time=START + DAY * u.s)
+def test_maneuvered_propagator_pickles() -> None:
+    propagator = maneuvered(0.1, burn_time=START + DAY * u.s)
     copy = pickle.loads(pickle.dumps(propagator))
     assert_same_states(copy.propagate(START, GRID), propagator.propagate(START, GRID))
     bounds = propagator.radius_bounds(START, 7 * DAY)
     again = copy.radius_bounds(START, 7 * DAY)
     assert np.array_equal(again.highest, bounds.highest)
-    zero = pickle.loads(pickle.dumps(manoeuvred(0.0)))
+    zero = pickle.loads(pickle.dumps(maneuvered(0.0)))
     assert_same_states(zero.propagate(START, GRID), LEO.propagate(START, GRID))
 
 
 def test_offset_beyond_horizon_is_refused() -> None:
-    propagator = manoeuvred(0.1, burn_time=START + HOUR * u.s, horizon=DAY)
+    propagator = maneuvered(0.1, burn_time=START + HOUR * u.s, horizon=DAY)
     last = HOUR + DAY
     propagator.propagate(START, last)
     with pytest.raises(ValueError, match="after the horizon"):
         propagator.propagate(START, last + 1e-3)
     with pytest.raises(ValueError, match="after the horizon"):
-        manoeuvred(0.0, horizon=DAY).propagate(START, DAY + 1.0)
+        maneuvered(0.0, horizon=DAY).propagate(START, DAY + 1.0)
 
 
 def test_times_at_the_horizon_survive_rounding() -> None:
     # Times around this one land on either side of the end, as Time differences
     # round; one that rounds past it by less than a microsecond is the end.
     burn_time = Time("2026-10-06T07:13:21.123456", scale="utc")
-    propagator = manoeuvred(0.1, burn_time=burn_time, horizon=DAY)
+    propagator = maneuvered(0.1, burn_time=burn_time, horizon=DAY)
     for lead in (1.1, 3333.3, 12345.678):
         epoch = burn_time - lead * u.s
         states = propagator.propagate(epoch, lead + DAY)
@@ -347,7 +344,7 @@ def test_times_at_the_horizon_survive_rounding() -> None:
 
 
 def test_radius_bounds_of_a_span_past_the_horizon_are_refused() -> None:
-    propagator = manoeuvred(0.1, horizon=DAY)
+    propagator = maneuvered(0.1, horizon=DAY)
     propagator.radius_bounds(START, DAY)
     with pytest.raises(ValueError, match="after the horizon"):
         propagator.radius_bounds(START, DAY + 1.0)
@@ -383,12 +380,12 @@ def test_checks_its_arguments(
         "horizon": DAY,
     }
     with pytest.raises(error, match=message):
-        ManoeuvredPropagator(**(arguments | change))  # type: ignore[arg-type]
+        ManeuveredPropagator(**(arguments | change))  # type: ignore[arg-type]
 
 
 def test_a_shorter_step_gives_the_same_difference() -> None:
-    fine = ManoeuvredPropagator(LEO, START, 1.0, DAY, step=20.0)
-    coarse = manoeuvred(1.0, horizon=DAY)
+    fine = ManeuveredPropagator(LEO, START, 1.0, DAY, step=20.0)
+    coarse = maneuvered(1.0, horizon=DAY)
     offsets = np.arange(1.0, DAY, 317.0)
     gap = fine.propagate(START, offsets).r - coarse.propagate(START, offsets).r
     assert np.linalg.norm(gap, axis=2).max() < 0.05

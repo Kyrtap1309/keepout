@@ -245,6 +245,8 @@ def with_returns(summary: report.Summary, directions: set[str]) -> str:
         item["event_returns"] = [back] if returning else []
         item["conflict"] = False
         item["clean"] = not returning
+    # As keepout.maneuver.judge has it: one clean option is enough.
+    demo["recommendable"] = any(item["clean"] for item in demo["rescreens"])
     return report.render_page(summary, "img")
 
 

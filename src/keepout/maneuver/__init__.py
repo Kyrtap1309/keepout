@@ -7,7 +7,8 @@ answers for one burn. :func:`burn_effects` gives the change of an object's
 state at TCA for each burn of a grid, as a :class:`BurnEffects`, and
 :func:`closest_approach_shift` how far the closest approach moves in time.
 :func:`rescreen` screens a burn against a catalog for a
-:class:`RescreenResult`: the :class:`NewApproach` it brings.
+:class:`RescreenResult`: the :class:`NewApproach` it brings, and
+:func:`judge` says whether a burn can be recommended (:class:`BurnVerdict`).
 """
 
 from keepout.maneuver._differential import (
@@ -20,21 +21,30 @@ from keepout.maneuver.planner import (
     MAX_CONFIRMATIONS,
     MIN_BURN_LEAD,
     TARGET_PC,
+    BurnDirection,
     BurnGrid,
     ManeuverOption,
     ManeuverPlan,
     evaluate_burn,
     plan_maneuver,
 )
-from keepout.maneuver.rescreen import NewApproach, RescreenResult, rescreen
+from keepout.maneuver.rescreen import (
+    BurnVerdict,
+    NewApproach,
+    RescreenResult,
+    judge,
+    rescreen,
+)
 
 __all__ = [
     "DEFAULT_BURN_GRID",
     "MAX_CONFIRMATIONS",
     "MIN_BURN_LEAD",
     "TARGET_PC",
+    "BurnDirection",
     "BurnEffects",
     "BurnGrid",
+    "BurnVerdict",
     "ManeuverOption",
     "ManeuverPlan",
     "NewApproach",
@@ -42,6 +52,7 @@ __all__ = [
     "burn_effects",
     "closest_approach_shift",
     "evaluate_burn",
+    "judge",
     "plan_maneuver",
     "rescreen",
 ]

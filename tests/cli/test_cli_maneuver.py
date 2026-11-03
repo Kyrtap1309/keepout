@@ -15,7 +15,7 @@ import subprocess
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Final
+from typing import Final, NamedTuple
 
 import pytest
 from astropy.time import Time
@@ -48,15 +48,28 @@ from keepout.risk import RiskLevel
 from keepout.screening import CloseApproach, screen
 from keepout.synthetic import read_fleet, run
 
-RESULT: Final = run(
-    read_fleet(FLEET_TOML),
-    load(FIXTURE_CSV),
-    Time(START, scale="utc"),
-    float(DAYS) * 86400.0,
-)
-"""Two CDMs: 52939 against 47826 (maneuverable), and 44476 against 55841 (not)."""
 
-CROSSING, DRIFTING = (kvn.dumps(cdm) for cdm in RESULT.cdms)
+class _Operator(NamedTuple):
+    crossing: str
+    drifting: str
+    crossing_id: str
+
+
+@functools.cache
+def operator_cdms() -> _Operator:
+    """The synthetic operator's two CDMs, as KVN: 52939 against 47826
+    (maneuverable), and 44476 against 55841 (not); computed once, on first
+    use rather than on import."""
+    result = run(
+        read_fleet(FLEET_TOML),
+        load(FIXTURE_CSV),
+        Time(START, scale="utc"),
+        float(DAYS) * 86400.0,
+    )
+    crossing, drifting = (kvn.dumps(cdm) for cdm in result.cdms)
+    return _Operator(crossing, drifting, result.cdms[0].message_id)
+
+
 PRIMARY: Final = 52939
 SECONDARY: Final = 47826
 NEIGHBOURS: Final = frozenset({PRIMARY, SECONDARY, 57087, 62118, 100000})
@@ -82,7 +95,7 @@ def write(folder: Path, name: str, text: str) -> str:
 
 
 def crossing(folder: Path) -> str:
-    return write(folder, "crossing.kvn", CROSSING)
+    return write(folder, "crossing.kvn", operator_cdms().crossing)
 
 
 def catalog_of(folder: Path, numbers: frozenset[int] = NEIGHBOURS) -> str:
@@ -507,7 +520,10 @@ def test_catalog_and_source_together_are_a_usage_error(tmp_path: Path) -> None:
 
 
 def test_two_events_exit_one_listing_the_pairs(tmp_path: Path) -> None:
-    files = (crossing(tmp_path), write(tmp_path, "drifting.kvn", DRIFTING))
+    files = (
+        crossing(tmp_path),
+        write(tmp_path, "drifting.kvn", operator_cdms().drifting),
+    )
     result = keepout("maneuver", *files)
     assert result.exit_code == ExitCode.ERROR
     assert result.stdout == ""
@@ -519,9 +535,13 @@ def test_two_events_exit_one_listing_the_pairs(tmp_path: Path) -> None:
 
 def test_cdms_of_one_event_are_planned_from_the_latest(tmp_path: Path) -> None:
     # 19 h before TCA comes before a CDM created 18.6 h before it.
-    later = CROSSING.replace(RESULT.cdms[0].message_id, "UPDATE").replace(
-        "CREATION_DATE                  = 2026-10-06T00",
-        "CREATION_DATE                  = 2026-10-06T01",
+    later = (
+        operator_cdms()
+        .crossing.replace(operator_cdms().crossing_id, "UPDATE")
+        .replace(
+            "CREATION_DATE                  = 2026-10-06T00",
+            "CREATION_DATE                  = 2026-10-06T01",
+        )
     )
     assert "= 2026-10-06T01" in later
     files = (crossing(tmp_path), write(tmp_path, "later.kvn", later))
@@ -544,7 +564,7 @@ def test_assumed_covariance_is_labelled(tmp_path: Path) -> None:
 
 
 def test_a_calculated_covariance_is_not_labelled_assumed(tmp_path: Path) -> None:
-    calculated = CROSSING.replace(
+    calculated = operator_cdms().crossing.replace(
         "COVARIANCE_METHOD              = DEFAULT",
         "COVARIANCE_METHOD              = CALCULATED",
     )
@@ -559,7 +579,7 @@ def test_a_calculated_covariance_is_not_labelled_assumed(tmp_path: Path) -> None
 
 def test_pc_of_an_approach_of_the_catalog_is_labelled_assumed(tmp_path: Path) -> None:
     # Even for a CDM with covariances of its own: element sets have none.
-    calculated = CROSSING.replace(
+    calculated = operator_cdms().crossing.replace(
         "COVARIANCE_METHOD              = DEFAULT",
         "COVARIANCE_METHOD              = CALCULATED",
     )
@@ -575,7 +595,7 @@ def test_pc_of_an_approach_of_the_catalog_is_labelled_assumed(tmp_path: Path) ->
 
 
 def test_missing_hbr_exits_one(tmp_path: Path) -> None:
-    lines = CROSSING.splitlines(keepends=True)
+    lines = operator_cdms().crossing.splitlines(keepends=True)
     without = "".join(line for line in lines if not line.startswith("HBR"))
     result = keepout("maneuver", write(tmp_path, "crossing.kvn", without))
     assert result.exit_code == ExitCode.ERROR
@@ -657,7 +677,9 @@ def test_a_file_that_is_no_cdm_is_named(tmp_path: Path) -> None:
 
 
 def test_a_primary_that_cannot_manoeuvre_exits_one(tmp_path: Path) -> None:
-    result = keepout("maneuver", write(tmp_path, "drifting.kvn", DRIFTING))
+    result = keepout(
+        "maneuver", write(tmp_path, "drifting.kvn", operator_cdms().drifting)
+    )
     assert result.exit_code == ExitCode.ERROR
     assert "cannot manoeuvre (MANEUVERABLE = NO)" in result.stderr
 

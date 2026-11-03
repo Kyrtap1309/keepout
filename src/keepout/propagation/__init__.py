@@ -11,7 +11,7 @@ set's SGP4 record and :func:`sgp4_shape` its orbit's size as SGP4 sees it.
 given; no third bodies or solar radiation pressure) in GCRF, on
 :func:`integrate`, which carries many states through one integration and is
 what :mod:`keepout.maneuver` uses for a whole grid of burns.
-:class:`ManoeuvredPropagator` adds the effect of a burn on one object, as a
+:class:`ManeuveredPropagator` adds the effect of a burn on one object, as a
 Cowell difference, to any propagator: the re-screen of a planned burn.
 :func:`propagate_in_chunks` walks a long time grid in chunks of bounded
 memory, and :func:`pair_states` gives the states of single pairs (SGP4's
@@ -20,6 +20,7 @@ fast path when it can).
 
 from keepout.propagation.base import (
     CHUNK_STATES,
+    DECAYED,
     ERROR_MESSAGES,
     NO_ERROR,
     Ephemeris,
@@ -34,7 +35,7 @@ from keepout.propagation.base import (
 )
 from keepout.propagation.cowell import CowellPropagator, integrate
 from keepout.propagation.forces import EARTH_RADIUS, ForceModel, earth_pole
-from keepout.propagation.manoeuvred import ManoeuvredPropagator
+from keepout.propagation.maneuvered import ManeuveredPropagator
 from keepout.propagation.sgp4_prop import (
     MAX_SATREC_NUMBER,
     PairStates,
@@ -47,6 +48,7 @@ from keepout.propagation.sgp4_prop import (
 
 __all__ = [
     "CHUNK_STATES",
+    "DECAYED",
     "EARTH_RADIUS",
     "ERROR_MESSAGES",
     "MAX_SATREC_NUMBER",
@@ -55,7 +57,7 @@ __all__ = [
     "Ephemeris",
     "ErrorArray",
     "ForceModel",
-    "ManoeuvredPropagator",
+    "ManeuveredPropagator",
     "PairStates",
     "Propagator",
     "RadiusBounds",

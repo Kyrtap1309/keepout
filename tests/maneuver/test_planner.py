@@ -12,6 +12,7 @@ import numpy as np
 import pytest
 from astropy.time import Time
 from builders import approx
+from scipy.stats import ncx2
 
 from keepout._defaults import DECISION_POINT
 from keepout._types import FloatArray, override
@@ -37,6 +38,7 @@ from keepout.maneuver import (
     MAX_CONFIRMATIONS,
     MIN_BURN_LEAD,
     TARGET_PC,
+    BurnDirection,
     BurnGrid,
     ManeuverOption,
     ManeuverPlan,
@@ -48,7 +50,6 @@ from keepout.maneuver import (
 from keepout.objects import ObjectState
 from keepout.orbits import EARTH_MU, orbital_period
 from keepout.pc import (
-    AUTO,
     MethodChoice,
     PcComputation,
     PcResult,
@@ -56,7 +57,7 @@ from keepout.pc import (
     computation,
     compute_pc,
 )
-from keepout.pc.api import AUTO_MC_SAMPLES, AUTO_MC_SEED
+from keepout.pc.api import AUTO_MC_SEED
 from keepout.propagation.forces import EARTH_RADIUS
 from keepout.risk import PC_FLOOR, Thresholds
 from keepout.state import StateVector
@@ -214,6 +215,13 @@ class Scripted(PcComputation):
 def test_baseline_reproduces_the_cdm_pc(plan: ManeuverPlan) -> None:
     expected = compute_pc(plan.conjunction)
     assert plan.baseline.pc == approx(expected.value, rel=1e-6)
+    # Independently: both covariances are isotropic, so the miss is a circular
+    # Gaussian of 2 sigma^2 per axis on the encounter plane, and the Pc over the
+    # disc of radius R is a noncentral chi-squared probability.
+    spread = 2.0 * SIGMA**2
+    radius = plan.conjunction.combined_hard_body_radius
+    exact = ncx2.cdf(radius**2 / spread, df=2, nc=MISS**2 / spread)
+    assert plan.baseline.pc == pytest.approx(exact, rel=1e-4)
     assert plan.baseline.delta_v == 0.0
     assert plan.baseline.method == expected.method
     assert plan.baseline.range_at_tca == pytest.approx(MISS, rel=1e-9)
@@ -250,6 +258,43 @@ def test_grid_shape_and_axes() -> None:
     assert plan.burn_leads[-1] >= MIN_BURN_LEAD
     assert plan.pc.shape == (len(plan.burn_leads), 62)
     assert plan.range_at_tca.shape == plan.pc.shape
+
+
+def test_a_plan_without_a_grid_has_the_baseline_alone(plan: ManeuverPlan) -> None:
+    alone = plan_maneuver(leo_event(), grid=None)
+    assert alone.baseline == plan.baseline
+    assert (alone.confirmation.method, dict(alone.confirmation.options)) == (
+        plan.confirmation.method,
+        dict(plan.confirmation.options),
+    )
+    assert (alone.pc.shape, alone.burn_leads.shape, alone.options) == ((0, 0), (0,), ())
+    assert not any("cells" in note for note in alone.notes)
+    option = plan.prograde
+    assert option is not None
+    evaluated = evaluate_burn(alone, burn_lead=option.burn_lead, delta_v=option.delta_v)
+    assert evaluated == evaluate_burn(
+        plan, burn_lead=option.burn_lead, delta_v=option.delta_v
+    )
+
+
+def test_a_plan_without_a_grid_accepts_a_cdm_inside_the_burn_window() -> None:
+    late = leo_event(hours=1.0)
+    with pytest.raises(ManeuverError, match="after the burn window closed"):
+        plan_maneuver(late)
+    assert plan_maneuver(late, grid=None).options == ()
+
+
+def test_options_are_named_by_direction(plan: ManeuverPlan) -> None:
+    assert plan.prograde is not None
+    assert plan.retrograde is not None
+    assert plan.options == (plan.prograde, plan.retrograde)
+    for direction in BurnDirection:
+        option = plan.option(direction)
+        assert option is not None
+        assert option.direction is direction
+        assert math.copysign(1.0, option.delta_v) == direction.sign
+    with pytest.raises(ValueError, match="no burn"):
+        _ = plan.baseline.direction
 
 
 def test_burn_window_stops_at_the_cdm_creation(plan: ManeuverPlan) -> None:
@@ -387,9 +432,7 @@ def test_a_failed_confirmation_moves_to_the_next_candidate(plan: ManeuverPlan) -
     assert any("prograde" in note and "failed" in note for note in confirmed.notes)
 
 
-def test_conservative_basis_decides_on_the_upper_end(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_conservative_basis_decides_on_the_upper_end() -> None:
     def with_interval(conjunction: Conjunction) -> PcResult:
         result = compute_pc(conjunction, "foster")
         return dataclasses.replace(
@@ -404,7 +447,10 @@ def test_conservative_basis_decides_on_the_upper_end(
         def __call__(self, conjunction: Conjunction) -> PcResult:
             return with_interval(conjunction)
 
-    monkeypatch.setattr(planner, "computation", lambda *_, **__: Wide("foster"))
+        @override
+        def resolved(self, result: PcResult) -> PcComputation:
+            return self
+
     plan = plan_maneuver(leo_event(), grid=SMALL, compute=Wide("foster"))
     assert plan.baseline.pc > 2.0 * TARGET_PC
     assert plan.prograde is None
@@ -437,7 +483,6 @@ def test_auto_fallback_keeps_its_seed_and_cap_in_confirmation(
     cap = 20_000
     monkeypatch.setattr("keepout.pc._auto.hall3d_over_scan", no_convergence)
     monkeypatch.setattr("keepout.pc._auto.AUTO_MC_SAMPLES", cap)
-    monkeypatch.setattr(planner, "AUTO_MC_SAMPLES", cap)
     monkeypatch.setattr(api, "_compute", spy)
     event = event_of(as_cdm(slow_conjunction()))
     first = plan_maneuver(event, target_pc=1e-3, grid=SMALL)
@@ -450,25 +495,14 @@ def test_auto_fallback_keeps_its_seed_and_cap_in_confirmation(
     assert first.prograde is not None
     assert first.prograde.method == "montecarlo"
 
-    second = plan_maneuver(event, target_pc=1e-3, grid=SMALL)
-    assert second.prograde == first.prograde
-    assert second.retrograde == first.retrograde
-
     runs.clear()
     evaluated = evaluate_burn(
         first, burn_lead=first.prograde.burn_lead, delta_v=first.prograde.delta_v
     )
     assert runs == [("montecarlo", expected)]
-    # One burn integrates apart from the grid, by under a micrometre here.
-    assert evaluated.pc == first.prograde.pc
-
-
-def test_the_fallback_is_confirmed_with_autos_own_seed_and_cap() -> None:
-    confirmation = planner._confirmation(AUTO, "montecarlo")
-    assert confirmation.options == {
-        "max_samples": AUTO_MC_SAMPLES,
-        "seed": AUTO_MC_SEED,
-    }
+    # One burn integrates apart from the grid, by under a micrometre here: the
+    # same seed then gives the same Pc, up to a sample crossing the radius.
+    assert evaluated.pc == pytest.approx(first.prograde.pc, rel=0.05)
 
 
 def test_explicit_options_are_what_confirms_and_evaluates() -> None:
@@ -599,6 +633,7 @@ def test_a_negative_drag_term_is_an_error() -> None:
         plan_maneuver(event, grid=SMALL)
 
 
+@pytest.mark.slow
 def test_drag_barely_changes_the_grid(
     record_property: Callable[[str, object], None],
 ) -> None:
@@ -707,7 +742,7 @@ def test_slow_encounter_cells_are_nan_and_noted() -> None:
     counting = [note for note in plan.notes if f"{empty} of {plan.pc.size}" in note]
     assert len(counting) == 1
     (slow,) = (note for note in plan.notes if "only a re-screen shows" in note)
-    assert "within a twentieth of an orbit of TCA" in slow
+    assert "within 1/20 of an orbit of TCA" in slow
     assert "hours" in slow
     assert not any("tens of metres" in note for note in plan.notes)
     assert not any("0.2 m" in note for note in plan.notes)

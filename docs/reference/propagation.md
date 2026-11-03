@@ -8,4 +8,4 @@
 
 ::: keepout.propagation.cowell
 
-::: keepout.propagation.manoeuvred
+::: keepout.propagation.maneuvered

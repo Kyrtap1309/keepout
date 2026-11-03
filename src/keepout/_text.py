@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
-__all__ = ["plural"]
+from keepout.units import HOUR
+
+__all__ = ["before_tca", "plural"]
+
+
+def before_tca(seconds: float) -> str:
+    """A time before TCA in hours: ``6.0 h before TCA``."""
+    return f"{seconds / HOUR:.1f} h before TCA"
 
 
 def plural(count: int, noun: str, nouns: str | None = None) -> str:

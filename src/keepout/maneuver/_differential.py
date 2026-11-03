@@ -14,6 +14,7 @@ from typing import Final
 import numpy as np
 import numpy.typing as npt
 
+from keepout._linalg import as_axis
 from keepout._types import FloatArray, read_only
 from keepout._validation import require_positive
 from keepout.propagation.cowell import integrate
@@ -23,6 +24,7 @@ from keepout.state import StateVector, require_frame
 __all__ = ["BurnEffects", "burn_effects", "closest_approach_shift"]
 
 _MAX_NEWTON_ITERATIONS: Final = 8
+"""Most Newton steps of :func:`closest_approach_shift`."""
 
 _NEWTON_TOLERANCE: Final = 1e-6
 """Newton step [s] at which a shift has converged, 15 mm at orbital speed; the
@@ -72,22 +74,6 @@ class BurnEffects:
         object.__setattr__(self, "delta_v", changes)
         object.__setattr__(self, "dr", dr)
         object.__setattr__(self, "dv", dv)
-
-
-def _axis(values: npt.ArrayLike, name: str) -> FloatArray:
-    """Finite numbers of a grid axis, shape ``(N,)``, N >= 1.
-
-    Raises
-    ------
-    ValueError
-        If they are empty, not one-dimensional or not finite.
-    """
-    array = np.asarray(values, dtype=np.float64)
-    if array.ndim != 1 or array.size == 0:
-        raise ValueError(f"{name} must be a non-empty 1-D array, got {array.shape}")
-    if not np.all(np.isfinite(array)):
-        raise ValueError(f"{name} must be finite")
-    return array
 
 
 def burn_effects(
@@ -141,8 +127,8 @@ def burn_effects(
         If the solver fails, or a cell falls below the Earth's surface.
     """
     require_frame(state, "GCRF", "a burn")
-    leads = _axis(burn_leads, "burn_leads")
-    changes = _axis(delta_v, "delta_v")
+    leads = as_axis(burn_leads, "burn_leads")
+    changes = as_axis(delta_v, "delta_v")
     if np.any(np.diff(leads) >= 0.0) or leads[-1] < 0.0:
         raise ValueError(f"burn_leads must be descending and >= 0, got {leads}")
     burning = changes != 0.0
@@ -166,7 +152,8 @@ def closest_approach_shift(
     """Time of the nearest minimum of the range along a parabola, if any.
 
     Newton from time 0 on half the slope of the squared range, ``p · dp/dt``
-    of ``p = r + v t + a t²/2``, until it converges, for at most 8 iterations.
+    of ``p = r + v t + a t²/2``, until it converges, for at most
+    :data:`_MAX_NEWTON_ITERATIONS` iterations.
     In a slow, nearly co-orbital encounter the curvature ``|dp/dt|² + p · a``
     is near 0 or negative, Newton jumps far along a parabola that no longer
     holds, or to a maximum: such a cell gets NaN, never a time that is not a

@@ -362,6 +362,15 @@ class Covariance:
         object.__setattr__(covariance, "repairs", repairs)
         return covariance
 
+    def at(self, epoch: Time) -> Covariance:
+        """The same matrix at another epoch, as a model holds it fixed; it is
+        not checked again."""
+        moved = object.__new__(Covariance)
+        for name in ("matrix", "frame", "repairs"):
+            object.__setattr__(moved, name, getattr(self, name))
+        object.__setattr__(moved, "epoch", epoch)
+        return moved
+
     @classmethod
     def from_position(
         cls, position: npt.ArrayLike, frame: CovarianceFrame, epoch: Time

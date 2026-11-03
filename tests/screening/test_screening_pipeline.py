@@ -28,7 +28,7 @@ from keepout.omm import Omm, load
 from keepout.propagation import (
     CowellPropagator,
     ForceModel,
-    ManoeuvredPropagator,
+    ManeuveredPropagator,
     Propagator,
     RadiusBounds,
     Sgp4Propagator,
@@ -453,7 +453,7 @@ def hook_burning(
 ) -> Callable[[Propagator], Propagator]:
     """A hook for one primary: ``delta_v`` along its velocity at ``burn_time``."""
     return functools.partial(
-        ManoeuvredPropagator, burn_time=burn_time, delta_v=delta_v, horizon=horizon
+        ManeuveredPropagator, burn_time=burn_time, delta_v=delta_v, horizon=horizon
     )
 
 
@@ -496,7 +496,7 @@ def test_a_burn_moves_the_primary_in_the_approaches(workers: int) -> None:
     whole = screen(primary, FIXTURE, START, DAY)
     assert burned.approaches != whole.approaches
     assert burned.approaches
-    moved = ManoeuvredPropagator(Sgp4Propagator(primary), START, delta_v, horizon)
+    moved = ManeuveredPropagator(Sgp4Propagator(primary), START, delta_v, horizon)
     for approach in burned.approaches:
         offset = (approach.tca - START).to_value(u.s)
         state = moved.propagate(START, offset)
@@ -553,7 +553,7 @@ def test_a_burned_screening_misses_no_minimum_of_a_dense_scan(
     primary = elements([number])
     catalog = [o for o in without(STALE, *SGP4_FAILING) if o.catalog_number != number]
     burn_time = START + burn_at * u.s
-    moved = ManoeuvredPropagator(
+    moved = ManeuveredPropagator(
         Sgp4Propagator(primary), burn_time, delta_v, DAY + 2 * DERIVATIVE_STEP
     )
     result = screen(primary, catalog, START, DAY, adjust_primaries=lambda _: moved)
@@ -588,7 +588,7 @@ def test_a_burn_brings_in_objects_the_unburned_orbit_cannot_reach() -> None:
     base = Sgp4Propagator([primary])
     burn_time = START + burn_at * u.s
     horizon = duration + 2 * DERIVATIVE_STEP
-    moved = ManoeuvredPropagator(base, burn_time, delta_v, horizon)
+    moved = ManeuveredPropagator(base, burn_time, delta_v, horizon)
     others, _, _ = Sgp4Propagator.from_omms(catalog)
     their_bounds = others.radius_bounds(START, duration)
     radii = np.linalg.norm(
@@ -677,7 +677,7 @@ def test_the_hook_must_keep_the_frame() -> None:
 
 def test_a_hook_that_cannot_propagate_stops_the_screening() -> None:
     def fails(primaries: Propagator) -> Propagator:
-        return ManoeuvredPropagator(primaries, START, -3000.0, DAY)
+        return ManeuveredPropagator(primaries, START, -3000.0, DAY)
 
     with pytest.raises(PropagationError, match="fell below the Earth's surface"):
         screen(elements(FORMATION[:1]), FIXTURE, START, DAY, adjust_primaries=fails)

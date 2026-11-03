@@ -20,11 +20,13 @@ from keepout.cli.assess import HardBodyRadius, load_cdms
 from keepout.cli.catalog_input import CatalogFile, catalog_input, require_one_catalog
 from keepout.cli.options import CacheDir, JsonFlag, SourceOption, Workers, positive
 from keepout.cli.output import (
+    ASSUMED_COVARIANCES,
     ExitCode,
     JsonOut,
     duration_words,
     isot,
     minute,
+    objects,
     pc_text,
     plural,
     show,
@@ -42,6 +44,8 @@ if TYPE_CHECKING:
 
     from keepout.events import ConjunctionEvent
     from keepout.maneuver import (
+        BurnDirection,
+        BurnVerdict,
         ManeuverOption,
         ManeuverPlan,
         NewApproach,
@@ -134,9 +138,9 @@ class _Burn(NamedTuple):
     rescreen: RescreenResult | None
 
     @property
-    def direction(self) -> str:
+    def direction(self) -> BurnDirection:
         """The burn's direction along the velocity."""
-        return "prograde" if self.option.delta_v > 0.0 else "retrograde"
+        return self.option.direction
 
 
 def maneuver_command(
@@ -170,7 +174,7 @@ def maneuver_command(
         )
     require_one_catalog(catalog, source)
     from keepout.events import group_events
-    from keepout.maneuver import evaluate_burn, plan_maneuver, rescreen
+    from keepout.maneuver import evaluate_burn, judge, plan_maneuver, rescreen
 
     event = _one_event(group_events(load_cdms(cdms)))
     screened = (
@@ -178,31 +182,35 @@ def maneuver_command(
         if catalog is None and source is None
         else catalog_input(catalog, source, cache_dir)
     )
-    plan = plan_maneuver(event, target_pc=target_pc, combined_hard_body_radius=hbr)
     if burn_before is None or dv is None:
-        found = (plan.prograde, plan.retrograde)
-        options = [item for item in found if item is not None]
+        plan = plan_maneuver(event, target_pc=target_pc, combined_hard_body_radius=hbr)
+        options = plan.options
     else:
+        plan = plan_maneuver(
+            event, target_pc=target_pc, grid=None, combined_hard_body_radius=hbr
+        )
         burn_lead = burn_before * HOUR
-        options = [evaluate_burn(plan, burn_lead=burn_lead, delta_v=dv)]
+        options = (evaluate_burn(plan, burn_lead=burn_lead, delta_v=dv),)
     burns = [
         _Burn(
             option,
             None
             if screened is None
-            else rescreen(plan, option, screened[0], workers=workers),
+            else rescreen(plan, option, screened.omms, workers=workers),
         )
         for option in options
     ]
-    refusal = _refusal(plan, burns)
-    gaps = [] if burn_before is not None else _gaps(burns)
-    show(
-        _payload(plan, burns),
-        *_summary(plan, burns, gaps, None if screened is None else screened[1]),
-        *([] if refusal is None else [refusal]),
-        as_json=as_json,
+    verdict = judge(burns)
+    text = _summary(
+        plan,
+        burns,
+        [] if burn_before is not None else _gaps(burns),
+        None if screened is None else screened.label,
     )
-    if refusal is not None:
+    if not verdict.recommendable:
+        text.append(_refusal(plan, verdict))
+    show(_payload(plan, burns), *text, as_json=as_json)
+    if not verdict.recommendable:
         raise typer.Exit(ExitCode.NO_SAFE_BURN)
 
 
@@ -226,7 +234,7 @@ def _one_event(events: Sequence[ConjunctionEvent]) -> ConjunctionEvent:
     """
     if len(events) > 1:
         listed = ", ".join(
-            f"{_objects(event)} at {minute(event.latest.tca)}" for event in events
+            f"{objects(event.latest)} at {minute(event.latest.tca)}" for event in events
         )
         raise ManeuverError(
             f"these CDMs hold {len(events)} events, and a burn is planned for "
@@ -235,40 +243,32 @@ def _one_event(events: Sequence[ConjunctionEvent]) -> ConjunctionEvent:
     return events[0]
 
 
-def _objects(event: ConjunctionEvent) -> str:
-    latest = event.latest
-    return f"{latest.object1.object_id} / {latest.object2.object_id}"
-
-
-def _refusal(plan: ManeuverPlan, burns: Sequence[_Burn]) -> str | None:
-    """The line saying why no burn can be recommended; ``None`` if one can."""
+def _refusal(plan: ManeuverPlan, verdict: BurnVerdict) -> str:
+    """The line saying why no burn can be recommended."""
     target = f"the target Pc {pc_text(plan.target_pc)}"
-    results = [burn.rescreen for burn in burns]
-    if not burns:
+    if not verdict.burns:
         reason = f"No burn on the grid meets {target}"
-    elif not all(burn.option.meets_target for burn in burns):
+    elif verdict.missed_target:
         reason = f"This burn misses {target}"
-    elif any(result is None or result.clean for result in results):
-        return None
     else:
-        reds = any(result.conflict for result in results if result is not None)
-        back = any(result.event_returns for result in results if result is not None)
-        what = " or ".join(
-            [
-                *(["an approach at red"] if reds else []),
-                *([f"this pair back above {target}"] if back else []),
-            ]
-        )
-        reason = f"{'Every' if len(burns) > 1 else 'This'} burn brings {what}"
+        brought = []
+        if verdict.brings_red:
+            brought.append("an approach at red")
+        if verdict.brings_pair_back:
+            brought.append(f"this pair back above {target}")
+        burns = "Every burn" if verdict.burns > 1 else "This burn"
+        reason = f"{burns} brings {' or '.join(brought)}"
     return f"{reason} (exit status {int(ExitCode.NO_SAFE_BURN)})."
 
 
 def _gaps(burns: Sequence[_Burn]) -> list[str]:
     """The line of the direction without an option, if the other has one."""
+    from keepout.maneuver import BurnDirection
+
     found = {burn.direction for burn in burns}
     return [
         f"No {direction} burn on the grid meets the target."
-        for direction in ("prograde", "retrograde")
+        for direction in BurnDirection
         if found and direction not in found
     ]
 
@@ -316,7 +316,7 @@ def _rescreen_json(result: RescreenResult) -> dict[str, JsonOut]:
 def _burn_json(burn: _Burn) -> dict[str, JsonOut]:
     option = burn.option
     return {
-        "direction": burn.direction,
+        "direction": str(burn.direction),
         "burn_lead_s": option.burn_lead,
         "delta_v_m_s": option.delta_v,
         **_option_json(option),
@@ -364,7 +364,8 @@ def _burns_table(plan: ManeuverPlan, burns: Sequence[_Burn]) -> Table:
     for burn in burns:
         option = burn.option
         lead = f"{option.burn_lead / HOUR:.1f}"
-        rows.add_row(*_row(burn.direction, lead, f"{option.delta_v:+.3g}", option))
+        delta_v = f"{option.delta_v:+.3g}"
+        rows.add_row(*_row(burn.direction, lead, delta_v, option))
     return rows
 
 
@@ -430,7 +431,7 @@ def _approach_lines(
 
 
 def _rescreen_lines(
-    direction: str, result: RescreenResult, secondary: str, label: str
+    direction: BurnDirection, result: RescreenResult, secondary: str, label: str
 ) -> list[str]:
     """What the re-screen of a burn found, for people."""
     start, end = result.window
@@ -441,23 +442,14 @@ def _rescreen_lines(
             result.closer_approaches, "closer approach", "closer approaches"
         ),
     ]
-    assumed = (
-        [
-            (
-                "Covariances are assumed (keepout's model of GP element set errors), "
-                "not orbit determination."
-            )
-        ]
-        if approaches or result.event_returns
-        else []
-    )
     body = [
         _event_line(result, secondary),
         _conflict_line(result),
         *_return_lines(result),
         *approaches,
-        *assumed,
     ]
+    if approaches or result.event_returns:
+        body.append(ASSUMED_COVARIANCES)
     return [
         (
             f"{direction} re-screened against "
@@ -479,7 +471,7 @@ def _summary(
     event = plan.event
     latest = event.latest
     head = (
-        f"Event {event.event_id}: {_objects(event)}, TCA {minute(latest.tca)} UTC, "
+        f"Event {event.event_id}: {objects(latest)}, TCA {minute(latest.tca)} UTC, "
         f"target Pc {pc_text(plan.target_pc)}."
     )
     notes = [f"Note: {note}" for note in plan.notes]

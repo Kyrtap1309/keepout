@@ -122,7 +122,7 @@ A burn that clears one event moves the primary for days afterwards, into
 approaches it did not have. `rescreen(plan, option, catalog)` screens the
 primary against a GP catalog twice for 7 days from the burn, with the same
 [screening](screening.md) as everywhere else: once as SGP4 gives it, and
-once with the burn. The burn is a `ManoeuvredPropagator`: SGP4's states
+once with the burn. The burn is a `ManeuveredPropagator`: SGP4's states
 plus the Cowell difference of the burn, rotated to TEME at every node.
 Against a Cowell integration of the whole orbit after the burn, at 1 m/s
 over 7 days, that difference reached 2.24 m at worst on the 38 fixture
@@ -149,9 +149,10 @@ The result compares the two screenings:
   false and the re-screen says nothing of the event) and how many catalog
   objects screening left out.
 
-Each new and closer approach gets Foster's Pc on the
-[synthetic covariance model](assumptions.md) of both element sets, an
-assumed covariance, and a risk level; `conflict` is true when one is red,
+Each new and closer approach gets the synthetic operator's Pc (`auto`
+unless `compute` says otherwise, on the conservative basis of the
+thresholds) on the [synthetic covariance model](assumptions.md) of both
+element sets, an assumed covariance, and a risk level; `conflict` is true when one is red,
 and `clean` when there is no conflict and no event return.
 The primary must be in the catalog and screened in both runs, and SGP4
 must carry it through the whole window: otherwise `rescreen` raises

@@ -30,7 +30,8 @@ import erfa
 import numpy as np
 from astropy.time import Time
 
-from keepout._types import FloatArray, override, read_only
+from keepout._linalg import as_vector
+from keepout._types import FloatArray, override
 from keepout._validation import non_negative_float, require_single_time
 from keepout.orbits import EARTH_MU
 from keepout.propagation._atmosphere import density
@@ -120,16 +121,13 @@ class ForceModel:
     drag_term: float | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
-        pole = np.array(self.pole, dtype=np.float64)
-        if pole.shape != (3,):
-            raise ValueError(f"pole must have shape (3,), got {pole.shape}")
+        pole = as_vector(self.pole, "pole")
         if not abs(np.linalg.norm(pole) - 1.0) <= _UNIT_TOLERANCE:
             raise ValueError(f"pole must be a unit vector, got {pole}")
         if not 0 <= self.degree <= _MAX_DEGREE:
             raise ValueError(
                 f"degree must be from 0 to {_MAX_DEGREE}, got {self.degree}"
             )
-        read_only(pole)
         object.__setattr__(self, "pole", pole)
         if self.drag_term is not None:
             term = non_negative_float(self.drag_term, "drag_term")

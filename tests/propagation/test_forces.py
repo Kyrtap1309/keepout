@@ -323,7 +323,7 @@ def test_pole_is_a_read_only_copy() -> None:
     [
         (np.array([0.0, 1.0]), "pole must have shape"),
         (np.array([0.0, 0.0, 2.0]), "pole must be a unit vector"),
-        (np.array([0.0, 0.0, np.nan]), "pole must be a unit vector"),
+        (np.array([0.0, 0.0, np.nan]), "pole must be finite"),
     ],
 )
 def test_a_bad_pole_is_refused(pole: FloatArray, match: str) -> None:

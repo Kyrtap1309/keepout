@@ -109,8 +109,15 @@ def test_effect_is_nearly_antisymmetric() -> None:
 
 @pytest.mark.parametrize(
     ("state", "force"),
-    [(circular(), FULL), (across_a_band_edge(), DRAG)],
-    ids=["gravity", "drag across a band edge"],
+    [
+        pytest.param(circular(), FULL, id="gravity"),
+        pytest.param(
+            across_a_band_edge(),
+            DRAG,
+            id="drag across a band edge",
+            marks=pytest.mark.slow,
+        ),
+    ],
 )
 def test_grid_matches_one_burn_at_a_time(state: StateVector, force: ForceModel) -> None:
     leads = np.array([25.0, 11.0, 6.0]) * HOUR

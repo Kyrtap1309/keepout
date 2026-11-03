@@ -12,7 +12,7 @@ import enum
 import functools
 import json
 from collections.abc import Callable, Mapping, Sequence
-from typing import TYPE_CHECKING, NoReturn, ParamSpec, TypeAlias, TypeVar
+from typing import TYPE_CHECKING, Final, NoReturn, ParamSpec, TypeAlias, TypeVar
 
 import typer
 from rich import box
@@ -26,13 +26,17 @@ from keepout.units import DAY, HOUR, MINUTE
 if TYPE_CHECKING:
     from astropy.time import Time
 
+    from keepout.cdm import Cdm
+
 __all__ = [
+    "ASSUMED_COVARIANCES",
     "ExitCode",
     "JsonOut",
     "duration_words",
     "fail",
     "isot",
     "minute",
+    "objects",
     "pc_text",
     "plural",
     "reported",
@@ -40,6 +44,13 @@ __all__ = [
     "table",
     "utc",
 ]
+
+
+ASSUMED_COVARIANCES: Final = (
+    "Covariances are assumed (keepout's model of GP element set errors), "
+    "not orbit determination."
+)
+"""The line under a Pc on the synthetic covariance model."""
 
 
 class ExitCode(enum.IntEnum):
@@ -123,6 +134,11 @@ def utc(time: Time) -> str:
 def minute(time: Time) -> str:
     """``time`` in UTC to the minute, for tables: ``2026-10-06 19:36``."""
     return utc(time)[:16].replace("T", " ")
+
+
+def objects(cdm: Cdm) -> str:
+    """The pair of a CDM: ``"<object1> / <object2>"``."""
+    return f"{cdm.object1.object_id} / {cdm.object2.object_id}"
 
 
 def pc_text(pc: float | None) -> str:

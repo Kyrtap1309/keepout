@@ -3,17 +3,17 @@
 A burn that clears one conjunction moves the primary along its orbit for days
 afterwards, into approaches it did not have. :func:`rescreen` screens the
 primary against a catalog twice over a window from the burn, without the burn
-and with it (:class:`~keepout.propagation.ManoeuvredPropagator`), and reports
+and with it (:class:`~keepout.propagation.ManeuveredPropagator`), and reports
 the approaches that only the burn has, and the ones it brings closer. An
 approach of a secondary is the same one, moved, while the baseline has an
 approach of that secondary within :data:`~keepout._defaults.TCA_TOLERANCE`.
 
 A burn can also bring the event's own pair back. The planner looks for the
-new TCA only within a twentieth of an orbit of the old one, so in a slow
-encounter the two objects can meet again hours away, at a Pc the plan never
-saw: :attr:`RescreenResult.event_returns` holds those new or closer
-approaches of the event's secondary, away from the event's TCA, at or above
-the plan's target.
+new TCA only near the old one, so in a slow encounter the two objects can
+meet again hours away, at a Pc the plan never saw:
+:attr:`RescreenResult.event_returns` holds those new or closer approaches of
+the event's secondary, away from the event's TCA, at or above the plan's
+target.
 
 The answer "nothing new" must never stand for "nothing looked at". The primary
 must be screened, in both runs: it is found in the catalog by its catalog
@@ -30,14 +30,15 @@ catalog, and the other objects still deserve a check.
 :attr:`RescreenResult.skipped_objects` how many catalog objects were left out.
 
 Element sets have no covariance, so the Pc of an approach reported here rests
-on an **assumed** one (:mod:`keepout.synthetic.covariance_model`), Foster's 2-D
-Pc on the model's covariance of both objects at its TCA, with the plan's
-combined hard-body radius.
+on an **assumed** one (:mod:`keepout.synthetic.covariance_model`): the Pc of
+``compute`` (``"auto"`` by default, as the synthetic operator's) on the
+model's covariance of both objects at its TCA, with the plan's combined
+hard-body radius, on the basis of the thresholds.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final
 
@@ -46,20 +47,21 @@ import numpy as np
 from astropy.time import Time
 
 from keepout._defaults import SCREENING_DURATION, TCA_TOLERANCE
+from keepout._text import before_tca
 from keepout._validation import require_non_negative
 from keepout.errors import ManeuverError, PropagationError
 from keepout.events import ConjunctionEvent
 from keepout.maneuver.planner import ManeuverOption, ManeuverPlan
 from keepout.omm import Omm, deduplicate
-from keepout.pc import computation
+from keepout.pc import AUTO, PcComputation
 from keepout.propagation import (
     NO_ERROR,
-    ManoeuvredPropagator,
+    ManeuveredPropagator,
     Propagator,
     Sgp4Propagator,
     describe_error,
 )
-from keepout.risk import DEFAULT_THRESHOLDS, RiskLevel, Thresholds
+from keepout.risk import DEFAULT_THRESHOLDS, PcObservation, RiskLevel, Thresholds
 from keepout.screening import (
     DEFAULT_VOLUME,
     CloseApproach,
@@ -71,21 +73,18 @@ from keepout.screening import (
     VolumeRule,
     screen,
 )
-from keepout.screening.tca import DERIVATIVE_STEP
+from keepout.screening.tca import SEARCH_REACH
 from keepout.synthetic.covariance_model import SyntheticCovarianceModel
 from keepout.synthetic.operator import DEFAULT_MODEL
-from keepout.units import DAY, HOUR, elapsed_seconds
+from keepout.units import DAY, elapsed_seconds
 
-__all__ = ["NewApproach", "RescreenResult", "rescreen"]
-
-_APPROACH_PC: Final = computation("foster")
-"""The Pc of a new approach."""
+__all__ = ["BurnVerdict", "NewApproach", "RescreenResult", "judge", "rescreen"]
 
 _PRIMARY_STEP: Final = 60.0
 """Time between the checks of the primary's states over the window [s]."""
 
 
-@dataclass(frozen=True, eq=False, kw_only=True)
+@dataclass(frozen=True, eq=False, slots=True, kw_only=True)
 class NewApproach:
     """A close approach the burn brings, or brings closer.
 
@@ -94,7 +93,7 @@ class NewApproach:
     approach
         The approach, with the burn.
     pc
-        Foster's 2-D Pc, on assumed covariances.
+        Its Pc on assumed covariances, on the basis of the thresholds.
     level
         Its risk level.
     """
@@ -104,7 +103,7 @@ class NewApproach:
     level: RiskLevel
 
 
-@dataclass(frozen=True, eq=False, kw_only=True)
+@dataclass(frozen=True, eq=False, slots=True, kw_only=True)
 class RescreenResult:
     """What a burn does to the primary's approaches with the catalog.
 
@@ -173,6 +172,73 @@ class RescreenResult:
         """Whether the burn brings no red approach and does not bring the
         event's pair back at or above the target (no :attr:`event_returns`)."""
         return not self.conflict and not self.event_returns
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class BurnVerdict:
+    """Whether one of the burns of an event can be recommended, and if not,
+    why: see :func:`judge`.
+
+    Parameters
+    ----------
+    burns
+        Number of burns judged.
+    missed_target
+        Whether a burn misses the plan's target.
+    brings_red
+        Whether, with no clean burn, a burn brings an approach at red.
+    brings_pair_back
+        Whether, with no clean burn, a burn brings the event's pair back
+        above the target.
+    """
+
+    burns: int
+    missed_target: bool
+    brings_red: bool
+    brings_pair_back: bool
+
+    @property
+    def recommendable(self) -> bool:
+        """Whether a burn can be recommended."""
+        return self.burns > 0 and not (
+            self.missed_target or self.brings_red or self.brings_pair_back
+        )
+
+
+def judge(
+    burns: Sequence[tuple[ManeuverOption, RescreenResult | None]],
+) -> BurnVerdict:
+    """Whether a burn of an event can be recommended: there is one, every
+    burn meets the target, and one of them is clean or was not re-screened
+    (``None``), as nothing is known against it then.
+
+    Parameters
+    ----------
+    burns
+        Each burn with its re-screen, if there was one.
+
+    Returns
+    -------
+    BurnVerdict
+        The verdict; what a clean or unscreened burn leaves out is not held
+        against the others.
+    """
+    missed = not all(option.meets_target for option, _ in burns)
+    results = [result for _, result in burns]
+    if missed or any(result is None or result.clean for result in results):
+        return BurnVerdict(
+            burns=len(burns),
+            missed_target=missed,
+            brings_red=False,
+            brings_pair_back=False,
+        )
+    screened = [result for result in results if result is not None]
+    return BurnVerdict(
+        burns=len(burns),
+        missed_target=False,
+        brings_red=any(result.conflict for result in screened),
+        brings_pair_back=any(result.event_returns for result in screened),
+    )
 
 
 def _catalog_number(designator: str) -> int | None:
@@ -268,13 +334,12 @@ def _require_primary_screened(
 
 
 def _screened_secondary(
-    event: ConjunctionEvent,
+    number: int | None,
     newest: Mapping[int, Omm],
     results: Iterable[ScreeningResult],
 ) -> int | None:
-    """The catalog number of the event's secondary, if every screening looked
-    at it."""
-    number = _catalog_number(event.latest.object2.object_id)
+    """The catalog number of the event's secondary, ``number``, if every
+    screening looked at it."""
     if number is None or number not in newest:
         return None
     left_out = (_left_out(result, number, ScreeningRole.CATALOG) for result in results)
@@ -313,22 +378,54 @@ def _matched(
     )
 
 
-def _new_approach(
-    approach: CloseApproach,
-    combined_hard_body_radius: float,
-    newest: Mapping[int, Omm],
-    model: SyntheticCovarianceModel,
-    thresholds: Thresholds,
-) -> NewApproach:
-    """An approach with its Pc on the model's covariances."""
-    tca = approach.tca
-    conjunction = approach.to_conjunction(
-        combined_hard_body_radius=combined_hard_body_radius,
-        primary_covariance=model.covariance(newest[approach.primary_number], tca),
-        secondary_covariance=model.covariance(newest[approach.secondary_number], tca),
+@dataclass(frozen=True, slots=True)
+class _Assessor:
+    """What gives an approach of a re-screen its Pc and level."""
+
+    start: Time
+    combined_hard_body_radius: float
+    newest: Mapping[int, Omm]
+    model: SyntheticCovarianceModel
+    compute: PcComputation
+    thresholds: Thresholds
+
+    def __call__(self, approach: CloseApproach) -> NewApproach:
+        """An approach with its Pc on the model's covariances, as of the burn."""
+        tca, model, newest = approach.tca, self.model, self.newest
+        conjunction = approach.to_conjunction(
+            combined_hard_body_radius=self.combined_hard_body_radius,
+            primary_covariance=model.covariance(newest[approach.primary_number], tca),
+            secondary_covariance=model.covariance(
+                newest[approach.secondary_number], tca
+            ),
+        )
+        observation = PcObservation.from_result(
+            self.compute(conjunction),
+            time_to_tca=elapsed_seconds(self.start, tca),
+            assumed_covariance=True,
+        )
+        pc = self.thresholds.value_of(observation)
+        return NewApproach(approach=approach, pc=pc, level=self.thresholds.level(pc))
+
+
+def _classified(
+    after: ScreeningResult,
+    baseline: ScreeningResult,
+    is_the_event: Callable[[CloseApproach], bool],
+    assessed: _Assessor,
+) -> tuple[tuple[NewApproach, ...], tuple[NewApproach, ...]]:
+    """The approaches only ``after`` has, and those it has closer than
+    ``baseline``, but the event's own."""
+    matched = [(found, _matched(found, baseline)) for found in after.approaches]
+    new = tuple(assessed(found) for found, known in matched if known is None)
+    closer = tuple(
+        assessed(found)
+        for found, known in matched
+        if known is not None
+        and not is_the_event(found)
+        and found.range_at_tca < known.range_at_tca
     )
-    pc = _APPROACH_PC(conjunction).value
-    return NewApproach(approach=approach, pc=pc, level=thresholds.level(pc))
+    return new, closer
 
 
 def rescreen(
@@ -339,6 +436,7 @@ def rescreen(
     duration: float = SCREENING_DURATION,
     volume: ScreeningVolume | VolumeRule = DEFAULT_VOLUME,
     model: SyntheticCovarianceModel = DEFAULT_MODEL,
+    compute: PcComputation = AUTO,
     thresholds: Thresholds = DEFAULT_THRESHOLDS,
     workers: int | None = 1,
 ) -> RescreenResult:
@@ -366,8 +464,11 @@ def rescreen(
         The screening volume, as for :func:`keepout.screening.screen`.
     model
         The covariance model of both objects of a new approach.
+    compute
+        The Pc method of a new approach, from :func:`~keepout.pc.computation`.
     thresholds
-        The risk levels of the new approaches.
+        Whose basis turns a result into the Pc of a new approach, and its
+        risk level.
     workers
         Number of processes to screen in, or ``None`` for the default (see
         :func:`~keepout.screening.screen`: a script calling with more than 1
@@ -387,7 +488,8 @@ def rescreen(
         If the primary's designator is not a catalog number, the catalog has
         no element set of it, the window does not hold the event's TCA and
         the tolerance either side, or SGP4 reports an error for it anywhere in
-        the window, on a 60 s grid and at its end, all before anything is
+        the window, every :data:`_PRIMARY_STEP` and at its end, all before
+        anything is
         screened; or if screening leaves the primary out (stale or unsupported
         elements, no volume, SGP4 failing inside the window), or the burn
         cannot be integrated.
@@ -398,7 +500,7 @@ def rescreen(
         If the volume rule returns something other than a
         :class:`~keepout.screening.volume.ScreeningVolume`.
     KeepoutError
-        If Foster's Pc of a new or a closer approach fails.
+        If the Pc of a new or a closer approach fails.
     """
     require_non_negative(duration, "duration")
     event = plan.event
@@ -406,8 +508,8 @@ def rescreen(
     newest = deduplicate(elements).by_number
     primary = _primary_elements(event, newest)
     lead = option.burn_lead
-    burn = f"burn of {option.delta_v:g} m/s {lead / HOUR:.1f} h before TCA"
-    if not (lead >= TCA_TOLERANCE and lead + TCA_TOLERANCE <= duration):
+    burn = f"burn of {option.delta_v:g} m/s {before_tca(lead)}"
+    if not TCA_TOLERANCE <= lead <= duration - TCA_TOLERANCE:
         raise ManeuverError(
             f"event {event.event_id}: a window of {duration / DAY:g} days from a "
             f"{burn} does not hold the event's TCA and {TCA_TOLERANCE:g} s "
@@ -417,10 +519,10 @@ def rescreen(
     tca = plan.conjunction.tca
     start: Time = tca - lead * u.s
     primaries = [primary]
-    horizon = duration + 2.0 * DERIVATIVE_STEP
+    horizon = duration + SEARCH_REACH
 
     def burned(base: Propagator) -> Propagator:
-        return ManoeuvredPropagator(base, start, option.delta_v, horizon)
+        return ManeuveredPropagator(base, start, option.delta_v, horizon)
 
     _require_primary_carried(event, primary, start, duration)
     baseline = screen(primaries, elements, start, duration, volume, workers=workers)
@@ -438,30 +540,25 @@ def rescreen(
     except PropagationError as exc:
         raise ManeuverError(f"event {event.event_id}: {burn}: {exc}") from exc
     _require_primary_screened(after, event, primary.catalog_number)
-    secondary = _screened_secondary(event, newest, (baseline, after))
-
-    radius = plan.conjunction.combined_hard_body_radius
-
-    def assessed(approach: CloseApproach) -> NewApproach:
-        return _new_approach(approach, radius, newest, model, thresholds)
+    pair = _catalog_number(event.latest.object2.object_id)
+    secondary = _screened_secondary(pair, newest, (baseline, after))
 
     def is_the_event(approach: CloseApproach) -> bool:
         return approach.secondary_number == secondary and _within_tolerance(
             approach.tca, tca
         )
 
-    matched = [(found, _matched(found, baseline)) for found in after.approaches]
-    new = tuple(assessed(found) for found, known in matched if known is None)
-    closer = tuple(
-        assessed(found)
-        for found, known in matched
-        if known is not None
-        and not is_the_event(found)
-        and found.range_at_tca < known.range_at_tca
+    assessed = _Assessor(
+        start,
+        plan.conjunction.combined_hard_body_radius,
+        newest,
+        model,
+        compute,
+        thresholds,
     )
+    new, closer = _classified(after, baseline, is_the_event, assessed)
     # By its designator, not only when screened: an approach of the secondary
     # in one screening alone is still that pair.
-    pair = _catalog_number(event.latest.object2.object_id)
     returns = tuple(
         item
         for item in sorted(

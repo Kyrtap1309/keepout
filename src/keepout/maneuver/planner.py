@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import dataclasses
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Final, NamedTuple
 
 import astropy.units as u
@@ -19,7 +20,7 @@ import numpy as np
 from astropy.time import Time
 
 from keepout._defaults import DECISION_POINT, MIN_BURN_LEAD, TARGET_PC
-from keepout._text import plural
+from keepout._text import before_tca, plural
 from keepout._types import FloatArray, read_only
 from keepout._validation import require_at_least, require_non_negative, require_positive
 from keepout.cdm import Cdm, CdmObject, Maneuverable
@@ -33,19 +34,19 @@ from keepout.maneuver._differential import (
     closest_approach_shift,
 )
 from keepout.objects import ObjectState
-from keepout.orbits import EARTH_MU, orbital_period
+from keepout.orbits import orbital_period, perigee_radius
 from keepout.pc import AUTO, Method, PcComputation, PcResult, computation
-from keepout.pc.api import AUTO_MC_SAMPLES, AUTO_MC_SEED
 from keepout.propagation.forces import EARTH_RADIUS, ForceModel, earth_pole
 from keepout.risk import DEFAULT_THRESHOLDS, PcObservation, Thresholds
 from keepout.state import StateVector
-from keepout.units import HOUR, KM
+from keepout.units import KM
 
 __all__ = [
     "DEFAULT_BURN_GRID",
     "MAX_CONFIRMATIONS",
     "MIN_BURN_LEAD",
     "TARGET_PC",
+    "BurnDirection",
     "BurnGrid",
     "ManeuverOption",
     "ManeuverPlan",
@@ -67,6 +68,31 @@ _SLOW_ENCOUNTER: Final = 100.0
 
 _DRAG_PERIGEE: Final = 450 * KM
 """Perigee altitude [m] below which a plan without drag says what that costs."""
+
+
+class BurnDirection(StrEnum):
+    """Which way a burn changes the velocity: along it or against it."""
+
+    PROGRADE = "prograde"
+    RETROGRADE = "retrograde"
+
+    @classmethod
+    def of(cls, delta_v: float) -> BurnDirection:
+        """The direction of a signed Δv along the velocity.
+
+        Raises
+        ------
+        ValueError
+            If ``delta_v`` is 0, which is no burn.
+        """
+        if delta_v == 0.0:
+            raise ValueError("a Δv of 0 is no burn and has no direction")
+        return cls.PROGRADE if delta_v > 0.0 else cls.RETROGRADE
+
+    @property
+    def sign(self) -> float:
+        """The sign of the Δv of a burn this way."""
+        return 1.0 if self is BurnDirection.PROGRADE else -1.0
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -165,12 +191,24 @@ class ManeuverOption:
     method: Method
     meets_target: bool
 
+    @property
+    def direction(self) -> BurnDirection:
+        """The burn's direction.
 
-@dataclass(frozen=True, eq=False, kw_only=True)
+        Raises
+        ------
+        ValueError
+            For the baseline, which has no burn.
+        """
+        return BurnDirection.of(self.delta_v)
+
+
+@dataclass(frozen=True, eq=False, slots=True, kw_only=True)
 class ManeuverPlan:
     """The burns of an event: the Pc grid and the minimum Δv per direction.
 
-    The arrays are read-only copies of those given.
+    The arrays are read-only copies of those given. A plan without a grid (see
+    :func:`plan_maneuver`) has arrays of size 0 and no options.
 
     Parameters
     ----------
@@ -245,6 +283,17 @@ class ManeuverPlan:
         object.__setattr__(self, "range_at_tca", ranges)
         object.__setattr__(self, "notes", tuple(self.notes))
 
+    @property
+    def options(self) -> tuple[ManeuverOption, ...]:
+        """The options found, prograde first."""
+        return tuple(
+            item for item in (self.prograde, self.retrograde) if item is not None
+        )
+
+    def option(self, direction: BurnDirection) -> ManeuverOption | None:
+        """The option of a direction; ``None`` if it has none."""
+        return self.prograde if direction is BurnDirection.PROGRADE else self.retrograde
+
 
 class _Cells(NamedTuple):
     """Both objects at the closest approach of each cell, shape ``(B, D, ...)``."""
@@ -255,12 +304,8 @@ class _Cells(NamedTuple):
     primary_v: FloatArray
     secondary_r: FloatArray
     secondary_v: FloatArray
-
-    @property
-    def ranges(self) -> FloatArray:
-        """Range at each closest approach [m]."""
-        ranges: FloatArray = np.linalg.norm(self.secondary_r - self.primary_r, axis=-1)
-        return ranges
+    ranges: FloatArray
+    """Range at each closest approach [m]."""
 
 
 class _Forces(NamedTuple):
@@ -268,10 +313,6 @@ class _Forces(NamedTuple):
 
     primary: ForceModel
     secondary: ForceModel
-
-
-def _hours(seconds: float) -> str:
-    return f"{seconds / HOUR:.1f} h before TCA"
 
 
 def _period(event: ConjunctionEvent, conjunction: Conjunction) -> float:
@@ -364,12 +405,15 @@ def _closest_approaches(
         limit=limit,
     )
     t = shift[..., None]
+    moved_primary = primary_r + (primary_v + 0.5 * primary_a * t) * t
+    moved_secondary = secondary.r + (secondary.v + 0.5 * secondary_a * t) * t
     return _Cells(
         shift,
-        primary_r + (primary_v + 0.5 * primary_a * t) * t,
+        moved_primary,
         primary_v + primary_a * t,
-        secondary.r + (secondary.v + 0.5 * secondary_a * t) * t,
+        moved_secondary,
         secondary.v + secondary_a * t,
+        np.linalg.norm(moved_secondary - moved_primary, axis=-1),
     )
 
 
@@ -379,16 +423,21 @@ def _moved(item: ObjectState, r: FloatArray, v: FloatArray, epoch: Time) -> Obje
     return ObjectState(
         item.object_id,
         StateVector(epoch, r, v, "GCRF"),
-        None if covariance is None else dataclasses.replace(covariance, epoch=epoch),
+        None if covariance is None else covariance.at(epoch),
         item.hard_body_radius,
     )
 
 
 def _cell_conjunction(
-    conjunction: Conjunction, cells: _Cells, index: tuple[int, int]
+    conjunction: Conjunction,
+    cells: _Cells,
+    index: tuple[int, int],
+    epoch: Time | None = None,
 ) -> Conjunction:
-    """The conjunction of one cell that has a closest approach."""
-    epoch: Time = conjunction.tca + float(cells.shift[index]) * u.s
+    """The conjunction of one cell that has a closest approach; ``epoch``, its
+    time, if already known."""
+    if epoch is None:
+        epoch = conjunction.tca + float(cells.shift[index]) * u.s
     return Conjunction(
         _moved(
             conjunction.primary, cells.primary_r[index], cells.primary_v[index], epoch
@@ -407,25 +456,18 @@ def _pc_grid(conjunction: Conjunction, cells: _Cells) -> tuple[FloatArray, int]:
     """Foster's Pc of each cell, and how many failed where a cell had a minimum."""
     pc = np.full(cells.shift.shape, np.nan)
     failed = 0
-    for row, column in np.argwhere(np.isfinite(cells.shift)).tolist():
+    found = np.isfinite(cells.shift)
+    epochs = conjunction.tca + cells.shift[found] * u.s
+    for (row, column), epoch in zip(np.argwhere(found).tolist(), epochs, strict=True):
         try:
-            result = _CELL_PC(_cell_conjunction(conjunction, cells, (row, column)))
+            result = _CELL_PC(
+                _cell_conjunction(conjunction, cells, (row, column), epoch)
+            )
         except KeepoutError:
             failed += 1
         else:
             pc[row, column] = result.value
     return pc, failed
-
-
-def _confirmation(compute: PcComputation, method: Method) -> PcComputation:
-    """What confirms a burn: ``compute`` if it names the event's ``method``,
-    with its options; else what ``"auto"`` chose, with ``"auto"``'s seed and
-    budget if that was its Monte Carlo fallback."""
-    if compute.method == method:
-        return compute
-    if method == "montecarlo":
-        return computation(method, max_samples=AUTO_MC_SAMPLES, seed=AUTO_MC_SEED)
-    return computation(method)
 
 
 def _option(
@@ -468,14 +510,13 @@ class _Search:
     pc: FloatArray
     target_pc: float
     confirmation: PcComputation
-    method: Method
     thresholds: Thresholds
     baseline_notes: tuple[str, ...]
 
-    def candidates(self, sign: float) -> list[tuple[int, int]]:
+    def candidates(self, direction: BurnDirection) -> list[tuple[int, int]]:
         """The cells of a direction below the target, by ``(|Δv|, burn lead)``."""
         below = self.pc < self.target_pc
-        rows, columns = np.nonzero(below & (np.sign(self.delta_v) == sign))
+        rows, columns = np.nonzero(below & (np.sign(self.delta_v) == direction.sign))
         order = np.lexsort((self.leads[rows], np.abs(self.delta_v[columns])))
         return [(int(rows[i]), int(columns[i])) for i in order]
 
@@ -502,11 +543,11 @@ class _Search:
         return option, result
 
     def option(
-        self, sign: float, name: str
+        self, direction: BurnDirection
     ) -> tuple[ManeuverOption | None, tuple[str, ...]]:
         """The smallest confirmed burn of a direction, and its notes: what the
         burn's Pc adds to the baseline's, and how candidates fell through."""
-        candidates = self.candidates(sign)
+        candidates = self.candidates(direction)
         refused = failed = 0
         found = None
         notes: list[str] = []
@@ -519,7 +560,7 @@ class _Search:
             if option.meets_target:
                 found = option
                 notes += [
-                    f"{name}: {note}"
+                    f"{direction}: {note}"
                     for note in result.diagnostics
                     if note not in self.baseline_notes
                 ]
@@ -527,8 +568,9 @@ class _Search:
             refused += 1
         if refused or failed:
             note = (
-                f"{name}: of {plural(len(candidates), 'cell')} below the target on "
-                f"Foster's Pc, {self.method} refused {refused} and failed on {failed}"
+                f"{direction}: of {plural(len(candidates), 'cell')} below the target "
+                f"on Foster's Pc, {self.confirmation.method} refused {refused} and "
+                f"failed on {failed}"
             )
             untested = len(candidates) - MAX_CONFIRMATIONS
             if found is None and untested > 0:
@@ -541,20 +583,11 @@ class _Search:
         return found, tuple(notes)
 
 
-def _perigee_altitude(state: StateVector) -> float:
-    """Two-body perigee of a bound orbit, above :data:`EARTH_RADIUS` [m]."""
-    radius = float(np.linalg.norm(state.r))
-    energy = float(state.v @ state.v) / 2.0 - EARTH_MU / radius
-    momentum = np.cross(state.r, state.v)
-    squared_eccentricity = 1.0 + 2.0 * energy * float(momentum @ momentum) / EARTH_MU**2
-    eccentricity = float(np.sqrt(max(squared_eccentricity, 0.0)))
-    return -EARTH_MU / (2.0 * energy) * (1.0 - eccentricity) - EARTH_RADIUS
-
-
 def _drag_off_note(state: StateVector) -> str:
-    """The note of a plan without drag; a low perigee makes it a warning."""
+    """The note of a plan without drag; a low perigee makes it a warning. The
+    orbit is bound: the plan has checked."""
     note = "drag is off: the CDM gives the primary no positive CD_AREA_OVER_MASS"
-    perigee = _perigee_altitude(state)
+    perigee = (perigee_radius(state) or np.inf) - EARTH_RADIUS
     if perigee >= _DRAG_PERIGEE:
         return note
     return (
@@ -564,16 +597,8 @@ def _drag_off_note(state: StateVector) -> str:
     )
 
 
-def _notes(
-    baseline: PcResult,
-    cdm: Cdm,
-    conjunction: Conjunction,
-    pc: FloatArray,
-    *,
-    no_minimum: int,
-    failed: int,
-) -> tuple[str, ...]:
-    """The notes of a plan, before those of its options."""
+def _notes(baseline: PcResult, cdm: Cdm, conjunction: Conjunction) -> tuple[str, ...]:
+    """The notes of a plan, before those of its grid and options."""
     notes = list(baseline.diagnostics)
     if cdm.assumed_covariance:
         notes.append(
@@ -585,18 +610,26 @@ def _notes(
         notes.append(
             f"relative speed {conjunction.relative_speed:.3g} m/s is below "
             f"{_SLOW_ENCOUNTER:g} m/s: the planner looks for the new TCA only within "
-            "a twentieth of an orbit of TCA, so after a burn the pair can meet "
+            f"1/{round(1.0 / _SHIFT_LIMIT)} of an orbit of TCA, so after a burn the "
+            "pair can meet "
             "again hours away, at a Pc no cell shows; only a re-screen shows "
             "it (inside that window the new TCA was measured up to 28 m off at "
             "10 m/s)"
         )
-    if no_minimum or failed:
-        notes.append(
+    return tuple(notes)
+
+
+def _grid_notes(pc: FloatArray, *, no_minimum: int, failed: int) -> tuple[str, ...]:
+    """The note of the cells without a Pc, if any."""
+    if not no_minimum and not failed:
+        return ()
+    return (
+        (
             f"{no_minimum + failed} of {pc.size} cells have no Pc and are never "
             f"options: {no_minimum} without a closest approach to trust, "
             f"{failed} where Foster's Pc failed"
-        )
-    return tuple(notes)
+        ),
+    )
 
 
 def _burn_leads(event: ConjunctionEvent, grid: BurnGrid, period: float) -> FloatArray:
@@ -612,7 +645,7 @@ def plan_maneuver(
     event: ConjunctionEvent,
     *,
     target_pc: float = TARGET_PC,
-    grid: BurnGrid = DEFAULT_BURN_GRID,
+    grid: BurnGrid | None = DEFAULT_BURN_GRID,
     compute: PcComputation = AUTO,
     policy: Policy = "repair",
     combined_hard_body_radius: float | None = None,
@@ -638,7 +671,8 @@ def plan_maneuver(
     target_pc
         The Pc a burn must stay below, in (0, 1).
     grid
-        The burns.
+        The burns; ``None`` for the baseline alone, to evaluate burns of one's
+        own with :func:`evaluate_burn` in a fraction of the time.
     compute
         The Pc method of the baseline, from :func:`~keepout.pc.computation`.
         An explicit method confirms the options with its own options; the
@@ -679,11 +713,11 @@ def plan_maneuver(
             f"event {event.event_id}: the primary {cdm.object1.object_id} cannot "
             "manoeuvre (MANEUVERABLE = NO)"
         )
-    if time_to_tca(cdm) < grid.latest_lead:
+    if grid is not None and time_to_tca(cdm) < grid.latest_lead:
         raise ManeuverError(
             f"event {event.event_id}: the latest CDM was created "
-            f"{_hours(time_to_tca(cdm))}, after the burn window closed "
-            f"{_hours(grid.latest_lead)}"
+            f"{before_tca(time_to_tca(cdm))}, after the burn window closed "
+            f"{before_tca(grid.latest_lead)}"
         )
     conjunction = cdm.conjunction(
         combined_hard_body_radius=combined_hard_body_radius, policy=policy
@@ -698,17 +732,32 @@ def plan_maneuver(
     period = _period(event, conjunction)
     forces = _forces(event)
     result = compute(conjunction)
-    method = result.method
-    confirmation = _confirmation(compute, method)
     baseline = _option(
         result,
         cdm,
         burn_lead=0.0,
         delta_v=0.0,
-        range_at_tca=float(np.linalg.norm(conjunction.relative_position)),
+        range_at_tca=conjunction.relative_motion.distance,
         target_pc=target_pc,
         thresholds=thresholds,
     )
+    plan = ManeuverPlan(
+        event=event,
+        conjunction=conjunction,
+        target_pc=target_pc,
+        baseline=baseline,
+        confirmation=compute.resolved(result),
+        burn_leads=np.empty(0),
+        delta_v=np.empty(0),
+        pc=np.empty((0, 0)),
+        range_at_tca=np.empty((0, 0)),
+        prograde=None,
+        retrograde=None,
+        assumed_covariance=cdm.assumed_covariance,
+        notes=_notes(result, cdm, conjunction),
+    )
+    if grid is None:
+        return plan
     leads = _burn_leads(event, grid, period)
     delta_v = grid.delta_v
     effects = _effects(event, conjunction.primary.state, leads, delta_v, forces.primary)
@@ -722,29 +771,24 @@ def plan_maneuver(
         delta_v=delta_v,
         pc=pc,
         target_pc=target_pc,
-        confirmation=confirmation,
-        method=method,
+        confirmation=plan.confirmation,
         thresholds=thresholds,
         baseline_notes=result.diagnostics,
     )
-    prograde, prograde_notes = search.option(1.0, "prograde")
-    retrograde, retrograde_notes = search.option(-1.0, "retrograde")
+    prograde, prograde_notes = search.option(BurnDirection.PROGRADE)
+    retrograde, retrograde_notes = search.option(BurnDirection.RETROGRADE)
     no_minimum = int(np.count_nonzero(np.isnan(cells.shift)))
-    return ManeuverPlan(
-        event=event,
-        conjunction=conjunction,
-        target_pc=target_pc,
-        baseline=baseline,
-        confirmation=confirmation,
+    return dataclasses.replace(
+        plan,
         burn_leads=leads,
         delta_v=delta_v,
         pc=pc,
         range_at_tca=cells.ranges,
         prograde=prograde,
         retrograde=retrograde,
-        assumed_covariance=cdm.assumed_covariance,
         notes=(
-            *_notes(result, cdm, conjunction, pc, no_minimum=no_minimum, failed=failed),
+            *plan.notes,
+            *_grid_notes(pc, no_minimum=no_minimum, failed=failed),
             *prograde_notes,
             *retrograde_notes,
         ),
@@ -790,8 +834,8 @@ def evaluate_burn(
     cdm = event.latest
     if burn_lead > time_to_tca(cdm):
         raise ManeuverError(
-            f"event {event.event_id}: a burn {_hours(burn_lead)} comes before the "
-            f"latest CDM, created {_hours(time_to_tca(cdm))}"
+            f"event {event.event_id}: a burn {before_tca(burn_lead)} comes before "
+            f"the latest CDM, created {before_tca(time_to_tca(cdm))}"
         )
     forces = _forces(event)
     effects = _effects(
@@ -806,7 +850,7 @@ def evaluate_burn(
     if np.isnan(cells.shift[0, 0]):
         raise ManeuverError(
             f"event {event.event_id}: a burn of {delta_v:g} m/s "
-            f"{_hours(burn_lead)} has no closest approach to trust"
+            f"{before_tca(burn_lead)} has no closest approach to trust"
         )
     result = plan.confirmation(_cell_conjunction(conjunction, cells, (0, 0)))
     return _option(

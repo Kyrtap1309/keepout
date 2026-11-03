@@ -243,7 +243,7 @@ The burns of METOP-B (38771) that clear a red event, CARA test CDM `000038771_co
 | retrograde | 22.6 h | -0.00200 m/s | 7.87e-06 | 624 m | foster |
 | prograde | 21.6 h | +0.00398 m/s | 6.43e-06 | 793 m | foster |
 
-The plan of the 5642 cells took 12.3 to 16.2 s (CPU time 181.1 to 245.4 s, numerical libraries on their default threads) over 3 runs on 2026-11-03, Intel(R) Core(TM) i5-14600K (20 logical CPUs), Python 3.13.7; `--check` checks the numbers, not the times.
+The plan of the 5642 cells took 9.9 to 11.0 s (CPU time 162.8 to 181.9 s, numerical libraries on their default threads) over 3 runs on 2026-11-03, Intel(R) Core(TM) i5-14600K (20 logical CPUs), Python 3.13.7; `--check` checks the numbers, not the times.
 <!-- maneuver-report-summary:end -->
 
 The full default grid, on a LEO event 48 h before TCA (12 896 cells), took

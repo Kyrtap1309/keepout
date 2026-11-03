@@ -97,7 +97,7 @@ from keepout.screening.search_result import (
     RangeMinimum,
     SearchResult,
 )
-from keepout.screening.tca import DEFAULT_STEP, DERIVATIVE_STEP, ApproachSearch
+from keepout.screening.tca import DEFAULT_STEP, SEARCH_REACH, ApproachSearch
 from keepout.screening.volume import (
     DEFAULT_VOLUME,
     ScreeningVolume,
@@ -178,8 +178,9 @@ def screen(
         Called once, in this process, with the SGP4 propagator of the primaries
         that are screened, when there are any; what it returns (the same
         objects in order, in the catalog's frame, TEME) is screened in its
-        place, as a :class:`~keepout.propagation.ManoeuvredPropagator` for a
-        burn. It must give states to ``2 * DERIVATIVE_STEP`` (2 s) past the
+        place, as a :class:`~keepout.propagation.ManeuveredPropagator` for a
+        burn. It must give states to
+        :data:`~keepout.screening.tca.SEARCH_REACH` past the
         end of the window, where the search reads them, which is checked
         once. ``None`` screens SGP4.
 
@@ -202,7 +203,7 @@ def screen(
         :class:`~keepout.screening.volume.ScreeningVolume`.
     PropagationError
         If ``adjust_primaries`` raises it, as a
-        :class:`~keepout.propagation.ManoeuvredPropagator` does for an orbit
+        :class:`~keepout.propagation.ManeuveredPropagator` does for an orbit
         it cannot integrate.
     """
     require_single_time(start, "start")
@@ -391,12 +392,11 @@ def _adjusted(
             f"adjust_primaries must keep the frame {primaries.frame}, "
             f"got {adjusted.frame}"
         )
-    reach = 2.0 * DERIVATIVE_STEP
     try:
-        adjusted.propagate(settings.start, settings.duration + reach)
+        adjusted.propagate(settings.start, settings.duration + SEARCH_REACH)
     except ValueError as error:
         raise ValueError(
-            f"adjust_primaries must give states to {reach} s past the end of "
+            f"adjust_primaries must give states to {SEARCH_REACH} s past the end of "
             f"the window: {error}"
         ) from error
     return adjusted

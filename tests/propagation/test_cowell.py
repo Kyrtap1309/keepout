@@ -17,6 +17,7 @@ from keepout.errors import PropagationError
 from keepout.frames import teme_to_gcrf
 from keepout.orbits import EARTH_MU
 from keepout.propagation import (
+    DECAYED,
     ERROR_MESSAGES,
     NO_ERROR,
     Ephemeris,
@@ -24,6 +25,7 @@ from keepout.propagation import (
     Sgp4Propagator,
     propagate_in_chunks,
 )
+from keepout.propagation._atmosphere import density
 from keepout.propagation.cowell import CowellPropagator, integrate
 from keepout.propagation.forces import EARTH_RADIUS, ForceModel, earth_pole
 from keepout.units import DAY, HOUR, KM
@@ -36,8 +38,8 @@ FULL: Final = ForceModel(POLE)
 J2: Final = 0.484165143790815e-3 * math.sqrt(5.0)
 """J2 of EGM2008, from the normalised coefficient."""
 
-DECAYED: Final = 6
-"""Error code of an object that has re-entered."""
+EARTH_ROTATION: Final = 7.292115e-5
+"""The Earth's rotation rate [rad/s] (WGS 84), which the air turns with."""
 
 
 def state_of(
@@ -554,6 +556,25 @@ def test_drag_lowers_the_orbit_through_the_density_table() -> None:
     with_drag = integrate(ForceModel(POLE, drag_term=0.02), state[None], stops)
     without = integrate(FULL, state[None], stops)
     assert energy(with_drag[-1, 0]) < energy(without[-1, 0])
+
+
+@pytest.mark.parametrize("altitude", [300 * KM, 450 * KM])
+def test_drag_decays_a_circular_orbit_at_the_analytic_rate(altitude: float) -> None:
+    """da/dt = -rho B sqrt(mu a) (1 - omega a / v)^2 on a circular equatorial
+    orbit in an atmosphere turning with the Earth, over an hour, in which a and
+    the density barely change."""
+    semi_major_axis = EARTH_RADIUS + altitude
+    term = 0.02
+    state = state_of(semi_major_axis, inclination=0.0)
+    end = integrate(
+        ForceModel(POLE, degree=0, drag_term=term), state[None], np.array([HOUR])
+    )[-1, 0]
+    decay = -EARTH_MU / (2.0 * energy(end)) - semi_major_axis
+    speed = math.sqrt(EARTH_MU / semi_major_axis)
+    rho = float(density(np.array(altitude)))
+    co_rotation = (1.0 - EARTH_ROTATION * semi_major_axis / speed) ** 2
+    rate = -rho * term * math.sqrt(EARTH_MU * semi_major_axis) * co_rotation
+    assert decay == pytest.approx(rate * HOUR, rel=0.02)
 
 
 def test_importing_the_module_does_not_load_scipy() -> None:

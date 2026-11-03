@@ -19,6 +19,7 @@ import numpy as np
 import numpy.typing as npt
 from astropy.time import Time
 
+from keepout._linalg import as_axis
 from keepout._types import FloatArray, override
 from keepout._validation import (
     require_non_negative,
@@ -27,6 +28,7 @@ from keepout._validation import (
 )
 from keepout.errors import PropagationError
 from keepout.propagation.base import (
+    DECAYED,
     Ephemeris,
     RadiusBounds,
     object_indices,
@@ -39,10 +41,6 @@ if TYPE_CHECKING:
     from scipy.interpolate import CubicHermiteSpline
 
 __all__ = ["SPAN_SLACK", "CowellPropagator", "integrate"]
-
-_DECAYED: Final = 6
-"""Error code of a state after re-entry, in
-:data:`~keepout.propagation.base.ERROR_MESSAGES`."""
 
 SPAN_SLACK: Final = 1e-6
 """How far past an end of the span a time may lie [s]: the difference of two
@@ -90,11 +88,7 @@ def _stops_array(stops: npt.ArrayLike) -> FloatArray:
         If they are empty, not one-dimensional, not finite or not strictly
         monotonic.
     """
-    array = np.asarray(stops, dtype=np.float64)
-    if array.ndim != 1 or array.size == 0:
-        raise ValueError(f"stops must be a non-empty 1-D array, got {array.shape}")
-    if not np.all(np.isfinite(array)):
-        raise ValueError("stops must be finite")
+    array = as_axis(stops, "stops")
     gaps = np.diff(array)
     if not (np.all(gaps > 0.0) or np.all(gaps < 0.0)):
         raise ValueError("stops must be strictly monotonic")
@@ -118,8 +112,7 @@ def integrate(
     solver's error norm is a root mean square over them, so one difficult
     object in a large batch is held to a looser tolerance than alone. The
     tolerances may not bound the error of drag on an orbit that crosses bands
-    of the density table: 100 times tighter ones moved one orbit by 15 m in
-    25 h, cause not isolated.
+    of the density table (see "The atmosphere" in ``docs/assumptions.md``).
 
     Parameters
     ----------
@@ -259,7 +252,8 @@ class CowellPropagator:
 
     A span that does not start at ``epoch`` is reached by integrating to its
     start first, so an object that re-enters on the way has no valid state.
-    An object that re-enters has error code 6 and NaN states from the last
+    An object that re-enters has error code
+    :data:`~keepout.propagation.base.DECAYED` and NaN states from the last
     node before re-entry on (the spline ends there). A pickled propagator
     holds its splines, about 1.7 MB per object for a day at 10 s, and
     integrates nothing again.
@@ -397,7 +391,7 @@ class CowellPropagator:
         errors = np.zeros((len(self), len(times)), dtype=np.uint8)
         for index, arc in enumerate(self._arcs):
             valid = times < arc.end
-            errors[index, ~valid] = _DECAYED
+            errors[index, ~valid] = DECAYED
             if arc.spline is not None:
                 states[index, valid] = arc.spline(times[valid])
         return Ephemeris(

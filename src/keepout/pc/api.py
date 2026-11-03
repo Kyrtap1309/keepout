@@ -20,6 +20,7 @@ from keepout.pc._auto import (
     applicability,
     assess,
     auto,
+    auto_options,
     known_only_in_position,
 )
 from keepout.pc._duration import DURATION_LIMIT, SIGMA_EXTENT, encounter_duration
@@ -372,6 +373,23 @@ class PcComputation:
     def __call__(self, conjunction: Conjunction) -> PcResult:
         """The Pc of ``conjunction`` (see :func:`compute_pc`)."""
         return _compute(conjunction, self.method, self.options)
+
+    def resolved(self, result: PcResult) -> PcComputation:
+        """The computation of the method that gave ``result``, one of this
+        computation's: itself if it names that method, else that method with
+        the options ``"auto"`` runs it with (its Monte Carlo fallback's seed and
+        sample budget).
+
+        Raises
+        ------
+        ValueError
+            If this computation names another method than ``result``'s.
+        """
+        if self.method == result.method:
+            return self
+        if self.method != "auto":
+            raise ValueError(f"a {result.method} result is not one of {self.method}'s")
+        return computation(result.method, **auto_options(result.method))
 
 
 AUTO: Final = PcComputation()

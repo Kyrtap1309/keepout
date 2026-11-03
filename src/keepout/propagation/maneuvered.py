@@ -1,6 +1,6 @@
 """An orbit after a burn: a propagator's states plus a Cowell difference.
 
-:class:`ManoeuvredPropagator` keeps what its base propagator says of an object
+:class:`ManeuveredPropagator` keeps what its base propagator says of an object
 and adds what a burn changes: the difference of two Cowell orbits from the
 base's state at the burn, one with the burn and one without. Each state stays
 in the base's theory (SGP4 for an element set) and screening needs nothing
@@ -41,7 +41,7 @@ from keepout.units import elapsed_seconds
 if TYPE_CHECKING:
     from scipy.interpolate import CubicHermiteSpline
 
-__all__ = ["ManoeuvredPropagator"]
+__all__ = ["ManeuveredPropagator"]
 
 
 def _gcrf_to_frame(frame: RefFrame, epochs: Time) -> FloatArray:
@@ -95,7 +95,7 @@ def _burn_difference(
     return CubicHermiteSpline(nodes, position, speed)
 
 
-class ManoeuvredPropagator:
+class ManeuveredPropagator:
     """The states of one object with an along-track burn, in its base's frame.
 
     Before the burn a state is the base's, exactly. From the burn on it is
@@ -110,19 +110,16 @@ class ManoeuvredPropagator:
     base stays, with its NaN state, and the integration ignores it; the state
     at the burn must have none.
 
-    Against a Cowell integration of the whole orbit after the burn, at 1 m/s
-    over 7 days with the default ``step``, the difference was measured off by
-    at most 2.24 m on the 38 orbits of the test fixture with an eccentricity
-    above 0.3 (from the integrator and from the spline at perigee), and by
-    0.09 m on 68377 (a circular LEO) and 0.82 m on 89251 (e = 0.28, perigee
-    near 500 km), below 0.3: these measurements, not a bound.
+    Against a Cowell integration of the whole orbit after the burn the
+    difference is off by metres at 1 m/s over 7 days; the measurements are
+    under "Re-screen accuracy" in ``docs/assumptions.md``.
 
     Times after ``burn_time + horizon`` have no state: :meth:`propagate` and
     :meth:`radius_bounds` refuse them, so that a window past the horizon never
     goes unnoticed. Screening reads positions
-    ``2 * keepout.screening.tca.DERIVATIVE_STEP`` (2 s) past the end of a
-    window (:mod:`keepout.screening._refine`), so ``horizon`` must reach that
-    far; :func:`~keepout.screening.screen` refuses one that does not.
+    :data:`~keepout.screening.tca.SEARCH_REACH` past the end of a window, so
+    ``horizon`` must reach that far; :func:`~keepout.screening.screen`
+    refuses one that does not.
 
     A burn at a time inside the window of a screening is a kink in the
     primary's path, which the search's bound on accelerations does not
@@ -147,8 +144,8 @@ class ManoeuvredPropagator:
         integrates nothing and gives the base's states exactly.
     horizon
         Seconds after ``burn_time`` the states go up to, finite and > 0. To
-        screen a window of ``duration`` from the burn, ``duration + 2 *
-        DERIVATIVE_STEP``.
+        screen a window of ``duration`` from the burn, ``duration +
+        SEARCH_REACH``.
     step
         Longest time between nodes [s], finite and > 0.
 
@@ -230,7 +227,7 @@ class ManoeuvredPropagator:
 
         Returns
         -------
-        ManoeuvredPropagator
+        ManeuveredPropagator
             The chosen objects; nothing is integrated again.
 
         Raises
@@ -280,7 +277,7 @@ class ManoeuvredPropagator:
         burned = np.clip(times[after], None, self._horizon)
         r, v = states.r.copy(), states.v.copy()
         r[:, after] += self._difference(burned)
-        v[:, after] += self._difference(burned, 1)
+        v[:, after] += self._difference(burned, nu=1)
         return Ephemeris(epoch, seconds, r, v, states.errors, self.frame)
 
     def radius_bounds(self, start: Time, duration: float) -> RadiusBounds:

@@ -34,7 +34,7 @@ Foster's 2-D Pc after an impulsive along-track burn of the primary, by burn size
 
 Cells below the target: 2339 retrograde and 2076 prograde of 5642.
 
-The plan of the 5642 cells took 12.3 to 16.2 s (CPU time 181.1 to 245.4 s, numerical libraries on their default threads) over 3 runs on 2026-11-03, Intel(R) Core(TM) i5-14600K (20 logical CPUs), Python 3.13.7; `--check` checks the numbers, not the times.
+The plan of the 5642 cells took 9.9 to 11.0 s (CPU time 162.8 to 181.9 s, numerical libraries on their default threads) over 3 runs on 2026-11-03, Intel(R) Core(TM) i5-14600K (20 logical CPUs), Python 3.13.7; `--check` checks the numbers, not the times.
 
 ## Re-screen demonstration
 
@@ -67,7 +67,7 @@ Notes of the plan:
 - the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used.
 - every Pc rests on an assumed covariance (COVARIANCE_METHOD = DEFAULT).
 - drag is off: the CDM gives the primary no positive CD_AREA_OVER_MASS.
-- relative speed 1.99 m/s is below 100 m/s: the planner looks for the new TCA only within a twentieth of an orbit of TCA, so after a burn the pair can meet again hours away, at a Pc no cell shows; only a re-screen shows it (inside that window the new TCA was measured up to 28 m off at 10 m/s).
+- relative speed 1.99 m/s is below 100 m/s: the planner looks for the new TCA only within 1/20 of an orbit of TCA, so after a burn the pair can meet again hours away, at a Pc no cell shows; only a re-screen shows it (inside that window the new TCA was measured up to 28 m off at 10 m/s).
 - 240 of 930 cells have no Pc and are never options: 240 without a closest approach to trust, 0 where Foster's Pc failed.
 - prograde: 2-D Pc assumptions questionable: the encounter lasts about 8.4e+03 s, 9.7% of the primary's orbital period (limit 1%); a 3-D Pc may differ.
 - retrograde: 2-D Pc assumptions questionable: the encounter lasts about 7.17e+03 s, 8.3% of the primary's orbital period (limit 1%); a 3-D Pc may differ.
@@ -79,9 +79,9 @@ Notes of the plan:
   - new: 55841 at 2026-10-09 00:07 UTC, range 4113 m, 1.9 m/s, assumed Pc 9.87e-06, yellow
 - **retrograde**: 19879 objects screened from 2026-10-07 23:57 to 2026-10-14 23:57 UTC, 35 catalog objects left out; on the element sets (SGP4, not the CDM's orbit) the event's secondary 55841 has no approach within 10 minutes of the CDM's TCA; 0 new approaches and 0 closer approaches, none at red.
 
-The prograde burn clears the event at its TCA but brings the event's own secondary 55841 back at another time, above the target 1.00e-07. The planner looks for the new TCA only within a twentieth of an orbit of the old one, and in an encounter this slow (2.0 m/s) a burn moves the next close approach of the same two objects by hours: only the re-screen shows it. The retrograde option is clean, so `keepout maneuver` exits with status 0 and shows both, the one above as not clean.
+The prograde burn clears the event at its TCA but brings the event's own secondary 55841 back at another time, above the target 1.00e-07. The planner looks for the new TCA only near the old one, and in an encounter this slow (2.0 m/s) a burn moves the next close approach of the same two objects by hours: only the re-screen shows it. The retrograde option is clean, so `keepout maneuver` exits with status 0 and shows both, the one above as not clean.
 
-A new approach is one the run without the burn does not have within 10 minutes of its TCA; a closer approach is one it has at a larger range. Their Pc is Foster's on the synthetic covariance model, an assumption. The re-screen searches for no other option: a burn that clears one event but brings another is for the analyst to weigh (see [Manoeuvre planning](maneuver.md#re-screen)).
+A new approach is one the run without the burn does not have within 10 minutes of its TCA; a closer approach is one it has at a larger range. Their Pc is the synthetic operator's (`auto`) on its covariance model, an assumption. The re-screen searches for no other option: a burn that clears one event but brings another is for the analyst to weigh (see [Manoeuvre planning](maneuver.md#re-screen)).
 
 ## Data
 

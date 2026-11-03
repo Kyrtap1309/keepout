@@ -123,17 +123,19 @@ ignore-words-list = "aas,oint,precesses"
 testpaths = ["tests"]
 pythonpath = ["tools"]
 # --disable-socket: no test reaches the network; conftest.py lets the
-# validation tests, which download their data, open sockets.
+# validation tests, which download their data, open sockets. The slow tests
+# run in CI (-m "not validation"), not by default.
 addopts = [
     "-ra",
     "--strict-markers",
     "-m",
-    "not validation",
+    "not validation and not slow",
     "--disable-socket",
     "--allow-unix-socket",
 ]
 filterwarnings = ["error"]
 markers = [
+    "slow: tests of tens of seconds (full burn grids, week-long integrations); CI runs them",
     "validation: slow checks against reference data (NASA CARA and ESA Kelvins data download on first run; screening and the synthetic operator use the committed GP data; the Space-Track answers check needs KEEPOUT_SPACETRACK_RAW)",
 ]
 

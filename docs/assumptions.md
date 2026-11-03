@@ -286,8 +286,8 @@ bounds.
   (e = 0.28, perigee near 500 km); other orbits are not covered by these
   numbers. Screening's volume is kilometres.
 - **Re-screen Pc assumed.** The catalog's element sets have no covariance,
-  so the Pc of a new or closer approach rests on the synthetic covariance
-  model above, with all its limits, and is labelled assumed wherever it is
+  so the Pc of a new or closer approach, by `auto` as for the synthetic
+  operator, rests on the synthetic covariance model above, with all its limits, and is labelled assumed wherever it is
   shown. The re-screen also sees only the objects in the catalog given:
   the public catalog lacks most debris (see
   [Screening](screening.md)).

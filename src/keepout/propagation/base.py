@@ -28,6 +28,7 @@ from keepout.state import RefFrame, as_ref_frame
 
 __all__ = [
     "CHUNK_STATES",
+    "DECAYED",
     "ERROR_MESSAGES",
     "NO_ERROR",
     "Ephemeris",
@@ -53,6 +54,10 @@ T)``, positions [m] and velocities [m/s] ``(N, T, 3)``, as the arrays of an
 NO_ERROR: Final = 0
 """Error code of a state computed without error."""
 
+DECAYED: Final = 6
+"""Error code of a state after re-entry; propagators other than SGP4 report
+re-entry with it too."""
+
 ERROR_MESSAGES: Final[Mapping[int, str]] = MappingProxyType(
     {
         1: "mean eccentricity outside the range 0 to 1",
@@ -60,12 +65,12 @@ ERROR_MESSAGES: Final[Mapping[int, str]] = MappingProxyType(
         3: "perturbed eccentricity outside the range 0 to 1",
         4: "semi-latus rectum below zero",
         5: "orbit below the Earth's surface (no longer used by SGP4)",
-        6: "decayed: orbit radius below one Earth radius",
+        DECAYED: "decayed: orbit radius below one Earth radius",
     }
 )
 """What each non-zero error code means. Codes 1 to 6 are SGP4's (Vallado et
 al., "Revisiting Spacetrack Report #3", AIAA 2006-6753); other propagators
-report an object that has re-entered with code 6."""
+report an object that has re-entered with :data:`DECAYED`."""
 
 CHUNK_STATES: Final = 1_000_000
 """Default number of states (objects x times) per chunk in
