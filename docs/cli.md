@@ -240,7 +240,7 @@ retrograde re-screened against 19879 objects (tests/screening/data/celestrak-pub
   No new or closer approach at red among the objects screened.
 ```
 
-It took 8.7 to 10.6 s over 3 runs (Intel Core i5-14600K).
+It took 9.9 to 10.4 s over 3 runs (Intel Core i5-14600K).
 
 The table gives the event without a burn and the smallest burn each way
 that meets the target. For each burn it shows the time before TCA, the
