@@ -24,7 +24,7 @@ The client follows CelesTrak's usage policy
 - Any other status than 200 OK, and any network error, raises at once;
   nothing is retried (clients that ignore errors are blocked).
 - Requests name keepout, its version and its home page in the
-  ``User-Agent`` (:data:`~keepout.sources._http.USER_AGENT`).
+  ``User-Agent``.
 
 Cached copies live under ``<cache>/celestrak/`` (``gp/<group>.csv`` and
 ``socrates/sort-minRange.csv``), each with a ``.meta.json`` file holding its

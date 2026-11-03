@@ -62,7 +62,7 @@ from keepout.propagation import (
     Sgp4Propagator,
     describe_error,
 )
-from keepout.risk import DEFAULT_THRESHOLDS, PcObservation, RiskLevel, Thresholds
+from keepout.risk import DEFAULT_THRESHOLDS, RiskLevel, Thresholds
 from keepout.screening import (
     DEFAULT_VOLUME,
     CloseApproach,
@@ -383,7 +383,6 @@ def _matched(
 class _Assessor:
     """What gives an approach of a re-screen its Pc and level."""
 
-    start: Time
     combined_hard_body_radius: float
     newest: Mapping[int, Omm]
     model: SyntheticCovarianceModel
@@ -400,12 +399,7 @@ class _Assessor:
                 newest[approach.secondary_number], tca
             ),
         )
-        observation = PcObservation.from_result(
-            self.compute(conjunction),
-            time_to_tca=elapsed_seconds(self.start, tca),
-            assumed_covariance=True,
-        )
-        pc = self.thresholds.value_of(observation)
+        pc = self.thresholds.value_of_result(self.compute(conjunction))
         return NewApproach(approach=approach, pc=pc, level=self.thresholds.level(pc))
 
 
@@ -556,7 +550,6 @@ def rescreen(
         )
 
     assessed = _Assessor(
-        start,
         plan.conjunction.combined_hard_body_radius,
         newest,
         model,

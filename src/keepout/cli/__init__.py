@@ -6,8 +6,11 @@ without it ``keepout`` says how to install it instead of failing with a
 traceback. The library never imports this package.
 """
 
+import os
 import sys
 from typing import Final
+
+from keepout._workers import ONE_THREAD
 
 __all__ = ["EXTRA_MODULES", "INSTALL_HINT", "main"]
 
@@ -32,6 +35,10 @@ def main() -> None:
     ModuleNotFoundError
         If a module outside the ``cli`` extra is missing (re-raised).
     """
+    # One BLAS thread unless the user set one: the integrations of a burn
+    # grid ran no faster on 20 threads, at 20 times the CPU time.
+    for name, value in ONE_THREAD.items():
+        os.environ.setdefault(name, value)
     try:
         from keepout.cli.app import run
     except ModuleNotFoundError as exc:

@@ -7,24 +7,19 @@
 keepout knows, recognised by content: CCSDS OMM in KVN (:mod:`keepout.omm.kvn`)
 or XML (:mod:`keepout.omm.xml`), CelesTrak's CSV or JSON
 (:mod:`keepout.omm.celestrak`) and legacy TLEs (:mod:`keepout.omm.tle`). Each
-of those modules reads one format and, but for TLE, writes it; each is
-imported on first use, so ``from keepout.omm import Omm`` loads none of them.
+of those modules reads one format and, but for TLE, writes it.
 """
 
 from __future__ import annotations
 
-import importlib
 from pathlib import Path
-from typing import TYPE_CHECKING, Final
 
 from keepout.ccsds.files import strip_bom
 from keepout.errors import OmmParseError
+from keepout.omm import celestrak, kvn, tle, xml
 from keepout.omm._io import OMM
 from keepout.omm.keywords import VERSION_KEYWORD
 from keepout.omm.model import Deduplicated, Omm, deduplicate
-
-if TYPE_CHECKING:
-    from keepout.omm import celestrak, kvn, tle, xml
 
 __all__ = [
     "Deduplicated",
@@ -37,28 +32,6 @@ __all__ = [
     "tle",
     "xml",
 ]
-
-_FORMATS: Final = frozenset({"celestrak", "kvn", "tle", "xml"})
-"""The format modules, imported on first use (PEP 562)."""
-
-
-# Hidden from type checkers: they see the imports above.
-if not TYPE_CHECKING:
-
-    def __getattr__(name: str) -> object:
-        """A format module of :data:`_FORMATS`, imported on first use.
-
-        Raises
-        ------
-        AttributeError
-            If the package has no such name.
-        """
-        if name not in _FORMATS:
-            raise AttributeError(f"module 'keepout.omm' has no attribute {name!r}")
-        return importlib.import_module(f"keepout.omm.{name}")
-
-    def __dir__() -> list[str]:
-        return sorted({*globals(), *_FORMATS})
 
 
 def loads(text: str) -> tuple[Omm, ...]:
@@ -87,8 +60,6 @@ def loads(text: str) -> tuple[Omm, ...]:
         If the text is in none of these formats, or the format's reader
         refuses it.
     """
-    from keepout.omm import celestrak, kvn, tle, xml
-
     body = strip_bom(text)
     start = body.lstrip()
     first, *second = start.splitlines()[:2] or [""]

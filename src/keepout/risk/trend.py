@@ -9,8 +9,8 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Final
 
+from keepout._text import days_text
 from keepout._validation import require_at_least, require_positive
-from keepout.risk._text import days_text
 from keepout.risk.observation import PC_FLOOR, PcObservation
 from keepout.risk.thresholds import DEFAULT_THRESHOLDS, RiskLevel, Thresholds
 from keepout.units import DAY

@@ -10,9 +10,8 @@ confirms the cells that are chosen as options.
 
 from __future__ import annotations
 
-import dataclasses
+import enum
 from dataclasses import dataclass
-from enum import StrEnum
 from typing import Final, NamedTuple
 
 import astropy.units as u
@@ -37,7 +36,7 @@ from keepout.objects import ObjectState
 from keepout.orbits import orbital_period, perigee_radius
 from keepout.pc import AUTO, Method, PcComputation, PcResult, computation
 from keepout.propagation.forces import EARTH_RADIUS, ForceModel, earth_pole
-from keepout.risk import DEFAULT_THRESHOLDS, PcObservation, Thresholds
+from keepout.risk import DEFAULT_THRESHOLDS, Thresholds
 from keepout.state import StateVector
 from keepout.units import KM
 
@@ -70,7 +69,7 @@ _DRAG_PERIGEE: Final = 450 * KM
 """Perigee altitude [m] below which a plan without drag says what that costs."""
 
 
-class BurnDirection(StrEnum):
+class BurnDirection(enum.StrEnum):
     """Which way a burn changes the velocity: along it or against it."""
 
     PROGRADE = "prograde"
@@ -239,9 +238,6 @@ class ManeuverPlan:
         ``baseline.method``; ``None`` if there is none.
     retrograde
         The same for negative burns.
-    assumed_covariance
-        Whether the latest CDM gives an assumed covariance: every Pc of the
-        plan then rests on a model.
     notes
         What a reader of the plan must know.
 
@@ -262,7 +258,6 @@ class ManeuverPlan:
     range_at_tca: FloatArray
     prograde: ManeuverOption | None
     retrograde: ManeuverOption | None
-    assumed_covariance: bool
     notes: tuple[str, ...]
 
     def __post_init__(self) -> None:
@@ -282,6 +277,12 @@ class ManeuverPlan:
         object.__setattr__(self, "pc", pc)
         object.__setattr__(self, "range_at_tca", ranges)
         object.__setattr__(self, "notes", tuple(self.notes))
+
+    @property
+    def assumed_covariance(self) -> bool:
+        """Whether the latest CDM gives an assumed covariance: every Pc of the
+        plan then rests on a model."""
+        return self.event.latest.assumed_covariance
 
     @property
     def options(self) -> tuple[ManeuverOption, ...]:
@@ -478,7 +479,6 @@ def _pc_grid(conjunction: Conjunction, cells: _Cells) -> tuple[FloatArray, int]:
 
 def _option(
     result: PcResult,
-    cdm: Cdm,
     *,
     burn_lead: float,
     delta_v: float,
@@ -487,13 +487,7 @@ def _option(
     thresholds: Thresholds,
 ) -> ManeuverOption:
     """The option of a method's result, on the basis of the thresholds."""
-    observation = PcObservation.from_result(
-        result,
-        time_to_tca=time_to_tca(cdm),
-        message_id=cdm.message_id,
-        assumed_covariance=cdm.assumed_covariance,
-    )
-    value = thresholds.value_of(observation)
+    value = thresholds.value_of_result(result)
     return ManeuverOption(
         burn_lead=burn_lead,
         delta_v=delta_v,
@@ -508,7 +502,6 @@ def _option(
 class _Search:
     """What the search for the options of a plan works on."""
 
-    cdm: Cdm
     conjunction: Conjunction
     cells: _Cells
     leads: FloatArray
@@ -539,7 +532,6 @@ class _Search:
         )
         option = _option(
             result,
-            self.cdm,
             burn_lead=float(self.leads[index[0]]),
             delta_v=float(self.delta_v[index[1]]),
             range_at_tca=float(self.cells.ranges[index]),
@@ -740,52 +732,55 @@ def plan_maneuver(
     result = compute(conjunction)
     baseline = _option(
         result,
-        cdm,
         burn_lead=0.0,
         delta_v=0.0,
         range_at_tca=conjunction.relative_motion.distance,
         target_pc=target_pc,
         thresholds=thresholds,
     )
-    plan = ManeuverPlan(
-        event=event,
-        conjunction=conjunction,
-        target_pc=target_pc,
-        baseline=baseline,
-        confirmation=compute.resolved(result),
-        burn_leads=np.empty(0),
-        delta_v=np.empty(0),
-        pc=np.empty((0, 0)),
-        range_at_tca=np.empty((0, 0)),
-        prograde=None,
-        retrograde=None,
-        assumed_covariance=cdm.assumed_covariance,
-        notes=_notes(result, cdm, conjunction),
-    )
+    confirmation = compute.resolved(result)
+    notes = _notes(result, cdm, conjunction)
     if grid is None:
-        return plan
+        empty = np.empty(0)
+        return ManeuverPlan(
+            event=event,
+            conjunction=conjunction,
+            target_pc=target_pc,
+            baseline=baseline,
+            confirmation=confirmation,
+            burn_leads=empty,
+            delta_v=empty,
+            pc=np.empty((0, 0)),
+            range_at_tca=np.empty((0, 0)),
+            prograde=None,
+            retrograde=None,
+            notes=notes,
+        )
     leads = _burn_leads(event, grid, period)
     delta_v = grid.delta_v
     effects = _effects(event, conjunction.primary.state, leads, delta_v, forces.primary)
     cells = _closest_approaches(conjunction, effects, forces, _SHIFT_LIMIT * period)
     pc, failed = _pc_grid(conjunction, cells)
     search = _Search(
-        cdm=cdm,
         conjunction=conjunction,
         cells=cells,
         leads=leads,
         delta_v=delta_v,
         pc=pc,
         target_pc=target_pc,
-        confirmation=plan.confirmation,
+        confirmation=confirmation,
         thresholds=thresholds,
         baseline_notes=result.diagnostics,
     )
     prograde, prograde_notes = search.option(BurnDirection.PROGRADE)
     retrograde, retrograde_notes = search.option(BurnDirection.RETROGRADE)
     no_minimum = int(np.count_nonzero(np.isnan(cells.shift)))
-    return dataclasses.replace(
-        plan,
+    return ManeuverPlan(
+        event=event,
+        conjunction=conjunction,
+        target_pc=target_pc,
+        baseline=baseline,
+        confirmation=confirmation,
         burn_leads=leads,
         delta_v=delta_v,
         pc=pc,
@@ -793,7 +788,7 @@ def plan_maneuver(
         prograde=prograde,
         retrograde=retrograde,
         notes=(
-            *plan.notes,
+            *notes,
             *_grid_notes(pc, no_minimum=no_minimum, failed=failed),
             *prograde_notes,
             *retrograde_notes,
@@ -861,7 +856,6 @@ def evaluate_burn(
     result = plan.confirmation(_cell_conjunction(conjunction, cells, (0, 0)))
     return _option(
         result,
-        cdm,
         burn_lead=burn_lead,
         delta_v=delta_v,
         range_at_tca=float(cells.ranges[0, 0]),

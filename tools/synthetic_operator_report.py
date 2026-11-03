@@ -35,7 +35,6 @@ from generated import (
     generated_notice,
     json_text,
     minute_text,
-    pc_text,
     positive,
     second_text,
     significant,
@@ -45,6 +44,7 @@ from generated import (
     write_or_check,
 )
 
+from keepout._text import pc_text
 from keepout._workers import DEFAULT_WORKERS
 from keepout.ccsds.message import UNKNOWN
 from keepout.cdm import kvn

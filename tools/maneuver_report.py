@@ -53,8 +53,6 @@ from generated import (
     generated_notice,
     json_text,
     minute_text,
-    pc_text,
-    plural,
     positive,
     read_json,
     readme_with,
@@ -78,6 +76,7 @@ from synthetic_operator_report import FLEET, level_key, shown, window_start
 
 from keepout._defaults import TCA_TOLERANCE
 from keepout._methods import Method
+from keepout._text import pc_text, plural
 from keepout._types import FloatArray
 from keepout._workers import DEFAULT_WORKERS, ONE_THREAD
 from keepout.cdm import Cdm, load

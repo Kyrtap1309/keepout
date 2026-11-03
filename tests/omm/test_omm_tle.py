@@ -116,7 +116,7 @@ def test_alpha_5_catalog_numbers_are_read(satnum: str, number: int) -> None:
 
 
 def test_names_two_and_three_line_forms_are_read_together() -> None:
-    two_line = "\n".join([GOES_LINE_1, GOES_LINE_2])
+    two_line = f"{GOES_LINE_1}\n{GOES_LINE_2}"
     text = f"{two_line}\n\n0 GOES 9\n{two_line}\n{GOES_9_TLE}"
     names = [omm.object_name for omm in tle.loads(text)]
     assert names == ["UNKNOWN", "GOES 9", "GOES 9 [P]"]

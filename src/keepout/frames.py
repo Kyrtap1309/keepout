@@ -248,12 +248,7 @@ def _teme_rotation(
     GCRS -> CIRS matrix (TT) and ``R3`` ERFA's rotation of the axes about z.
     """
     theta = erfa.gmst82(ut1, ut2) - erfa.era00(ut1, ut2)
-    cosine, sine = np.cos(theta), np.sin(theta)
-    about_z = np.zeros((*np.shape(theta), 3, 3))
-    about_z[..., 0, 0] = about_z[..., 1, 1] = cosine
-    about_z[..., 0, 1] = sine
-    about_z[..., 1, 0] = -sine
-    about_z[..., 2, 2] = 1.0
+    about_z = erfa.rz(theta, np.eye(3))
     gcrs_to_cirs = erfa.c2i06a(tt1, tt2)
     rotation: FloatArray = np.swapaxes(gcrs_to_cirs, -1, -2) @ about_z
     return rotation

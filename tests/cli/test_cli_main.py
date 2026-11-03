@@ -1,3 +1,4 @@
+import os
 import runpy
 import subprocess
 import sys
@@ -7,6 +8,14 @@ import pytest
 
 import keepout
 from keepout import cli
+from keepout._workers import ONE_THREAD
+
+
+@pytest.fixture(autouse=True)
+def no_thread_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    # main() sets them in this process: monkeypatch restores them afterwards.
+    for name in ONE_THREAD:
+        monkeypatch.delenv(name, raising=False)
 
 
 def test_the_keepout_script_runs_main() -> None:
@@ -23,6 +32,18 @@ def test_main_runs_the_command_line(
         cli.main()
     assert exit_.value.code == 0
     assert capsys.readouterr().out == f"keepout {keepout.__version__}\n"
+
+
+def test_main_uses_one_blas_thread_unless_told_otherwise(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OMP_NUM_THREADS", "3")
+    monkeypatch.setattr(sys, "argv", ["keepout", "--version"])
+    with pytest.raises(SystemExit):
+        cli.main()
+    assert os.environ["OPENBLAS_NUM_THREADS"] == "1"
+    assert os.environ["MKL_NUM_THREADS"] == "1"
+    assert os.environ["OMP_NUM_THREADS"] == "3"
 
 
 @pytest.mark.parametrize("module", ["typer", "rich"])

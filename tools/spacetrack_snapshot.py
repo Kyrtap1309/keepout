@@ -51,7 +51,6 @@ with citation, is committed.
 from __future__ import annotations
 
 import argparse
-import dataclasses
 import functools
 import statistics
 import sys
@@ -60,7 +59,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final, Literal, TypedDict, cast
+from typing import Final, Literal, TypedDict
 
 import snapshot_files
 from generated import REPO, day_text, json_text, positive, second_text
@@ -188,7 +187,16 @@ class Saved:
 
     def record(self) -> SavedRecord:
         """The answer as JSON."""
-        return cast("SavedRecord", dataclasses.asdict(self))
+        return SavedRecord(
+            method=self.method,
+            url=self.url,
+            status=self.status,
+            file=self.file,
+            sha256=self.sha256,
+            size=self.size,
+            retrieved=self.retrieved,
+            redacted=self.redacted,
+        )
 
 
 INDEX: Final = RawIndex("answers", Saved)

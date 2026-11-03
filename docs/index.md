@@ -233,8 +233,10 @@ tests is not covered by it:
 ```bash
 uv sync
 uv run pre-commit install     # every CI lint check, run on commit
-uv run pytest                 # offline test suite
-uv run pytest -m validation   # slow checks; downloads CARA and Kelvins data
+uv run pytest -n auto         # offline test suite, without the slow tests
+uv run pytest -n auto -m slow # the slow tests CI also runs (tens of seconds each)
+uv run pytest -m validation   # reference checks; downloads CARA and Kelvins data
+uv run pytest -n0 --inline-snapshot=fix   # update the CLI snapshots (not under -n)
 uv run python tools/validation_report.py   # regenerate the validation report
 uv run python tools/validation_report.py --monte-carlo   # Monte Carlo (slow)
 uv run python tools/risk_report.py   # Kelvins risk report (downloads 221 MB once)

@@ -71,7 +71,6 @@ from generated import (
     json_text,
     minute_text,
     parse_json,
-    plural,
     positive,
     read_json,
     readme_with,
@@ -80,6 +79,7 @@ from generated import (
 )
 from screening_timing import TimingOutput, select, timed
 
+from keepout._text import plural
 from keepout._workers import ONE_THREAD
 from keepout.omm import Omm
 from keepout.omm.celestrak import dumps_csv

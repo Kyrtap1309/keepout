@@ -1,7 +1,7 @@
 """Monte Carlo Pc with a Clopper-Pearson confidence interval.
 
 Each sample draws both objects' TCA states from their Gaussians in equinoctial
-elements (see :mod:`keepout.pc._orbit`), moves them by two-body motion and
+elements, moves them by two-body motion and
 counts a collision when the relative distance first drops below the combined
 hard-body radius inside the window. Samples already overlapping at the window
 start are not collisions in the window (only entries count, as in Hall 2021
@@ -61,8 +61,8 @@ MC_BATCH: Final = 50_000
 NEWTON_STEPS: Final = 12
 """Newton iterations refining a closest approach between two grid points.
 
-The distance is tested at every iterate (see ``_SamplePairs.closest_below``), so
-the count bounds the work rather than setting a convergence tolerance."""
+The distance is tested at every iterate, so the count bounds the work rather
+than setting a convergence tolerance."""
 
 SPEED_BOUND_FACTOR: Final = 1.5
 """Factor on the larger grid-point relative speed bounding the speed in between."""

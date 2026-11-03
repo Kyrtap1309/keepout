@@ -12,8 +12,6 @@ from generated import (
     json_text,
     minute_text,
     parse_json,
-    pc_text,
-    plural,
     positive,
     read_json,
     readme_with,
@@ -185,20 +183,6 @@ def test_readme_with_puts_the_block_in_the_file_text(tmp_path: Path) -> None:
     readme = tmp_path / "README.md"
     readme.write_text("intro\n<s>\nold\n<e>\n", encoding="utf-8")
     assert readme_with(readme, "<s>", "<e>", "new") == "intro\n<s>\nnew\n<e>\n"
-
-
-@pytest.mark.parametrize(
-    ("count", "nouns", "text"),
-    [(1, None, "1 run"), (2, None, "2 runs"), (0, "minima", "0 minima")],
-)
-def test_plural_names_one_or_many(count: int, nouns: str | None, text: str) -> None:
-    noun = "minimum" if nouns else "run"
-    assert plural(count, noun, nouns) == text
-
-
-def test_pc_text_gives_three_digits_or_a_dash() -> None:
-    assert pc_text(1.234e-5) == "1.23e-05"
-    assert pc_text(None) == "-"
 
 
 def test_day_minute_and_second_text_cut_an_iso_time() -> None:

@@ -60,7 +60,6 @@ gives. It is not covered by keepout's MIT licence.
 from __future__ import annotations
 
 import argparse
-import dataclasses
 import functools
 import gzip
 import math
@@ -71,7 +70,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final, Literal, TypeAlias, TypedDict, TypeVar, cast, get_args
+from typing import Final, Literal, TypeAlias, TypedDict, TypeVar, get_args
 from urllib.parse import parse_qs, urlsplit
 
 import astropy.units as u
@@ -194,7 +193,13 @@ class Body:
 
     def record(self) -> BodyRecord:
         """The body as JSON."""
-        return cast("BodyRecord", dataclasses.asdict(self))
+        return BodyRecord(
+            url=self.url,
+            file=self.file,
+            sha256=self.sha256,
+            size=self.size,
+            retrieved=self.retrieved,
+        )
 
 
 INDEX: Final = RawIndex("bodies", Body)

@@ -48,7 +48,7 @@ target-version = "py311"
 select = [
     "E", "F", "W", "I", "B", "UP", "SIM", "RUF", "N", "PT", "NPY",
     "ARG", "BLE", "C4", "D", "DTZ", "FBT", "FURB", "PERF", "PGH", "PIE", "PTH",
-    "RET", "TID",
+    "RET", "TID", "A", "ERA", "RSE", "SLOT", "ISC",
     "S", "C90", "PL", "PYI", "SLF", "ANN401",
     # Preview: every exception a function raises is in its docstring, and
     # strings joined inside a list or call are parenthesized (no lost comma).
@@ -90,9 +90,9 @@ convention = "numpy"
 "src/keepout/cli/{assess,maneuver,screen}.py" = ["DOC501"]
 # The tools run git and Python with arguments they build themselves.
 "tools/**" = ["S603", "S607"]
-# Stubs mirror the names sgp4 and astropy give (jdsatepochF, IERS_Auto), and
-# type what astropy leaves dynamic (array-or-scalar values) as Any.
-"stubs/**" = ["N801", "N815", "ANN401"]
+# Stubs mirror the names sgp4 and astropy give (jdsatepochF, IERS_Auto,
+# format=), and type what astropy leaves dynamic (array-or-scalar values) as Any.
+"stubs/**" = ["N801", "N815", "ANN401", "A002"]
 
 [tool.mypy]
 strict = true

@@ -80,7 +80,8 @@ class Time:
     def ut1(self) -> Self: ...
     @property
     def tdb(self) -> Self: ...
-    scale: str
+    @property
+    def scale(self) -> str: ...
     format: str
     precision: int
     out_subfmt: str

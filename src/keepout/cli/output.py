@@ -19,7 +19,7 @@ from rich import box
 from rich.console import Console, RenderableType
 from rich.table import Table
 
-from keepout._text import plural
+from keepout._text import pc_text, plural
 from keepout.errors import KeepoutError
 from keepout.units import DAY, HOUR, MINUTE
 
@@ -139,11 +139,6 @@ def minute(time: Time) -> str:
 def objects(cdm: Cdm) -> str:
     """The pair of a CDM: ``"<object1> / <object2>"``."""
     return f"{cdm.object1.object_id} / {cdm.object2.object_id}"
-
-
-def pc_text(pc: float | None) -> str:
-    """A Pc for tables, ``1.23e-05``, or ``-`` if there is none."""
-    return "-" if pc is None else f"{pc:.2e}"
 
 
 def duration_words(seconds: float) -> str:

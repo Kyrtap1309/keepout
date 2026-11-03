@@ -2,8 +2,8 @@
 
 keepout never vendors CARA files (they are distributed under the NASA Open
 Source Agreement). Files are downloaded on demand from a pinned commit,
-verified by SHA-256 and cached under
-:func:`~keepout.sources._store.cache_dir`.
+verified by SHA-256 and cached under the cache root: ``$KEEPOUT_CACHE_DIR``
+if set, else the user cache directory.
 """
 
 from __future__ import annotations
@@ -176,8 +176,8 @@ DILUTION_CDMS: Final[Mapping[str, CaraFile]] = {
 def commit_dir(cache: Path | None = None) -> Path:
     """The folder of the cached files of :data:`CARA_COMMIT`.
 
-    ``<cache>/cara/<CARA_COMMIT>``, ``<cache>`` being
-    :func:`~keepout.sources._store.cache_dir` of ``cache``; a file's copy is
+    ``<cache>/cara/<CARA_COMMIT>``, ``<cache>`` being ``cache``, else
+    ``$KEEPOUT_CACHE_DIR``, else the user cache directory; a file's copy is
     at its :attr:`CaraFile.path` below it.
     """
     return cache_dir(cache) / "cara" / CARA_COMMIT

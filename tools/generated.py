@@ -117,22 +117,6 @@ def relative(path: Path, start: Path) -> str:
     return Path(os.path.relpath(path, start)).as_posix()
 
 
-def plural(count: int, noun: str, nouns: str | None = None) -> str:
-    """``count`` and ``noun``, or its plural ``nouns`` (default: ``noun`` and
-    ``s``) unless ``count`` is one: ``1 event``, ``2 events``. As
-    :func:`keepout.cli.output.plural`, which the tools do not import (it
-    needs the ``cli`` extra)."""
-    if count == 1:
-        return f"{count} {noun}"
-    return f"{count} {nouns or noun + 's'}"
-
-
-def pc_text(pc: float | None) -> str:
-    """A Pc for tables, ``1.23e-05``, or ``-`` if there is none (as
-    :func:`keepout.cli.output.pc_text`)."""
-    return "-" if pc is None else f"{pc:.2e}"
-
-
 def significant(value: float, digits: int = 3) -> float:
     """``value`` rounded to ``digits`` significant digits: ``0.0123``."""
     return float(f"{value:.{digits}g}")

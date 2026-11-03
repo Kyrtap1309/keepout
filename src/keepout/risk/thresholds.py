@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Final, Literal, TypeAlias, get_args
+from typing import TYPE_CHECKING, Final, Literal, TypeAlias, get_args
 
 from keepout._types import OrderedEnum
 from keepout._validation import require_choice
 from keepout.risk.observation import PcObservation
+
+if TYPE_CHECKING:
+    from keepout.pc import PcResult
 
 __all__ = ["BASES", "DEFAULT_THRESHOLDS", "Basis", "RiskLevel", "Thresholds"]
 
@@ -90,9 +93,25 @@ class Thresholds:
         """
         if observation.pc is None:
             raise ValueError(f"observation has no Pc: {observation.error}")
-        if self.basis == "conservative" and observation.ci_high is not None:
-            return observation.ci_high
-        return observation.pc
+        return self._compared(observation.pc, observation.ci_high)
+
+    def value_of_result(self, result: PcResult) -> float:
+        """The value of a keepout result compared with the thresholds, as
+        :meth:`value_of` takes it from an observation of the result.
+
+        Parameters
+        ----------
+        result
+            A result of a Pc method.
+        """
+        high = None if result.interval is None else result.interval[1]
+        return self._compared(result.value, high)
+
+    def _compared(self, pc: float, ci_high: float | None) -> float:
+        """``ci_high`` on the conservative basis when there is one, else ``pc``."""
+        if self.basis == "conservative" and ci_high is not None:
+            return ci_high
+        return pc
 
     def level(self, value: float) -> RiskLevel:
         """The risk level of a Pc ``value``.

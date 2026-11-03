@@ -36,7 +36,6 @@ from generated import (
     generated_notice,
     json_text,
     minute_text,
-    plural,
     positive,
     readme_with,
     relative,
@@ -46,6 +45,7 @@ from generated import (
 )
 from screening_snapshot import SocratesSummary
 
+from keepout._text import plural
 from keepout._workers import DEFAULT_WORKERS
 from keepout.omm import Omm
 from keepout.screening import (

@@ -34,8 +34,8 @@ CacheDir: TypeAlias = Annotated[
         help="Cache root for downloaded data (default: the user cache directory).",
     ),
 ]
-"""``--cache-dir``: the cache root (:func:`keepout.sources._store.cache_dir`),
-also read from ``$KEEPOUT_CACHE_DIR``, which ``--help`` shows."""
+"""``--cache-dir``: the cache root, also read from ``$KEEPOUT_CACHE_DIR``,
+which ``--help`` shows."""
 
 Workers: TypeAlias = Annotated[
     int | None,
