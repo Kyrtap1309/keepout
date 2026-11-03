@@ -2,9 +2,11 @@
 
 :func:`plan_maneuver` turns a conjunction event into a :class:`ManeuverPlan`:
 the Pc of a grid of burns (time before TCA by signed along-track Δv) and the
-smallest burn per direction that meets a target, and :func:`evaluate_burn`
-answers for one burn. :func:`burn_effects` gives the change of an object's
-state at TCA for each burn of a grid, as a :class:`BurnEffects`, and
+smallest burn per direction that meets a target. :func:`evaluate_burn`
+answers for one burn, of a plan or of the :class:`ManeuverContext` of
+:func:`prepare_maneuver`, which skips the grid. :func:`burn_effects` gives
+the change of an object's state at TCA for each burn of a grid, as a
+:class:`BurnEffects`, and
 :func:`closest_approach_shift` how far the closest approach moves in time.
 :func:`rescreen` screens a burn against a catalog and returns a
 :class:`RescreenResult` listing the approaches it brings
@@ -24,10 +26,12 @@ from keepout.maneuver.planner import (
     TARGET_PC,
     BurnDirection,
     BurnGrid,
+    ManeuverContext,
     ManeuverOption,
     ManeuverPlan,
     evaluate_burn,
     plan_maneuver,
+    prepare_maneuver,
 )
 from keepout.maneuver.rescreen import (
     BurnVerdict,
@@ -46,6 +50,7 @@ __all__ = [
     "BurnEffects",
     "BurnGrid",
     "BurnVerdict",
+    "ManeuverContext",
     "ManeuverOption",
     "ManeuverPlan",
     "NewApproach",
@@ -55,5 +60,6 @@ __all__ = [
     "evaluate_burn",
     "judge",
     "plan_maneuver",
+    "prepare_maneuver",
     "rescreen",
 ]

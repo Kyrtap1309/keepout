@@ -53,7 +53,7 @@ from keepout._text import before_tca
 from keepout._validation import require_non_negative
 from keepout.errors import ManeuverError, PropagationError
 from keepout.events import ConjunctionEvent
-from keepout.maneuver.planner import ManeuverOption, ManeuverPlan
+from keepout.maneuver.planner import ManeuverContext, ManeuverOption
 from keepout.omm import Omm, deduplicate
 from keepout.pc import AUTO, PcComputation
 from keepout.propagation import (
@@ -428,7 +428,7 @@ def _classified(
 
 
 def rescreen(
-    plan: ManeuverPlan,
+    plan: ManeuverContext,
     option: ManeuverOption,
     catalog: Iterable[Omm],
     *,
@@ -446,7 +446,9 @@ def rescreen(
     Parameters
     ----------
     plan
-        The plan of the event; its latest CDM's ``OBJECT_DESIGNATOR`` values
+        The event's :class:`~keepout.maneuver.ManeuverPlan` or
+        :class:`~keepout.maneuver.ManeuverContext`; its latest CDM's
+        ``OBJECT_DESIGNATOR`` values
         are the catalog numbers of the primary and the secondary.
     option
         The burn, ``burn_lead`` before the event's TCA. The window must hold

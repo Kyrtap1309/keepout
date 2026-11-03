@@ -46,8 +46,8 @@ if TYPE_CHECKING:
     from keepout.maneuver import (
         BurnDirection,
         BurnVerdict,
+        ManeuverContext,
         ManeuverOption,
-        ManeuverPlan,
         NewApproach,
         RescreenResult,
     )
@@ -174,7 +174,13 @@ def maneuver_command(
         )
     require_one_catalog(catalog, source)
     from keepout.events import group_events
-    from keepout.maneuver import evaluate_burn, judge, plan_maneuver, rescreen
+    from keepout.maneuver import (
+        evaluate_burn,
+        judge,
+        plan_maneuver,
+        prepare_maneuver,
+        rescreen,
+    )
 
     event = _one_event(group_events(load_cdms(cdms)))
     screened = (
@@ -182,12 +188,13 @@ def maneuver_command(
         if catalog is None and source is None
         else catalog_input(catalog, source, cache_dir)
     )
+    plan: ManeuverContext
     if burn_before is None or dv is None:
         plan = plan_maneuver(event, target_pc=target_pc, combined_hard_body_radius=hbr)
         options = plan.options
     else:
-        plan = plan_maneuver(
-            event, target_pc=target_pc, grid=None, combined_hard_body_radius=hbr
+        plan = prepare_maneuver(
+            event, target_pc=target_pc, combined_hard_body_radius=hbr
         )
         burn_lead = burn_before * HOUR
         options = (evaluate_burn(plan, burn_lead=burn_lead, delta_v=dv),)
@@ -243,7 +250,7 @@ def _one_event(events: Sequence[ConjunctionEvent]) -> ConjunctionEvent:
     return events[0]
 
 
-def _refusal(plan: ManeuverPlan, verdict: BurnVerdict) -> str:
+def _refusal(plan: ManeuverContext, verdict: BurnVerdict) -> str:
     """The line saying why no burn can be recommended."""
     target = f"the target Pc {pc_text(plan.target_pc)}"
     if not verdict.burns:
@@ -324,7 +331,7 @@ def _burn_json(burn: _Burn) -> dict[str, JsonOut]:
     }
 
 
-def _payload(plan: ManeuverPlan, burns: Sequence[_Burn]) -> dict[str, JsonOut]:
+def _payload(plan: ManeuverContext, burns: Sequence[_Burn]) -> dict[str, JsonOut]:
     """The result as JSON values, for ``--json``."""
     latest = plan.event.latest
     return {
@@ -352,7 +359,7 @@ def _row(name: str, lead: str, delta_v: str, option: ManeuverOption) -> list[str
     ]
 
 
-def _burns_table(plan: ManeuverPlan, burns: Sequence[_Burn]) -> Table:
+def _burns_table(plan: ManeuverContext, burns: Sequence[_Burn]) -> Table:
     """A table of the baseline and the burns."""
     rows = table("Burns of the primary")
     rows.add_column("Option", no_wrap=True)
@@ -461,7 +468,7 @@ def _rescreen_lines(
 
 
 def _summary(
-    plan: ManeuverPlan,
+    plan: ManeuverContext,
     burns: Sequence[_Burn],
     gaps: Sequence[str],
     catalog_label: str | None,

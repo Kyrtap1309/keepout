@@ -29,8 +29,10 @@ print(plan.pc.shape, plan.notes)  # Foster's Pc per (burn time, Δv) cell
 ```
 
 `evaluate_burn(plan, burn_lead=..., delta_v=...)` gives one burn of the
-plan's event, on the grid or off it, with the event's own Pc method. The
-command line runs the same as `keepout maneuver`
+plan's event, on the grid or off it, with the event's own Pc method. For a
+burn of your own, `prepare_maneuver(event)` gives the event's baseline
+without the grid, in a fraction of the time, and `evaluate_burn` takes it
+in place of a plan. The command line runs the same as `keepout maneuver`
 ([Command line](cli.md#maneuver)).
 
 ## The grid
@@ -65,8 +67,9 @@ time to grow so close to TCA. `BurnGrid` changes any of these, and
 The default target, 1e-5, is ten times below the red
 threshold `red_from` (1e-4). The margin leaves the event clearly out of the
 red rather than just under it. The target is compared on the basis of the
-plan's `thresholds`, which `evaluate_burn` and `rescreen` use too. On the default, conservative basis a Monte Carlo Pc counts by the
-upper end of its confidence interval.
+plan's `thresholds`, which `evaluate_burn` and `rescreen` use too. On the
+default, conservative basis a Monte Carlo Pc counts by the upper end of its
+confidence interval.
 
 Every cell uses Foster's Pc, whatever the event's own method. Foster takes
 about 0.1 ms per cell and Hall 3D-Nc 0.1 to 0.2 s, so Hall on the 12 896

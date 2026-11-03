@@ -70,7 +70,6 @@ from keepout._types import FloatArray, IndexArray
 from keepout._validation import (
     require_at_least,
     require_non_negative,
-    require_positive,
     require_single_time,
 )
 from keepout._workers import process_pool, resolve_workers
@@ -97,7 +96,7 @@ from keepout.screening.search_result import (
     RangeMinimum,
     SearchResult,
 )
-from keepout.screening.tca import DEFAULT_STEP, SEARCH_REACH, ApproachSearch
+from keepout.screening.tca import SEARCH_REACH, ApproachSearch
 from keepout.screening.volume import (
     DEFAULT_VOLUME,
     ScreeningVolume,
@@ -132,7 +131,6 @@ def screen(
     workers: int | None = 1,
     max_age: float = MAX_AGE,
     max_lead: float = MAX_LEAD,
-    step: float = DEFAULT_STEP,
     max_states: int = CHUNK_STATES,
     adjust_primaries: Callable[[Propagator], Propagator] | None = None,
 ) -> ScreeningResult:
@@ -167,10 +165,6 @@ def screen(
     max_lead
         Longest time [s] from the start of the window to a later element
         epoch; element sets further ahead are left out.
-    step
-        Longest time between the search's grid samples [s]
-        (:func:`~keepout.screening.tca.time_grid`); the result does not
-        depend on it, the time it takes does.
     max_states
         Most states (objects x times) a process propagates at once; bounds
         the memory (about 49 bytes per state).
@@ -194,7 +188,7 @@ def screen(
     ------
     ValueError
         If ``start`` is not one time, or ``duration``, ``max_age``,
-        ``max_lead``, ``step``, ``workers`` or ``max_states`` is out of range,
+        ``max_lead``, ``workers`` or ``max_states`` is out of range,
         or the propagator of ``adjust_primaries`` changes the number of
         primaries or their frame or stops short of the states the search
         reads.
@@ -210,10 +204,9 @@ def screen(
     require_non_negative(duration, "duration")
     require_non_negative(max_age, "max_age")
     require_non_negative(max_lead, "max_lead")
-    require_positive(step, "step")
     processes = resolve_workers(workers)
     require_at_least(max_states, 1, "max_states")
-    settings = _SearchSettings(start, float(duration), float(step), max_states)
+    settings = _SearchSettings(start, float(duration), max_states)
     unique_primaries, duplicate_primaries = _deduplicated(
         primaries, ScreeningRole.PRIMARY
     )
@@ -256,7 +249,6 @@ class _SearchSettings:
 
     start: Time
     duration: float
-    step: float
     max_states: int
 
 
@@ -471,7 +463,6 @@ def _screen_part(part: _Part) -> _PartResult:
         settings.duration,
         part.volumes,
         pairs,
-        step=settings.step,
         primary_bounds=part.primary_bounds,
         catalog_bounds=bounds,
     )

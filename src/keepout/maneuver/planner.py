@@ -47,10 +47,12 @@ __all__ = [
     "TARGET_PC",
     "BurnDirection",
     "BurnGrid",
+    "ManeuverContext",
     "ManeuverOption",
     "ManeuverPlan",
     "evaluate_burn",
     "plan_maneuver",
+    "prepare_maneuver",
 ]
 
 MAX_CONFIRMATIONS: Final = 8
@@ -203,11 +205,11 @@ class ManeuverOption:
 
 
 @dataclass(frozen=True, eq=False, slots=True, kw_only=True)
-class ManeuverPlan:
-    """The burns of an event: the Pc grid and the minimum Δv per direction.
+class ManeuverContext:
+    """An event ready for burns: its conjunction, the target and the baseline.
 
-    The arrays are read-only copies of those given. A plan without a grid (see
-    :func:`plan_maneuver`) has arrays of size 0 and no options.
+    :func:`prepare_maneuver` makes one; :func:`evaluate_burn` and
+    :func:`~keepout.maneuver.rescreen` take one, or a :class:`ManeuverPlan`.
 
     Parameters
     ----------
@@ -226,6 +228,37 @@ class ManeuverPlan:
     confirmation
         The computation of ``baseline.method`` that confirms a burn, with the
         options that keep it reproducible.
+    notes
+        What a reader must know.
+    """
+
+    event: ConjunctionEvent
+    conjunction: Conjunction
+    target_pc: float
+    thresholds: Thresholds
+    baseline: ManeuverOption
+    confirmation: PcComputation
+    notes: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "notes", tuple(self.notes))
+
+    @property
+    def assumed_covariance(self) -> bool:
+        """Whether the latest CDM gives an assumed covariance: every Pc then
+        rests on a model."""
+        return self.event.latest.assumed_covariance
+
+
+@dataclass(frozen=True, eq=False, slots=True, kw_only=True)
+class ManeuverPlan(ManeuverContext):
+    """The burns of an event: the Pc grid and the minimum Δv per direction.
+
+    A :class:`ManeuverContext` with the grid of :func:`plan_maneuver`. The
+    arrays are read-only copies of those given.
+
+    Parameters
+    ----------
     burn_leads
         Times of the burns before TCA [s], shape ``(B,)``, descending.
     delta_v
@@ -242,8 +275,6 @@ class ManeuverPlan:
         ``baseline.method``; ``None`` if there is none.
     retrograde
         The same for negative burns.
-    notes
-        What a reader of the plan must know.
 
     Raises
     ------
@@ -251,21 +282,15 @@ class ManeuverPlan:
         If ``pc`` or ``range_at_tca`` does not have the shape ``(B, D)``.
     """
 
-    event: ConjunctionEvent
-    conjunction: Conjunction
-    target_pc: float
-    thresholds: Thresholds
-    baseline: ManeuverOption
-    confirmation: PcComputation
     burn_leads: FloatArray
     delta_v: FloatArray
     pc: FloatArray
     range_at_tca: FloatArray
     prograde: ManeuverOption | None
     retrograde: ManeuverOption | None
-    notes: tuple[str, ...]
 
     def __post_init__(self) -> None:
+        ManeuverContext.__post_init__(self)
         leads = np.array(self.burn_leads, dtype=np.float64)
         changes = np.array(self.delta_v, dtype=np.float64)
         pc = np.array(self.pc, dtype=np.float64)
@@ -281,13 +306,6 @@ class ManeuverPlan:
         object.__setattr__(self, "delta_v", changes)
         object.__setattr__(self, "pc", pc)
         object.__setattr__(self, "range_at_tca", ranges)
-        object.__setattr__(self, "notes", tuple(self.notes))
-
-    @property
-    def assumed_covariance(self) -> bool:
-        """Whether the latest CDM gives an assumed covariance: every Pc of the
-        plan then rests on a model."""
-        return self.event.latest.assumed_covariance
 
     @property
     def options(self) -> tuple[ManeuverOption, ...]:
@@ -644,69 +662,26 @@ def _burn_leads(event: ConjunctionEvent, grid: BurnGrid, period: float) -> Float
     return earliest - step * np.arange(steps + 1, dtype=np.float64)
 
 
-def plan_maneuver(
+def _prepare(
     event: ConjunctionEvent,
     *,
-    target_pc: float = TARGET_PC,
-    grid: BurnGrid | None = DEFAULT_BURN_GRID,
-    compute: PcComputation = AUTO,
-    policy: Policy = "repair",
-    combined_hard_body_radius: float | None = None,
-    thresholds: Thresholds = DEFAULT_THRESHOLDS,
-) -> ManeuverPlan:
-    """The Pc of along-track burns of the primary, from the latest CDM.
-
-    The baseline is the Pc of the CDM's own conjunction, by ``compute``, whose
-    result names the event's method. Every cell of the grid uses Foster's Pc.
-    A cell is an option in a direction when it is below ``target_pc``: cells
-    are tried from the smallest Δv and, among equals, from the latest burn, and
-    the first that the event's method also puts below ``target_pc`` is taken.
-    The method gets at most :data:`MAX_CONFIRMATIONS` tries per direction.
-    Comparisons are on the basis of ``thresholds``.
-
-    Takes tens of seconds on the default grid, and a run of the event's method
-    (up to a minute for a slow encounter) per try.
-
-    Parameters
-    ----------
-    event
-        The event; its latest CDM is planned from.
-    target_pc
-        The Pc a burn must stay below, in (0, 1).
-    grid
-        The burns; ``None`` for the baseline alone, to evaluate burns of one's
-        own with :func:`evaluate_burn` in a fraction of the time.
-    compute
-        The Pc method of the baseline, from :func:`~keepout.pc.computation`.
-        An explicit method confirms the options with its own options; the
-        method ``"auto"`` chose confirms them with defaults, or with ``"auto"``'s
-        seed and sample budget if it is the Monte Carlo fallback.
-    policy
-        Covariance policy; see :func:`keepout.covariance.make_covariance`.
-    combined_hard_body_radius
-        Combined radius [m]; if ``None``, the sum of both objects' ``HBR``.
-    thresholds
-        Whose :attr:`~keepout.risk.Thresholds.basis` turns a result into the
-        Pc compared with ``target_pc``.
-
-    Returns
-    -------
-    ManeuverPlan
-        The plan; a direction without an option has ``None``.
+    target_pc: float,
+    compute: PcComputation,
+    policy: Policy,
+    combined_hard_body_radius: float | None,
+    thresholds: Thresholds,
+    grid: BurnGrid | None = None,
+) -> tuple[ManeuverContext, PcResult]:
+    """:func:`prepare_maneuver`, with the baseline's own result; with a
+    ``grid``, also the check that its burn window is still open.
 
     Raises
     ------
     ValueError
         If ``target_pc`` is not in (0, 1).
     ManeuverError
-        If the primary has ``MANEUVERABLE = NO``, the CDM comes after the burn
-        window has closed, a covariance is unknown, the primary's orbit is not
-        bound, a ``CD_AREA_OVER_MASS`` is negative or not finite, or a cell falls
-        below the Earth's surface or fails to integrate (for the whole grid:
-        nothing is decided then).
-    KeepoutError
-        If the CDM's conjunction or its Pc cannot be computed, e.g.
-        :class:`~keepout.errors.HardBodyRadiusError` for a missing radius.
+        As :func:`prepare_maneuver`, or if the CDM comes after the window of
+        ``grid`` has closed.
     """
     if not 0.0 < target_pc < 1.0:
         raise ValueError(f"target_pc must be in (0, 1), got {target_pc}")
@@ -732,36 +707,153 @@ def plan_maneuver(
             f"event {event.event_id}: no burn can be planned without a covariance "
             f"of {labels}"
         )
-    period = _period(event, conjunction)
-    forces = _forces(event)
+    # Both check the event before its Pc, which can take a minute, is computed.
+    _period(event, conjunction)
+    _forces(event)
     result = compute(conjunction)
-    baseline = _option(
-        result,
-        burn_lead=0.0,
-        delta_v=0.0,
-        range_at_tca=conjunction.relative_motion.distance,
+    context = ManeuverContext(
+        event=event,
+        conjunction=conjunction,
         target_pc=target_pc,
         thresholds=thresholds,
-    )
-    confirmation = compute.resolved(result)
-    notes = _notes(result, cdm, conjunction)
-    if grid is None:
-        empty = np.empty(0)
-        return ManeuverPlan(
-            event=event,
-            conjunction=conjunction,
+        baseline=_option(
+            result,
+            burn_lead=0.0,
+            delta_v=0.0,
+            range_at_tca=conjunction.relative_motion.distance,
             target_pc=target_pc,
             thresholds=thresholds,
-            baseline=baseline,
-            confirmation=confirmation,
-            burn_leads=empty,
-            delta_v=empty,
-            pc=np.empty((0, 0)),
-            range_at_tca=np.empty((0, 0)),
-            prograde=None,
-            retrograde=None,
-            notes=notes,
-        )
+        ),
+        confirmation=compute.resolved(result),
+        notes=_notes(result, cdm, conjunction),
+    )
+    return context, result
+
+
+def prepare_maneuver(
+    event: ConjunctionEvent,
+    *,
+    target_pc: float = TARGET_PC,
+    compute: PcComputation = AUTO,
+    policy: Policy = "repair",
+    combined_hard_body_radius: float | None = None,
+    thresholds: Thresholds = DEFAULT_THRESHOLDS,
+) -> ManeuverContext:
+    """An event ready for burns of one's own (:func:`evaluate_burn`), without
+    the grid of :func:`plan_maneuver`: its baseline in a fraction of the time.
+
+    Parameters
+    ----------
+    event
+        The event; its latest CDM is planned from.
+    target_pc
+        The Pc a burn must stay below, in (0, 1).
+    compute
+        The Pc method of the baseline, from :func:`~keepout.pc.computation`.
+        An explicit method confirms burns with its own options; the method
+        ``"auto"`` chose confirms them with defaults, or with ``"auto"``'s
+        seed and sample budget if it is the Monte Carlo fallback.
+    policy
+        Covariance policy; see :func:`keepout.covariance.make_covariance`.
+    combined_hard_body_radius
+        Combined radius [m]; if ``None``, the sum of both objects' ``HBR``.
+    thresholds
+        Whose :attr:`~keepout.risk.Thresholds.basis` turns a result into the
+        Pc compared with ``target_pc``.
+
+    Raises
+    ------
+    ValueError
+        If ``target_pc`` is not in (0, 1).
+    ManeuverError
+        If the primary has ``MANEUVERABLE = NO``, a covariance is unknown, the
+        primary's orbit is not bound, or a ``CD_AREA_OVER_MASS`` is negative or
+        not finite.
+    KeepoutError
+        If the CDM's conjunction or its Pc cannot be computed, e.g.
+        :class:`~keepout.errors.HardBodyRadiusError` for a missing radius.
+    """
+    context, _ = _prepare(
+        event,
+        target_pc=target_pc,
+        compute=compute,
+        policy=policy,
+        combined_hard_body_radius=combined_hard_body_radius,
+        thresholds=thresholds,
+    )
+    return context
+
+
+def plan_maneuver(
+    event: ConjunctionEvent,
+    *,
+    target_pc: float = TARGET_PC,
+    grid: BurnGrid = DEFAULT_BURN_GRID,
+    compute: PcComputation = AUTO,
+    policy: Policy = "repair",
+    combined_hard_body_radius: float | None = None,
+    thresholds: Thresholds = DEFAULT_THRESHOLDS,
+) -> ManeuverPlan:
+    """The Pc of along-track burns of the primary, from the latest CDM.
+
+    The baseline is that of :func:`prepare_maneuver`. Every cell of the grid
+    uses Foster's Pc. A cell is an option in a direction when it is below
+    ``target_pc``: cells are tried from the smallest Δv and, among equals,
+    from the latest burn, and the first that the event's method also puts
+    below ``target_pc`` is taken. The method gets at most
+    :data:`MAX_CONFIRMATIONS` tries per direction. Comparisons are on the
+    basis of ``thresholds``.
+
+    Takes tens of seconds on the default grid, and a run of the event's method
+    (up to a minute for a slow encounter) per try.
+
+    Parameters
+    ----------
+    event
+        The event; its latest CDM is planned from.
+    target_pc
+        The Pc a burn must stay below, in (0, 1).
+    grid
+        The burns.
+    compute
+        The Pc method of the baseline, as for :func:`prepare_maneuver`.
+    policy
+        Covariance policy; see :func:`keepout.covariance.make_covariance`.
+    combined_hard_body_radius
+        Combined radius [m]; if ``None``, the sum of both objects' ``HBR``.
+    thresholds
+        Whose :attr:`~keepout.risk.Thresholds.basis` turns a result into the
+        Pc compared with ``target_pc``.
+
+    Returns
+    -------
+    ManeuverPlan
+        The plan; a direction without an option has ``None``.
+
+    Raises
+    ------
+    ValueError
+        If ``target_pc`` is not in (0, 1).
+    ManeuverError
+        As :func:`prepare_maneuver`, and if the CDM comes after the burn
+        window has closed, or a cell falls below the Earth's surface or fails
+        to integrate (for the whole grid: nothing is decided then).
+    KeepoutError
+        If the CDM's conjunction or its Pc cannot be computed, e.g.
+        :class:`~keepout.errors.HardBodyRadiusError` for a missing radius.
+    """
+    context, result = _prepare(
+        event,
+        target_pc=target_pc,
+        compute=compute,
+        policy=policy,
+        combined_hard_body_radius=combined_hard_body_radius,
+        thresholds=thresholds,
+        grid=grid,
+    )
+    conjunction = context.conjunction
+    period = _period(event, conjunction)
+    forces = _forces(event)
     leads = _burn_leads(event, grid, period)
     delta_v = grid.delta_v
     effects = _effects(event, conjunction.primary.state, leads, delta_v, forces.primary)
@@ -774,7 +866,7 @@ def plan_maneuver(
         delta_v=delta_v,
         pc=pc,
         target_pc=target_pc,
-        confirmation=confirmation,
+        confirmation=context.confirmation,
         thresholds=thresholds,
         baseline_notes=result.diagnostics,
     )
@@ -786,8 +878,8 @@ def plan_maneuver(
         conjunction=conjunction,
         target_pc=target_pc,
         thresholds=thresholds,
-        baseline=baseline,
-        confirmation=confirmation,
+        baseline=context.baseline,
+        confirmation=context.confirmation,
         burn_leads=leads,
         delta_v=delta_v,
         pc=pc,
@@ -795,7 +887,7 @@ def plan_maneuver(
         prograde=prograde,
         retrograde=retrograde,
         notes=(
-            *notes,
+            *context.notes,
             *_grid_notes(pc, no_minimum=no_minimum, failed=failed),
             *prograde_notes,
             *retrograde_notes,
@@ -804,18 +896,18 @@ def plan_maneuver(
 
 
 def evaluate_burn(
-    plan: ManeuverPlan,
+    plan: ManeuverContext,
     *,
     burn_lead: float,
     delta_v: float,
 ) -> ManeuverOption:
-    """One burn of a plan's event, on or off its grid, by the plan's confirmation
-    and on the basis of its thresholds.
+    """One burn of an event, on or off a plan's grid, by the confirmation of
+    ``plan`` and on the basis of its thresholds.
 
     Parameters
     ----------
     plan
-        The plan.
+        The event's :class:`ManeuverContext` or :class:`ManeuverPlan`.
     burn_lead
         Time of the burn before TCA [s], >= 0.
     delta_v

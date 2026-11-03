@@ -741,7 +741,6 @@ def test_screening_needs_nothing_but_inputs() -> None:
         ({"duration": -1.0}, "duration must be finite and >= 0, got -1.0"),
         ({"max_age": float("nan")}, "max_age must be finite and >= 0, got nan"),
         ({"max_lead": -1.0}, "max_lead must be finite and >= 0, got -1.0"),
-        ({"step": 0.0}, "step must be finite and > 0, got 0.0"),
         ({"workers": 0}, "workers must be at least 1, got 0"),
         ({"max_states": 0}, "max_states must be at least 1, got 0"),
     ],

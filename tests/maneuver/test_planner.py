@@ -46,6 +46,7 @@ from keepout.maneuver import (
     evaluate_burn,
     plan_maneuver,
     planner,
+    prepare_maneuver,
 )
 from keepout.objects import ObjectState
 from keepout.orbits import EARTH_MU, orbital_period
@@ -260,14 +261,15 @@ def test_grid_shape_and_axes() -> None:
     assert plan.range_at_tca.shape == plan.pc.shape
 
 
-def test_a_plan_without_a_grid_has_the_baseline_alone(plan: ManeuverPlan) -> None:
-    alone = plan_maneuver(leo_event(), grid=None)
+def test_a_context_is_the_plan_without_its_grid(plan: ManeuverPlan) -> None:
+    alone = prepare_maneuver(leo_event())
+    assert not isinstance(alone, ManeuverPlan)
     assert alone.baseline == plan.baseline
     assert (alone.confirmation.method, dict(alone.confirmation.options)) == (
         plan.confirmation.method,
         dict(plan.confirmation.options),
     )
-    assert (alone.pc.shape, alone.burn_leads.shape, alone.options) == ((0, 0), (0,), ())
+    assert plan.notes[: len(alone.notes)] == alone.notes
     assert not any("cells" in note for note in alone.notes)
     option = plan.prograde
     assert option is not None
@@ -277,11 +279,11 @@ def test_a_plan_without_a_grid_has_the_baseline_alone(plan: ManeuverPlan) -> Non
     )
 
 
-def test_a_plan_without_a_grid_accepts_a_cdm_inside_the_burn_window() -> None:
+def test_a_context_accepts_a_cdm_inside_the_burn_window() -> None:
     late = leo_event(hours=1.0)
     with pytest.raises(ManeuverError, match="after the burn window closed"):
         plan_maneuver(late)
-    assert plan_maneuver(late, grid=None).options == ()
+    assert prepare_maneuver(late).event is late
 
 
 def test_options_are_named_by_direction(plan: ManeuverPlan) -> None:
