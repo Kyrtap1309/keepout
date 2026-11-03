@@ -18,8 +18,10 @@ approach is refined by Newton's method on ``r.v = 0`` (slope
 
 from __future__ import annotations
 
+import contextlib
 import itertools
 from collections.abc import Iterator
+from concurrent.futures import Executor
 from dataclasses import dataclass
 from typing import Final, NamedTuple
 
@@ -27,6 +29,7 @@ import numpy as np
 
 from keepout._types import BoolArray, FloatArray, IndexArray
 from keepout._validation import require_at_least, require_positive
+from keepout._workers import process_pool, resolve_workers
 from keepout.conjunction import Conjunction
 from keepout.equinoctial import Orbits
 from keepout.orbits import EARTH_MU
@@ -56,7 +59,9 @@ MC_CONFIDENCE: Final = 0.99
 """Default confidence level of the Clopper-Pearson interval."""
 
 MC_BATCH: Final = 50_000
-"""Samples per batch: memory stays O(batch) whatever the sample count."""
+"""Samples per batch: memory stays O(batch) whatever the sample count. Each
+batch draws from its own stream of the seed (:class:`numpy.random.SeedSequence`
+spawned), so a seed gives the same result in any number of processes."""
 
 NEWTON_STEPS: Final = 12
 """Newton iterations refining a closest approach between two grid points.
@@ -252,6 +257,7 @@ def montecarlo(
     max_samples: int = MC_MAX_SAMPLES,
     confidence: float = MC_CONFIDENCE,
     seed: int | None = None,
+    workers: int | None = 1,
 ) -> PcResult:
     """Monte Carlo Pc with two-body motion and equinoctial sampling.
 
@@ -274,7 +280,14 @@ def montecarlo(
     confidence
         Confidence level of the Clopper-Pearson interval.
     seed
-        Seed of the random generator; results are reproducible with a seed.
+        Seed of the random generator; results are reproducible with a seed,
+        whatever ``workers``.
+    workers
+        Number of processes to sample in, a batch of :data:`MC_BATCH` samples
+        each at a time; 1 samples in this process, ``None`` uses one per
+        CPU, at most 4. Processes pay off from two batches (a batch takes
+        seconds); a script calling with more than 1 needs an
+        ``if __name__ == "__main__":`` guard.
 
     Returns
     -------
@@ -302,6 +315,7 @@ def montecarlo(
     ValueError
         If an argument is out of range.
     """
+    processes = resolve_workers(workers)
     if samples is not None:
         require_at_least(samples, 1, "samples")
     require_positive(rtol, "rtol")
@@ -318,7 +332,52 @@ def montecarlo(
         max_samples=max_samples,
         confidence=confidence,
         seed=seed,
+        workers=processes,
     )
+
+
+def _batch_collisions(
+    conjunction: Conjunction,
+    encounters: Encounters,
+    stream: np.random.SeedSequence,
+    count: int,
+) -> tuple[int, int]:
+    """Collisions and samples inside at the start, of ``count`` samples drawn
+    from ``stream``; at module level, for the processes of a pool."""
+    rng = np.random.default_rng(stream)
+    rate = encounters.rate
+    batch = _SamplePairs(
+        Orbits.from_elements(rate.primary.sample(rng, count), rate.primary.fr),
+        Orbits.from_elements(rate.secondary.sample(rng, count), rate.secondary.fr),
+    )
+    return _collisions(batch, encounters.scan, conjunction.combined_hard_body_radius)
+
+
+def _batch_results(
+    conjunction: Conjunction,
+    encounters: Encounters,
+    counts: list[int],
+    seed: int | None,
+    pool: Executor | None,
+    wave: int,
+) -> Iterator[tuple[int, int, int]]:
+    """Each batch's size, collisions and samples inside at the start, in
+    order; with a pool, ``wave`` batches are sampled at a time, so a caller
+    that stops early wastes fewer than ``wave``."""
+    streams = np.random.SeedSequence(seed).spawn(len(counts))
+    batches = list(zip(counts, streams, strict=True))
+    for first in range(0, len(batches), wave):
+        jobs = batches[first : first + wave]
+        if pool is None:
+            for count, stream in jobs:
+                yield count, *_batch_collisions(conjunction, encounters, stream, count)
+            continue
+        futures = [
+            pool.submit(_batch_collisions, conjunction, encounters, stream, count)
+            for count, stream in jobs
+        ]
+        for (count, _), future in zip(jobs, futures, strict=True):
+            yield count, *future.result()
 
 
 def montecarlo_over_scan(
@@ -330,6 +389,7 @@ def montecarlo_over_scan(
     max_samples: int = MC_MAX_SAMPLES,
     confidence: float = MC_CONFIDENCE,
     seed: int | None = None,
+    workers: int = 1,
 ) -> PcResult:
     """Monte Carlo Pc over an encounter scan.
 
@@ -337,7 +397,7 @@ def montecarlo_over_scan(
     :func:`~keepout.pc.compute_pc`, whose fallback reuses the scan of the
     failed :func:`~keepout.pc.hall3d.hall3d`.
     """
-    rate, scan = encounters.rate, encounters.scan
+    scan = encounters.scan
     # A peak-overlap failure inside a segment could have narrowed the
     # segments searched; the same rule as Hall's applies, checked before
     # sampling since no rate is evaluated after the scan (only the scan's
@@ -348,26 +408,23 @@ def montecarlo_over_scan(
     # Imported here: scipy.stats would add ~0.2 s to every `import keepout`.
     from scipy import stats
 
-    rng = np.random.default_rng(seed)
     budget = samples if samples is not None else max_samples
+    full, rest = divmod(budget, MC_BATCH)
+    counts = [MC_BATCH] * full + ([rest] if rest else [])
+    processes = min(workers, len(counts))
     hits = inside = done = 0
     low, high = 0.0, 1.0
     converged = False
-    while done < budget:
-        count = min(MC_BATCH, budget - done)
-        batch = _SamplePairs(
-            Orbits.from_elements(rate.primary.sample(rng, count), rate.primary.fr),
-            Orbits.from_elements(rate.secondary.sample(rng, count), rate.secondary.fr),
-        )
-        new_hits, new_inside = _collisions(
-            batch, scan, conjunction.combined_hard_body_radius
-        )
-        hits, inside, done = hits + new_hits, inside + new_inside, done + count
-        interval = stats.binomtest(hits, done).proportion_ci(confidence, "exact")
-        low, high = float(interval.low), float(interval.high)
-        converged = _converged(hits, done, low, high, rtol)
-        if samples is None and converged:
-            break
+    with process_pool(processes) if processes > 1 else contextlib.nullcontext() as pool:
+        for count, new_hits, new_inside in _batch_results(
+            conjunction, encounters, counts, seed, pool, processes
+        ):
+            hits, inside, done = hits + new_hits, inside + new_inside, done + count
+            interval = stats.binomtest(hits, done).proportion_ci(confidence, "exact")
+            low, high = float(interval.low), float(interval.high)
+            converged = _converged(hits, done, low, high, rtol)
+            if samples is None and converged:
+                break
     diagnostics: list[str] = []
     if samples is None and not converged:
         diagnostics.append(

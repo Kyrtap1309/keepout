@@ -29,8 +29,10 @@ def interval(result: PcResult) -> tuple[float, float]:
 
 
 def test_fast_encounter_agrees_with_2d_pc() -> None:
+    # A fixed seed whose 99% interval holds the exact Pc (seed 1's misses it,
+    # as 1 seed in 100 may).
     conjunction = head_on(8.0, 10.0, 20.0, 5.0)
-    result = montecarlo(conjunction, samples=20_000, seed=1)
+    result = montecarlo(conjunction, samples=20_000, seed=2)
     assert result.method == "montecarlo"
     expected = foster(conjunction.plane, 5.0).value
     assert interval(result)[0] <= expected <= interval(result)[1]
@@ -87,6 +89,24 @@ def test_stops_when_the_interval_is_narrow_enough(
     assert result.diagnostics == ()
 
 
+@pytest.mark.parametrize(
+    "options", [{"samples": 6_000}, {"rtol": 0.15, "max_samples": 100_000}]
+)
+def test_processes_give_the_result_of_one(
+    monkeypatch: pytest.MonkeyPatch, options: dict[str, float]
+) -> None:
+    # Each batch has its own stream of the seed: two processes sample the
+    # same batches, and stop after the same one.
+    monte_carlo_batches(monkeypatch, 2_000)
+    conjunction = head_on(8.0, 10.0, 20.0, 5.0)
+    alone = montecarlo(conjunction, seed=7, **options)  # type: ignore[arg-type]
+    shared = montecarlo(conjunction, seed=7, workers=2, **options)  # type: ignore[arg-type]
+    assert alone.details["samples"] > 2_000
+    assert (shared.value, shared.interval) == (alone.value, alone.interval)
+    assert shared.details == alone.details
+    assert shared.diagnostics == alone.diagnostics
+
+
 def test_budget_exhausted_is_reported() -> None:
     far = head_on(200.0, 10.0, 20.0, 5.0)  # Pc ~ 1e-43: no hits
     result = montecarlo(far, max_samples=2_000, seed=1)
@@ -127,6 +147,7 @@ def test_unknown_covariance_is_rejected() -> None:
         ({"rtol": 0.0}, "rtol must be finite and > 0"),
         ({"max_samples": 0}, "max_samples must be at least 1"),
         ({"confidence": 1.0}, r"confidence must be in \(0, 1\), got 1.0"),
+        ({"workers": 0}, "workers must be at least 1"),
     ],
 )
 def test_bad_arguments_are_rejected(options: dict[str, float], message: str) -> None:

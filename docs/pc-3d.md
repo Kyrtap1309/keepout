@@ -244,6 +244,13 @@ earlier if the budget of `max_samples = 1e7` is spent. `samples=` fixes the
 count and `seed=` makes a run reproducible. The interval is the result's
 `interval` (`low`, `high`), and its level is `details["confidence"]`.
 
+A batch takes seconds, so `workers=` samples several at once in processes
+(`None`: one per CPU, at most 4). Each batch draws from its own stream of
+the seed, so a seed gives the same result in any number of processes; with
+an `rtol` target, the processes stop after the same batch as one would, and
+at most `workers - 1` batches beyond it are sampled and dropped. A script
+calling with more than 1 needs an `if __name__ == "__main__":` guard.
+
 ## Maximum Pc
 
 All three are **upper bounds**, not estimates: their results have

@@ -165,6 +165,7 @@ class MonteCarloOptions(TypedDict, total=False):
     max_samples: int
     confidence: float
     seed: int | None
+    workers: int | None
 
 
 @overload
