@@ -23,6 +23,7 @@ from typing import Any, Final
 import astropy.units as u
 import pytest
 from astropy.time import Time
+from builders import DifferenceWidened
 from screening_data import FIXTURE_START, fixture_by_number, load_fixture
 
 from keepout._defaults import TCA_TOLERANCE
@@ -753,9 +754,15 @@ def test_skipped_secondary_leaves_the_rest_screened() -> None:
     assert result.catalog_objects == plain.catalog_objects - 1
 
 
-def test_secondary_seen_failing_only_after_the_burn_is_not_screened() -> None:
+def test_secondary_seen_failing_only_after_the_burn_is_not_screened(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     # Without the burn the filter rules 45665 out of the pair, so nobody finds
-    # out that SGP4 fails for it; the burn widens the primary's radius bounds.
+    # out that SGP4 fails for it. The burn's bounds as wide as its difference
+    # stand for a burn that brings the primary's radius near 45665's (no burn
+    # up to 60 m/s does: 45665 stays 10 km below).
+    module = importlib.import_module("keepout.maneuver.rescreen")
+    monkeypatch.setattr(module, "ManeuveredPropagator", DifferenceWidened)
     plain = plan_of(CROSSING)
     plan = renamed(plain, secondary=str(FAILING))
     baseline = screen([BY_NUMBER[CROSSING]], [BY_NUMBER[FAILING]], START, 7 * DAY)

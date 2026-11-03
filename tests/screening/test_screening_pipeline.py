@@ -12,6 +12,7 @@ import numpy as np
 import numpy.typing as npt
 import pytest
 from astropy.time import Time
+from builders import DifferenceWidened
 from screening_data import (
     DATA,
     FAST_SPEED,
@@ -50,7 +51,7 @@ from keepout.screening import (
     apogee_perigee_filter,
     screen,
 )
-from keepout.screening.tca import DERIVATIVE_STEP, PERTURBATION
+from keepout.screening.tca import DERIVATIVE_STEP, PERTURBATION, SEARCH_REACH
 from keepout.units import DAY, HOUR, KM
 
 START = FIXTURE_START
@@ -756,3 +757,26 @@ def test_screening_checks_its_arguments(
     }
     with pytest.raises(ValueError, match=message):
         screen(**(arguments | change))  # type: ignore[arg-type]
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("delta_v", [0.1, 1.0])
+def test_tight_radius_bounds_of_a_burn_miss_no_approach(delta_v: float) -> None:
+    # The whole public catalog against NOAA-20 after a burn: at 1 m/s the
+    # tight bounds span 13 km where |d| spans 3700 km (8 s against 32 s), and
+    # find the same approaches.
+    catalog = load(DATA / SNAPSHOT)
+    (primary,) = [omm for omm in catalog if omm.catalog_number == 43013]
+
+    def screened(kind: type[ManeuveredPropagator]) -> list[tuple[int, str, float]]:
+        def burned(base: Propagator) -> Propagator:
+            return kind(base, START, delta_v, 7 * DAY + SEARCH_REACH)
+
+        result = screen([primary], catalog, START, 7 * DAY, adjust_primaries=burned)
+        return [
+            (a.secondary_number, a.tca.isot, a.range_at_tca) for a in result.approaches
+        ]
+
+    tight = screened(ManeuveredPropagator)
+    assert tight
+    assert tight == screened(DifferenceWidened)

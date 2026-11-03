@@ -12,11 +12,12 @@ from hypothesis import strategies as st
 from hypothesis.extra.numpy import arrays
 from scipy.spatial.transform import Rotation
 
-from keepout._types import FloatArray
+from keepout._types import FloatArray, override
 from keepout.conjunction import Conjunction
 from keepout.covariance import Covariance
 from keepout.objects import ObjectState
 from keepout.pc.result import PcResult
+from keepout.propagation import ManeuveredPropagator
 from keepout.risk import PcKind, PcObservation
 from keepout.state import StateVector
 from keepout.units import DAY
@@ -287,3 +288,17 @@ def at(
 def series(*pairs: tuple[float, float | None]) -> list[PcObservation]:
     """Observations from ``(days before TCA, Pc)`` pairs."""
     return [at(days, pc) for days, pc in pairs]
+
+
+class DifferenceWidened(ManeuveredPropagator):
+    """A burn whose radius bounds are its base's widened by the whole
+    difference ``|d|``, as where the base fails: far wider than the radius
+    after the burn, as if the burn moved it by ``|d|``."""
+
+    __slots__ = ()
+
+    @override
+    def _burned_radius(
+        self, first: float, last: float, lowest: float
+    ) -> tuple[float, float] | None:
+        return None

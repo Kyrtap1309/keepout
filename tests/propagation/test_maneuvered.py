@@ -224,47 +224,67 @@ def test_a_base_in_gcrf_is_not_rotated() -> None:
     assert position.max() < 0.05
 
 
-@pytest.mark.parametrize("delta_v", [1.0, -1.0, 0.01])
-def test_radius_bounds_hold_the_states(delta_v: float) -> None:
-    propagator = maneuvered(delta_v)
+def dense_radii(propagator: Propagator, duration: float) -> FloatArray:
+    """Radii every 2 s: a bound holds them, and is within metres of them."""
+    offsets = np.arange(0.0, duration + 1.0, 2.0)
+    positions = propagator.propagate(START, offsets).r[0]
+    radii: FloatArray = np.linalg.norm(positions, axis=1)
+    return radii
+
+
+@pytest.mark.parametrize(
+    ("number", "delta_v"),
+    [(68377, 1.0), (68377, -1.0), (68377, 0.01), (HEO_WORST, 1.0)],
+)
+def test_radius_bounds_hold_the_states_closely(number: int, delta_v: float) -> None:
+    base = Sgp4Propagator([BY_NUMBER[number]])
+    propagator = maneuvered(delta_v, base=base)
     bounds = propagator.radius_bounds(START, 7 * DAY)
-    radii = np.linalg.norm(propagator.propagate(START, GRID).r, axis=2)
+    radii = dense_radii(propagator, 7 * DAY)
     assert bounds.lowest[0] <= radii.min()
     assert radii.max() <= bounds.highest[0]
-    base = LEO.radius_bounds(START, 7 * DAY)
-    assert bounds.lowest[0] < base.lowest[0]
-    assert base.highest[0] < bounds.highest[0]
+    # Not |d| wide: most of a difference lies along the track (1800 km at
+    # 1 m/s in a week on the LEO orbit).
+    assert radii.min() - bounds.lowest[0] < 500.0
+    assert bounds.highest[0] - radii.max() < 500.0
 
 
-def test_radius_bounds_widen_by_the_difference_of_their_span_only() -> None:
-    delta_v = 0.1
-    propagator = maneuvered(delta_v, burn_time=START + DAY * u.s)
+def test_radius_bounds_follow_their_span() -> None:
+    propagator = maneuvered(0.1, burn_time=START + DAY * u.s)
     before = propagator.radius_bounds(START, DAY / 2.0)
     base = LEO.radius_bounds(START, DAY / 2.0)
     assert np.array_equal(before.lowest, base.lowest)
     assert np.array_equal(before.highest, base.highest)
     short = propagator.radius_bounds(START, 2 * DAY)
     long = propagator.radius_bounds(START, 7 * DAY)
-    near = LEO.radius_bounds(START, 2 * DAY)
-    far = LEO.radius_bounds(START, 7 * DAY)
-    assert short.highest[0] - near.highest[0] < long.highest[0] - far.highest[0]
+    assert long.lowest[0] <= short.lowest[0] < short.highest[0] <= long.highest[0]
 
 
 def test_radius_bounds_hold_the_spline_between_its_nodes() -> None:
     # A step as long as a third of an orbit leaves peaks between the nodes.
     propagator = ManeuveredPropagator(LEO, START, 1.0, DAY, step=1800.0)
-    reference = LEO.propagate(START, np.arange(0.0, DAY, 7.0))
-    states = propagator.propagate(START, reference.offsets)
-    largest = np.linalg.norm(states.r - reference.r, axis=2).max()
-    bounds, base = propagator.radius_bounds(START, DAY), LEO.radius_bounds(START, DAY)
-    assert bounds.highest[0] - base.highest[0] >= largest
+    bounds = propagator.radius_bounds(START, DAY)
+    radii = dense_radii(propagator, DAY)
+    assert bounds.lowest[0] <= radii.min()
+    assert radii.max() <= bounds.highest[0]
 
 
-def test_lowest_bound_is_never_negative() -> None:
-    # Half an orbit's worth of 2 km/s moves the object by more than its radius.
+def test_radius_bounds_hold_a_burn_that_reshapes_the_orbit() -> None:
     bounds = maneuvered(2000.0).radius_bounds(START, 7 * DAY)
-    assert bounds.lowest[0] == 0.0
-    assert bounds.highest[0] > LEO.radius_bounds(START, 7 * DAY).highest[0]
+    radii = dense_radii(maneuvered(2000.0), 7 * DAY)
+    assert 0.0 <= bounds.lowest[0] <= radii.min()
+    assert radii.max() <= bounds.highest[0]
+    assert bounds.highest[0] > LEO.radius_bounds(START, 7 * DAY).highest[0] + 1e6
+
+
+def test_radius_bounds_fall_back_to_the_difference_where_the_base_fails() -> None:
+    base = Sgp4Propagator([BY_NUMBER[FAILING]])
+    propagator = maneuvered(1.0, base=base, horizon=2 * DAY)
+    bounds = propagator.radius_bounds(START, 2 * DAY)
+    widening = propagator._largest_difference(0.0, 2 * DAY)
+    nominal = base.radius_bounds(START, 2 * DAY)
+    assert bounds.lowest[0] == max(nominal.lowest[0] - widening, 0.0)
+    assert bounds.highest[0] == nominal.highest[0] + widening
 
 
 def test_errors_of_base_pass_through() -> None:

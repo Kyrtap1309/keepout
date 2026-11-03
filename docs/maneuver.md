@@ -166,6 +166,16 @@ eccentric orbits to 3 m and 68377 to 1 m. These are measurements on those
 orbits, not a bound, and other orbits are not covered by them. All are far
 below a screening volume of kilometres.
 
+The apogee/perigee filter needs bounds on the primary's radius after the
+burn. The difference lies mostly along the track (1800 km after a week of
+1 m/s on a LEO orbit) and moves the radius by far less, so the bounds are
+taken from the radius itself: sampled every 10 s, and widened between
+samples by a bound on its curvature, they are within metres of its range.
+A 1 m/s re-screen of NOAA-20 against the public catalog then takes 8 s, not
+32 s, and a slow test checks that it finds the same approaches as bounds
+widened by the whole difference. Where SGP4 fails for the primary inside
+the window, those wide bounds are used.
+
 The result compares the two screenings:
 
 - **New approaches**: approaches with the burn that the screening without it
