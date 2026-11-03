@@ -87,6 +87,7 @@ jobs:
       - run: uv run python tools/screening_benchmark.py --check
       - run: uv run python tools/screening_benchmark.py --source spacetrack --check
       - run: uv run python tools/synthetic_operator_report.py --check
+      - run: uv run python tools/maneuver_report.py --check
       - run: uv run python tools/validation_report.py
       - run: git add --intent-to-add docs && git diff --exit-code -- docs README.md
       - if: failure()

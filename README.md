@@ -5,7 +5,7 @@ catalog, CCSDS CDM ingest and generation, probability of collision (Pc),
 risk trends, a synthetic operator on public data, a command line and
 collision-avoidance manoeuvre planning.
 
-> **Status:** pre-alpha (milestone M6 — synthetic operator and command line).
+> **Status:** pre-alpha (milestone M7 — manoeuvre planning).
 
 Pc algorithms are implemented from the published literature and validated
 against the public test cases of the
@@ -206,6 +206,54 @@ Space-Track's public CDM summaries; `keepout validate` checks keepout's Pc
 against CARA's cases. See [Synthetic operator](docs/synthetic.md), [Command
 line](docs/cli.md) and [Space-Track data](docs/spacetrack.md).
 
+## Manoeuvre planning
+
+```bash
+keepout maneuver cdms/44476_55841_*.kvn --target-pc 1e-7 \
+    --catalog tests/screening/data/celestrak-public.csv.gz
+```
+
+`keepout maneuver` takes the CDMs of one event and plans an impulsive burn
+of the primary along its velocity: from the latest CDM it computes the Pc
+of a grid of burns (signed Δv by burn time, from 2 days, or the CDM's
+creation, to 6 hours before TCA), finds the smallest burn each way that
+meets the target Pc (by default 1e-5, one order of magnitude below the red
+threshold 1e-4, as a margin) and, given a catalog,
+screens each burn against it for 7 days for the approaches it brings or
+brings closer. Here, after the `keepout screen` example above, it plans
+the yellow Intelsat 39 event: the prograde burn clears it at its TCA but
+the re-screen finds the same pair back twelve hours later above the
+target, so only the retrograde burn is clean. Exit status 4 means no burn
+on the grid meets the target, the burn given with `--burn-before` and
+`--dv` misses it, or every burn brings an approach at red or the event's
+own pair back above the target. The covariances stay as the CDM
+gives them, and the Pc of an approach the re-screen finds rests on assumed
+covariances. See [Manoeuvre planning](docs/maneuver.md) for the method and
+[Assumptions](docs/assumptions.md#manoeuvre-planning) for what it leaves
+out.
+
+<!-- maneuver-report-summary:start -->
+The burns of METOP-B (38771) that clear a red event, CARA test CDM `000038771_conj_000030802_20201216_182131_20201215_171306` (2020 test data; HBR 10 m, CARA's value; [report](docs/maneuver-report.md)):
+
+![Pc after an along-track burn of METOP-B (38771)](docs/img/maneuver/heatmap.svg)
+
+| Burn | Before TCA | Δv | Pc | Range at TCA | Method |
+|---|---|---|---|---|---|
+| none | - | - | 1.56e-03 | 148 m | foster |
+| retrograde | 22.6 h | -0.00200 m/s | 7.87e-06 | 624 m | foster |
+| prograde | 21.6 h | +0.00398 m/s | 6.43e-06 | 793 m | foster |
+
+The plan of the 5642 cells took 12.3 to 16.2 s (CPU time 181.1 to 245.4 s, numerical libraries on their default threads) over 3 runs on 2026-11-03, Intel(R) Core(TM) i5-14600K (20 logical CPUs), Python 3.13.7; `--check` checks the numbers, not the times.
+<!-- maneuver-report-summary:end -->
+
+The full default grid, on a LEO event 48 h before TCA (12 896 cells), took
+29.9 to 31.2 s with the numerical libraries on one thread and 33.4 to
+46.1 s on their default threads (3 runs each, 2026-11-03, same CPU).
+
+CARA test CDM: NASA CARA Analysis Tools (NASA Open Source Agreement),
+downloaded on demand; only numbers derived from it and the figure are
+committed.
+
 ## Development
 
 ```bash
@@ -220,6 +268,7 @@ uv run python tools/screening_report.py   # SOCRATES screening report (offline)
 uv run python tools/screening_benchmark.py   # screening benchmark (offline, minutes)
 uv run python tools/screening_benchmark.py --source spacetrack   # on the full catalog
 uv run python tools/synthetic_operator_report.py   # synthetic operator report (offline)
+uv run python tools/maneuver_report.py   # manoeuvre report (downloads one CARA CDM)
 uv run python tools/spacetrack_snapshot.py verify   # frozen Space-Track catalog (offline)
 uv run ruff check && uv run ruff format --check
 uv run mypy && uv run basedpyright

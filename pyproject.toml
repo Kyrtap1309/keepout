@@ -85,9 +85,9 @@ convention = "numpy"
 # fault-injection seams and fake callables with Any.
 "tests/**" = ["D", "DOC", "ARG", "FBT", "S101", "S301", "S314", "SLF001", "ANN401"]
 # Inline snapshots hold the commands' output line for line.
-"tests/cli/test_cli_{assess,screen}.py" = ["E501"]
+"tests/cli/test_cli_{assess,screen,maneuver}.py" = ["E501"]
 # A command's docstring is its --help text, which states its exit statuses.
-"src/keepout/cli/{assess,screen}.py" = ["DOC501"]
+"src/keepout/cli/{assess,maneuver,screen}.py" = ["DOC501"]
 # The tools run git and Python with arguments they build themselves.
 "tools/**" = ["S603", "S607"]
 # Stubs mirror the names sgp4 and astropy give (jdsatepochF, IERS_Auto), and
@@ -204,6 +204,7 @@ type = "layers"
 layers = [
     "keepout.cli",
     "keepout.validation",
+    "keepout.maneuver",
     "keepout.sources | keepout.synthetic",
     "keepout.events",
     "keepout.risk | keepout.screening",
@@ -216,7 +217,7 @@ layers = [
     "keepout.state",
     "keepout._workers",
     "keepout._linalg",
-    "keepout._types | keepout._validation | keepout._methods | keepout._defaults | keepout.errors",
+    "keepout._types | keepout._validation | keepout._methods | keepout._defaults | keepout._text | keepout.errors",
     "keepout.units",
 ]
 

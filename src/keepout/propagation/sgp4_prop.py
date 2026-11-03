@@ -29,6 +29,7 @@ from keepout.propagation.base import (
     Propagator,
     RadiusBounds,
     States,
+    object_indices,
     pair_sampler,
     time_offsets,
 )
@@ -212,31 +213,6 @@ def _tai_to_utc(
     return np.asarray(utc1, dtype=np.float64), np.asarray(utc2, dtype=np.float64)
 
 
-def _indices(indices: npt.ArrayLike, size: int) -> IndexArray:
-    """``indices`` checked as positions in a sequence of ``size`` items.
-
-    Raises
-    ------
-    ValueError
-        If ``indices`` is not one-dimensional, or not integers when not
-        empty.
-    IndexError
-        If an index is outside ``[0, size)``.
-    """
-    array = np.asarray(indices)
-    if array.ndim != 1:
-        raise ValueError(f"indices must be one-dimensional, got shape {array.shape}")
-    if array.size == 0:
-        return np.empty(0, dtype=np.intp)
-    if not np.issubdtype(array.dtype, np.integer):
-        raise ValueError(f"indices must be integers, got {array.dtype}")
-    if array.min() < 0 or array.max() >= size:
-        raise IndexError(
-            f"indices must be in [0, {size}), got {array.min()} .. {array.max()}"
-        )
-    return array.astype(np.intp)
-
-
 class _Partition(NamedTuple):
     """Element sets split by whether SGP4 can be initialised with them."""
 
@@ -418,7 +394,7 @@ class Sgp4Propagator:
         IndexError
             If an index is outside ``[0, len(self))``.
         """
-        chosen = _indices(indices, len(self))
+        chosen = object_indices(indices, len(self))
         subset = object.__new__(type(self))
         subset._set(
             tuple(self._omms[i] for i in chosen),

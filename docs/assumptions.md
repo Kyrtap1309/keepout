@@ -5,9 +5,10 @@ enough. In one place it must assume more: the [synthetic operator](synthetic.md)
 gives GP element sets, which carry no covariance, a covariance from a model
 of their errors, so that a Pc can be computed at all. This page states that
 model, where its numbers come from, what it is for and what it cannot do,
-and the synthetic operator's other assumptions. Nothing on this page applies
-to CDMs from an operational service, whose covariances come from orbit
-determination.
+and the synthetic operator's other assumptions. Nothing in those sections
+applies to CDMs from an operational service, whose covariances come from
+orbit determination. The last section states what the
+[manoeuvre planner](maneuver.md) assumes, which applies to any CDM.
 
 !!! warning "Not a calibrated product"
     The synthetic covariance is a documented assumption built from published
@@ -215,6 +216,82 @@ redistributed, so they cannot calibrate it.
   the [limits of GP data](screening.md#limits-of-gp-data); the screening
   volume decides which approaches exist at all.
 
+## Manoeuvre planning
+
+The [manoeuvre planner](maneuver.md) answers "what does this burn do to
+the event", from the CDM's states and covariances, under these
+assumptions. The numbers below are measurements on sample cases, not
+bounds.
+
+- **The burn.** Impulsive, ideal (no execution error, no attitude or
+  thrust profile) and along the primary's velocity only: no radial or
+  normal burns, and no burn of the secondary. An along-track burn acts
+  through the drift it builds up, so it loses effect close to TCA; the
+  latest burn time is 6 hours before TCA for that reason, not because
+  later burns are impossible.
+- **The CDM's state is the truth.** The planner adds the change a burn
+  makes at TCA to the CDM's state; it has no better orbit to start from.
+- **Covariances unchanged.** Every cell uses the CDM's covariances of
+  both objects, as if the burn added no uncertainty and the orbit
+  determination did not change with time.
+- **The target.** 1e-5 by default (`TARGET_PC`): keepout's default, one
+  order of magnitude below `red_from` (1e-4), chosen as a margin, so that
+  a burn leaves the event clearly out of the red rather than just under
+  it. `--target-pc` or `target_pc` sets another.
+- **Forces.** Zonal gravity to J6 (EGM2008) about a pole fixed for the
+  integration. No tesseral terms, no third bodies (Moon, Sun) and no
+  solar radiation pressure: these matter most at GEO, where lunisolar
+  gravity and SRP dominate the perturbations, so a GEO plan rests on a
+  simpler orbit than a LEO one.
+- **Drag only with CD·A/m.** Drag is on only when the CDM gives the
+  primary's `CD_AREA_OVER_MASS`; otherwise the plan says it is off. What
+  that costs depends on the altitude. On one circular orbit each (CD·A/m
+  = 0.02, burns up to 25 h before TCA, the default grid), switching drag
+  on moved log10 Pc by at most 0.003 at 630 km, 0.03 at 500 km, 0.18 at
+  400 km and 1.29 at 300 km; below a 450 km perigee the note without
+  drag is a warning with these numbers.
+- **The atmosphere.** An exponential density table by altitude band
+  (Vallado, table 8-4), without solar activity or the day-night bulge;
+  its density is a rough guess for any given day. The table's bands do
+  not join exactly (up to 0.14 % at 25 km, 0.01 % or less above), and an
+  orbit whose altitude swings across band edges integrates less accurately
+  than the solver's tolerances suggest. Against tolerances 10 times
+  tighter (rtol 1e-12), after 25 h the three eccentric orbits measured
+  differed by 1.5 m (240 km, e = 0.005, CD·A/m = 0.05), 4.1 m (300 km,
+  e = 0.01, CD·A/m = 0.02) and 9.5 m (400 km, e = 0.02, CD·A/m = 0.1),
+  and a circular orbit at 300 km (CD·A/m = 0.02) by 0.03 m; drag itself
+  moved these orbits by 170 to 2 650 km. The planner works on
+  differences of orbits integrated together, in which most of this error
+  cancels.
+- **Foster on the grid.** Every cell uses Foster's 2-D Pc, whatever the
+  event's own method, for speed (0.1 ms per cell against 0.1 to 0.2 s for
+  Hall 3D-Nc). The options are confirmed with the event's own method, so
+  a cell Foster puts below the target that the method does not is never
+  an option; the rest of the grid, and the heatmap, are Foster's.
+- **Slow encounters.** Each cell's new closest approach comes from a
+  second-order expansion about TCA, and the planner looks for it only
+  within a twentieth of an orbit of TCA. A cell where the expansion has
+  no true minimum there gets no Pc and is never an option; the plan
+  counts these cells. In a slow encounter a burn can bring the pair back
+  hours later, outside that window, at a Pc no cell shows: only a
+  re-screen shows it, as an event return. Below 100 m/s relative speed
+  the plan notes it. Inside the window the new TCA of a cell was measured
+  up to 28 m off at 10 m/s among the cells sampled, against covariances
+  of hundreds of metres.
+- **Re-screen accuracy.** The burned orbit of a re-screen is SGP4 plus a
+  Cowell difference. Against a Cowell integration of the whole orbit
+  after the burn, at 1 m/s over 7 days, the difference reached 2.24 m at
+  worst on the 38 fixture orbits with an eccentricity above 0.3, and
+  below 0.3 0.09 m on 68377 (a circular LEO) and 0.82 m on 89251
+  (e = 0.28, perigee near 500 km); other orbits are not covered by these
+  numbers. Screening's volume is kilometres.
+- **Re-screen Pc assumed.** The catalog's element sets have no covariance,
+  so the Pc of a new or closer approach rests on the synthetic covariance
+  model above, with all its limits, and is labelled assumed wherever it is
+  shown. The re-screen also sees only the objects in the catalog given:
+  the public catalog lacks most debris (see
+  [Screening](screening.md)).
+
 ## References
 
 - T. Flohrer, H. Krag, H. Klinkrad, B. Bastida Virgili, C. Früh, "Improving
@@ -233,3 +310,5 @@ redistributed, so they cannot calibrate it.
 - S. Alfano, "Relating Position Uncertainty to Maximum Conjunction
   Probability", *Journal of the Astronautical Sciences* 53(2), 193-205,
   2005.
+- D. A. Vallado, *Fundamentals of Astrodynamics and Applications*,
+  Microcosm Press, table 8-4 (exponential atmosphere).

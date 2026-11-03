@@ -15,9 +15,11 @@ __all__ = [
     "HttpStatusError",
     "KeepoutError",
     "KelvinsFormatError",
+    "ManeuverError",
     "OmmParseError",
     "OmmWriteError",
     "PcConvergenceError",
+    "PropagationError",
     "RateLimited",
     "SourceFormatError",
     "SourceUnavailable",
@@ -206,3 +208,12 @@ class UnsupportedFrame(GeometryError, ValueError):
     It is also a :class:`ValueError`, as raised for any other invalid argument
     of :class:`~keepout.state.StateVector` or :class:`~keepout.covariance.Covariance`.
     """
+
+
+class PropagationError(KeepoutError):
+    """A numerical propagation failed: the integrator gave up, or an orbit
+    fell below the Earth's surface."""
+
+
+class ManeuverError(KeepoutError):
+    """An avoidance manoeuvre cannot be planned or checked for this event."""

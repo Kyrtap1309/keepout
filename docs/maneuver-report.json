@@ -1,0 +1,193 @@
+{
+  "settings": {
+    "cdm": "000038771_conj_000030802_20201216_182131_20201215_171306",
+    "cara_commit": "1c78beb1f7aefc384886c3be1d09e4681acb5d37",
+    "hard_body_radius": 10.0,
+    "hard_body_radius_source": "cara",
+    "target_pc": 1e-05,
+    "grid": {
+      "earliest_lead_hours": 48.0,
+      "latest_lead_hours": 6.0,
+      "steps_per_orbit": 8,
+      "smallest_delta_v": 0.001,
+      "largest_delta_v": 1.0,
+      "delta_v_per_direction": 31
+    },
+    "green_below": 1e-07,
+    "red_from": 0.0001,
+    "basis": "conservative"
+  },
+  "event": {
+    "event": "000038771/000030802/2020-12-16T18:21:31.413",
+    "primary": "000038771",
+    "primary_name": "METOP-B",
+    "secondary": "000030802",
+    "secondary_name": "FENGYUN 1C DEB",
+    "tca": "2020-12-16T18:21:31.413",
+    "created": "2020-12-15T17:13:06.000",
+    "hours_to_tca": 25.14,
+    "relative_speed": 1390.243,
+    "primary_drag_term": 0.025436,
+    "target_pc": 1e-05,
+    "baseline": {
+      "burn_lead_hours": 0.0,
+      "delta_v": 0.0,
+      "pc": 0.00156,
+      "range_at_tca": 147.8,
+      "method": "foster",
+      "meets_target": false
+    },
+    "burn_times": 91,
+    "cells": 5642,
+    "cells_without_pc": 0,
+    "below_target": {
+      "prograde": 2076,
+      "retrograde": 2339
+    },
+    "prograde": {
+      "burn_lead_hours": 21.56,
+      "delta_v": 0.00398,
+      "pc": 6.43e-06,
+      "range_at_tca": 793.2,
+      "method": "foster",
+      "meets_target": true
+    },
+    "retrograde": {
+      "burn_lead_hours": 22.61,
+      "delta_v": -0.002,
+      "pc": 7.87e-06,
+      "range_at_tca": 624.4,
+      "method": "foster",
+      "meets_target": true
+    },
+    "notes": []
+  },
+  "demonstration": {
+    "fleet": "examples/synthetic-operator/fleet.toml",
+    "retrieved": "2026-10-06",
+    "start": "2026-10-06T00:00:00.000",
+    "days": 7.0,
+    "volume": "5 km sphere (as CelesTrak SOCRATES)",
+    "pc": 7.38e-06,
+    "level": "yellow",
+    "action": "monitor",
+    "plan": {
+      "event": "44476/55841/2026-10-08T12:03:02.771792",
+      "primary": "44476",
+      "primary_name": "INTELSAT 39 (IS-39)",
+      "secondary": "55841",
+      "secondary_name": "LUCH-5X (OLYMP-K 2)",
+      "tca": "2026-10-08T12:03:02.771792",
+      "created": "2026-10-06T00:00:00.000",
+      "hours_to_tca": 60.05,
+      "relative_speed": 1.988,
+      "primary_drag_term": null,
+      "target_pc": 1e-07,
+      "baseline": {
+        "burn_lead_hours": 0.0,
+        "delta_v": 0.0,
+        "pc": 7.38e-06,
+        "range_at_tca": 3646.5,
+        "method": "foster",
+        "meets_target": false
+      },
+      "burn_times": 15,
+      "cells": 930,
+      "cells_without_pc": 240,
+      "below_target": {
+        "prograde": 31,
+        "retrograde": 77
+      },
+      "prograde": {
+        "burn_lead_hours": 12.1,
+        "delta_v": 0.0794,
+        "pc": 6.54e-08,
+        "range_at_tca": 7770.6,
+        "method": "foster",
+        "meets_target": true
+      },
+      "retrograde": {
+        "burn_lead_hours": 12.1,
+        "delta_v": -0.0398,
+        "pc": 4.64e-08,
+        "range_at_tca": 9156.8,
+        "method": "foster",
+        "meets_target": true
+      },
+      "notes": [
+        "2-D Pc assumptions questionable: the encounter lasts about 2.51e+03 s, 2.9% of the primary's orbital period (limit 1%); a 3-D Pc may differ",
+        "the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used",
+        "every Pc rests on an assumed covariance (COVARIANCE_METHOD = DEFAULT)",
+        "drag is off: the CDM gives the primary no positive CD_AREA_OVER_MASS",
+        "relative speed 1.99 m/s is below 100 m/s: the planner looks for the new TCA only within a twentieth of an orbit of TCA, so after a burn the pair can meet again hours away, at a Pc no cell shows; only a re-screen shows it (inside that window the new TCA was measured up to 28 m off at 10 m/s)",
+        "240 of 930 cells have no Pc and are never options: 240 without a closest approach to trust, 0 where Foster's Pc failed",
+        "prograde: 2-D Pc assumptions questionable: the encounter lasts about 8.4e+03 s, 9.7% of the primary's orbital period (limit 1%); a 3-D Pc may differ",
+        "retrograde: 2-D Pc assumptions questionable: the encounter lasts about 7.17e+03 s, 8.3% of the primary's orbital period (limit 1%); a 3-D Pc may differ"
+      ]
+    },
+    "rescreens": [
+      {
+        "direction": "prograde",
+        "start": "2026-10-07T23:57:11.092089",
+        "end": "2026-10-14T23:57:11.092089",
+        "catalog_objects": 19879,
+        "skipped_objects": 35,
+        "secondary_screened": true,
+        "event_range": null,
+        "conflict": false,
+        "clean": false,
+        "new_approaches": [
+          {
+            "secondary": 55841,
+            "tca": "2026-10-09T00:07:28.973149",
+            "range_at_tca": 4112.8,
+            "relative_speed": 1.891,
+            "pc": 9.87e-06,
+            "level": "yellow"
+          }
+        ],
+        "closer_approaches": [],
+        "event_returns": [
+          {
+            "secondary": 55841,
+            "tca": "2026-10-09T00:07:28.973149",
+            "range_at_tca": 4112.8,
+            "relative_speed": 1.891,
+            "pc": 9.87e-06,
+            "level": "yellow"
+          }
+        ]
+      },
+      {
+        "direction": "retrograde",
+        "start": "2026-10-07T23:57:11.092089",
+        "end": "2026-10-14T23:57:11.092089",
+        "catalog_objects": 19879,
+        "skipped_objects": 35,
+        "secondary_screened": true,
+        "event_range": null,
+        "conflict": false,
+        "clean": true,
+        "new_approaches": [],
+        "closer_approaches": [],
+        "event_returns": []
+      }
+    ]
+  },
+  "timings": {
+    "cpu_model": "Intel(R) Core(TM) i5-14600K",
+    "logical_cpus": 20,
+    "python": "3.13.7",
+    "date": "2026-11-03",
+    "one_thread": false,
+    "runs": 3,
+    "wall": [
+      12.3,
+      16.2
+    ],
+    "cpu": [
+      181.1,
+      245.4
+    ]
+  }
+}

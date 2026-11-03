@@ -53,6 +53,7 @@ nav:
   - Risk assessment: risk.md
   - Screening: screening.md
   - Synthetic operator: synthetic.md
+  - Manoeuvre planning: maneuver.md
   - Assumptions: assumptions.md
   - Command line: cli.md
   - Space-Track data: spacetrack.md
@@ -62,12 +63,14 @@ nav:
       - Risk on ESA's Kelvins data: risk-kelvins.md
       - Screening against SOCRATES: screening-socrates.md
       - Synthetic operator on public data: synthetic-operator.md
+      - Manoeuvre planning on a CARA event: maneuver-report.md
   - Reference:
       - Probability of collision: reference/pc.md
       - Conjunction events: reference/events.md
       - Risk: reference/risk.md
       - Screening: reference/screening.md
       - Synthetic operator: reference/synthetic.md
+      - Manoeuvres: reference/maneuver.md
       - Conjunction: reference/conjunction.md
       - CDM: reference/cdm.md
       - Element sets (OMM): reference/omm.md

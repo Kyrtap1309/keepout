@@ -17,8 +17,10 @@ __all__ = [
     "CELESTRAK_TTL",
     "DECISION_POINT",
     "GP_INTERVAL",
+    "MIN_BURN_LEAD",
     "SCREENING_DURATION",
     "SOCRATES_RADIUS",
+    "TARGET_PC",
     "TCA_TOLERANCE",
 ]
 
@@ -29,6 +31,13 @@ TCA_TOLERANCE: Final = 10 * MINUTE
 DECISION_POINT: Final = 2 * DAY
 """Time before TCA [s] from which a manoeuvre is decided
 (:attr:`keepout.risk.DecisionConfig.decision_point`)."""
+
+TARGET_PC: Final = 1e-5
+"""Pc below which a burn is an option (:data:`keepout.maneuver.TARGET_PC`)."""
+
+MIN_BURN_LEAD: Final = 6 * HOUR
+"""Latest time before TCA [s] of a planned burn
+(:data:`keepout.maneuver.MIN_BURN_LEAD`)."""
 
 SCREENING_DURATION: Final = 7 * DAY
 """Length of a screening window [s]

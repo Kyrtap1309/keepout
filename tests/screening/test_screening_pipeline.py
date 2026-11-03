@@ -3,24 +3,39 @@ element sets left out and why, and the same result in any number of
 processes."""
 
 import dataclasses
+import functools
 from collections.abc import Callable, Sequence
 
 import astropy.units as u
 import numpy as np
 import numpy.typing as npt
 import pytest
+from astropy.time import Time
 from screening_data import (
+    DATA,
     FAST_SPEED,
     FIXTURE_START,
+    SGP4_FAILING,
+    SNAPSHOT,
     fixture_by_number,
     load_fixture,
     socrates_approaches,
 )
 
-from keepout.errors import GeometryError, UnsupportedElements
+from keepout.errors import GeometryError, PropagationError, UnsupportedElements
 from keepout.frames import teme_to_gcrf
-from keepout.omm import Omm
-from keepout.propagation import Sgp4Propagator, describe_error, satrec_of
+from keepout.omm import Omm, load
+from keepout.propagation import (
+    CowellPropagator,
+    ForceModel,
+    ManoeuvredPropagator,
+    Propagator,
+    RadiusBounds,
+    Sgp4Propagator,
+    describe_error,
+    earth_pole,
+    satrec_of,
+)
 from keepout.screening import (
     DEFAULT_DURATION,
     DEFAULT_VOLUME,
@@ -34,8 +49,8 @@ from keepout.screening import (
     apogee_perigee_filter,
     screen,
 )
-from keepout.screening.tca import PERTURBATION
-from keepout.units import DAY
+from keepout.screening.tca import DERIVATIVE_STEP, PERTURBATION
+from keepout.units import DAY, HOUR
 
 START = FIXTURE_START
 FIXTURE = load_fixture()
@@ -45,10 +60,12 @@ FORMATION = [68377, 56156, 58199]
 SPREAD = [omm.catalog_number for omm in FIXTURE[::9][:5]]
 """LEO, GEO and HEO objects of the fixture."""
 FAILING = [45665, 45711]
-"""SGP4 fails for them 41 h 36 min and 23 h 12 min after START (error 1);
+"""SGP4 fails for them 41 h 34 min 43 s and 23 h 12 min after START (error 1);
 each is the other's only neighbour."""
 STALE = 32360
 """Its elements are 29.3 days old at START."""
+DENSE_STEP = 5.0
+"""Time between the samples of a dense scan of a pair [s]."""
 REENTERING = 270365
 """An orbit with its perigee 113 km up: SGP4's drag on it exceeds the search's
 bound on perturbations from 8 days after its epoch; SGP4 fails at 10.5 days."""
@@ -423,6 +440,247 @@ def test_the_result_does_not_depend_on_workers_or_chunks(
     assert len(whole.approaches) > 150
     split = screen(primaries, catalog, *window, workers=workers, max_states=max_states)
     assert summary(split) == summary(whole)
+
+
+def frame_to_gcrf_of(primaries: Propagator) -> tuple[npt.NDArray[np.float64], ...]:
+    """Positions and velocities at START in GCRF, each ``(N, 3)``."""
+    states = primaries.propagate(START, 0.0)
+    return teme_to_gcrf(START, states.r[:, 0], states.v[:, 0])
+
+
+def hook_burning(
+    delta_v: float, burn_time: Time, horizon: float
+) -> Callable[[Propagator], Propagator]:
+    """A hook for one primary: ``delta_v`` along its velocity at ``burn_time``."""
+    return functools.partial(
+        ManoeuvredPropagator, burn_time=burn_time, delta_v=delta_v, horizon=horizon
+    )
+
+
+@pytest.mark.parametrize("workers", [1, 2])
+def test_screen_with_identity_hook_equals_screen(workers: int) -> None:
+    primaries, catalog = mixed()
+    window = (START, 2 * DAY)
+    whole = screen(primaries, catalog, *window)
+    assert len(whole.approaches) > 150
+    same = screen(primaries, catalog, *window, workers=workers, adjust_primaries=_same)
+    assert summary(same) == summary(whole)
+
+
+def _same(primaries: Propagator) -> Propagator:
+    return primaries
+
+
+@pytest.mark.parametrize("burn_at", [0.0, DAY / 2.0])
+@pytest.mark.parametrize("workers", [1, 2])
+def test_screen_with_zero_burn_equals_screen(burn_at: float, workers: int) -> None:
+    primary = elements(FORMATION[:1])
+    whole = screen(primary, FIXTURE, START, DAY)
+    assert len(whole.approaches) > 5
+    hook = hook_burning(0.0, START + burn_at * u.s, 2 * DAY)
+    burned = screen(
+        primary, FIXTURE, START, DAY, workers=workers, adjust_primaries=hook
+    )
+    assert summary(burned) == summary(whole)
+
+
+@pytest.mark.parametrize("workers", [1, 2])
+def test_a_burn_moves_the_primary_in_the_approaches(workers: int) -> None:
+    primary = elements(FORMATION[:1])
+    delta_v = 0.05
+    horizon = DAY + 2 * DERIVATIVE_STEP
+    hook = hook_burning(delta_v, START, horizon)
+    burned = screen(
+        primary, FIXTURE, START, DAY, workers=workers, adjust_primaries=hook
+    )
+    whole = screen(primary, FIXTURE, START, DAY)
+    assert burned.approaches != whole.approaches
+    assert burned.approaches
+    moved = ManoeuvredPropagator(Sgp4Propagator(primary), START, delta_v, horizon)
+    for approach in burned.approaches:
+        offset = (approach.tca - START).to_value(u.s)
+        state = moved.propagate(START, offset)
+        r, v = teme_to_gcrf(approach.tca, state.r[0, 0], state.v[0, 0])
+        assert approach.primary_state.r == pytest.approx(r, abs=1e-3)
+        assert approach.primary_state.v == pytest.approx(v, abs=1e-6)
+
+
+def dense_minima(
+    primary: Propagator,
+    catalog: Sequence[Omm],
+    duration: float,
+    volume: ScreeningVolume = DEFAULT_VOLUME,
+) -> list[tuple[int, float, float]]:
+    """Every local minimum of the range inside ``volume`` in a window, by
+    scanning each pair: catalog number, TCA and range, without the search."""
+    others = Sgp4Propagator(catalog)
+    grid = np.arange(0.0, duration + DENSE_STEP, DENSE_STEP)
+    r_primary = primary.propagate(START, grid).r[0]
+    ranges = np.linalg.norm(others.propagate(START, grid).r - r_primary, axis=2)
+    reach = volume.bounding_radius + DENSE_STEP * 8_000.0  # half a step at 16 km/s
+    falling = ranges[:, :-2] > ranges[:, 1:-1]
+    rising = ranges[:, 1:-1] <= ranges[:, 2:]
+    rows, samples = np.nonzero(falling & rising & (ranges[:, 1:-1] < reach))
+    found = []
+    for row, sample in zip(rows.tolist(), (samples + 1).tolist(), strict=True):
+        middle = float(grid[sample])
+        fine = np.linspace(middle - DENSE_STEP, middle + DENSE_STEP, 2001)
+        own = primary.propagate(START, fine)
+        other = others.subset(np.array([row])).propagate(START, fine)
+        distance = np.linalg.norm(other.r[0] - own.r[0], axis=1)
+        best = int(np.argmin(distance))
+        tca = float(fine[best])
+        if 0.0 < tca <= duration and volume.contains_position(
+            own.r[0, best], own.v[0, best], other.r[0, best]
+        ):
+            found.append((catalog[row].catalog_number, tca, float(distance[best])))
+    return sorted(found, key=lambda minimum: minimum[1])
+
+
+@pytest.mark.parametrize(
+    ("number", "delta_v", "burn_at"),
+    [
+        (FORMATION[0], 0.05, 0.0),
+        (FORMATION[0], 0.05, DAY / 2.0),
+        (FORMATION[0], -1.0, DAY / 2.0 + 37.0),
+        (FORMATION[1], 0.5, 3 * HOUR + 11.0),
+        (FORMATION[2], 1.0, DAY / 3.0),
+    ],
+)
+def test_a_burned_screening_misses_no_minimum_of_a_dense_scan(
+    number: int, delta_v: float, burn_at: float
+) -> None:
+    primary = elements([number])
+    catalog = [o for o in without(STALE, *SGP4_FAILING) if o.catalog_number != number]
+    burn_time = START + burn_at * u.s
+    moved = ManoeuvredPropagator(
+        Sgp4Propagator(primary), burn_time, delta_v, DAY + 2 * DERIVATIVE_STEP
+    )
+    result = screen(primary, catalog, START, DAY, adjust_primaries=lambda _: moved)
+    assert [s for s in result.skipped if s.role == "catalog"] == []
+    assert_same_minima(result, dense_minima(moved, catalog, DAY))
+
+
+def assert_same_minima(
+    result: ScreeningResult, expected: Sequence[tuple[int, float, float]]
+) -> None:
+    assert expected, "no approach to check"
+    found = sorted(
+        (a.secondary_number, float((a.tca - START).to_value(u.s)), a.range_at_tca)
+        for a in result.approaches
+    )
+    assert [minimum[0] for minimum in found] == sorted(m[0] for m in expected)
+    for (_, tca, distance), (_, tca_dense, range_dense) in zip(
+        found, sorted(expected), strict=True
+    ):
+        assert tca == pytest.approx(tca_dense, abs=5.0)
+        assert distance == pytest.approx(range_dense, abs=1.0)
+
+
+def test_a_burn_brings_in_objects_the_unburned_orbit_cannot_reach() -> None:
+    number, delta_v, burn_at = 56156, 10.0, DAY / 3.0
+    # Only objects whose radii keep them from the orbit without the burn but
+    # not from the one with it: if the bounds did not widen, all are filtered.
+    volume = ScreeningVolume(radial=30e3, transverse=30e3, normal=30e3)
+    duration = 2 * DAY
+    catalog = load(DATA / SNAPSHOT)
+    primary = next(omm for omm in catalog if omm.catalog_number == number)
+    base = Sgp4Propagator([primary])
+    burn_time = START + burn_at * u.s
+    horizon = duration + 2 * DERIVATIVE_STEP
+    moved = ManoeuvredPropagator(base, burn_time, delta_v, horizon)
+    others, _, _ = Sgp4Propagator.from_omms(catalog)
+    their_bounds = others.radius_bounds(START, duration)
+    radii = np.linalg.norm(
+        moved.propagate(START, np.arange(0.0, duration, 20.0)).r, axis=2
+    )
+    actual = RadiusBounds(radii.min(axis=1), radii.max(axis=1))
+    reachable = apogee_perigee_filter(actual, their_bounds, volume)[0]
+    before = apogee_perigee_filter(
+        base.radius_bounds(START, duration), their_bounds, volume
+    )[0]
+    chosen = [
+        omm
+        for omm, new in zip(others.omms, reachable & ~before, strict=True)
+        if new and omm.catalog_number != number
+    ]
+    assert not {omm.catalog_number for omm in chosen} & set(SGP4_FAILING)
+    result = screen(
+        [primary],
+        chosen,
+        START,
+        duration,
+        volume,
+        adjust_primaries=lambda _: moved,
+    )
+    kept = {s.catalog_number for s in result.skipped}
+    scanned = [omm for omm in chosen if omm.catalog_number not in kept]
+    assert_same_minima(result, dense_minima(moved, scanned, duration, volume))
+
+
+def test_a_hook_short_of_the_search_is_refused_on_any_data() -> None:
+    # No minimum near the end of this window: the search alone would not see it.
+    primary = elements(FORMATION[:1])
+    short = hook_burning(0.05, START, DAY)
+    with pytest.raises(ValueError, match=r"2\.0 s past the end of the window"):
+        screen(primary, [], START, DAY, adjust_primaries=short)
+    enough = hook_burning(0.05, START, DAY + 2 * DERIVATIVE_STEP)
+    assert screen(primary, FIXTURE, START, DAY, adjust_primaries=enough).approaches
+
+
+def test_the_hook_is_not_called_without_primaries() -> None:
+    calls: list[Propagator] = []
+
+    def hook(primaries: Propagator) -> Propagator:
+        calls.append(primaries)
+        return primaries
+
+    stale = screen(elements([STALE]), FIXTURE, START, DAY, adjust_primaries=hook)
+    assert calls == []
+    assert [s.reason for s in stale.skipped if s.role == "primary"] == [
+        SkipReason.STALE
+    ]
+
+
+def test_the_hook_gets_the_primaries_that_are_screened() -> None:
+    seen: list[tuple[int, ...]] = []
+
+    def hook(primaries: Propagator) -> Propagator:
+        assert isinstance(primaries, Sgp4Propagator)
+        seen.append(tuple(omm.catalog_number for omm in primaries.omms))
+        return primaries
+
+    primaries = elements([*FORMATION, STALE])
+    screen(primaries, [], START, DAY, adjust_primaries=hook)
+    assert seen == [tuple(FORMATION)]
+
+
+def test_the_hook_must_keep_the_primaries() -> None:
+    def drop(primaries: Propagator) -> Propagator:
+        return primaries.subset(np.array([0]))
+
+    message = "adjust_primaries must keep the 3 primaries, got 1"
+    with pytest.raises(ValueError, match=message):
+        screen(elements(FORMATION), FIXTURE, START, DAY, adjust_primaries=drop)
+
+
+def test_the_hook_must_keep_the_frame() -> None:
+    def elsewhere(primaries: Propagator) -> Propagator:
+        state = np.hstack(frame_to_gcrf_of(primaries))
+        force = ForceModel(earth_pole(START))
+        return CowellPropagator(START, state, [force], (0.0, DAY), step=DAY)
+
+    message = "adjust_primaries must keep the frame TEME, got GCRF"
+    with pytest.raises(ValueError, match=message):
+        screen(elements(FORMATION[:1]), [], START, DAY, adjust_primaries=elsewhere)
+
+
+def test_a_hook_that_cannot_propagate_stops_the_screening() -> None:
+    def fails(primaries: Propagator) -> Propagator:
+        return ManoeuvredPropagator(primaries, START, -3000.0, DAY)
+
+    with pytest.raises(PropagationError, match="fell below the Earth's surface"):
+        screen(elements(FORMATION[:1]), FIXTURE, START, DAY, adjust_primaries=fails)
 
 
 def test_screening_needs_nothing_but_inputs() -> None:

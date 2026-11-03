@@ -19,6 +19,7 @@ from rich import box
 from rich.console import Console, RenderableType
 from rich.table import Table
 
+from keepout._text import plural
 from keepout.errors import KeepoutError
 from keepout.units import DAY, HOUR, MINUTE
 
@@ -53,6 +54,10 @@ class ExitCode(enum.IntEnum):
     """A wrong command line (Typer's status for it)."""
     MANOEUVRE = 3
     """``keepout assess``: at least one event's decision is to manoeuvre."""
+    NO_SAFE_BURN = 4
+    """``keepout maneuver``: no burn exists, the burn given misses the target,
+    or every burn brings an approach at red or the event's pair back above the
+    target."""
 
 
 JsonOut: TypeAlias = (
@@ -123,14 +128,6 @@ def minute(time: Time) -> str:
 def pc_text(pc: float | None) -> str:
     """A Pc for tables, ``1.23e-05``, or ``-`` if there is none."""
     return "-" if pc is None else f"{pc:.2e}"
-
-
-def plural(count: int, noun: str, nouns: str | None = None) -> str:
-    """``count`` and ``noun``, or its plural ``nouns`` (default: ``noun`` and
-    ``s``) unless ``count`` is one: ``1 event``, ``2 events``."""
-    if count == 1:
-        return f"{count} {noun}"
-    return f"{count} {nouns or noun + 's'}"
 
 
 def duration_words(seconds: float) -> str:

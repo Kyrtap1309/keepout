@@ -76,6 +76,19 @@ def test_an_unknown_covariance_method_is_a_parse_error() -> None:
         _ = cdm.assumed_covariance
 
 
+@pytest.mark.parametrize("value", ["YES", "NO", "N/A"])
+def test_maneuverable_is_given_as_written(value: str) -> None:
+    cdm = minimal_cdm(replace(segment_fields(1), "MANEUVERABLE", value))
+    assert cdm.object1.maneuverable == value
+
+
+def test_cd_area_over_mass_is_optional() -> None:
+    fields = [*segment_fields(1), Field("CD_AREA_OVER_MASS", 0.02)]
+    cdm = minimal_cdm(fields)
+    assert cdm.object1.cd_area_over_mass == 0.02
+    assert cdm.object2.cd_area_over_mass is None
+
+
 def test_a_cdm_has_exactly_two_object_sections() -> None:
     cdm = minimal_cdm()
     with pytest.raises(ValueError, match="a CDM has 2 object sections, got 1"):

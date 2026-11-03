@@ -22,7 +22,7 @@ import numpy as np
 import numpy.typing as npt
 from astropy.time import Time
 
-from keepout._types import BoolArray, FloatArray, read_only
+from keepout._types import BoolArray, FloatArray, IndexArray, read_only
 from keepout._validation import require_at_least, require_single_time
 from keepout.state import RefFrame, as_ref_frame
 
@@ -36,6 +36,7 @@ __all__ = [
     "RadiusBounds",
     "States",
     "describe_error",
+    "object_indices",
     "pair_sampler",
     "propagate_in_chunks",
     "time_offsets",
@@ -121,6 +122,43 @@ def time_offsets(epoch: Time, offsets: npt.ArrayLike) -> FloatArray:
         raise ValueError("offsets must be finite")
     read_only(seconds)
     return seconds
+
+
+def object_indices(indices: npt.ArrayLike, size: int) -> IndexArray:
+    """``indices`` checked as positions in a sequence of ``size`` items.
+
+    Parameters
+    ----------
+    indices
+        One-dimensional array of integers in ``[0, size)``.
+    size
+        Length of the sequence.
+
+    Returns
+    -------
+    IndexArray
+        The positions.
+
+    Raises
+    ------
+    ValueError
+        If ``indices`` is not one-dimensional, or not integers when not
+        empty.
+    IndexError
+        If an index is outside ``[0, size)``.
+    """
+    array = np.asarray(indices)
+    if array.ndim != 1:
+        raise ValueError(f"indices must be one-dimensional, got shape {array.shape}")
+    if array.size == 0:
+        return np.empty(0, dtype=np.intp)
+    if not np.issubdtype(array.dtype, np.integer):
+        raise ValueError(f"indices must be integers, got {array.dtype}")
+    if array.min() < 0 or array.max() >= size:
+        raise IndexError(
+            f"indices must be in [0, {size}), got {array.min()} .. {array.max()}"
+        )
+    return array.astype(np.intp)
 
 
 def _view(array: npt.NDArray[np.generic]) -> npt.NDArray[np.generic]:
