@@ -291,7 +291,13 @@ class ManeuverPlan:
         )
 
     def option(self, direction: BurnDirection) -> ManeuverOption | None:
-        """The option of a direction; ``None`` if it has none."""
+        """The option of a direction; ``None`` if it has none.
+
+        Parameters
+        ----------
+        direction
+            Prograde or retrograde.
+        """
         return self.prograde if direction is BurnDirection.PROGRADE else self.retrograde
 
 

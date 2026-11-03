@@ -149,6 +149,11 @@ def read_public_cdms(data: bytes) -> tuple[PublicCdm, ...]:
     empty string is a missing value, which only the names, object types,
     radar cross-sections, exclusion volumes and ``PC`` may be.
 
+    Parameters
+    ----------
+    data
+        The body of the answer, as Space-Track sent it.
+
     Raises
     ------
     SourceFormatError

@@ -1,6 +1,6 @@
 """Close approaches on a time grid: exact on straight-line motion, the same
 however the grid is cut into chunks, and on SGP4 every minimum the
-brute-force oracle and SOCRATES find."""
+brute-force oracle finds (SOCRATES's: ``test_screening_pipeline.py``)."""
 
 import dataclasses
 import functools
@@ -17,7 +17,6 @@ from astropy.time import Time
 from hypothesis import given, settings, target
 from hypothesis import strategies as st
 from screening_data import (
-    FAST_SPEED,
     FIXTURE_START,
     fixture_by_number,
     load_fixture,
@@ -527,12 +526,13 @@ def test_failed_objects_are_listed_with_their_first_failure() -> None:
         (3, 3000.0),
     ]
     assert result.primary_failures == {}
-    assert dict(result.catalog_failures) == {
-        0: ObjectFailure(4080.0, 6),
-        1: ObjectFailure(result.catalog_failures[1].offset, 6),
-        2: ObjectFailure(0.0, 6),
-    }
-    assert result.catalog_failures[1].offset == pytest.approx(1000.0, abs=1e-6)
+    # Object 1 fails at its TCA, which the search finds to a microsecond.
+    failures = sorted(result.catalog_failures.items())
+    assert [(index, f.offset, f.code) for index, f in failures] == [
+        (0, 4080.0, 6),
+        (1, pytest.approx(1000.0, abs=1e-6), 6),
+        (2, 0.0, 6),
+    ]
     # A primary failing on the grid, and one failing at a TCA.
     for window, offset in [((600.0, 700.0), 600.0), ((999.5, 1000.5), 1000.0)]:
         failing = StraightLines(PRIMARY[0][None], PRIMARY[1][None], np.array([window]))
@@ -713,7 +713,7 @@ def test_a_minimum_holds_read_only_states() -> None:
         RangeMinimum(0, 1, 10.0, 5.0, r, r[:2], r, r)
 
 
-# SGP4 on the frozen fixture: the brute-force oracle and SOCRATES.
+# SGP4 on the frozen fixture: the brute-force oracle.
 
 
 def fixture_search(
@@ -894,31 +894,6 @@ def test_a_window_with_minima_against_the_oracle() -> None:
     assert inside == 22
 
 
-def test_every_socrates_approach_of_the_fixture_is_found() -> None:
-    # SOCRATES prints TCA to the millisecond and the range to the metre; the
-    # TCA of a slow pair is ill-conditioned (a flat minimum of the range).
-    first = min(approach.tca for approach in SOCRATES)
-    start = first - HOUR * u.s
-    duration = (max(approach.tca for approach in SOCRATES) - start).sec + HOUR
-    primaries = sorted({approach.primary_number for approach in SOCRATES})
-    result = fixture_search(primaries, start, duration, DEFAULT_VOLUME)[0].run()
-    found: dict[tuple[int, int], list[RangeMinimum]] = {}
-    for minimum in result.minima:
-        pair = (
-            primaries[minimum.primary_index],
-            FIXTURE[minimum.secondary_index].catalog_number,
-        )
-        found.setdefault(pair, []).append(minimum)
-    assert len(SOCRATES) == 1033
-    for approach in SOCRATES:
-        offset = (approach.tca - start).sec
-        candidates = found[(approach.primary_number, approach.secondary_number)]
-        match = min(candidates, key=lambda m: abs(m.offset - offset))
-        fast = approach.relative_speed >= FAST_SPEED
-        assert match.offset == pytest.approx(offset, abs=1e-3 if fast else 0.5)
-        assert match.range_at_tca == pytest.approx(approach.range_at_tca, abs=0.5)
-
-
 def test_a_docked_spacecraft_has_no_minimum() -> None:
     # CelesTrak gives docked spacecraft their station's element set.
     station = PRIMARIES[0]
@@ -1001,9 +976,9 @@ def test_sgp4s_own_path_finds_what_any_propagator_finds() -> None:
     assert summary(run(Wrapped(own), Wrapped(catalog))) == summary(sgp4)
 
 
-@pytest.mark.validation
+@pytest.mark.slow
 def test_a_week_of_the_fixture_against_the_oracle() -> None:
-    # Offline, about 20 s: 25 primaries, every 10 s of the week.
+    # About 20 s: 25 primaries, every 10 s of the week.
     inside = check_against_oracle(
         [omm.catalog_number for omm in PRIMARIES],
         WEEK_START,

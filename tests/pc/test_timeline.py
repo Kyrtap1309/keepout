@@ -2,6 +2,7 @@ import math
 
 import numpy as np
 import pytest
+from builders import approx
 
 from keepout.errors import PcConvergenceError
 from keepout.pc._quadrature import integrate_segments
@@ -57,7 +58,7 @@ def test_an_encounter_anywhere_in_a_long_window_is_found_and_integrated(
     lo, hi = scan.index_ranges[0]
     assert np.max(np.diff(scan.times[lo : hi + 1])) <= CROSSING / 8 * (1 + 1e-9)
     nc = integrate_segments(rate, scan, rtol=1e-6).nc
-    assert nc == pytest.approx(TAU * math.sqrt(2 * math.pi), rel=1e-9)
+    assert nc == approx(TAU * math.sqrt(2 * math.pi), rel=1e-9)
 
 
 def test_refinement_beyond_its_budget_is_coarser_not_an_error() -> None:
@@ -66,7 +67,7 @@ def test_refinement_beyond_its_budget_is_coarser_not_an_error() -> None:
     scan = locate(rate, WINDOW, lambda w: [Candidate(*w, 0.01, 40.0)])
     assert scan.times.size <= MIN_SCAN_POINTS + MAX_REFINED_POINTS
     nc = integrate_segments(rate, scan, rtol=1e-6).nc
-    assert nc == pytest.approx(40.0 * math.sqrt(2 * math.pi), rel=1e-9)
+    assert nc == approx(40.0 * math.sqrt(2 * math.pi), rel=1e-9)
 
 
 def test_detection_beyond_its_budget_raises_naming_the_window() -> None:
@@ -98,4 +99,4 @@ def test_candidates_outside_the_window_are_not_scanned() -> None:
     assert scan.window == (-50.0, 50.0)
     assert len(scan.index_ranges) == 1
     nc = integrate_segments(rate, scan, rtol=1e-6).nc
-    assert nc == pytest.approx(TAU * math.sqrt(2 * math.pi), rel=1e-9)
+    assert nc == approx(TAU * math.sqrt(2 * math.pi), rel=1e-9)

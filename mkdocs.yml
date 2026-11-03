@@ -1,6 +1,9 @@
 site_name: keepout
 site_description: Spacecraft conjunction assessment in Python
 copyright: Copyright &copy; 2026 Patryk Niczke — MIT licence
+repo_url: https://github.com/Kyrtap1309/keepout
+repo_name: Kyrtap1309/keepout
+edit_uri: ""
 
 # Local working notes (git-ignored), never part of the site.
 exclude_docs: |
@@ -36,6 +39,7 @@ plugins:
 
 markdown_extensions:
   - admonition
+  - pymdownx.details
   - pymdownx.arithmatex:
       generic: true
   - pymdownx.superfences
@@ -46,17 +50,19 @@ extra_javascript:
   - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
 
 nav:
-  - Home: index.md
-  - Frames, units and CDM support: frames-and-units.md
-  - 2-D probability of collision: pc-2d.md
-  - 3-D, Monte Carlo and maximum Pc: pc-3d.md
-  - Risk assessment: risk.md
-  - Screening: screening.md
-  - Synthetic operator: synthetic.md
-  - Manoeuvre planning: maneuver.md
-  - Assumptions: assumptions.md
-  - Command line: cli.md
-  - Space-Track data: spacetrack.md
+  - Getting started: index.md
+  - Guides:
+      - Screening: screening.md
+      - Synthetic operator: synthetic.md
+      - 2-D probability of collision: pc-2d.md
+      - 3-D, Monte Carlo and maximum Pc: pc-3d.md
+      - Risk assessment: risk.md
+      - Manoeuvre planning: maneuver.md
+      - Command line: cli.md
+      - Space-Track data: spacetrack.md
+  - Background:
+      - Synthetic covariance model: assumptions.md
+      - Frames and units: frames-and-units.md
   - Reports:
       - Validation report: validation.md
       - Monte Carlo validation report: validation-monte-carlo.md
@@ -65,27 +71,33 @@ nav:
       - Synthetic operator on public data: synthetic-operator.md
       - Manoeuvre planning on a CARA event: maneuver-report.md
   - Reference:
-      - Probability of collision: reference/pc.md
-      - Conjunction events: reference/events.md
-      - Risk: reference/risk.md
-      - Screening: reference/screening.md
-      - Synthetic operator: reference/synthetic.md
-      - Manoeuvres: reference/maneuver.md
-      - Conjunction: reference/conjunction.md
-      - CDM: reference/cdm.md
-      - Element sets (OMM): reference/omm.md
-      - CCSDS formats: reference/ccsds.md
-      - Covariance: reference/covariance.md
-      - Encounter plane: reference/encounter.md
-      - Frames: reference/frames.md
-      - Objects and state vectors: reference/objects.md
-      - Propagation: reference/propagation.md
-      - CARA reference data: reference/cara.md
-      - Kelvins data: reference/kelvins.md
-      - GP catalog: reference/catalog.md
-      - CelesTrak data: reference/celestrak.md
-      - Space-Track data: reference/spacetrack.md
-      - Data cache: reference/cache.md
-      - Validation tooling: reference/validation.md
-      - Errors: reference/errors.md
-      - Units: reference/units.md
+      - Core types:
+          - Conjunction: reference/conjunction.md
+          - Objects and state vectors: reference/objects.md
+          - Covariance: reference/covariance.md
+          - Encounter plane: reference/encounter.md
+          - Frames: reference/frames.md
+          - Units: reference/units.md
+          - Propagation: reference/propagation.md
+      - Pc and risk:
+          - Probability of collision: reference/pc.md
+          - Conjunction events: reference/events.md
+          - Risk: reference/risk.md
+          - Manoeuvres: reference/maneuver.md
+      - Screening and operator:
+          - Screening: reference/screening.md
+          - Synthetic operator: reference/synthetic.md
+      - Formats:
+          - CDM: reference/cdm.md
+          - Element sets (OMM): reference/omm.md
+          - CCSDS formats: reference/ccsds.md
+      - Data sources:
+          - GP catalog: reference/catalog.md
+          - CelesTrak data: reference/celestrak.md
+          - Space-Track data: reference/spacetrack.md
+          - CARA reference data: reference/cara.md
+          - Kelvins data: reference/kelvins.md
+          - Data cache: reference/cache.md
+      - Validation and errors:
+          - Validation tooling: reference/validation.md
+          - Errors: reference/errors.md

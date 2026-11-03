@@ -75,7 +75,8 @@ class SpaceTrackClient:
         The account; from the environment (:meth:`Credentials.from_env`)
         at the login if ``None``.
     cache
-        Cache root; :func:`~keepout.sources._store.cache_dir` if ``None``.
+        Cache root; if ``None``, ``$KEEPOUT_CACHE_DIR`` or else the
+        platform's user cache directory for keepout.
     transport
         Sends the requests; a new :class:`UrllibTransport` if ``None``.
     throttle
@@ -244,7 +245,7 @@ class SpaceTrackClient:
         return PublicCdms(cdms, retrieval)
 
     def close(self) -> None:
-        """The logout, if logged in and not stopped by a rate-limit answer.
+        """Log out, if logged in and not stopped by a rate-limit answer.
 
         A failed logout is ignored: the session expires on its own.
         """
@@ -255,9 +256,8 @@ class SpaceTrackClient:
             self._send(Request("GET", LOGOUT_URL))
 
     def _reserve(self, query: Query) -> None:
-        """The record, in the ledger, that ``query`` is sent now: after a
-        check of its class's interval, the login if needed, and the same
-        check again.
+        """Record in the ledger that ``query`` is sent now, after checking
+        its class's interval, logging in if needed, and checking again.
 
         Another process may have queried while this one logged in, so the
         ledger is read again after the login and what it holds is kept.
@@ -436,7 +436,8 @@ def fetch_public_cdms(
     Parameters
     ----------
     cache
-        Cache root; :func:`~keepout.sources._store.cache_dir` if ``None``.
+        Cache root; if ``None``, ``$KEEPOUT_CACHE_DIR`` or else the
+        platform's user cache directory for keepout.
     max_age
         Seconds a cached copy is used; the ``cdm_public`` interval of
         :data:`~keepout.sources.spacetrack.CLASS_INTERVALS` (8 h) if
@@ -478,7 +479,8 @@ def fetch_catalog(
     Parameters
     ----------
     cache
-        Cache root; :func:`~keepout.sources._store.cache_dir` if ``None``.
+        Cache root; if ``None``, ``$KEEPOUT_CACHE_DIR`` or else the
+        platform's user cache directory for keepout.
     max_age
         Seconds a cached copy is used; the ``gp`` interval of
         :data:`~keepout.sources.spacetrack.CLASS_INTERVALS` (1 h) if

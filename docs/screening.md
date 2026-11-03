@@ -1,11 +1,12 @@
 # Screening
 
 Screening finds the close approaches of your satellites (the *primaries*)
-with a catalog of other objects over a window of days: every time a catalog
-object comes inside a *screening volume* around a primary, with its time of
-closest approach (TCA), range at TCA and relative velocity. keepout screens
-the general perturbations (GP) element sets that USSPACECOM publishes, with
-SGP4, as CelesTrak's [SOCRATES](https://celestrak.org/SOCRATES/) does.
+with a catalog of other objects over a window of days. An approach is any
+time a catalog object comes inside a *screening volume* around a primary.
+keepout reports each with its time of closest approach (TCA), range at TCA
+and relative velocity. It screens the general perturbations (GP) element
+sets that USSPACECOM publishes, with SGP4, as CelesTrak's
+[SOCRATES](https://celestrak.org/SOCRATES/) does.
 
 ```python
 from collections import Counter
@@ -38,11 +39,12 @@ if __name__ == "__main__":  # needed for workers > 1
 ```
 
 The window starts on 2026-10-06 to match the catalog CelesTrak served that
-day (the frozen copy in `tests/screening/data/`), on which this prints the
-output below. On the live catalog, start the window from the data, as with
-`Time.now()`: a window that ends more than 30 days after an element set's
-epoch leaves that set out as stale (see [Element age](#element-age)), so this
-fixed start finds nothing from November 2026 on.
+day. On that catalog (the frozen copy in `tests/screening/data/`) this
+prints the output below. On the live catalog, start the window from the
+data, as with `Time.now()`. A window that ends more than 30 days after an
+element set's epoch leaves that set out as stale (see
+[Element age](#element-age)). This fixed start therefore finds nothing from
+November 2026 on.
 
 ```text
 2026-10-06T05:12:33.772 58180 4633 m (R 3186, T -2873, N 1748) 7914 m/s
@@ -55,14 +57,15 @@ Counter({'stale': 28})
 !!! warning "Screening finds geometry, not risk"
     GP element sets carry no covariance, and their errors reach kilometres
     within days. A close approach found on GP data is a candidate for a
-    closer look, not a collision risk; see [Limits of GP data](#limits-of-gp-data).
+    closer look, not a collision risk. See
+    [Limits of GP data](#limits-of-gp-data).
 
 ## Element sets
 
-`keepout.omm` reads element sets into `Omm` objects (one object's SGP4 mean
-elements each, in SI units) from every format they come in, recognised by
-content: CCSDS OMM in KVN or XML (CCSDS 502.0-B-3), CelesTrak's CSV and JSON,
-and legacy two- and three-line element sets (TLE).
+`keepout.omm` reads element sets into `Omm` objects, each one object's SGP4
+mean elements in SI units. It reads every format they come in, recognised
+by content: CCSDS OMM in KVN or XML (CCSDS 502.0-B-3), CelesTrak's CSV and
+JSON, and legacy two- and three-line element sets (TLE).
 
 ```python
 import keepout.omm
@@ -76,12 +79,14 @@ TLE form, so use OMM data for them. SGP4 accepts catalog numbers up to
 
 ## CelesTrak's public catalog
 
-`keepout.sources.celestrak.fetch_catalog()` downloads the GP groups that
-together form CelesTrak's public catalog (`PUBLIC_GROUPS`: active
-satellites, the last 30 days' launches, analyst objects and the debris of the
-three largest fragmentations), as CSV, and keeps one element set per object:
-the newest, when an object is in several groups (`Catalog.duplicates` lists
-the others). `fetch_group` fetches one group, `fetch_socrates` the latest
+`keepout.sources.celestrak.fetch_catalog()` downloads, as CSV, the GP
+groups that together form CelesTrak's public catalog (`PUBLIC_GROUPS`).
+They are the active satellites, the last 30 days' launches, analyst objects
+and the debris of the three largest fragmentations. It keeps one element
+set per object, the newest when an object is in several groups.
+`Catalog.duplicates` lists the others.
+
+`fetch_group` fetches one group. `fetch_socrates` fetches the latest
 SOCRATES report, whose `approaches()` are its rows in SI units
 (`keepout.sources.socrates.SocratesApproach`).
 
@@ -89,11 +94,12 @@ The client follows CelesTrak's
 [usage policy](https://celestrak.org/usage-policy.php), which blocks clients
 that ignore it:
 
-- A download is cached (under `$KEEPOUT_CACHE_DIR`, else the user cache
-  directory, e.g. `~/.cache/keepout` on Linux) and reused for at least two hours (`TTL`, CelesTrak's
-  update interval) without asking CelesTrak again.
+- A download is cached under `$KEEPOUT_CACHE_DIR`, else the user cache
+  directory (e.g. `~/.cache/keepout` on Linux). It is reused for at least
+  two hours (`TTL`, CelesTrak's update interval) without asking CelesTrak
+  again.
 - CelesTrak answers a repeated download of unchanged data with HTTP 403. The
-  cached copy is then current and is returned; without one,
+  cached copy is then current and is returned. Without one,
   `SourceUnavailable` says why.
 - Any other status (`HttpStatusError`) or network error raises at once.
   Nothing is retried.
@@ -105,9 +111,10 @@ Only what is in the public catalog can be screened this way; see
 ## How `screen` works
 
 `screen(primaries, catalog, start, duration=7 days, volume=DEFAULT_VOLUME)`
-returns a `ScreeningResult`: the `CloseApproach`es in chronological order,
-the element sets it left out (`skipped`), the window and the volume of each
-primary. The window has no default start: `start` is always given.
+returns a `ScreeningResult`. It holds the `CloseApproach`es in
+chronological order, the element sets it left out (`skipped`), the window
+and the volume of each primary. The window has no default start, so
+`start` is always given.
 
 1. **Element sets.** Of several element sets of one object, the newest is
    screened; the others are skipped. An element set is also skipped when it
@@ -118,19 +125,19 @@ primary. The window has no default start: `start` is always given.
    drops the pairs whose distances from the Earth's centre never come
    within the primary's volume of each other, before anything is
    propagated.
-3. **Search.** The remaining pairs are propagated with SGP4 (in TEME, in
-   time chunks of bounded memory) on a time grid; sieves rule out the grid
-   intervals in which a pair cannot come inside the volume, and in the
-   others every local minimum of the range is found, with its TCA.
+3. **Search.** The remaining pairs are propagated with SGP4 on a time grid,
+   in TEME and in time chunks of bounded memory. Sieves rule out the grid
+   intervals in which a pair cannot come inside the volume. In the other
+   intervals every local minimum of the range is found, with its TCA.
 4. **Approaches.** Each minimum inside the primary's volume becomes a
    `CloseApproach`: both objects' states at TCA, rotated from TEME to GCRF.
 
 ### Skipped element sets
 
-Nothing is dropped silently: `result.skipped` lists every element set that
-was not screened, as a `SkippedObject` with the element set, its
-`ScreeningRole` (`PRIMARY` or `CATALOG`), a `SkipReason` and a detail for
-people.
+Nothing is dropped silently. `result.skipped` lists every element set that
+was not screened, as a `SkippedObject`. Each holds the element set, its
+`ScreeningRole` (`PRIMARY` or `CATALOG`), a `SkipReason` and a
+human-readable detail.
 
 | `SkipReason` | When |
 |---|---|
@@ -142,7 +149,7 @@ people.
 | `PROPAGATION_FAILED` | SGP4 reports an error inside the window (e.g. the orbit has decayed) |
 
 An object with an SGP4 error inside the window is left out with every
-approach it has: its states before the error are not trusted either. An
+approach it has, since its states before the error are not trusted either. An
 object the filter rules out of every pair is never propagated, so an error
 it would have is not seen.
 
@@ -151,11 +158,14 @@ it would have is not seen.
 The search's guarantee (next section) assumes that every acceleration
 beyond the point mass and J2 stays below 1 m/s² (`PERTURBATION`). On the
 public catalog of October 2026, SGP4 stays below 0.2 m/s² from 3 days before
-to 38 days after each element epoch; further away some objects leave the
-bound (from 39 days after the epoch, by orders of magnitude). Hence the
-defaults: `max_age` of 30 days from the epoch to the end of the window and
-`max_lead` of 3 days from the start of the window to a later epoch (CelesTrak
-serves epochs up to about a day and a half after the day of the download).
+to 38 days after each element epoch. Further away some objects leave the
+bound, from 39 days after the epoch and by orders of magnitude. Hence the
+defaults:
+
+- `max_age` of 30 days from the epoch to the end of the window;
+- `max_lead` of 3 days from the start of the window to a later epoch.
+  CelesTrak serves epochs up to about a day and a half after the day of the
+  download.
 
 One kind of object breaks the assumption inside these limits: an object
 re-entering the atmosphere. With its perigee 113 km up, SGP4's drag on
@@ -185,14 +195,15 @@ takes, not what it finds:
 
 In an interval that passes, a minimum of the range is a root of
 ρ·dρ/dt (ρ the relative position), found with Brent's method to 1 µs.
-dρ/dt comes from positions (a central difference), not from SGP4's
-velocities: SGP4's velocity is not exactly the derivative of its position
+dρ/dt comes from positions by a central difference, not from SGP4's
+velocities. SGP4's velocity is not exactly the derivative of its position
 (by up to 12 m/s), which would move the TCA of a slow pair by seconds. The
-states reported at TCA are SGP4's own, velocities included. When the range
-of a pair changes too slowly over an interval for the grid to decide (a
-co-orbital or formation-flying pair), the interval is resampled every
-10 s (`SLOW_STEP`): a minimum and a maximum of the range less than 10 s
-apart are not told apart there.
+states reported at TCA are SGP4's own, velocities included.
+
+The range of a co-orbital or formation-flying pair can change too slowly
+over an interval for the grid to decide. Such an interval is resampled
+every 10 s (`SLOW_STEP`). A minimum and a maximum of the range less than
+10 s apart are not told apart there.
 
 keepout's tests compare the search with a brute-force one (every pair
 sampled densely) on a small catalog, and check with property tests that no
@@ -219,23 +230,26 @@ filter or sieve drops an approach the brute-force search finds.
 `workers=4` deals the catalog into 4 parts, screened in separate processes,
 and merges the results. Each approach depends on its own pair's states only,
 so the result is the same, bit for bit, for any number of workers.
+
 The processes are started with `spawn` on every platform, which imports the
-main module again: a script must call `screen` with `workers` above 1 under
-`if __name__ == "__main__":`, as in the example above, and a script read from
-standard input (`python -`) cannot use workers.
+main module again. A script must therefore call `screen` with `workers`
+above 1 under `if __name__ == "__main__":`, as in the example above. A
+script read from standard input (`python -`) cannot use workers.
 
 ### From an approach to a Pc
 
-A `CloseApproach` holds the catalog numbers and both GCRF states at TCA; the
-range at TCA (`range_at_tca`), the miss vector in the primary's RTN frame (`miss_rtn`), the
-relative velocity and speed follow from them. `to_conjunction` turns an
-approach into a `Conjunction` for `compute_pc`, with a hard-body radius (the
-combined one, or each object's: `primary_radius` and `secondary_radius`)
-and covariances at TCA from elsewhere (your own orbit determination, a
-CDM). Without covariances only the maximum-Pc methods apply: an upper
-bound, not an estimate. The [synthetic operator](synthetic.md) supplies
-assumed covariances from a model of GP errors instead, and turns each
-approach into a CDM.
+A `CloseApproach` holds the catalog numbers and both GCRF states at TCA.
+The range at TCA (`range_at_tca`), the miss vector in the primary's RTN
+frame (`miss_rtn`), the relative velocity and the speed follow from them.
+
+`to_conjunction` turns an approach into a `Conjunction` for `compute_pc`.
+It takes a hard-body radius, either the combined one or each object's
+(`primary_radius` and `secondary_radius`). It also takes covariances at
+TCA from elsewhere, such as your own orbit determination or a CDM. Without
+covariances only the maximum-Pc methods apply, which give an upper bound,
+not an estimate. The [synthetic operator](synthetic.md) supplies assumed
+covariances from a model of GP errors instead, and turns each approach into
+a CDM.
 
 ```python
 from astropy.time import Time
@@ -270,11 +284,12 @@ alfano 7.2e-03
 
 A `ScreeningVolume` is an ellipsoid centred on the primary with radial,
 transverse (in-track) and normal (cross-track) semi-axes along the primary's
-RTN axes; a sphere is three equal semi-axes. `screen` takes one volume for
-every primary, or a rule (`VolumeRule`, a function of the primary's `Omm`)
-choosing each primary's own. A rule refuses a primary by raising a
-`KeepoutError` (the primary is then skipped as `NO_VOLUME`); any other
-exception is taken for a bug in the rule and propagates.
+RTN axes. A sphere is three equal semi-axes. `screen` takes one volume for
+every primary, or a rule choosing each primary's own. A rule
+(`VolumeRule`) is a function of the primary's `Omm`. It refuses a primary
+by raising a `KeepoutError`, and the primary is then skipped as
+`NO_VOLUME`. Any other exception is taken for a bug in the rule and
+propagates.
 
 | Volume | Size | Source |
 |---|---|---|
@@ -308,14 +323,14 @@ Every row of the table also needs an eccentricity below 0.25. keepout makes
 three choices the table leaves open:
 
 - **Semi-axes.** The table does not say whether its sizes are semi-axes or
-  full extents; keepout reads them as semi-axes, the larger of the two
+  full extents. keepout reads them as semi-axes, the larger of the two
   readings, so no approach the handbook would report is missed.
 - **Fixed ellipsoids.** The LEO rows are covariance screenings, for which
   the 18th Space Defense Squadron builds a volume from both objects'
-  covariances; GP data has none, so keepout uses the rows' sizes as fixed
+  covariances. GP data has none, so keepout uses the rows' sizes as fixed
   ellipsoids.
 - **Outside the table.** An orbit in no row gets the deep-space volume,
-  which the table labels "Deep Space (GEO/HEO/MEO)"; its regime is
+  which the table labels "Deep Space (GEO/HEO/MEO)". Its regime is
   `SfsRegime.OUTSIDE`, so the classification stays honest.
 
 The regime comes from SGP4's own mean elements (its perigee and un-Kozai'd
@@ -326,19 +341,19 @@ some orbits across a regime boundary.
 ## Limits of GP data
 
 GP element sets are mean elements that the 18th Space Defense Squadron fits
-to its tracking and publishes for every cataloged object; they are what
+to its tracking and publishes for every cataloged object. They are what
 anyone can screen with. They are not precise orbits:
 
 - **No covariance.** GP data says nothing about its own uncertainty, so a
-  probability of collision cannot be computed from it; an approach found on
+  probability of collision cannot be computed from it. An approach found on
   GP data gives a miss distance, not a risk.
 - **Kilometre errors.** SGP4's analytic theory and the fit leave errors of
   kilometres in low orbits within days of the element epoch, growing with
   the time since it. This is why NASA finds a 10 km threshold necessary on
-  GP data to catch 95 % of the high-Pc events (Appendix E of its handbook),
-  where the 5 km default only matches SOCRATES.
+  GP data to catch 95 % of the high-Pc events (Appendix E of its handbook).
+  The 5 km default only matches SOCRATES.
 - **Each object its own epoch.** Element sets are hours to days old, each
-  from its own fit; SOCRATES and keepout give the same approach only from
+  from its own fit. SOCRATES and keepout give the same approach only from
   the same element sets, and two element sets of the same epoch can still
   differ (see the [SOCRATES report](screening-socrates.md)).
 
@@ -350,49 +365,52 @@ operational conjunction assessment service, which keepout reads with
 ## The public catalog
 
 CelesTrak publishes only part of the catalog: about 20 000 objects in its
-groups (19 914 on 2026-10-06), while SOCRATES screens the whole catalog of
-Space-Track.org (24 194 objects appear in its report of that day). Most
-rocket bodies and debris are in no public group: 40 211 of the 186 229
+groups (19 914 on 2026-10-06). SOCRATES screens the whole catalog of
+Space-Track.org, and 24 194 objects appear in its report of that day. Most
+rocket bodies and debris are in no public group. 40 211 of the 186 229
 approaches of SOCRATES's report of 2026-10-06 involve an object outside the
 public catalog, and screening against `fetch_catalog()` misses such
-approaches. The full catalog, about 32 000 objects (31 930 on
-2026-10-15), comes from Space-Track.org with a free account:
+approaches.
+
+The full catalog, about 32 000 objects (31 930 on 2026-10-15), comes from
+Space-Track.org with a free account.
 `keepout.sources.spacetrack.fetch_catalog()` gives it as the same `Catalog`
 (see [Space-Track data](spacetrack.md)).
 
 ## Validation and performance
 
-- **[Screening against SOCRATES](screening-socrates.md).** The 1 275
-  approaches of SOCRATES's report of 2026-10-06 whose objects are in the
-  public catalog with the element sets SOCRATES used, screened with
-  keepout's defaults: all agree within SOCRATES's print precision (1 ms,
-  0.5 m, 0.5 m/s; 0.5 s for the TCA of slow pairs) except 5 approaches of
-  two objects whose element sets evidently differ from SOCRATES's, and one
-  left out as stale. `tools/screening_report.py` generates the report; CI
-  runs it with `--check`.
-- **Benchmark.** 20 LEO primaries against the 19 914 objects of the frozen
-  public catalog for 7 days take about 9 s with 4 workers on a desktop CPU,
-  and against the 31 930 objects of the frozen full catalog (Space-Track,
-  2026-10-15) 13 s, finding 866 approaches in the 5 km sphere (the target
-  is under 60 s); `tools/screening_benchmark.py` (`--source spacetrack` for
-  the full catalog) writes the numbers to the
-  [README](https://github.com/Kyrtap1309/keepout#performance).
-  CI also times every change against its merge base on the same runner (a
-  reduced catalog, one process, five runs each, alternately) and fails when
-  the median CPU time rises by more than 20 %.
+- **[Screening against SOCRATES](screening-socrates.md).** It covers the
+  1 275 approaches of SOCRATES's report of 2026-10-06 whose objects are in
+  the public catalog with the element sets SOCRATES used. Screened with
+  keepout's defaults, all agree within SOCRATES's print precision (1 ms,
+  0.5 m, 0.5 m/s; 0.5 s for the TCA of slow pairs). The exceptions are 5
+  approaches of two objects whose element sets evidently differ from
+  SOCRATES's, and one left out as stale. `tools/screening_report.py`
+  generates the report, and CI runs it with `--check`.
+- **Benchmark.** 20 LEO primaries screened for 7 days with 4 workers on a
+  desktop CPU take about 9 s against the frozen public catalog (19 914
+  objects). Against the frozen full catalog (31 930 objects, Space-Track,
+  2026-10-15) they take 13 s and find 866 approaches in the 5 km sphere.
+  The target is under 60 s. `tools/screening_benchmark.py` writes the full
+  tables to the [README](https://github.com/Kyrtap1309/keepout#performance)
+  and the numbers to [`screening-benchmark.json`](screening-benchmark.json)
+  and [`screening-benchmark-spacetrack.json`](screening-benchmark-spacetrack.json).
+- **Regressions.** CI times every change against its merge base on the same
+  runner (a reduced catalog, one process, five runs each, alternately). It
+  fails when the median CPU time rises by more than 20 %.
 
 ## Data
 
-The frozen catalog, test fixture and SOCRATES excerpt in
-`tests/screening/data/` (see the `NOTICE` there): Data: USSPACECOM/18 SDS
+The frozen catalog, test fixture and SOCRATES excerpt are in
+`tests/screening/data/` (see the `NOTICE` there). Data: USSPACECOM/18 SDS
 via Space-Track.org, retrieved from CelesTrak (celestrak.org) on
 2026-10-06. This is basic space situational awareness data, which the
 Space-Track.org user agreement allows to be redistributed with this
-citation; it is not covered by keepout's MIT licence. Cite data you
+citation. It is not covered by keepout's MIT licence. Cite data you
 download from CelesTrak in the same way when you publish results computed
 from it.
 
-The frozen full catalog in `tests/screening/spacetrack-data/` (see the
-`NOTICE` there): Data: USSPACECOM/18 SDS via Space-Track.org, retrieved on
-2026-10-15; also basic SSA data, redistributed with this citation and not
-covered by keepout's MIT licence.
+The frozen full catalog is in `tests/screening/spacetrack-data/` (see the
+`NOTICE` there). Data: USSPACECOM/18 SDS via Space-Track.org, retrieved on
+2026-10-15. It is also basic SSA data, redistributed with this citation and
+not covered by keepout's MIT licence.

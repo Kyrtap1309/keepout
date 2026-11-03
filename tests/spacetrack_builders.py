@@ -1,5 +1,5 @@
-"""Space-Track test data: a fake server, and ``gp`` and ``cdm_public``
-answers in its JSON layout.
+"""Space-Track test data: a fake server, a fake HTTPS handler, and ``gp``
+and ``cdm_public`` answers in its JSON layout.
 
 The ``gp`` answers are made from :data:`celestrak_builders.SAMPLE`
 (CelesTrak data, which Space-Track's user agreement allows to redistribute
@@ -10,12 +10,18 @@ their layout is the class's model definition, every value a string. None
 was downloaded from Space-Track.
 """
 
+import email
+import http.client
+import io
 import json
 import urllib.parse
+import urllib.request
+import urllib.response
 from collections.abc import Iterable, Mapping
 from typing import Final, TypeAlias
 
 from celestrak_builders import SAMPLE
+from web_builders import BrokenBody
 
 from keepout.omm import Omm
 from keepout.omm.celestrak import dumps_json
@@ -165,3 +171,44 @@ class FakeSpaceTrack:
         if isinstance(answer, bytes):
             return Response(200, answer)
         return answer
+
+
+def assert_hidden(*texts: str) -> None:
+    """A check that no text holds the identity or password of
+    :data:`CREDENTIALS`, as typed or form-encoded."""
+    for text in texts:
+        for secret in (PASSWORD, urllib.parse.quote_plus(PASSWORD), IDENTITY):
+            assert secret not in text
+
+
+class FakeHttps(urllib.request.BaseHandler):
+    """A handler answering HTTPS requests from ``answers`` (status, body,
+    headers) and recording what was sent: method, URL, body and headers.
+
+    It comes before urllib's own HTTPS handler, so that is never asked.
+    """
+
+    handler_order = 100
+
+    def __init__(
+        self, answers: dict[str, tuple[int, bytes | BrokenBody, str] | Exception]
+    ) -> None:
+        super().__init__()
+        self.answers = answers
+        self.sent: list[tuple[str, str, bytes | None, dict[str, str]]] = []
+
+    def https_open(self, req: urllib.request.Request) -> urllib.response.addinfourl:
+        data = req.data if isinstance(req.data, bytes) else None
+        self.sent.append(
+            (req.get_method(), req.full_url, data, dict(req.header_items()))
+        )
+        answer = self.answers[req.full_url]
+        if isinstance(answer, Exception):
+            raise answer
+        status, body, headers = answer
+        message = email.message_from_string(headers, _class=http.client.HTTPMessage)
+        stream = io.BytesIO(body) if isinstance(body, bytes) else body
+        response = urllib.response.addinfourl(stream, message, req.full_url, status)
+        # urllib's error processor reads the reason phrase.
+        response.msg = "fake"  # type: ignore[attr-defined]
+        return response

@@ -14,6 +14,7 @@ from cli_builders import (
     celestrak_pages,
     fake_space_track,
     keepout,
+    usage_error,
 )
 from spacetrack_builders import (
     IDENTITY,
@@ -207,7 +208,10 @@ def test_fetch_catalog_reports_an_unreachable_celestrak(
     assert result.exit_code == ExitCode.ERROR
     assert result.stderr.startswith("Error: ")
     assert "celestrak.org" in result.stderr
-    assert web.waits == list(RETRY_DELAYS)
+    # CelesTrak asks not to be retried: one request, no wait.
+    assert len(web.urls) == 1
+    assert "celestrak.org" in web.urls[0]
+    assert web.waits == []
 
 
 def test_fetch_catalog_from_space_track(
@@ -398,6 +402,12 @@ def test_a_bug_shows_its_traceback_without_the_password(
 def test_the_cache_variable_is_checked_and_shown_in_the_help(tmp_path: Path) -> None:
     file = tmp_path / "file"
     file.write_text("")
-    result = keepout("fetch", "cara", env={"KEEPOUT_CACHE_DIR": str(file)})
+    # Wide enough for the path to stay on one line.
+    env = {"KEEPOUT_CACHE_DIR": str(file), "COLUMNS": "500"}
+    result = keepout("fetch", "cara", env=env)
     assert result.exit_code == ExitCode.USAGE
+    assert (
+        "Invalid value for '--cache-dir' (env var: 'KEEPOUT_CACHE_DIR'): "
+        f"Directory '{file}' is a file."
+    ) in usage_error(result)
     assert "KEEPOUT_CACHE_DIR" in keepout("fetch", "cara", "--help").stdout

@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from builders import LEO_R, LEO_V, known, object_state
+from builders import LEO_R, LEO_V, approx, known, object_state
 
 from keepout._linalg import symmetric_part
 from keepout._types import FloatArray
@@ -42,8 +42,8 @@ def test_samples_stay_on_the_curved_orbit() -> None:
     states = cartesian(orbit, orbit.sample(np.random.default_rng(1), 20_000), 0.0)
     radius = np.linalg.norm(states[:, :3], axis=1) - np.linalg.norm(LEO_R)
     along = states[:, 1]
-    assert np.std(along) == pytest.approx(60e3, rel=0.03)
-    assert np.std(radius) == pytest.approx(30.0, rel=0.1)
+    assert np.std(along) == approx(60e3, rel=0.03)
+    assert np.std(radius) == approx(30.0, rel=0.1)
     cartesian_sigma = np.hypot(30.0, np.sqrt(2.0) * 60e3**2 / (2 * 7000e3))
     assert np.std(radius) < 0.2 * cartesian_sigma
 
@@ -62,7 +62,7 @@ def test_centre_at_inverts_the_motion() -> None:
     orbit = OrbitUncertainty.of(ALONG_TRACK)
     later = cartesian(orbit, orbit.elements, 120.0)
     np.testing.assert_allclose(orbit.centre_at(later, 120.0), orbit.elements, atol=1e-9)
-    assert orbit.period == pytest.approx(orbital_period(ALONG_TRACK.state), rel=1e-12)
+    assert orbit.period == approx(orbital_period(ALONG_TRACK.state), rel=1e-12)
 
 
 def test_an_unknown_covariance_has_no_orbit_uncertainty() -> None:

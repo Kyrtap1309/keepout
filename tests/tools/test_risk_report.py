@@ -7,6 +7,7 @@ import pytest
 import risk_report as report
 from builders import KELVINS_EXCERPT as EXCERPT
 from builders import series
+from report_builders import assert_writes_then_checks, readme_with_markers
 
 from keepout.risk import (
     Assessment,
@@ -22,8 +23,7 @@ from keepout.units import DAY
 
 
 def paths(tmp_path: Path) -> list[str]:
-    readme = tmp_path / "README.md"
-    readme.write_text(f"intro\n{report.START}\n{report.END}\n", encoding="utf-8")
+    readme = readme_with_markers(tmp_path, report.START, report.END)
     return [
         "--table",
         str(EXCERPT),
@@ -37,10 +37,7 @@ def paths(tmp_path: Path) -> list[str]:
 
 
 def test_main_writes_then_checks(tmp_path: Path) -> None:
-    args = paths(tmp_path)
-    assert report.main(["--check", *args]) == 1
-    assert report.main(args) == 0
-    assert report.main(["--check", *args]) == 0
+    assert_writes_then_checks(report.main, paths(tmp_path))
     summary = json.loads(
         (tmp_path / "docs" / "risk-kelvins.json").read_text(encoding="utf-8")
     )

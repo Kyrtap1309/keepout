@@ -4,7 +4,16 @@ from pathlib import Path
 
 import pytest
 from astropy.time import Time
-from cli_builders import DAYS, FIXTURE_CSV, FLEET_TOML, START, keepout, write_fleet
+from cli_builders import (
+    DAYS,
+    FIXTURE_CSV,
+    FLEET_TOML,
+    START,
+    keepout,
+    operator_run,
+    usage_error,
+    write_fleet,
+)
 from inline_snapshot import snapshot
 
 from keepout.cdm import kvn
@@ -12,7 +21,6 @@ from keepout.cli import screen
 from keepout.cli.output import ExitCode
 from keepout.omm import load
 from keepout.omm.celestrak import dumps_csv
-from keepout.synthetic import read_fleet, run
 
 
 def screen_fixture(
@@ -52,12 +60,7 @@ TCA (UTC)         Objects        Miss (m)  CDMs        Pc  Level   Action \n\
 Covariances are assumed (keepout's model of GP element set errors), not orbit determination.
 2 CDMs written to <tmp>/cdms
 """)
-    expected = run(
-        read_fleet((tmp_path / "fleet.toml").read_text()),
-        load(FIXTURE_CSV),
-        Time(START, scale="utc"),
-        float(DAYS) * 86400.0,
-    )
+    expected = operator_run()
     written = sorted(cdms.iterdir())
     assert [path.name for path in written] == sorted(
         f"{cdm.message_id}.kvn" for cdm in expected.cdms
@@ -135,7 +138,8 @@ def test_screen_starts_now_by_default(
     now = Time("2026-10-06T00:00:00.75", scale="utc").unix
     monkeypatch.setattr(screen, "time", types.SimpleNamespace(time=lambda: now))
     args = screen_fixture(tmp_path, "--json")
-    del args[5:7]  # --start START
+    start = args.index("--start")
+    del args[start : start + 2]
     result = keepout(*args)
     assert result.exit_code == ExitCode.OK
     payload = json.loads(result.stdout)
@@ -217,30 +221,36 @@ def test_screen_reports_a_bad_catalog_file(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    ("option", "value"),
+    ("option", "value", "reason"),
     [
-        ("--days", "0"),
-        ("--days", "-1"),
-        ("--days", "nan"),
-        ("--start", "yesterday"),
-        ("--start", "2026-13-01"),
-        ("--workers", "0"),
+        ("--days", "0", "must be a positive number, got 0.0"),
+        ("--days", "-1", "must be a positive number, got -1.0"),
+        ("--days", "nan", "must be a positive number, got nan"),
+        ("--start", "yesterday", "not an ISO 8601 UTC time: 'yesterday'"),
+        ("--start", "2026-13-01", "not an ISO 8601 UTC time: '2026-13-01'"),
+        ("--workers", "0", "0 is not in the range x>=1."),
     ],
 )
-def test_screen_refuses_bad_options(tmp_path: Path, option: str, value: str) -> None:
+def test_screen_refuses_bad_options(
+    tmp_path: Path, option: str, value: str, reason: str
+) -> None:
     args = screen_fixture(tmp_path)
     args[args.index(option) + 1] = value
     result = keepout(*args)
     assert result.exit_code == ExitCode.USAGE
-    assert option in result.stderr
+    assert f"Invalid value for '{option}': {reason}" in usage_error(result)
 
 
 def test_screen_needs_an_existing_fleet_file(tmp_path: Path) -> None:
     args = screen_fixture(tmp_path)
-    args[args.index("--fleet") + 1] = str(tmp_path / "missing.toml")
-    result = keepout(*args)
+    missing = tmp_path / "missing.toml"
+    args[args.index("--fleet") + 1] = str(missing)
+    # Wide enough for the path to stay on one line.
+    result = keepout(*args, env={"COLUMNS": "500"})
     assert result.exit_code == ExitCode.USAGE
-    assert "--fleet" in result.stderr
+    assert (
+        f"Invalid value for '--fleet': File '{missing}' does not exist."
+    ) in usage_error(result)
 
 
 def test_screen_takes_a_catalog_file_or_a_source_not_both(tmp_path: Path) -> None:

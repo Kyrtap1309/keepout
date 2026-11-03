@@ -35,7 +35,6 @@ def test_default_levels(pc: float, level: RiskLevel) -> None:
 
 def test_levels_are_ordered_by_severity() -> None:
     assert RiskLevel.GREEN < RiskLevel.YELLOW < RiskLevel.RED
-    assert RiskLevel.RED > RiskLevel.GREEN
     assert not isinstance(RiskLevel.GREEN, int)
 
 
@@ -53,7 +52,11 @@ def test_conservative_basis_uses_the_upper_end_of_an_interval() -> None:
 def test_custom_thresholds() -> None:
     limits = Thresholds(green_below=1e-6, red_from=1e-3)
     assert classify(seen(5e-7), limits) is RiskLevel.GREEN
+    assert classify(seen(1e-6), limits) is RiskLevel.YELLOW
     assert classify(seen(5e-4), limits) is RiskLevel.YELLOW
+    # Between the default red_from (1e-4) and the custom one.
+    assert classify(seen(9.99e-4), limits) is RiskLevel.YELLOW
+    assert classify(seen(1e-3), limits) is RiskLevel.RED
 
 
 @pytest.mark.parametrize(
@@ -94,10 +97,6 @@ def test_a_higher_pc_is_never_a_lower_level(
     low, high = sorted((low, high))
     limits = Thresholds(basis=basis)
     assert classify(seen(low), limits) <= classify(seen(high), limits)
-
-
-def test_a_level_is_labelled_in_lower_case() -> None:
-    assert [level.key for level in RiskLevel] == ["green", "yellow", "red"]
 
 
 def test_a_level_has_a_stable_key_for_data() -> None:

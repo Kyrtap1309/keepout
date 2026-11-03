@@ -118,7 +118,7 @@ def parse_value(keyword: Keyword, text: str, unit: str | None) -> FieldValue:
 
 
 def _check_unit(keyword: Keyword, unit: str | None) -> None:
-    """A check that ``unit``, if given, is the keyword's (:class:`ValueError` if not).
+    """Check that ``unit``, if given, is the keyword's.
 
     Raises
     ------
@@ -161,7 +161,8 @@ def format_value(keyword: Keyword, value: FieldValue) -> tuple[str, str | None]:
 
 
 def _shortest(value: float, scale: float) -> str:
-    """Shortest number text that :func:`parse_value` turns back into ``value``."""
+    """Shortest number text that :func:`parse_value` turns back into
+    ``value``, or into a neighbouring double (see :func:`message_number`)."""
     return repr(message_number(value, scale))
 
 
@@ -173,10 +174,17 @@ def message_number(value: float, scale: float) -> float:
     """The number :func:`format_value` writes for a stored value, in message units.
 
     It is the shortest decimal that :func:`parse_value` scales back to
-    ``value`` exactly: ``value / scale`` itself may have spurious digits
-    (6535.677249 km is 6535677.249 m, and dividing by 1000 gives the
-    neighbouring double 6535.677248999999); the shortest decimal is the one
-    the message had. Reading the written text gives this number back.
+    ``value`` exactly, if there is one: ``value / scale`` itself may have
+    spurious digits (6535.677249 km is 6535677.249 m, and dividing by 1000
+    gives the neighbouring double 6535.677248999999); the shortest decimal is
+    the one the message had. Reading the written text gives this number back.
+
+    A value read from a message always comes back exactly. Other values
+    (computed ones) may have no decimal that scales back to them; then
+    ``value / scale`` is written, which scales back to within 1 ulp of
+    ``value`` (a neighbouring double, for a few values in a hundred at
+    scale 1000), unless ``value / scale`` is so small it is subnormal
+    (below about 2.2e-308) and has fewer significant bits.
 
     Parameters
     ----------

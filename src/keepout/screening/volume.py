@@ -98,7 +98,20 @@ class ScreeningVolume:
 
     @classmethod
     def sphere(cls, radius: float, *, label: str = "") -> ScreeningVolume:
-        """A sphere of ``radius`` [m] around the primary."""
+        """A sphere of ``radius`` [m] around the primary.
+
+        Parameters
+        ----------
+        radius
+            Radius of the sphere [m], finite and positive.
+        label
+            Where the volume comes from, for reports.
+
+        Raises
+        ------
+        ValueError
+            If ``radius`` is not finite and positive.
+        """
         return cls(radius, radius, radius, label)
 
     @classmethod
@@ -232,7 +245,8 @@ class ScreeningVolume:
 
 
 DEFAULT_VOLUME: Final = ScreeningVolume.sphere(
-    SOCRATES_RADIUS, label=f"{SOCRATES_RADIUS / KM:g} km sphere (as CelesTrak SOCRATES)"
+    SOCRATES_RADIUS,
+    label=f"{SOCRATES_RADIUS / KM:g} km sphere (as in CelesTrak's SOCRATES)",
 )
 """The volume screening uses unless told otherwise: a 5 km sphere."""
 

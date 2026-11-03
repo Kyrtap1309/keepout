@@ -12,10 +12,12 @@ from builders import (
     LEO_R,
     LEO_V,
     TYPICAL_HEAD_ON,
+    approx,
     head_on,
     known,
     object_state,
     shifted_back,
+    unbound_crossing,
     without_covariance,
 )
 from faults import (
@@ -148,9 +150,12 @@ def test_the_registry_says_what_each_method_is() -> None:
 
 
 @pytest.mark.parametrize("method", ["frisbee", "dilution", "alfano"])
-def test_a_maximum_pc_is_an_upper_bound(method: Method) -> None:
+def test_a_maximum_pc_is_labelled_an_upper_bound(method: Method) -> None:
     conjunction = secondary_unknown() if method == "frisbee" else TYPICAL_HEAD_ON
     assert compute_pc(conjunction, method).kind == "upper_bound"
+
+
+def test_a_pc_from_both_covariances_is_labelled_an_estimate() -> None:
     assert compute_pc(TYPICAL_HEAD_ON).kind == "estimate"
 
 
@@ -199,21 +204,25 @@ def test_fast_leo_encounter_has_no_warnings() -> None:
     assert result.diagnostics == ()
     # head_on: v_rel along GCRF -y where the primary's sigma is 1 m, the
     # secondary's 0: 2 (5 * 1 m + 5 m) / (2 * 7546 m/s).
-    assert result.details["encounter_duration_s"] == pytest.approx(
+    assert result.details["encounter_duration_s"] == approx(
         2 * (SIGMA_EXTENT * 1.0 + 5.0) / (2 * 7546.0), rel=1e-12
     )
 
 
 def test_covariance_repairs_come_first_labelled_by_object() -> None:
-    base = TYPICAL_HEAD_ON
+    # The slow encounter has notes of its own, which the repair must precede.
+    base = SLOW_ALONG_TRACK
     asymmetric = known(base.primary.covariance).matrix.copy()
-    asymmetric[0, 1] += 1.0
+    asymmetric[0, 1] += 0.1 * math.sqrt(asymmetric[0, 0] * asymmetric[1, 1])
     repaired = ObjectState(
         "12345", base.primary.state, make_covariance(asymmetric, "GCRF", EPOCH)
     )
     result = compute_pc(Conjunction(repaired, base.secondary, 5.0))
+    own = compute_pc(base).diagnostics
+    assert own
     assert result.diagnostics == (
         "primary (12345): symmetrised covariance (max relative asymmetry 0.1)",
+        *own,
     )
 
 
@@ -241,7 +250,7 @@ def along_track_conjunction(duration: float) -> Conjunction:
 @pytest.mark.parametrize(("fraction", "warns"), [(0.99, False), (1.01, True)])
 def test_duration_warning_starts_at_the_limit(fraction: float, warns: bool) -> None:
     conjunction = along_track_conjunction(fraction * DURATION_LIMIT * LEO_PERIOD)
-    assert encounter_duration(conjunction) == pytest.approx(
+    assert encounter_duration(conjunction) == approx(
         fraction * DURATION_LIMIT * LEO_PERIOD, rel=1e-9
     )
     diagnostics = compute_pc(conjunction).diagnostics
@@ -252,27 +261,15 @@ def test_duration_warning_starts_at_the_limit(fraction: float, warns: bool) -> N
 
 
 def test_unbound_primary_gets_no_duration_warning() -> None:
-    # 15 km/s at 7000 km is above escape speed: there is no period to compare.
-    fast = np.array([0.0, 15000.0, 0.0])
-    primary = object_state(LEO_R, fast, 1e8 * np.eye(3))
-    secondary = object_state(
-        LEO_R + np.array([30.0, 0.0, 0.0]), fast + np.array([0.0, 0.0, 1.0]), np.eye(3)
-    )
-    assert compute_pc(Conjunction(primary, secondary, 5.0)).diagnostics == ()
+    # There is no period to compare the encounter duration with.
+    assert compute_pc(unbound_crossing()).diagnostics == ()
 
 
 def test_auto_keeps_foster_for_a_questionable_unbound_encounter() -> None:
     # Unbound primary, secondary 10 m off closest approach along the relative
     # velocity (z): a 2-D assumption is questionable, but Hall needs elliptic
     # orbits, so Foster stays, with the note and without a 2-D comparison.
-    fast = np.array([0.0, 15000.0, 0.0])
-    primary = object_state(LEO_R, fast, 1e8 * np.eye(3))
-    secondary = object_state(
-        LEO_R + np.array([30.0, 0.0, 10.0]),
-        fast + np.array([0.0, 0.0, 1.0]),
-        np.eye(3),
-    )
-    result = compute_pc(Conjunction(primary, secondary, 5.0))
+    result = compute_pc(unbound_crossing(z_offset=10.0))
     assert result.method == "foster"
     (message,) = result.diagnostics
     assert message.startswith("states are 10 m from closest approach")
@@ -300,7 +297,7 @@ def test_large_sigma_across_a_slow_track_does_not_warn() -> None:
     )
     result = compute_pc(Conjunction(primary, secondary, 5.0))
     assert result.diagnostics == ()
-    assert result.details["encounter_duration_s"] == pytest.approx(
+    assert result.details["encounter_duration_s"] == approx(
         2 * (SIGMA_EXTENT * math.sqrt(2.0) + 5.0) / 20.0, rel=1e-9
     )
 
@@ -409,7 +406,7 @@ def test_auto_uses_alfano_when_both_covariances_are_unknown() -> None:
     conjunction = both_unknown(FAR_HEAD_ON)
     result = compute_pc(conjunction)
     assert result.method == "alfano"
-    assert result.value == pytest.approx(
+    assert result.value == approx(
         5.0 / 300.0 * math.sqrt(2.0 / (math.pi * math.e)), rel=1e-3
     )
 

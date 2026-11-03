@@ -435,7 +435,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         is missing.
     """
     parser = argparse.ArgumentParser(prog=TOOL)
-    parser.add_argument("--check", action="store_true", help="fail if out of date")
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help=(
+            "fail if out of date (the plots only need to exist: their SVG bytes "
+            "vary with the matplotlib version)"
+        ),
+    )
     parser.add_argument(
         "--table", type=Path, default=None, help="a local raw table or excerpt"
     )
@@ -457,6 +464,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     for event_id in summary["examples"].values():
         path = args.images / image(event_id)
         if args.check:
+            # Only its existence: matplotlib versions write different SVG
+            # bytes for the same figure.
             if not path.exists():
                 print(f"{path} is missing; run {TOOL}")
                 status = 1

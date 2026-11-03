@@ -135,8 +135,8 @@ addopts = [
 ]
 filterwarnings = ["error"]
 markers = [
-    "slow: tests of tens of seconds (full burn grids, week-long integrations); CI runs them",
-    "validation: slow checks against reference data (NASA CARA and ESA Kelvins data download on first run; screening and the synthetic operator use the committed GP data; the Space-Track answers check needs KEEPOUT_SPACETRACK_RAW)",
+    "slow: tests of tens of seconds (full burn grids, week-long integrations, the screening and synthetic operator reports on the committed GP data); CI runs them",
+    "validation: slow checks against reference data (NASA CARA and ESA Kelvins data download on first run; the Space-Track answers check needs KEEPOUT_SPACETRACK_RAW)",
 ]
 
 [tool.coverage.run]

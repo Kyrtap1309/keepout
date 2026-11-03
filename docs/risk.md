@@ -28,17 +28,21 @@ objects, a repeated `MESSAGE_ID`, TCAs further apart or different
 `CONJUNCTION_ID` values. `group_events` sorts a pile of CDMs into events.
 
 `event.observations()` computes keepout's own Pc for every CDM with
-`compute_pc` (`"auto"` by default; `compute=computation("elrod")` for
-another method, `computation("montecarlo", samples=100_000, seed=1)` for a
-method with options) and keeps the originator's `COLLISION_PROBABILITY`
-next to it in `reported_pc`. Each result becomes a `PcObservation`: the time
-from the CDM's creation to TCA, the Pc, what kind of value it is, and the
-diagnostics. A CDM whose Pc cannot be computed (an unusable covariance, no
-convergence) gives an observation with the error instead of stopping the
-others. An observation's `source` names the method that gave the value,
-e.g. `keepout (foster)` when `"auto"` chose Foster; a failed one names the
-method asked for, e.g. `keepout (auto)`. A missing hard-body radius is the one exception: it is reported
-before anything is computed, since every CDM would fail the same way.
+`compute_pc`. The method is `"auto"` by default. `compute=computation("elrod")`
+picks another method, and `computation("montecarlo", samples=100_000, seed=1)`
+a method with options. The originator's `COLLISION_PROBABILITY` is kept
+next to keepout's Pc in `reported_pc`.
+
+Each result becomes a `PcObservation`: the time from the CDM's creation to
+TCA, the Pc, what kind of value it is, and the diagnostics. A CDM whose Pc
+cannot be computed (an unusable covariance, no convergence) gives an
+observation with the error instead of stopping the others. A missing
+hard-body radius is the one exception. It is reported before anything is
+computed, since every CDM would fail the same way.
+
+An observation's `source` names the method that gave the value, e.g.
+`keepout (foster)` when `"auto"` chose Foster. A failed one names the
+method asked for, e.g. `keepout (auto)`.
 
 Observations can also come from elsewhere. ESA's Kelvins data
 (`keepout.sources.kelvins`) gives ESA's own Pc per CDM, which keepout
@@ -59,8 +63,8 @@ assesses as reported.
 | red | from `red_from` | Pc >= 1e-4 |
 
 The default thresholds follow common operational practice (NASA's CARA
-mitigates at 1e-4); they are a starting point, not a standard for every
-mission: `Thresholds(green_below=..., red_from=...)` sets your own.
+mitigates at 1e-4). They are a starting point, not a standard for every
+mission. `Thresholds(green_below=..., red_from=...)` sets your own.
 
 By default the comparison is **conservative**: a Monte Carlo Pc is compared
 by the upper end of its confidence interval, so 0 hits in too few samples is
@@ -68,12 +72,13 @@ not green. `Thresholds(basis="estimate")` compares the estimate itself.
 
 ## Trend
 
-`analyse_trend` orders the observations from the oldest to the latest. At
-one time, a failed observation counts as later than one with a Pc, and the
-higher Pc (or interval upper end) as the latest. CDMs issued after TCA and
-CDMs without a Pc are left out, with a note. The **direction** is the slope
-of a least-squares line through log10 Pc against time over the last three
-observations (`TrendConfig(window=...)`):
+`analyse_trend` orders the observations from the oldest to the latest. When
+observations share a time, a failed one is ordered after one with a Pc.
+Among those with a Pc, the highest (or the highest interval upper end)
+comes last. CDMs issued after TCA and CDMs without a Pc are left out, with
+a note. The **direction** is the slope of a least-squares line through
+log10 Pc against time over the last three observations
+(`TrendConfig(window=...)`):
 
 - **rising**: more than 0.5 decades of Pc per day (`steady_within`);
 - **falling**: less than -0.5 decades per day;
@@ -81,12 +86,12 @@ observations (`TrendConfig(window=...)`):
 - **undetermined**: fewer than two observations, or all at one time.
 
 Pc values below 1e-30 (including 0) are fitted at 1e-30. These settings are a
-heuristic, not a standard; the [Kelvins report](risk-kelvins.md) shows how
+heuristic, not a standard. The [Kelvins report](risk-kelvins.md) shows how
 they behave on 15 321 real events.
 
 ## Decision
 
-`decide` looks at the latest observation before TCA; the actions are
+`decide` looks at the latest observation before TCA. The actions are
 ordered from the mildest to the most drastic (`Action.IGNORE <
 Action.MONITOR < Action.PREPARE_MANOEUVRE < Action.MANOEUVRE`):
 
@@ -98,26 +103,30 @@ Action.MONITOR < Action.PREPARE_MANOEUVRE < Action.MANOEUVRE`):
 | green, rising fast enough to reach yellow by TCA | **monitor** |
 | green, an upper bound or with diagnostics | **monitor** |
 | green otherwise | **ignore** |
-| no Pc (the computation failed) | **monitor**; if the latest observation with a Pc was red, the red rules judged at this observation's time (manoeuvre within the decision point, otherwise prepare manoeuvre) |
+| no Pc (the computation failed) | **monitor**, or the red rules (below) |
 | none before TCA (the event is past) | **monitor** |
 
-A green Pc that rises is projected to TCA along the fitted slope; a rise from
-1e-18 to 1e-17 is reported but does not need attention. A doubtful green (an
-upper bound, a repaired covariance, a questionable 2-D assumption, a failed
-computation) is never ignored.
+When the latest observation has no Pc but the latest observation with a Pc
+was red, the red rules apply, judged at the failed observation's time. That
+gives manoeuvre within the decision point and prepare manoeuvre before it.
+
+A green Pc that rises is projected to TCA along the fitted slope. A rise
+from 1e-18 to 1e-17 is reported but does not need attention. A doubtful
+green is never ignored: an upper bound, a repaired covariance, a
+questionable 2-D assumption or a failed computation.
 
 The decision point leaves time to plan the manoeuvre and screen the new
-orbit; set it with `DecisionConfig(decision_point=...)` (seconds).
+orbit. Set it with `DecisionConfig(decision_point=...)`, in seconds.
 
 ## Assumptions and limits
 
 - The rules are transparent heuristics for a small operator's triage, not an
   operational standard and not a substitute for an operational conjunction
   assessment service.
-- The latest observation decides (if it has no Pc, together with the latest
-  one with a Pc); earlier ones shape the trend only.
-- The trend extrapolates nothing except the rising-green check; forecasting
-  the Pc at TCA is out of scope until v1.x.
-- Each CDM is computed independently with `compute_pc`: in `"auto"` mode a
-  slow encounter can take up to a minute per CDM; `computation("foster")`
-  takes milliseconds.
+- The latest observation decides. If it has no Pc, the latest one with a Pc
+  decides with it. Earlier observations shape the trend only.
+- The trend extrapolates nothing except the rising-green check. Forecasting
+  the Pc at TCA is not implemented.
+- Each CDM is computed independently with `compute_pc`. In `"auto"` mode a
+  slow encounter can take up to a minute per CDM, while
+  `computation("foster")` takes milliseconds.

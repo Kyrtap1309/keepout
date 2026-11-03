@@ -1,7 +1,7 @@
 import math
 
 import pytest
-from builders import TYPICAL_HEAD_ON, head_on
+from builders import TYPICAL_HEAD_ON, approx, head_on
 from pc_builders import PlaneCase
 from reference_pc import principal_axes_pc
 
@@ -11,7 +11,7 @@ from keepout.pc.foster import MIN_RTOL, foster
 def test_zero_miss_isotropic_has_a_closed_form() -> None:
     conjunction = head_on(0.0, 10.0, 10.0, 5.0)
     expected = 1.0 - math.exp(-(5.0**2) / (2.0 * 10.0**2))
-    assert foster(conjunction.plane, 5.0).value == pytest.approx(expected, rel=1e-10)
+    assert foster(conjunction.plane, 5.0).value == approx(expected, rel=1e-10)
 
 
 def test_far_miss_underflows_to_exactly_zero_without_integrating() -> None:
@@ -76,7 +76,7 @@ def test_line_like_covariance_is_integrated_accurately(
     conjunction = head_on(miss, sigma_narrow, sigma_wide, radius)
     expected = principal_axes_pc(0.0, miss, sigma_wide, sigma_narrow, radius)
     result = foster(conjunction.plane, radius)
-    assert result.value == pytest.approx(expected, rel=1e-8)
+    assert result.value == approx(expected, rel=1e-8)
 
 
 def test_a_breakpoint_at_the_edge_of_the_band_leaves_no_sliver() -> None:
@@ -86,7 +86,7 @@ def test_a_breakpoint_at_the_edge_of_the_band_leaves_no_sliver() -> None:
     unscaled = foster(case.plane(), case.radius)
     scaled = foster(case.plane(3.0), 3.0 * case.radius)
     assert scaled.diagnostics == ()
-    assert scaled.value == pytest.approx(unscaled.value, rel=1e-10)
+    assert scaled.value == approx(unscaled.value, rel=1e-10)
 
 
 @pytest.mark.parametrize(
@@ -102,4 +102,4 @@ def test_chord_steps_at_the_circle_edge_match_the_oracle(case: PlaneCase) -> Non
     expected = principal_axes_pc(
         case.miss_u, case.miss_v, case.sigma_u, case.sigma_v, case.radius
     )
-    assert foster(case.plane(), case.radius).value == pytest.approx(expected, rel=1e-10)
+    assert foster(case.plane(), case.radius).value == approx(expected, rel=1e-10)

@@ -4,7 +4,7 @@ pair the brute-force oracle finds within the primary's volume."""
 import numpy as np
 import pytest
 from astropy.time import Time
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from screening_data import FIXTURE_START, SGP4_FAILING, load_fixture
 from screening_oracle import Oracle, brute_force
@@ -169,6 +169,8 @@ volumes = st.one_of(
 )
 
 
+# An example propagates the fixture's objects: no 200 ms deadline.
+@settings(deadline=None)
 @given(
     window=st.integers(min_value=0, max_value=len(WINDOWS) - 1),
     chosen=st.lists(

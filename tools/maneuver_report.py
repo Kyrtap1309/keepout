@@ -1,8 +1,8 @@
 """The manoeuvre report: the Pc of along-track burns on a CARA test event, and
 a re-screen of burns on the frozen catalog.
 
-Usage: ``uv run python tools/maneuver_report.py [--check] [--cdm PATH]
-[--hbr METRES] [--workers N] [--repeat N]``.
+Usage: ``uv run python tools/maneuver_report.py [--check] [--keep-timings]
+[--cdm PATH] [--hbr METRES] [--workers N] [--repeat N]``.
 
 Plans the burns of CARA test CDM :data:`CDM_ID` (Metop-B against a Fengyun
 1C fragment, from :data:`keepout.sources.cara.PC_METHOD_CDMS`, downloaded on
@@ -24,7 +24,9 @@ summary block. The plan of the CARA event is timed over ``--repeat`` runs
 instead of writing when the numbers, the page or the README are out of date;
 it plans once and takes the timings from the committed JSON, so they are
 shown but never checked, and the heatmap is then only required to exist (SVG
-bytes vary with the matplotlib version). CARA's files are not redistributed:
+bytes vary with the matplotlib version). ``--keep-timings`` writes the files
+with the committed JSON's timings instead of measuring again, for a change of
+the text alone. CARA's files are not redistributed:
 only numbers derived from them and the figure are written.
 """
 
@@ -641,8 +643,8 @@ def _demonstration(summary: Summary) -> list[str]:
         f"fleet (`{demo['fleet']}`) against the public catalog frozen on "
         f"{demo['retrieved']}, {demo['days']:g} days from "
         f"{minute_text(demo['start'])} UTC with the {demo['volume']}. Its "
-        "yellow event of the highest Pc is planned here with the target "
-        f"green below {settings['green_below']:.0e}, and each option is "
+        "highest-Pc yellow event is planned here, with the target set to the "
+        f"green threshold ({settings['green_below']:.0e}), and each option is "
         "re-screened against the same catalog for "
         f"{DEFAULT_DURATION / DAY:g} days from the burn."
     )
@@ -760,22 +762,23 @@ def render_page(summary: Summary, images: str) -> str:
             "keepout's [manoeuvre planner](maneuver.md) on CARA test CDM "
             f"`{settings['cdm']}` from the "
             "[NASA CARA Analysis Tools](https://github.com/nasa/CARA_Analysis_Tools) "
-            f"(commit `{commit[:12]}`): {primary_text(plan)} passing "
-            f"{_object(plan['secondary'], plan['secondary_name'])}, "
-            f"{plan['tca'][:4]} test data, {_level_text(settings, plan)} at "
-            f"{plan['relative_speed']:.0f} m/s without a burn. keepout is not "
+            f"(commit `{commit[:12]}`): a {plan['tca'][:4]} test conjunction of "
+            f"{primary_text(plan)} with "
+            f"{_object(plan['secondary'], plan['secondary_name'])} at "
+            f"{plan['relative_speed']:.0f} m/s, {_level_text(settings, plan)} "
+            "without a burn. keepout is not "
             f"{primary_text(plan)}'s operator, and nothing here is advice about "
             "it. "
             f"Combined hard-body radius: {radius_text(settings)}. The burns are "
             "along-track and impulsive, the covariances unchanged; "
-            "[Assumptions](assumptions.md#manoeuvre-planning) lists every "
+            "[Assumptions and limits](maneuver.md#assumptions-and-limits) lists every "
             "assumption."
         ),
         "",
         (
             "Settings: target Pc "
-            f"{settings['target_pc']:.0e} (keepout's default, a decade below "
-            f"red from {settings['red_from']:.0e}, as a margin); burns from "
+            f"{settings['target_pc']:.0e} (keepout's default: ten times below the "
+            f"red threshold, {settings['red_from']:.0e}); burns from "
             f"{grid['earliest_lead_hours']:g} h (or the CDM's creation, if later) "
             f"to {grid['latest_lead_hours']:g} h before TCA, "
             f"{grid['steps_per_orbit']} per orbit; Δv from "
@@ -1080,7 +1083,19 @@ def positive_radius(text: str) -> float:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog=TOOL)
-    parser.add_argument("--check", action="store_true", help="fail if out of date")
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help=(
+            "fail if out of date (the timings are not checked, and the heatmap "
+            "only needs to exist: its SVG bytes vary with the matplotlib version)"
+        ),
+    )
+    parser.add_argument(
+        "--keep-timings",
+        action="store_true",
+        help="write with the committed JSON's timings instead of measuring again",
+    )
     parser.add_argument(
         "--cdm", type=Path, default=None, help="a local CDM instead of CARA's"
     )
@@ -1165,7 +1180,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         source = "cara"
     else:
         radius, source = args.hbr, "given"
-    plan, wall, cpu = timed_plan(event, radius, 1 if args.check else args.repeat)
+    committed_timings = args.check or args.keep_timings
+    plan, wall, cpu = timed_plan(event, radius, 1 if committed_timings else args.repeat)
 
     demonstration = demonstration_summary(
         snapshot.read_catalog(args.data),
@@ -1175,7 +1191,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     timings = (
         read_timings(args.page.with_suffix(".json"))
-        if args.check
+        if committed_timings
         else measured_timings(args.repeat, wall, cpu)
     )
     summary: Summary = {
@@ -1205,6 +1221,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     status = write_or_check(files, check=args.check, tool=TOOL)
     heatmap = args.images / HEATMAP
     if args.check:
+        # Only its existence: matplotlib versions write different SVG bytes
+        # for the same figure, so comparing them would fail on another setup.
         if not heatmap.exists():
             print(f"{heatmap} is missing; run {TOOL}")
             status = 1

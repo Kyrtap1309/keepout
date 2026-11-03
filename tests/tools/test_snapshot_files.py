@@ -1,14 +1,17 @@
 import argparse
 import gzip
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, TypedDict
 
 import pytest
+import screening_snapshot
 import snapshot_files
+import spacetrack_snapshot
 from celestrak_builders import SAMPLE
+from snapshot_raws import celestrak_raw, spacetrack_raw
 from web_builders import digest
 
 from keepout.omm import Omm
@@ -229,3 +232,84 @@ def test_build_writes_the_data_from_raw_and_verify_checks_it(
 def test_verify_reads_the_committed_data(tmp_path: Path) -> None:
     (tmp_path / "text").write_text("committed")
     assert run(["verify", "--data", str(tmp_path)], tmp_path / "elsewhere") == 0
+
+
+# The data commands through each snapshot tool, on a download from a fake
+# server (tests/tools/snapshot_raws.py).
+
+
+@dataclass(frozen=True)
+class Tool:
+    """A snapshot tool, the name of its gzipped catalog and a download of its."""
+
+    main: Callable[[Sequence[str] | None], int]
+    snapshot: str
+    raw: Path
+
+    def build(self, data: Path, *options: str) -> int:
+        return self.main(["build", str(self.raw), "--data", str(data), *options])
+
+    def verify(self, data: Path) -> int:
+        return self.main(["verify", "--data", str(data)])
+
+
+@pytest.fixture(params=["screening", "spacetrack"])
+def tool(request: pytest.FixtureRequest, tmp_path: Path) -> Tool:
+    if request.param == "screening":
+        raw = celestrak_raw(tmp_path / "raw")
+        return Tool(screening_snapshot.main, screening_snapshot.SNAPSHOT, raw)
+    raw = spacetrack_raw(tmp_path / "raw")
+    return Tool(spacetrack_snapshot.main, spacetrack_snapshot.SNAPSHOT, raw)
+
+
+def test_build_is_deterministic(tool: Tool, tmp_path: Path) -> None:
+    one, two = tmp_path / "one", tmp_path / "two"
+    assert tool.build(one) == 0
+    assert tool.build(two) == 0
+    names = sorted(path.name for path in one.iterdir())
+    assert snapshot_files.MANIFEST in names
+    assert sorted(path.name for path in two.iterdir()) == names
+    for name in names:
+        assert (one / name).read_bytes() == (two / name).read_bytes(), name
+    stored = (one / tool.snapshot).read_bytes()
+    assert stored == gzip.compress(gzip.decompress(stored), mtime=0)
+
+
+def test_build_keeps_a_gzipped_file_with_the_same_contents(
+    tool: Tool, tmp_path: Path
+) -> None:
+    data = tmp_path / "data"
+    assert tool.build(data) == 0
+    path = data / tool.snapshot
+    other = gzip.compress(gzip.decompress(path.read_bytes()), compresslevel=1)
+    path.write_bytes(other)
+    assert tool.build(data) == 0
+    assert path.read_bytes() == other
+    assert tool.verify(data) == 0
+
+
+def test_build_replaces_a_broken_gzip_file(tool: Tool, tmp_path: Path) -> None:
+    data = tmp_path / "data"
+    assert tool.build(data) == 0
+    path = data / tool.snapshot
+    good = path.read_bytes()
+    path.write_bytes(good[:-1] + bytes([good[-1] ^ 1]))
+    assert tool.build(data, "--check") == 1
+    assert tool.build(data) == 0
+    assert path.read_bytes() == good
+
+
+def test_verify_finds_a_changed_file(tool: Tool, tmp_path: Path) -> None:
+    data = tmp_path / "data"
+    assert tool.build(data) == 0
+    manifest = json.loads((data / snapshot_files.MANIFEST).read_text())
+    for name in manifest["files"]:
+        if name.endswith(".gz"):
+            continue  # a gzip file with the same data is kept (above)
+        path = data / name
+        good = path.read_bytes()
+        path.write_bytes(good + b"\n")
+        assert tool.verify(data) == 1, name
+        assert tool.build(data, "--check") == 1, name
+        path.write_bytes(good)
+    assert tool.verify(data) == 0

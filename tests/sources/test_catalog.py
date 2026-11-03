@@ -9,8 +9,7 @@ from astropy.time import Time
 from celestrak_builders import SAMPLE
 
 from keepout.omm import Omm
-from keepout.sources import celestrak, spacetrack
-from keepout.sources.cache import CopyMeta, read_copy, save_copy
+from keepout.sources.cache import CopyMeta
 from keepout.sources.catalog import (
     CATALOG_SOURCES,
     DEFAULT_SOURCE,
@@ -19,6 +18,7 @@ from keepout.sources.catalog import (
     CatalogSourceName,
     Retrieval,
 )
+from keepout.units import HOUR
 
 NOW = 1_791_000_000.0
 URL = "https://example.org/gp"
@@ -54,16 +54,6 @@ def test_a_catalog_keeps_each_objects_newest_set_by_catalog_number(
     assert catalog.parts == (first, second)
 
 
-def test_a_saved_copy_reads_back_with_its_metadata(tmp_path: Path) -> None:
-    target = tmp_path / "gp" / "catalog.json"
-    meta = save_copy(target, URL, b"[]", NOW)
-    assert (meta.url, meta.retrieved, meta.checked) == (URL, NOW, NOW)
-    cached = read_copy(target, URL)
-    assert cached is not None
-    assert cached.data == b"[]"
-    assert cached.meta == meta
-
-
 def test_the_catalog_sources_are_named_by_their_keys() -> None:
     assert tuple(CATALOG_SOURCES) == get_args(CatalogSourceName)
     assert all(name == source.name for name, source in CATALOG_SOURCES.items())
@@ -71,8 +61,9 @@ def test_the_catalog_sources_are_named_by_their_keys() -> None:
 
 
 def test_a_catalog_is_reused_as_long_as_its_source_allows() -> None:
-    assert CATALOG_SOURCES["celestrak"].reuse == celestrak.TTL
-    assert CATALOG_SOURCES["spacetrack"].reuse == spacetrack.CLASS_INTERVALS["gp"]
+    # CelesTrak updates every 2 h; Space-Track allows a gp query an hour.
+    assert CATALOG_SOURCES["celestrak"].reuse == 2 * HOUR
+    assert CATALOG_SOURCES["spacetrack"].reuse == HOUR
 
 
 @pytest.mark.parametrize("name", get_args(CatalogSourceName))

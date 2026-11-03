@@ -129,6 +129,11 @@ def encounter_plane(conjunction: Conjunction) -> EncounterPlane:
     Use :attr:`Conjunction.plane <keepout.conjunction.Conjunction.plane>`,
     which caches the result.
 
+    Parameters
+    ----------
+    conjunction
+        Both objects' states at TCA, and their covariances where known.
+
     Raises
     ------
     GeometryError

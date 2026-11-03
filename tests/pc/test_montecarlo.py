@@ -171,3 +171,18 @@ def test_confidence_is_printed_with_its_digits() -> None:
         seed=1,
     )
     assert "the 99.5% interval" in result.diagnostics[0]
+
+
+@pytest.mark.slow
+def test_a_long_fast_run_is_unbiased_to_a_percent_or_two() -> None:
+    # The 20k-sample checks above have a 99% interval of ~+-8%: a bias below
+    # that passes them. Here N = 3e5 at Pc ~ 0.27 (sigmas as small as the
+    # hard body, so the hits are many) gives a binomial std
+    # sqrt(Pc (1 - Pc) / N) ~ 0.3% of Pc; 5 std (the seed is fixed, so this
+    # cannot flake) still sees a 1.5% bias. About 25 s.
+    samples = 300_000
+    conjunction = head_on(5.0, 5.0, 5.0, 5.0)
+    expected = foster(conjunction.plane, 5.0).value
+    result = montecarlo(conjunction, samples=samples, seed=11)
+    std = np.sqrt(expected * (1.0 - expected) / samples)
+    assert abs(result.value - expected) <= 5.0 * std

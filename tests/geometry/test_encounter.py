@@ -71,7 +71,9 @@ def test_relative_position_along_velocity_falls_back() -> None:
     np.testing.assert_allclose(plane.miss_vector, [0.0, 0.0], atol=1e-9)
     np.testing.assert_allclose(plane.basis @ plane.basis.T, np.eye(2), atol=1e-12)
     np.testing.assert_allclose(plane.basis @ [0.0, 0.0, 1.0], [0.0, 0.0], atol=1e-12)
-    assert np.all(np.isfinite(plane.covariance))
+    # Both objects have the default identity position covariance, which any
+    # orthonormal basis projects to I each.
+    np.testing.assert_allclose(plane.covariance, 2.0 * np.eye(2), atol=1e-12)
 
 
 @given(

@@ -102,9 +102,12 @@ def test_observations_are_keepouts_pc_of_each_cdm() -> None:
     seen = ConjunctionEvent("E", (second, first)).observations(
         combined_hard_body_radius=HBR
     )
-    expected = compute_pc(first.conjunction(combined_hard_body_radius=HBR))
+    expected = [
+        compute_pc(cdm.conjunction(combined_hard_body_radius=HBR)).value
+        for cdm in (first, second)
+    ]
     assert [o.message_id for o in seen] == ["A", "B"]
-    assert seen[0].pc == expected.value
+    assert [o.pc for o in seen] == expected
     assert seen[0].source == "keepout (foster)"  # what "auto" chose
     assert seen[0].time_to_tca == pytest.approx(2 * DAY, abs=1e-6)
     assert seen[1].time_to_tca == pytest.approx(B1_TIME_TO_TCA, abs=1e-6)

@@ -1,8 +1,6 @@
 import copy
 import dataclasses
-import gzip
 import math
-import shutil
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -10,12 +8,11 @@ import astropy.units as u
 import pytest
 import screening_report as report
 import screening_snapshot as snapshot
-import snapshot_files
 from generated import read_json
+from report_builders import assert_writes_then_checks, fixture_data, readme_with_markers
 from screening_data import FIXTURE_START, fixture_by_number, socrates_text
 
 from keepout.omm import Omm
-from keepout.omm.celestrak import dumps_csv
 from keepout.sources.socrates import COLUMNS, read_socrates
 
 FIXTURE = fixture_by_number()
@@ -55,22 +52,16 @@ def data_dir(
     catalog: Sequence[Omm] | None = None,
 ) -> Path:
     """A data directory: the chosen pairs' rows and objects, the manifest."""
-    data = tmp_path / "data"
-    data.mkdir()
     rows = [a.line for a in ROWS] if lines is None else lines
-    (data / snapshot.SOCRATES).write_bytes(
-        gzip.compress((HEADER + "".join(rows)).encode())
+    return fixture_data(
+        tmp_path,
+        catalog=objects() if catalog is None else catalog,
+        socrates=HEADER + "".join(rows),
     )
-    omms = objects() if catalog is None else catalog
-    (data / snapshot.SNAPSHOT).write_bytes(gzip.compress(dumps_csv(omms).encode()))
-    shutil.copy(snapshot.DATA / snapshot_files.MANIFEST, data / snapshot_files.MANIFEST)
-    return data
 
 
 def arguments(tmp_path: Path, data: Path) -> list[str]:
-    readme = tmp_path / "README.md"
-    if not readme.exists():
-        readme.write_text(f"intro\n{report.START}\n{report.END}\n", encoding="utf-8")
+    readme = readme_with_markers(tmp_path, report.START, report.END)
     page = tmp_path / "docs" / "screening-socrates.md"
     return [
         "--data",
@@ -89,10 +80,7 @@ def written(tmp_path: Path) -> report.Summary:
 
 
 def test_main_writes_then_checks(tmp_path: Path) -> None:
-    args = arguments(tmp_path, data_dir(tmp_path))
-    assert report.main(["--check", *args]) == 1
-    assert report.main(args) == 0
-    assert report.main(["--check", *args]) == 0
+    assert_writes_then_checks(report.main, arguments(tmp_path, data_dir(tmp_path)))
     summary = written(tmp_path)
     assert summary["settings"]["start"] == "2026-10-06T00:00:00.000"
     assert (summary["settings"]["primaries"], summary["settings"]["objects"]) == (5, 9)
@@ -270,8 +258,8 @@ def test_render_without_findings(
     assert "| slow (< 1 km/s) | 0 | 0 | - | - | - | - |" in page
     assert "it is allowed 0.5 s.\n" in page
     readme = report.render_summary(summary, "page.md")
-    assert "| slow (< 1 km/s) | 0 | 0 | - | - |" in readme
-    assert readme.endswith("|")
+    # The table ends the block: no note follows it.
+    assert readme.endswith("\n| slow (< 1 km/s) | 0 | 0 | - | - |")
 
 
 @pytest.mark.parametrize(

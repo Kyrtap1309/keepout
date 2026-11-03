@@ -1,17 +1,24 @@
 """keepout — spacecraft conjunction assessment.
 
-The core types, the Pc entry point, the event assessment, screening (with
-its volume) and the exception hierarchy are available from the package
-itself; CDM input and output are in :mod:`keepout.cdm`, the individual Pc
-methods in :mod:`keepout.pc`, conjunction events (the CDMs of one
-encounter) in :mod:`keepout.events`, risk levels, trends and decisions in
-:mod:`keepout.risk`, element sets in :mod:`keepout.omm`, the screening
-search, its parts and the reasons for skipped element sets in
-:mod:`keepout.screening`, propagators in :mod:`keepout.propagation`, the
-synthetic operator (covariance model, fleet, run) in
-:mod:`keepout.synthetic` and data sources (CelesTrak, Space-Track, CARA,
-Kelvins) in :mod:`keepout.sources`. The ``keepout`` command
-(:mod:`keepout.cli`) needs the ``cli`` extra.
+The package itself exports the core types, the Pc entry point, the event
+assessment, screening (with its volume) and the exception hierarchy. The
+rest is in subpackages:
+
+- :mod:`keepout.cdm`: CDM input and output.
+- :mod:`keepout.pc`: the individual Pc methods.
+- :mod:`keepout.events`: conjunction events, the CDMs of one encounter.
+- :mod:`keepout.risk`: risk levels, trends and decisions.
+- :mod:`keepout.omm`: element sets.
+- :mod:`keepout.screening`: the screening search, its parts and the reasons
+  for skipped element sets.
+- :mod:`keepout.propagation`: propagators.
+- :mod:`keepout.synthetic`: the synthetic operator (covariance model, fleet,
+  run).
+- :mod:`keepout.maneuver`: avoidance manoeuvre planning.
+- :mod:`keepout.sources`: data sources (CelesTrak, Space-Track, CARA,
+  Kelvins).
+
+The ``keepout`` command (:mod:`keepout.cli`) needs the ``cli`` extra.
 """
 
 from __future__ import annotations

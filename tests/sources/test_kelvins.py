@@ -1,5 +1,4 @@
 import gzip
-import math
 from pathlib import Path
 
 import numpy as np
@@ -31,9 +30,17 @@ def test_features_are_numbers_with_nan_for_empty_cells(
 ) -> None:
     assert events[30].features.shape == (4, len(FEATURES))
     assert len(FEATURES) == 100
-    assert np.isnan(events[907].column("F10")).any()
+    # An early and a late column, as the excerpt has them.
+    assert events[30].column("max_risk_estimate").tolist() == [
+        -7.674279141980588,
+        -7.201487466968649,
+        -7.201280314814994,
+        -7.677160727313679,
+    ]
+    assert events[30].column("AP").tolist() == [2.0, 2.0, 5.0, 5.0]
+    assert events[78].column("miss_distance").tolist() == [214.0, 1331.0, 5369.0]
+    assert np.isnan(events[907].column("F10")).all()
     assert np.isnan(events[5490].column("c_sigma_rdot")).all()
-    assert events[78].column("miss_distance")[0] > 0.0
 
 
 def test_features_are_read_only(events: dict[int, KelvinsEvent]) -> None:
@@ -107,6 +114,11 @@ def excerpt_with(tmp_path: Path, old: str, new: str) -> Path:
         ("1.389,,0.010742,", "1.389,,oops,", "is not a number: 'oops'"),
         ("30,1.0878610185185187,5,", "30.5,1.0878610185185187,5,", "event_id must be"),
         ("30,1.0878610185185187,5,", "30,,5,", "line 2: time_to_tca is missing"),
+        (
+            "30,1.0878610185185187,5,-30.0,",
+            "30,1.0878610185185187,5,,",
+            "line 2: risk is missing",
+        ),
         (",-9.683610248926804,", ",0.5,", "line 6: risk .* is above 0"),
         ("78,6.6573216087962965,1,", "78,6.6573216087962965,2,", "changes mission"),
         ("97,0.013183530092592592,", "30,0.013183530092592592,", "not contiguous"),
@@ -252,9 +264,3 @@ def test_load_fetches_the_table_by_default(
 ) -> None:
     monkeypatch.setattr(kelvins, "fetch_raw", lambda: EXCERPT)
     assert len(kelvins.load()) == 6
-
-
-def test_no_nan_in_the_kept_time_and_risk(events: dict[int, KelvinsEvent]) -> None:
-    for event in events.values():
-        assert not any(map(math.isnan, event.column("risk")))
-        assert not any(map(math.isnan, event.time_to_tca))

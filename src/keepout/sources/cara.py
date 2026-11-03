@@ -223,7 +223,7 @@ def prefetch(
     cache: Path | None = None,
     download: Downloader = http_download,
 ) -> None:
-    """The download of every file not cached yet, concurrently.
+    """Download every file not cached yet, concurrently.
 
     Raises
     ------

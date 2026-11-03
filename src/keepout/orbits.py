@@ -24,7 +24,13 @@ def _semi_major_axis(state: StateVector) -> float | None:
 
 
 def orbital_period(state: StateVector) -> float | None:
-    """Two-body orbital period [s] of an inertial state; ``None`` if unbound."""
+    """Two-body orbital period [s] of an inertial state; ``None`` if unbound.
+
+    Parameters
+    ----------
+    state
+        Position and velocity in an inertial frame (e.g. GCRF).
+    """
     semi_major_axis = _semi_major_axis(state)
     if semi_major_axis is None:
         return None
@@ -32,7 +38,13 @@ def orbital_period(state: StateVector) -> float | None:
 
 
 def perigee_radius(state: StateVector) -> float | None:
-    """Two-body perigee radius [m] of an inertial state; ``None`` if unbound."""
+    """Two-body perigee radius [m] of an inertial state; ``None`` if unbound.
+
+    Parameters
+    ----------
+    state
+        Position and velocity in an inertial frame (e.g. GCRF).
+    """
     semi_major_axis = _semi_major_axis(state)
     if semi_major_axis is None:
         return None

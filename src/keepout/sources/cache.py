@@ -2,12 +2,11 @@
 when to download again.
 
 A download kept for reuse (CelesTrak, Space-Track) has a ``.meta.json``
-file next to it recording its URL, digest and times (:class:`CopyMeta`);
-:func:`read_copy` gives the copy only if both files are intact, and
-:func:`cached_fetch` holds the policy around it: use a fresh copy that can
-be read, else download, read and save (gzipped if asked). Both files are
-written atomically (:mod:`keepout.sources._store`), under the cache root
-:func:`~keepout.sources._store.cache_dir`.
+file next to it recording its URL, digest and times (:class:`CopyMeta`).
+:func:`read_copy` gives the copy only if both files are intact.
+:func:`cached_fetch` holds the policy around it. It uses a fresh copy that
+can be read; otherwise it downloads, reads and saves a new one (gzipped if
+asked). Both files are written atomically under keepout's cache directory.
 """
 
 from __future__ import annotations
@@ -118,7 +117,7 @@ def _is_time(value: object) -> TypeIs[float]:
 
 
 def save_copy(target: Path, url: str, data: bytes, now: float) -> CopyMeta:
-    """The storing of a download at ``target`` with its metadata, both atomic.
+    """Store a download at ``target`` with its metadata, both atomically.
 
     Parameters
     ----------
@@ -143,7 +142,7 @@ def save_copy(target: Path, url: str, data: bytes, now: float) -> CopyMeta:
 
 
 def write_meta(target: Path, meta: CopyMeta) -> None:
-    """The atomic write of the ``.meta.json`` file of the download at ``target``.
+    """Write the ``.meta.json`` file of the download at ``target`` atomically.
 
     Times must be floats (``time.time()``); :func:`read_copy` refuses others.
     """
@@ -163,8 +162,8 @@ class Unchanged(SourceUnavailable):
 
 
 def require_max_age(max_age: float, interval: float, reason: str) -> None:
-    """The refusal of a ``max_age`` below a source's least ``interval``
-    between two downloads.
+    """Raise :class:`ValueError` if ``max_age`` is below a source's least
+    ``interval`` between two downloads.
 
     Raises
     ------

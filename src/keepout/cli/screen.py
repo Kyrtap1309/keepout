@@ -149,8 +149,8 @@ def _now() -> Time:
 
 
 def _write_cdms(result: OperatorResult, cdm_dir: Path) -> dict[str, Path]:
-    """The file written for each CDM, ``<MESSAGE_ID>.kvn`` in ``cdm_dir``, by
-    message ID."""
+    """Write each CDM to ``<MESSAGE_ID>.kvn`` in ``cdm_dir`` and return the
+    files by message ID."""
     from keepout.cdm import kvn
 
     cdm_dir.mkdir(parents=True, exist_ok=True)

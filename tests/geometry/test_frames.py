@@ -5,7 +5,7 @@ import erfa
 import numpy as np
 import pytest
 from astropy.time import Time
-from builders import EARTH_ROTATION_RATE, EPOCH, LEO_R, LEO_V, well_posed
+from builders import EARTH_ROTATION_RATE, EPOCH, LEO_R, LEO_V, approx, well_posed
 from hypothesis import assume, given
 from hypothesis import strategies as st
 from hypothesis.extra.numpy import arrays
@@ -45,7 +45,7 @@ def test_rtn_rotation_is_proper_and_aligned(r: FloatArray, v: FloatArray) -> Non
     np.testing.assert_allclose(rotation @ rotation.T, np.eye(3), atol=1e-12)
     assert np.linalg.det(rotation) == pytest.approx(1.0, abs=1e-12)
     radial = rotation @ r
-    assert radial[0] == pytest.approx(r_norm, rel=1e-12)
+    assert radial[0] == approx(r_norm, rel=1e-12)
     np.testing.assert_allclose(radial[1:], 0.0, atol=1e-9 * r_norm)
     in_rtn = rotation @ v
     assert abs(in_rtn[2]) <= 1e-9 * float(np.linalg.norm(v))
@@ -149,9 +149,9 @@ def test_positive_radial_in_track_correlation_stretches_along_r_plus_t() -> None
     position = rtn_to_inertial_covariance(rtn, TILTED_R, TILTED_V)[:3, :3]
     along = (AXES["R"] + AXES["T"]) / np.sqrt(2.0)
     across = (AXES["R"] - AXES["T"]) / np.sqrt(2.0)
-    assert along @ position @ along == pytest.approx(150.0, rel=1e-12)
-    assert across @ position @ across == pytest.approx(50.0, rel=1e-12)
-    assert AXES["R"] @ position @ AXES["T"] == pytest.approx(50.0, rel=1e-12)
+    assert along @ position @ along == approx(150.0, rel=1e-12)
+    assert across @ position @ across == approx(50.0, rel=1e-12)
+    assert AXES["R"] @ position @ AXES["T"] == approx(50.0, rel=1e-12)
 
 
 def test_gcrf_state_is_returned_unchanged() -> None:
@@ -182,7 +182,7 @@ def test_eme2000_is_rotated_by_the_frame_bias() -> None:
     # Along x only the y and z rotations (xi0, d_alpha0) move the vector:
     # 22 mas, i.e. 0.75 m at 7000 km -- enough to matter against a hard body.
     shift = float(np.linalg.norm(converted.r - state.r))
-    assert shift == pytest.approx(np.hypot(16.617, 14.6) * MAS * 7000e3, rel=1e-3)
+    assert shift == approx(np.hypot(16.617, 14.6) * MAS * 7000e3, rel=1e-3)
 
 
 def test_itrf_matches_vallado_example_3_15() -> None:

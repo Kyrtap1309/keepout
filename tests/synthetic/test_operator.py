@@ -3,6 +3,7 @@ approach with the model's covariances, and the risk of each, judged from
 the CDM."""
 
 import dataclasses
+import functools
 from collections import Counter
 
 import astropy.units as u
@@ -14,7 +15,7 @@ from screening_data import FIXTURE_START, fixture_by_number, load_fixture
 from keepout.ccsds.message import UNKNOWN
 from keepout.cdm import kvn, make_message_id, xml
 from keepout.errors import FleetError
-from keepout.pc import computation, compute_pc
+from keepout.pc import computation
 from keepout.risk import Action, DecisionConfig, RiskLevel, Thresholds
 from keepout.screening import ScreeningVolume
 from keepout.synthetic import (
@@ -37,9 +38,15 @@ FLEET = Fleet(
     ),
     catalog_hard_body_radius=1.0,
 )
-RESULT = run(FLEET, FIXTURE, START, 3 * DAY)
-"""A LEO satellite crossing a Starlink at 6 km/s, and Intelsat 39 drifting
-past the Luch-5X inspector satellite at 2 m/s."""
+# The Pc values below are regression snapshots of keepout's own results.
+
+
+@functools.cache
+def fleet_run() -> OperatorResult:
+    """:data:`FLEET`'s run over three days, made once: a LEO satellite
+    crossing a Starlink at 6 km/s, and Intelsat 39 drifting past the Luch-5X
+    inspector satellite at 2 m/s."""
+    return run(FLEET, FIXTURE, START, 3 * DAY)
 
 
 def only(result: OperatorResult, primary: int, secondary: int) -> OperatorEvent:
@@ -53,23 +60,25 @@ def only(result: OperatorResult, primary: int, secondary: int) -> OperatorEvent:
 
 
 def test_every_approach_becomes_an_event() -> None:
-    approaches = RESULT.screening.approaches
+    result = fleet_run()
+    approaches = result.screening.approaches
     assert [(a.primary_number, a.secondary_number) for a in approaches] == [
         (52939, 47826),
         (44476, 55841),
     ]
-    assert [event.approach for event in RESULT.events] == list(approaches)
-    assert RESULT.cdms == tuple(event.event.cdms[0] for event in RESULT.events)
-    assert all(len(event.event.cdms) == 1 for event in RESULT.events)
-    assert RESULT.fleet is FLEET
-    assert RESULT.model is DEFAULT_MODEL
-    assert RESULT.created is START
-    assert RESULT.screening.start is START
-    assert RESULT.screening.duration == 3 * DAY
+    assert [event.approach for event in result.events] == list(approaches)
+    assert result.cdms == tuple(event.event.cdms[0] for event in result.events)
+    assert all(len(event.event.cdms) == 1 for event in result.events)
+    assert result.fleet is FLEET
+    assert result.model is DEFAULT_MODEL
+    assert result.created is START
+    assert result.screening.start is START
+    assert result.screening.duration == 3 * DAY
 
 
 def test_the_cdm_names_both_objects_and_its_assumptions() -> None:
-    event = only(RESULT, 44476, 55841)
+    result = fleet_run()
+    event = only(result, 44476, 55841)
     cdm, tca = event.cdm, event.approach.tca
     assert cdm.version == "2.0"
     assert cdm.originator == "KEEPOUT"
@@ -101,12 +110,13 @@ def test_the_cdm_names_both_objects_and_its_assumptions() -> None:
         assert section.comments == DEFAULT_MODEL.comments(omm, tca)
     relative = cdm.relative
     assert relative.get("START_SCREEN_PERIOD") == START
-    assert relative.get("STOP_SCREEN_PERIOD") == RESULT.screening.end
+    assert relative.get("STOP_SCREEN_PERIOD") == result.screening.end
     assert relative.get("SCREEN_VOLUME_X") == 5000.0
 
 
 def test_the_cdm_holds_the_approach_with_the_model_covariances() -> None:
-    for event in RESULT.events:
+    result = fleet_run()
+    for event in result.events:
         approach = event.approach
         conjunction = event.cdm.conjunction()
         pairs = (
@@ -136,7 +146,8 @@ def test_the_cdm_holds_the_approach_with_the_model_covariances() -> None:
 
 
 def test_each_event_is_assessed_from_its_cdm() -> None:
-    crossing = only(RESULT, 52939, 47826)
+    result = fleet_run()
+    crossing = only(result, 52939, 47826)
     assert crossing.cdm.message_for == "FLEET ONE"
     assert crossing.cdm.object1.section.get("MANEUVERABLE") == "YES"
     assert crossing.observation.source == "keepout (foster)"
@@ -144,12 +155,11 @@ def test_each_event_is_assessed_from_its_cdm() -> None:
     assert crossing.observation.diagnostics == ()
     assert crossing.assessment.level is RiskLevel.GREEN
     assert crossing.action is Action.IGNORE
-    drifting = only(RESULT, 44476, 55841)
+    drifting = only(result, 44476, 55841)
     assert drifting.event.event_id == (f"44476/55841/{drifting.cdm.tca.utc.isot}")
     observation = drifting.observation
     assert observation.message_id == drifting.cdm.message_id
     assert observation.time_to_tca == pytest.approx(2.50 * DAY, abs=0.01 * DAY)
-    assert observation.pc == compute_pc(drifting.cdm.conjunction()).value
     assert observation.pc == pytest.approx(7.3761e-6, rel=1e-4)
     # A slow encounter: the 2-D Pc is kept, with both notes.
     assert len(observation.diagnostics) == 2

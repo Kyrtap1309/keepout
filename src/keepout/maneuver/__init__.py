@@ -6,9 +6,10 @@ smallest burn per direction that meets a target, and :func:`evaluate_burn`
 answers for one burn. :func:`burn_effects` gives the change of an object's
 state at TCA for each burn of a grid, as a :class:`BurnEffects`, and
 :func:`closest_approach_shift` how far the closest approach moves in time.
-:func:`rescreen` screens a burn against a catalog for a
-:class:`RescreenResult`: the :class:`NewApproach` it brings, and
-:func:`judge` says whether a burn can be recommended (:class:`BurnVerdict`).
+:func:`rescreen` screens a burn against a catalog and returns a
+:class:`RescreenResult` listing the approaches it brings
+(:class:`NewApproach`). :func:`judge` says whether a burn can be recommended
+(:class:`BurnVerdict`).
 """
 
 from keepout.maneuver._differential import (

@@ -1,25 +1,24 @@
-import dataclasses
 import gzip
 import json
 import urllib.parse
 from pathlib import Path
 
-import astropy.units as u
 import pytest
 import snapshot_files
 import spacetrack_snapshot as snapshot
 from celestrak_builders import SAMPLE
 from hypothesis import given
 from hypothesis import strategies as st
-from spacetrack_builders import (
-    CREDENTIALS,
-    IDENTITY,
-    PASSWORD,
-    FakeSpaceTrack,
-    public_cdm,
-    space_track_cdm_public,
-    space_track_gp,
+from report_builders import assert_writes_then_checks
+from snapshot_raws import (
+    CDMS,
+    CROSSING,
+    GP,
+    START,
+    space_track,
+    spacetrack_download,
 )
+from spacetrack_builders import CREDENTIALS, IDENTITY, PASSWORD, FakeSpaceTrack
 from web_builders import digest
 
 from keepout.errors import AuthError, HttpStatusError, SourceUnavailable
@@ -38,58 +37,18 @@ from keepout.sources.spacetrack import (
 )
 
 CALSPHERE, ISS, GOES, THEMIS, EXPRESS, SARAMAGO, STARLINK, DRAGON = SAMPLE
-CROSSING = dataclasses.replace(
-    ISS,
-    catalog_number=99999,
-    object_name="CROSSING",
-    ra_of_asc_node=ISS.ra_of_asc_node + 0.01,
-)
-"""The ISS's orbit turned 0.01 rad about the Earth's axis: it passes the ISS
-at about 42 km every 46 minutes."""
-OLD_ISS = dataclasses.replace(ISS, epoch=ISS.epoch - 1.0 * u.day)
-"""An older element set of the ISS: a duplicate the catalog leaves out."""
-GP = space_track_gp([*SAMPLE, CROSSING, OLD_ISS])
-PASSING = public_cdm(
-    SAT_1_ID="25544",
-    SAT_2_ID="99999",
-    TCA="2026-10-06T00:44:04.056973",
-    MIN_RNG="42000",
-)
-"""keepout's first approach of the ISS and CROSSING, 2 s later and 195 m
-closer."""
-CDMS = space_track_cdm_public(
-    PASSING,
-    public_cdm(CDM_ID="2", SAT_2_ID="123456"),
-    public_cdm(CDM_ID="3", SAT_1_ID="900", SAT_2_ID="25544"),
-)
-"""The ISS and CROSSING; an object not in the catalog; Calsphere 1 and the
-ISS, never within 100 km of each other."""
 URLS = [LOGIN_URL, CATALOG.url, PUBLIC_CDMS.url, LOGOUT_URL]
-START = 1_791_000_000.0
-"""A Unix time in October 2026."""
 
 
 @pytest.fixture
 def server() -> FakeSpaceTrack:
-    return FakeSpaceTrack({CATALOG.url: GP, PUBLIC_CDMS.url: CDMS})
-
-
-def download(
-    raw: Path, server: FakeSpaceTrack, cache: Path
-) -> tuple[snapshot.Saved, ...]:
-    return snapshot.download(
-        raw,
-        cache=cache,
-        credentials=CREDENTIALS,
-        transport=server,
-        clock=lambda: START,
-    )
+    return space_track()
 
 
 @pytest.fixture
 def raw(tmp_path: Path, server: FakeSpaceTrack) -> Path:
     directory = tmp_path / "raw"
-    download(directory, server, tmp_path / "cache")
+    spacetrack_download(directory, server, tmp_path / "cache")
     return directory
 
 
@@ -132,7 +91,7 @@ def test_download_refuses_a_directory_with_a_download(
     raw: Path, server: FakeSpaceTrack, tmp_path: Path
 ) -> None:
     with pytest.raises(ValueError, match="already holds a download"):
-        download(raw, server, tmp_path / "other-cache")
+        spacetrack_download(raw, server, tmp_path / "other-cache")
     assert len(server.requests) == 4
 
 
@@ -141,7 +100,7 @@ def test_download_refuses_an_answer_from_the_cache(
 ) -> None:
     again = tmp_path / "again"
     with pytest.raises(ValueError, match="answered from the cache"):
-        download(again, server, tmp_path / "cache")
+        spacetrack_download(again, server, tmp_path / "cache")
     assert len(server.requests) == 4
     assert snapshot.INDEX.read(again) == ()
 
@@ -150,7 +109,7 @@ def test_download_stops_at_an_error_and_keeps_the_answers(tmp_path: Path) -> Non
     server = FakeSpaceTrack({CATALOG.url: Response(500, b"maintenance")})
     raw = tmp_path / "raw"
     with pytest.raises(HttpStatusError, match="HTTP 500"):
-        download(raw, server, tmp_path / "cache")
+        spacetrack_download(raw, server, tmp_path / "cache")
     assert server.calls == ["login", CATALOG.url, "logout"]
     index = snapshot.INDEX.read(raw)
     assert [(saved.url, saved.status) for saved in index] == [
@@ -170,7 +129,7 @@ def test_download_hides_the_credentials_and_sends_no_second_login(
     server = FakeSpaceTrack({CATALOG.url: GP}, login=Response(200, echo))
     raw = tmp_path / "raw"
     with pytest.raises(SourceUnavailable, match="was sent already"):
-        download(raw, server, tmp_path / "cache")
+        spacetrack_download(raw, server, tmp_path / "cache")
     assert server.calls == ["login", CATALOG.url]
     login, gp = snapshot.INDEX.read(raw)
     assert login.redacted is True
@@ -311,17 +270,9 @@ def test_a_changed_answer_is_refused(raw: Path) -> None:
         snapshot.replay_catalog(raw)
 
 
-def test_an_unknown_raw_index_is_refused(tmp_path: Path) -> None:
-    (tmp_path / snapshot_files.RAW_INDEX).write_text('{"format": 2}', encoding="utf-8")
-    with pytest.raises(ValueError, match="format 1"):
-        snapshot.INDEX.read(tmp_path)
-
-
 def test_build_writes_the_data_then_checks_it(raw: Path, tmp_path: Path) -> None:
     data = tmp_path / "data"
-    assert build(raw, data, "--check") == 1
-    assert build(raw, data) == 0
-    assert build(raw, data, "--check") == 0
+    assert_writes_then_checks(snapshot.main, ["build", str(raw), "--data", str(data)])
     assert snapshot.main(["verify", "--data", str(data)]) == 0
     assert load(data / snapshot.SNAPSHOT) == tuple(
         sorted([*SAMPLE, CROSSING], key=lambda omm: omm.catalog_number)
@@ -358,47 +309,6 @@ def test_nothing_of_the_public_cdms_is_committed(raw: Path, tmp_path: Path) -> N
     assert b"cdm_public" not in written
     assert b"CALSPHERE 1" in written
     assert b"123456" not in written
-
-
-def test_build_is_deterministic(raw: Path, tmp_path: Path) -> None:
-    assert build(raw, tmp_path / "one") == 0
-    assert build(raw, tmp_path / "two") == 0
-    for name in (snapshot.SNAPSHOT, snapshot.NOTICE, snapshot_files.MANIFEST):
-        one = (tmp_path / "one" / name).read_bytes()
-        assert one == (tmp_path / "two" / name).read_bytes()
-    stored = (tmp_path / "one" / snapshot.SNAPSHOT).read_bytes()
-    assert stored == gzip.compress(gzip.decompress(stored), mtime=0)
-
-
-def test_build_keeps_a_gzipped_file_with_the_same_contents(
-    raw: Path, tmp_path: Path
-) -> None:
-    data = tmp_path / "data"
-    assert build(raw, data) == 0
-    path = data / snapshot.SNAPSHOT
-    other = gzip.compress(gzip.decompress(path.read_bytes()), compresslevel=1)
-    path.write_bytes(other)
-    assert build(raw, data) == 0
-    assert path.read_bytes() == other
-    assert snapshot.main(["verify", "--data", str(data)]) == 0
-
-
-def test_build_replaces_a_broken_gzip_file(raw: Path, tmp_path: Path) -> None:
-    data = tmp_path / "data"
-    assert build(raw, data) == 0
-    path = data / snapshot.SNAPSHOT
-    good = path.read_bytes()
-    path.write_bytes(good[:-1] + bytes([good[-1] ^ 1]))
-    assert build(raw, data, "--check") == 1
-    assert build(raw, data) == 0
-    assert path.read_bytes() == good
-
-
-def test_verify_finds_a_changed_file(raw: Path, tmp_path: Path) -> None:
-    data = tmp_path / "data"
-    assert build(raw, data) == 0
-    (data / snapshot.NOTICE).write_text("changed\n", encoding="utf-8")
-    assert snapshot.main(["verify", "--data", str(data)]) == 1
 
 
 def test_build_refuses_a_catalog_csv_cannot_hold(

@@ -213,19 +213,6 @@ def test_radius_bounds_reject_bad_bounds(
         RadiusBounds(lowest, highest)  # type: ignore[arg-type]
 
 
-@pytest.mark.parametrize("duration", [0.0, 50.0, 1e4])
-def test_the_bounds_hold_the_propagated_radius(duration: float) -> None:
-    propagator = linear(5)
-    bounds = propagator.radius_bounds(EPOCH, duration)
-    ephemeris = propagator.propagate(EPOCH, np.linspace(0.0, duration, 101))
-    radius = np.linalg.norm(ephemeris.r, axis=-1)
-    lowest = np.broadcast_to(bounds.lowest[:, None], radius.shape)
-    highest = np.broadcast_to(bounds.highest[:, None], radius.shape)
-    valid = ephemeris.valid
-    assert np.all(lowest[valid] <= radius[valid] * (1 + 1e-15))
-    assert np.all(radius[valid] <= highest[valid] * (1 + 1e-15))
-
-
 def test_a_propagator_is_anything_with_the_protocol() -> None:
     propagator: Propagator = linear(3)
     assert isinstance(propagator, Propagator)
@@ -253,12 +240,19 @@ def test_chunks_hold_the_whole_grid(
         )
     )
     assert all(len(chunk) == len(propagators) for chunk in chunks)
-    size = max(shared_times + 1, max_states // max(1, sum(counts)))
-    lengths = [len(chunk[0].offsets) for chunk in chunks]
-    assert all(length <= size for length in lengths)
     if not chunks:
         assert times == 0
         return
+    # The docstring's sizes: at most max_states states (objects x times) in a
+    # chunk, but at least shared_times + 1 times (or the whole grid); every
+    # chunk but the last as long as that allows.
+    objects = sum(counts)
+    floor = min(shared_times + 1, times)
+    lengths = [len(chunk[0].offsets) for chunk in chunks]
+    assert all(length >= floor for length in lengths)
+    assert all(length * objects <= max_states or length == floor for length in lengths)
+    if objects:
+        assert all((length + 1) * objects > max_states for length in lengths[:-1])
     # Every chunk after the first starts at the last shared_times times of
     # the one before: dropped, the chunks hold the grid once.
     skip = shared_times

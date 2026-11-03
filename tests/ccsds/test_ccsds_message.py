@@ -7,11 +7,14 @@ from keepout.ccsds import files, kvn, xml
 from keepout.ccsds.message import COMMENT, Family, KeywordValues, Located
 from keepout.errors import CdmParseError, CdmWriteError, OmmParseError, OmmWriteError
 
-CDM = Family(
+# Families of made-up widths, not keepout's CDM and OMM ones.
+FAMILY_A = Family(
     "CDM", CdmParseError, CdmWriteError, keyword_width=8, unknown_is_text=False
 )
-OMM = Family("OMM", OmmParseError, OmmWriteError, keyword_width=4, unknown_is_text=True)
-FAMILIES = [CDM, OMM]
+FAMILY_B = Family(
+    "OMM", OmmParseError, OmmWriteError, keyword_width=4, unknown_is_text=True
+)
+FAMILIES = [FAMILY_A, FAMILY_B]
 
 
 @pytest.mark.parametrize("family", FAMILIES)

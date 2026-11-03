@@ -1,11 +1,10 @@
-"""The committed screening data: digests, and that every file follows from
+"""The committed screening data: that every file follows from
 the catalog, the SOCRATES excerpt and the manifest."""
 
 from typing import Any
 
 import pytest
 import screening_snapshot as snapshot
-import snapshot_files
 
 from keepout.omm import Omm, load
 from keepout.sources.socrates import read_socrates
@@ -23,18 +22,17 @@ def inputs() -> snapshot.Inputs:
     return snapshot.inputs_from_data(DATA)
 
 
-def test_files_match_the_manifest(manifest: Any) -> None:
+def test_the_manifest_lists_the_files(manifest: Any) -> None:
     assert set(manifest["files"]) == {
         snapshot.SNAPSHOT,
         snapshot.SOCRATES,
         snapshot.FIXTURE,
         snapshot.NOTICE,
     }
-    stored = {name: (DATA / name).read_bytes() for name in manifest["files"]}
-    assert snapshot_files.file_digests(stored) == manifest["files"]
 
 
 def test_every_file_follows_from_the_data(inputs: snapshot.Inputs) -> None:
+    # The manifest too, so its digests are those of the committed files.
     for name, stored in snapshot.stored_files(DATA, inputs).items():
         assert (DATA / name).read_bytes() == stored, name
 

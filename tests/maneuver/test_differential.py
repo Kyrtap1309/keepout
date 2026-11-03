@@ -123,12 +123,12 @@ def test_grid_matches_one_burn_at_a_time(state: StateVector, force: ForceModel) 
     leads = np.array([25.0, 11.0, 6.0]) * HOUR
     delta_v = np.array([-1.0, -0.01, 0.1, 1.0])
     grid = burn_effects(state, leads, delta_v, force)
-    for row, lead in enumerate(leads):
+    np.testing.assert_array_equal(grid.burn_leads, leads)
+    for row in range(len(leads)):
         for column, change in enumerate(delta_v):
             alone = burn_effects(state, leads[[row]], np.array([change]), force)
             assert grid.dr[row, column] == pytest.approx(alone.dr[0, 0], abs=1.0)
             assert grid.dv[row, column] == pytest.approx(alone.dv[0, 0], abs=1e-3)
-            assert lead == grid.burn_leads[row]
 
 
 def test_a_burn_at_tca_changes_the_velocity_only() -> None:

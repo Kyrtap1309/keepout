@@ -123,7 +123,8 @@ _FEATURE_INDEX: Final = {name: index for index, name in enumerate(FEATURES)}
 _FEATURE_COLUMNS: Final = tuple(_INDEX[name] for name in FEATURES)
 
 StreamDownloader: TypeAlias = Callable[[str, Sink], None]
-"""A download of a URL into a sink, like :func:`keepout.sources._http.http_stream`."""
+"""A download of a URL into a sink: streamed, raising
+:class:`~keepout.errors.SourceUnavailable` if it fails."""
 
 
 def fetch_raw(
@@ -139,15 +140,16 @@ def fetch_raw(
     Parameters
     ----------
     cache
-        Cache root; :func:`~keepout.sources._store.cache_dir` if ``None``.
+        Cache root; if ``None``, ``$KEEPOUT_CACHE_DIR`` or else the
+        platform's user cache directory for keepout.
     download
         Downloads the archive.
 
     Raises
     ------
     SourceUnavailable
-        If the download fails, also when tried again
-        (:func:`~keepout.sources._http.retrying`).
+        If the download fails, also when tried again: a network error, HTTP
+        429 or a server error is tried twice more, after 5 s and 30 s.
     ChecksumMismatch
         If the archive or the table does not have its pinned digest.
     KelvinsFormatError

@@ -3,10 +3,12 @@ import csv
 import gzip
 import io
 import json
+import os
+import platform
 import shutil
 import stat
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +19,7 @@ import snapshot_files
 import spacetrack_snapshot
 from astropy.time import Time
 from generated import README, json_text, read_json
+from report_builders import assert_writes_then_checks, fixture_data, readme_with_markers
 from screening_data import fixture_by_number, load_fixture
 from screening_timing import Timing, timed
 
@@ -30,14 +33,56 @@ SPACETRACK = benchmark.SOURCES["spacetrack"]
 PRIMARIES = ["63216", "58509", "44476"]
 """LEO objects of the test fixture with approaches in the week."""
 
+OFFLINE_SITE = """\
+import socket
 
-def data_dir(tmp_path: Path) -> Path:
-    """A data directory whose snapshot is the test fixture."""
-    data = tmp_path / "data"
-    data.mkdir()
-    shutil.copy(snapshot.DATA / snapshot.FIXTURE, data / snapshot.SNAPSHOT)
-    shutil.copy(snapshot.DATA / snapshot_files.MANIFEST, data / snapshot_files.MANIFEST)
-    return data
+_connect = socket.socket.connect
+
+
+def _refuse(self, address):
+    if self.family != socket.AF_UNIX:
+        raise OSError("tests must not access the network")
+    return _connect(self, address)
+
+
+socket.socket.connect = _refuse
+"""
+"""``sitecustomize`` of the measurement processes: no connection but local
+ones (as ``--disable-socket --allow-unix-socket`` for the tests)."""
+
+
+@pytest.fixture(autouse=True)
+def offline_subprocesses(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the processes ``compare`` and ``run_timing`` start offline.
+
+    The suite's network guards hold in the test process only: Python runs
+    ``sitecustomize`` from ``PYTHONPATH`` in each new process, which here
+    refuses connections, and astropy reads ``ASTROPY_CONFIG_DIR``, which here
+    turns off IERS downloads.
+    """
+    site = tmp_path / "offline-site"
+    site.mkdir()
+    (site / "sitecustomize.py").write_text(OFFLINE_SITE, encoding="utf-8")
+    config = tmp_path / "offline-astropy"
+    config.mkdir()
+    (config / "astropy.cfg").write_text(
+        "[utils.iers.iers]\nauto_download = False\n", encoding="utf-8"
+    )
+    path = os.environ.get("PYTHONPATH")
+    monkeypatch.setenv("PYTHONPATH", os.pathsep.join(filter(None, [str(site), path])))
+    monkeypatch.setenv("ASTROPY_CONFIG_DIR", str(config))
+
+
+def test_measurement_processes_are_offline() -> None:
+    connect = "import socket; socket.create_connection(('192.0.2.1', 9), timeout=1)"
+    with pytest.raises(benchmark.TimingFailed, match="must not access the network"):
+        benchmark.run_timing([sys.executable, "-c", connect])
+    iers = (
+        "from astropy.utils import iers; "
+        "assert not iers.conf.auto_download; raise SystemExit(3)"
+    )
+    with pytest.raises(benchmark.TimingFailed, match="exit status 3"):
+        benchmark.run_timing([sys.executable, "-c", iers])
 
 
 def spacetrack_data(tmp_path: Path) -> Path:
@@ -53,15 +98,22 @@ def spacetrack_data(tmp_path: Path) -> Path:
 
 
 def arguments(tmp_path: Path) -> list[str]:
-    readme = tmp_path / "README.md"
-    readme.write_text(f"intro\n{CELESTRAK.start}\n{CELESTRAK.end}\n", encoding="utf-8")
+    """The fixture as the catalog and a README with the public catalog's
+    markers in ``tmp_path``."""
+    fixture_data(tmp_path)
+    readme_with_markers(tmp_path, CELESTRAK.start, CELESTRAK.end)
+    return arguments_of(tmp_path)
+
+
+def arguments_of(folder: Path) -> list[str]:
+    """The arguments of a run on the files of ``folder``."""
     return [
         "--data",
-        str(data_dir(tmp_path)),
+        str(folder / "data"),
         "--results",
-        str(tmp_path / "docs" / "screening-benchmark.json"),
+        str(folder / "docs" / "screening-benchmark.json"),
         "--readme",
-        str(readme),
+        str(folder / "README.md"),
         "--primaries",
         *PRIMARIES,
         "--workers",
@@ -80,15 +132,16 @@ def rewrite(tmp_path: Path, summary: benchmark.Summary) -> None:
     """Replace the results file and the README block by ``summary``'s."""
     path = tmp_path / "docs" / "screening-benchmark.json"
     path.write_text(json_text(summary), encoding="utf-8")
-    readme = tmp_path / "README.md"
     block = benchmark.render_summary(summary)
-    readme.write_text(
-        f"intro\n{CELESTRAK.start}\n{block}\n{CELESTRAK.end}\n", encoding="utf-8"
-    )
+    readme_with_markers(tmp_path, CELESTRAK.start, CELESTRAK.end, block)
+
+
+Benchmarked = tuple[list[benchmark.Found], list[benchmark.Measured]]
+Call = tuple[list[int], int, str, dict[str, Any]]
 
 
 @pytest.fixture(scope="module")
-def benchmarked() -> tuple[list[benchmark.Found], list[benchmark.Measured]]:
+def benchmarked() -> Benchmarked:
     """One real benchmark of :data:`PRIMARIES` in the fixture, for ``main``."""
     return benchmark.benchmark(
         [fixture_by_number()[int(number)] for number in PRIMARIES],
@@ -99,30 +152,54 @@ def benchmarked() -> tuple[list[benchmark.Found], list[benchmark.Measured]]:
     )
 
 
-def test_main_writes_then_checks_the_data_not_the_timings(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    benchmarked: tuple[list[benchmark.Found], list[benchmark.Measured]],
-) -> None:
-    # main screens as the fixture says; its runs take that benchmark's
-    # results, so only the writing and checking runs here.
-    calls: list[tuple[list[int], int, str, dict[str, Any]]] = []
+def replaying(
+    benchmarked: Benchmarked, calls: list[Call]
+) -> Callable[..., Benchmarked]:
+    """A ``benchmark`` recording its calls and answering ``benchmarked``: main
+    screens as the fixture says, without running the screenings again."""
 
     def fake(
         primaries: Sequence[Omm], catalog: Sequence[Omm], start: Time, **kwargs: Any
-    ) -> tuple[list[benchmark.Found], list[benchmark.Measured]]:
+    ) -> Benchmarked:
         numbers = [omm.catalog_number for omm in primaries]
         calls.append((numbers, len(catalog), start.isot, kwargs))
         return copy.deepcopy(benchmarked)
 
-    monkeypatch.setattr(benchmark, "benchmark", fake)
-    args = arguments(tmp_path)
-    assert benchmark.main(["--check", *args]) == 1
-    assert benchmark.main(args) == 0
-    assert benchmark.main(["--check", *args]) == 0
+    return fake
+
+
+@pytest.fixture(scope="module")
+def written_once(
+    tmp_path_factory: pytest.TempPathFactory, benchmarked: Benchmarked
+) -> tuple[Path, list[Call]]:
+    """A directory where main wrote the benchmark (checking before and after),
+    and the calls of its screenings."""
+    folder = tmp_path_factory.mktemp("benchmark")
+    calls: list[Call] = []
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(benchmark, "benchmark", replaying(benchmarked, calls))
+        assert_writes_then_checks(benchmark.main, arguments(folder))
+    return folder, calls
+
+
+@pytest.fixture
+def copied(
+    written_once: tuple[Path, list[Call]],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    benchmarked: Benchmarked,
+) -> list[str]:
+    """The arguments of a run on a copy of :func:`written_once`'s files."""
+    shutil.copytree(written_once[0], tmp_path, dirs_exist_ok=True)
+    monkeypatch.setattr(benchmark, "benchmark", replaying(benchmarked, []))
+    return arguments_of(tmp_path)
+
+
+def test_main_writes_then_checks(written_once: tuple[Path, list[Call]]) -> None:
+    folder, calls = written_once
     screened = ([63216, 58509, 44476], 222, "2026-10-06T00:00:00.000")
     assert calls == [(*screened, {"workers": 1, "repeat": 1})] * 3
-    summary = written(tmp_path)
+    summary = written(folder)
     assert summary["settings"] == {
         "source": "celestrak",
         "primaries": [63216, 58509, 44476],
@@ -141,7 +218,7 @@ def test_main_writes_then_checks_the_data_not_the_timings(
     assert timings is not None
     assert timings["runs"] == 1
     assert timings["cpu_model"] == benchmark.cpu_model()
-    readme = (tmp_path / "README.md").read_text(encoding="utf-8")
+    readme = (folder / "README.md").read_text(encoding="utf-8")
     assert (
         "| Volume | Screened | Left out | Approaches | Wall time | CPU time |" in readme
     )
@@ -151,21 +228,23 @@ def test_main_writes_then_checks_the_data_not_the_timings(
     assert "for 7 days from 2026-10-06 00:00 UTC, in one process" in readme
     assert "Times: 1 run on" in readme
 
-    # Other timings: still up to date.
-    faster = copy.deepcopy(summary)
+
+def test_check_passes_with_other_timings(copied: list[str], tmp_path: Path) -> None:
+    faster = written(tmp_path)
     assert faster["timings"] is not None
     for measured in faster["timings"]["volumes"]:
         measured["wall"], measured["cpu"] = 0.1, 0.2
     faster["timings"]["cpu_model"] = "another CPU"
     rewrite(tmp_path, faster)
-    assert benchmark.main(["--check", *args]) == 0
+    assert benchmark.main(["--check", *copied]) == 0
     assert "| 0.1 s | 0.2 s |" in (tmp_path / "README.md").read_text(encoding="utf-8")
 
-    # Other data: out of date.
-    changed = copy.deepcopy(faster)
+
+def test_check_fails_with_other_data(copied: list[str], tmp_path: Path) -> None:
+    changed = written(tmp_path)
     changed["found"][0]["approaches"] += 1
     rewrite(tmp_path, changed)
-    assert benchmark.main(["--check", *args]) == 1
+    assert benchmark.main(["--check", *copied]) == 1
 
 
 def test_runs_that_find_different_results_fail(
@@ -331,9 +410,33 @@ def test_cpu_model_reads_the_systems_name(tmp_path: Path) -> None:
     cpuinfo = tmp_path / "cpuinfo"
     cpuinfo.write_text("processor\t: 0\nmodel name\t: Some CPU @ 3 GHz\n")
     assert benchmark.cpu_model(cpuinfo) == "Some CPU @ 3 GHz"
-    cpuinfo.write_text("processor\t: 0\n")
-    assert benchmark.cpu_model(cpuinfo)
-    assert benchmark.cpu_model(tmp_path / "missing")
+
+
+@pytest.mark.parametrize(
+    ("processor", "machine", "expected"),
+    [
+        ("Intel64 Family 6", "AMD64", "Intel64 Family 6"),
+        ("", "arm64", "arm64"),
+        ("", "", "unknown CPU"),
+    ],
+)
+@pytest.mark.parametrize("cpuinfo", ["processor\t: 0\n", None])
+def test_cpu_model_falls_back_to_the_platforms_name(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    processor: str,
+    machine: str,
+    expected: str,
+    cpuinfo: str | None,
+) -> None:
+    # Without a model name in /proc/cpuinfo (or without the file: macOS,
+    # Windows).
+    monkeypatch.setattr(platform, "processor", lambda: processor)
+    monkeypatch.setattr(platform, "machine", lambda: machine)
+    path = tmp_path / "cpuinfo"
+    if cpuinfo is not None:
+        path.write_text(cpuinfo)
+    assert benchmark.cpu_model(path) == expected
 
 
 @pytest.mark.parametrize(
@@ -364,8 +467,13 @@ def test_counts_must_be_positive(
 def test_the_primaries_are_in_the_frozen_catalogs(path: Path) -> None:
     text = gzip.decompress(path.read_bytes()).decode()
     numbers = {int(row["NORAD_CAT_ID"]) for row in csv.DictReader(io.StringIO(text))}
-    assert len(set(benchmark.PRIMARIES)) == 20
     assert set(benchmark.PRIMARIES) <= numbers
+
+
+def test_the_primaries_are_twenty_distinct_satellites() -> None:
+    # "20 primaries" is the performance target the docstrings and README state.
+    stated = 20
+    assert len(set(benchmark.PRIMARIES)) == len(benchmark.PRIMARIES) == stated
 
 
 def test_reduced_catalog_keeps_every_kth_object_and_the_primaries() -> None:
@@ -446,7 +554,7 @@ def compare_arguments(tmp_path: Path, base_python: str) -> list[str]:
         "--base-python",
         base_python,
         "--data",
-        str(data_dir(tmp_path)),
+        str(fixture_data(tmp_path)),
         "--primaries",
         *PRIMARIES,
         "--every",
@@ -499,12 +607,31 @@ def test_compare_main_screens_the_chosen_source(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
-    args = compare_arguments(tmp_path, str(tmp_path / "missing" / "python"))
+    commands: list[Sequence[str]] = []
+
+    def recorded(command: Sequence[str]) -> benchmark.Run:
+        commands.append(command)
+        return run(1.0)
+
+    real = benchmark.compare
+
+    def compare(
+        head: Sequence[str], base: Sequence[str], *, repeat: int
+    ) -> benchmark.Comparison:
+        return real(head, base, repeat=repeat, run=recorded)
+
+    monkeypatch.setattr(benchmark, "compare", compare)
+    args = compare_arguments(tmp_path, "base-python")
     args[args.index("--data") + 1] = str(spacetrack_data(tmp_path))
     assert benchmark.main(["--source", "spacetrack", *args]) == 0
     assert capsys.readouterr().out.startswith(
         "Screening benchmark: 3 primaries x 222 objects x 1 day,"
     )
+    head, base = commands
+    assert (head[0], base[0]) == (sys.executable, "base-python")
+    assert head[1:] == base[1:]
+    # The window starts on the Space-Track catalog's retrieval day.
+    assert head[head.index("--start") + 1] == "2026-10-15T00:00:00.000"
 
 
 def test_compare_main_skips_a_base_that_cannot_run(

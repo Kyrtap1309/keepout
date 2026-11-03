@@ -4,7 +4,7 @@ from collections.abc import Callable
 
 import numpy as np
 import pytest
-from builders import TYPICAL_HEAD_ON
+from builders import TYPICAL_HEAD_ON, approx
 
 from keepout.encounter import EncounterPlane
 from keepout.errors import CovarianceError, GeometryError
@@ -21,10 +21,8 @@ def test_principal_axes_put_the_wide_axis_first() -> None:
     covariance = rotation @ np.diag([400.0, 25.0]) @ rotation.T
     miss = rotation @ np.array([3.0, 4.0])
     gaussian = plane_gaussian(miss, covariance, 10.0)
-    assert (gaussian.sigma_u, gaussian.sigma_v) == pytest.approx((20.0, 5.0), rel=1e-12)
-    assert (abs(gaussian.miss_u), abs(gaussian.miss_v)) == pytest.approx(
-        (3.0, 4.0), rel=1e-12
-    )
+    assert (gaussian.sigma_u, gaussian.sigma_v) == approx((20.0, 5.0), rel=1e-12)
+    assert (abs(gaussian.miss_u), abs(gaussian.miss_v)) == approx((3.0, 4.0), rel=1e-12)
     assert gaussian.diagnostics == ()
 
 

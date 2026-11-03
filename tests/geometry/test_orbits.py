@@ -1,6 +1,5 @@
 import numpy as np
-import pytest
-from builders import EPOCH, LEO_R
+from builders import EPOCH, LEO_R, approx
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -11,7 +10,7 @@ from keepout.state import StateVector
 def test_orbital_period_of_a_circular_leo() -> None:
     circular_speed = float(np.sqrt(EARTH_MU / 7000e3))
     state = StateVector(EPOCH, LEO_R, [0.0, circular_speed, 0.0], "GCRF")
-    assert orbital_period(state) == pytest.approx(
+    assert orbital_period(state) == approx(
         2 * np.pi * 7000e3 / circular_speed, rel=1e-12
     )
 
@@ -24,7 +23,7 @@ def test_unbound_orbit_has_no_period() -> None:
 def test_perigee_of_a_circular_orbit_is_its_radius() -> None:
     circular_speed = float(np.sqrt(EARTH_MU / 7000e3))
     state = StateVector(EPOCH, LEO_R, [0.0, circular_speed, 0.0], "GCRF")
-    assert perigee_radius(state) == pytest.approx(7000e3, rel=1e-12)
+    assert perigee_radius(state) == approx(7000e3, rel=1e-12)
 
 
 @given(
@@ -37,7 +36,7 @@ def test_a_state_at_perigee_has_its_own_radius_as_perigee(
     # Perpendicular to the radius and above circular speed: at perigee.
     speed = speed_ratio * float(np.sqrt(EARTH_MU / radius))
     state = StateVector(EPOCH, [radius, 0.0, 0.0], [0.0, speed, 0.0], "GCRF")
-    assert perigee_radius(state) == pytest.approx(radius, rel=1e-9)
+    assert perigee_radius(state) == approx(radius, rel=1e-9)
 
 
 @given(flight_path=st.floats(-1.2, 1.2), speed_ratio=st.floats(0.8, 1.3))

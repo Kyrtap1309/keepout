@@ -454,7 +454,7 @@ def _rescreen_lines(
         (
             f"{direction} re-screened against "
             f"{plural(result.catalog_objects, 'object')} ({label}) from {utc(start)} "
-            f"to {utc(end)} UTC; {left_out} left out, of which it says nothing."
+            f"to {utc(end)} UTC; {left_out} left out (not checked)."
         ),
         *(f"  {line}" for line in body),
     ]

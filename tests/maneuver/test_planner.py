@@ -505,10 +505,42 @@ def test_auto_fallback_keeps_its_seed_and_cap_in_confirmation(
     assert evaluated.pc == pytest.approx(first.prograde.pc, rel=0.05)
 
 
-def test_explicit_options_are_what_confirms_and_evaluates() -> None:
-    compute = computation("foster", rtol=1e-6)
+def test_explicit_options_are_what_confirms_and_evaluates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    @dataclass(frozen=True, eq=False)
+    class Counted(PcComputation):
+        calls: list[Conjunction] = field(default_factory=list)
+
+        @override
+        def __call__(self, conjunction: Conjunction) -> PcResult:
+            self.calls.append(conjunction)
+            return super().__call__(conjunction)
+
+    runs: list[tuple[str, dict[str, object]]] = []
+    real = api._compute
+
+    def spy(
+        conjunction: Conjunction, method: MethodChoice, options: Mapping[str, object]
+    ) -> PcResult:
+        runs.append((method, dict(options)))
+        return real(conjunction, method, options)
+
+    monkeypatch.setattr(api, "_compute", spy)
+    compute = Counted("foster", {"rtol": 1e-6})
     plan = plan_maneuver(leo_event(), grid=SMALL, compute=compute)
     assert plan.confirmation is compute
+    assert plan.prograde is not None
+    # The baseline and a confirmation per direction at least; the grid's own
+    # Foster runs take the defaults.
+    expected: tuple[str, dict[str, object]] = ("foster", {"rtol": 1e-6})
+    assert len(compute.calls) >= 3
+    assert runs.count(expected) == len(compute.calls)
+    runs.clear()
+    evaluate_burn(
+        plan, burn_lead=plan.prograde.burn_lead, delta_v=plan.prograde.delta_v
+    )
+    assert runs == [expected]
 
 
 def test_assumed_covariance_is_carried() -> None:
@@ -705,7 +737,9 @@ def test_evaluate_burn_uses_the_thresholds_basis(plan: ManeuverPlan) -> None:
     assert evaluate_burn(wide, burn_lead=7 * HOUR, delta_v=1e-3).pc == 0.25
     estimate = Thresholds(basis="estimate")
     pc = evaluate_burn(wide, burn_lead=7 * HOUR, delta_v=1e-3, thresholds=estimate).pc
-    assert pc != 0.25
+    # Wide's estimate is Foster's value, untouched.
+    foster = dataclasses.replace(plan, confirmation=FOSTER)
+    assert pc == evaluate_burn(foster, burn_lead=7 * HOUR, delta_v=1e-3).pc
 
 
 def test_evaluate_burn_rejects_a_burn_before_the_cdm(plan: ManeuverPlan) -> None:
@@ -746,9 +780,9 @@ def test_slow_encounter_cells_are_nan_and_noted() -> None:
     assert "hours" in slow
     assert not any("tens of metres" in note for note in plan.notes)
     assert not any("0.2 m" in note for note in plan.notes)
-    for option in (plan.prograde, plan.retrograde):
-        if option is not None:
-            assert not math.isnan(plan.pc[cell(plan, option)])
+    assert plan.options
+    for option in plan.options:
+        assert not math.isnan(plan.pc[cell(plan, option)])
 
 
 def test_a_slow_encounter_is_confirmed_by_its_own_method() -> None:

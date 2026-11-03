@@ -71,6 +71,11 @@ def test_reads_tracss_cdm_version_2() -> None:
     assert cdm.relative.get("CONJUNCTION_ID") is None
     first = cdm.object1
     assert first.ref_frame == "ITRF"
+    # X = 6778.137 km, Y_DOT = 5.9 km/s, Z_DOT = 4.4 km/s, in metres.
+    state = first.state()
+    assert state.frame == "ITRF"
+    np.testing.assert_array_equal(state.r, [6_778_137.0, 0.0, 0.0])
+    np.testing.assert_array_equal(state.v, [0.0, 5_900.0, 4_400.0])
     assert first.hard_body_radius == 5.0
     assert cdm.object2.hard_body_radius is None
     assert first.user_defined == {

@@ -29,8 +29,10 @@ ERRORS = [
 """Every exception class defined in ``keepout.errors`` but the base."""
 
 
-def test_the_error_module_defines_errors() -> None:
-    assert len(ERRORS) >= 8
+def test_the_error_module_exports_every_error_it_defines() -> None:
+    assert {error.__name__ for error in ERRORS} == set(errors.__all__) - {
+        "KeepoutError"
+    }
 
 
 @pytest.mark.parametrize("error", ERRORS, ids=lambda error: error.__name__)

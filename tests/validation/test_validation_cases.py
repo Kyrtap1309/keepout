@@ -46,27 +46,43 @@ from keepout.validation.cases import (
 from keepout.validation.criteria import HALL, HALL_PC_SET, MONTE_CARLO, BoundCriterion
 from keepout.validation.evaluation import evaluate
 
+SECONDARY_COVARIANCE = np.diag([900.0, 100.0, 64.0, 4e-2, 1e-2, 9e-2])
+"""A valid 6x6 covariance unlike :data:`DIAGONAL_COVARIANCE` in every variance."""
 
-def alfano_rows(asymmetry: float = 0.0) -> list[list[Any]]:
-    """A 36-row sheet in the layout of CARA's ``CaseN data at TCA.xls``."""
+
+def alfano_rows(asymmetry: float = 0.0, miss: float = 10.0) -> list[list[Any]]:
+    """A 36-row sheet in the layout of CARA's ``CaseN data at TCA.xls``:
+    :data:`DIAGONAL_COVARIANCE` on the primary, :data:`SECONDARY_COVARIANCE`
+    on the secondary, ``miss`` [m] apart along x."""
     rows: list[list[Any]] = [[""] * 6 for _ in range(36)]
     rows[4][:3] = [7000e3, 0.0, 0.0]
     rows[8][:3] = [0.0, 7500.0, 0.0]
-    rows[22][:3] = [7000e3 + 10.0, 0.0, 0.0]
+    rows[22][:3] = [7000e3 + miss, 0.0, 0.0]
     rows[26][:3] = [0.0, 0.0, 7500.0]
-    for first in (12, 30):
-        matrix = DIAGONAL_COVARIANCE.copy()
+    for first, covariance in ((12, DIAGONAL_COVARIANCE), (30, SECONDARY_COVARIANCE)):
+        matrix = covariance.copy()
         matrix[0, 1] = asymmetry
         for offset in range(6):
             rows[first + offset] = list(matrix[offset])
     return rows
 
 
+def case_sheet(path: Path) -> list[list[Any]]:
+    """:func:`alfano_rows` for the sheet at ``path``, ``N`` m apart for case N."""
+    number = int(path.name.removeprefix("Case").split()[0])
+    return alfano_rows(miss=float(number))
+
+
 def test_alfano_sheet_gives_both_objects() -> None:
     primary, secondary = alfano_objects(alfano_rows())
     np.testing.assert_array_equal(primary.state.r, [7000e3, 0.0, 0.0])
+    np.testing.assert_array_equal(primary.state.v, [0.0, 7500.0, 0.0])
+    np.testing.assert_array_equal(secondary.state.r, [7000e3 + 10.0, 0.0, 0.0])
     np.testing.assert_array_equal(secondary.state.v, [0.0, 0.0, 7500.0])
-    assert known(primary.covariance).matrix[1, 1] == 400.0
+    np.testing.assert_array_equal(known(primary.covariance).matrix, DIAGONAL_COVARIANCE)
+    np.testing.assert_array_equal(
+        known(secondary.covariance).matrix, SECONDARY_COVARIANCE
+    )
     assert (
         known(primary.covariance).repairs == known(secondary.covariance).repairs == ()
     )
@@ -122,7 +138,7 @@ def offline_alfano(
     """Serve ``results`` as the Alfano results table and one sheet per case."""
     monkeypatch.setattr(cara, "fetch", lambda file, cache=None: Path(file.path))
     monkeypatch.setattr(cara, "load_csv", lambda path: results)
-    monkeypatch.setattr(cara, "load_xls_rows", lambda path: alfano_rows())
+    monkeypatch.setattr(cara, "load_xls_rows", case_sheet)
 
 
 def alfano_result(case: int, reference: Any = 1e-4) -> dict[str, Any]:
@@ -135,6 +151,10 @@ def test_alfano_cases_are_built_from_the_results_table(
     offline_alfano(monkeypatch, [alfano_result(n) for n in range(1, 13)])
     cases = alfano_cases(load_alfano_inputs())
     assert [c.case_id for c in cases] == [str(n) for n in range(1, 13)]
+    # Each case is built from its own sheet.
+    misses = [c.conjunction.miss_distance for c in cases]
+    # Positions of 7000 km round to ~1e-9 m.
+    np.testing.assert_allclose(misses, range(1, 13), rtol=0.0, atol=1e-6)
     assert cases[0].conjunction.combined_hard_body_radius == 10.0
     assert (cases[0].reference, cases[0].paper) == (1e-4, 2e-4)
 
@@ -212,7 +232,7 @@ def offline_alfano_3d(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cara, "fetch", lambda file, cache=None: Path(file.path))
     monkeypatch.setattr(cara, "load_csv", lambda path: results)
     monkeypatch.setattr(cara, "load_xlsx", lambda path: windows)
-    monkeypatch.setattr(cara, "load_xls_rows", lambda path: alfano_rows())
+    monkeypatch.setattr(cara, "load_xls_rows", case_sheet)
 
 
 def test_alfano_3d_cases_use_the_supplementary_windows(

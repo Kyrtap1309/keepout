@@ -127,6 +127,28 @@ def test_zero_delta_v_equals_base_everywhere() -> None:
     assert np.array_equal(bounds.highest, base.highest)
 
 
+def test_a_tiny_burn_is_no_zero_burn_and_has_no_step() -> None:
+    # 1 um/s takes the spline path, not the zero burn's shortcut: the base
+    # before the burn, and after it a difference growing as dv t (the orbit
+    # bends it by under 5 % in 10 min), from nothing at the burn.
+    delta_v = 1e-6
+    burn_time = START + DAY * u.s
+    propagator = maneuvered(delta_v, burn_time=burn_time, horizon=HOUR)
+    before = np.arange(-600.0, 0.0, 7.0)
+    assert_same_states(
+        propagator.propagate(burn_time, before), LEO.propagate(burn_time, before)
+    )
+    after = np.arange(1.0, 600.0, 7.0)
+    moved, base = (
+        propagator.propagate(burn_time, after),
+        LEO.propagate(burn_time, after),
+    )
+    drift = np.linalg.norm(moved.r - base.r, axis=2)[0] / (delta_v * after)
+    assert np.all((drift > 0.95) & (drift < 1.0 + 1e-3))
+    kick = np.linalg.norm(moved.v - base.v, axis=2)[0] / delta_v
+    assert np.all((kick > 0.9) & (kick < 1.0 + 1e-3))
+
+
 def difference_errors(
     propagator: Propagator,
     base: Propagator,
@@ -161,10 +183,11 @@ def difference_errors(
         pytest.param(68377, 1.0, 7 * DAY, 1.0, marks=pytest.mark.slow),
         # e > 0.3 at the top of the grid: the integrator and the 60 s spline at
         # perigee reach 2.24 m, the worst of the 38 such orbits of the fixture
-        # (HEO_WORST), against a volume of kilometres.
-        (HEO, 1.0, 7 * DAY, 3.0),
-        (HEO_LOW, 1.0, 7 * DAY, 3.0),
-        (HEO_WORST, 1.0, 7 * DAY, 3.0),
+        # (HEO_WORST), against a volume of kilometres. 11 to 16 s each; the
+        # day of HEO above stands for them in a quick run.
+        pytest.param(HEO, 1.0, 7 * DAY, 3.0, marks=pytest.mark.slow),
+        pytest.param(HEO_LOW, 1.0, 7 * DAY, 3.0, marks=pytest.mark.slow),
+        pytest.param(HEO_WORST, 1.0, 7 * DAY, 3.0, marks=pytest.mark.slow),
     ],
 )
 def test_difference_matches_cowell(

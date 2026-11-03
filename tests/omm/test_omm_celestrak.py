@@ -21,7 +21,7 @@ from sgp4 import omm as sgp4_omm
 
 from keepout.ccsds.epochs import parse_epoch
 from keepout.errors import OmmParseError
-from keepout.omm import Omm, celestrak
+from keepout.omm import Omm
 from keepout.omm.celestrak import (
     dumps_csv,
     dumps_json,
@@ -240,10 +240,6 @@ def test_writers_give_back_the_sample() -> None:
     assert loads_json(dumps_json(omms)) == omms
     assert dumps_csv(omms).splitlines()[0] == SAMPLE_CSV.read_text().splitlines()[0]
     assert json.loads(dumps_json(omms)) == json.loads(SAMPLE_JSON.read_text())
-
-
-def test_the_module_is_exported() -> None:
-    assert celestrak.loads_csv is loads_csv
 
 
 @settings(deadline=None)

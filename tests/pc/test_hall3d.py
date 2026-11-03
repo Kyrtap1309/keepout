@@ -11,10 +11,13 @@ from builders import (
     LEO_R,
     LEO_V,
     TYPICAL_HEAD_ON,
+    UNBOUND_V,
+    approx,
     drifting,
     head_on,
     object_state,
     shifted_back,
+    unbound_crossing,
     without_covariance,
 )
 from faults import (
@@ -65,9 +68,7 @@ def test_fast_encounter_matches_2d_pc(
     conjunction = head_on(miss, sx, sz, radius)
     result = hall3d(conjunction)
     assert result.method == "hall3d"
-    assert result.value == pytest.approx(
-        foster(conjunction.plane, radius).value, rel=1e-4
-    )
+    assert result.value == approx(foster(conjunction.plane, radius).value, rel=1e-4)
     assert result.details["encounters"] == 1.0
     assert result.details["fallbacks"] == 0.0
     assert result.diagnostics == ()
@@ -78,7 +79,7 @@ def test_a_certain_slow_drift_matches_the_2d_pc() -> None:
     # a straight line at a known speed: 3-D and 2-D agree.
     conjunction = drifting(velocity_sigma=1e-4)
     result = hall3d(conjunction, window=DRIFT_WINDOW)
-    assert result.value == pytest.approx(foster(conjunction.plane, 5.0).value, rel=1e-3)
+    assert result.value == approx(foster(conjunction.plane, 5.0).value, rel=1e-3)
 
 
 def test_velocity_uncertainty_changes_the_3d_pc() -> None:
@@ -93,7 +94,7 @@ def test_velocity_uncertainty_changes_the_3d_pc() -> None:
 def test_swapping_the_objects_changes_nothing() -> None:
     base = TYPICAL_HEAD_ON
     swapped = Conjunction(base.secondary, base.primary, 5.0)
-    assert hall3d(swapped).value == pytest.approx(hall3d(base).value, rel=1e-8)
+    assert hall3d(swapped).value == approx(hall3d(base).value, rel=1e-8)
 
 
 def test_explicit_window_is_used() -> None:
@@ -117,11 +118,8 @@ def test_unknown_covariance_is_rejected() -> None:
 
 
 def test_unbound_orbit_is_rejected() -> None:
-    fast = np.array([0.0, 15000.0, 0.0])
-    primary = object_state(LEO_R, fast, np.eye(3))
-    secondary = object_state(LEO_R + np.array([30.0, 0.0, 0.0]), LEO_V, np.eye(3))
     with pytest.raises(GeometryError, match="unbound"):
-        hall3d(Conjunction(primary, secondary, 5.0))
+        hall3d(unbound_crossing())
 
 
 def test_the_encounter_scan_names_the_object_not_a_method() -> None:
@@ -133,7 +131,7 @@ def test_the_encounter_scan_names_the_object_not_a_method() -> None:
         Encounters.locate(unknown, None)
     assert missing.value.roles == ("secondary",)
     assert str(missing.value) == "both covariances are needed; unknown: secondary"
-    fast = object_state(LEO_R, np.array([0.0, 15000.0, 0.0]), np.eye(3))
+    fast = object_state(LEO_R, UNBOUND_V, np.eye(3))
     with pytest.raises(UnusableOrbit, match="unbound") as unusable:
         Encounters.locate(Conjunction(base.primary, fast, 5.0), None)
     assert unusable.value.role == "secondary"
@@ -148,7 +146,7 @@ def test_zero_relative_velocity_nc_matches_a_brute_force_count() -> None:
     # SIDE_BY_SIDE_NC is a brute-force count with a 0.8% standard error;
     # rel=0.025 is three of them.
     result = hall3d(side_by_side(), window=SIDE_BY_SIDE_WINDOW)
-    assert result.value == pytest.approx(SIDE_BY_SIDE_NC, rel=0.025)
+    assert result.value == approx(SIDE_BY_SIDE_NC, rel=0.025)
 
 
 def test_zero_relative_velocity_is_noted_as_an_upper_bound() -> None:
@@ -235,9 +233,10 @@ def test_rate_at_the_edge_of_an_explicit_window_is_not_reported() -> None:
     # same window passed explicitly is the caller's choice.
     conjunction = slow_crossing()
     automatic = hall3d(conjunction)
+    assert any("pass window=" in note for note in automatic.diagnostics)
     window = (automatic.details["window_start_s"], automatic.details["window_end_s"])
     explicit = hall3d(conjunction, window=window)
-    assert explicit.value == pytest.approx(automatic.value, rel=1e-6)
+    assert explicit.value == approx(automatic.value, rel=1e-6)
     assert not any("pass window=" in note for note in explicit.diagnostics)
 
 
@@ -251,7 +250,7 @@ def test_long_explicit_window_resolves_the_encounter(
     # these windows steps over it; the screen must still find and resolve it.
     conjunction = TYPICAL_HEAD_ON
     result = hall3d(conjunction, window=window)
-    assert result.value == pytest.approx(foster(conjunction.plane, 5.0).value, rel=1e-4)
+    assert result.value == approx(foster(conjunction.plane, 5.0).value, rel=1e-4)
     assert result.details["encounters"] == 1.0
 
 
@@ -293,7 +292,7 @@ def test_failure_in_the_far_tail_is_allowed(
     overlap_failing_where(monkeypatch, lambda t: np.abs(t) >= 3e-3, failure)
     result = hall3d(conjunction, window=(-0.02, 0.02))
     assert result.details["fallbacks"] > 0
-    assert result.value == pytest.approx(foster(conjunction.plane, 5.0).value, rel=1e-4)
+    assert result.value == approx(foster(conjunction.plane, 5.0).value, rel=1e-4)
 
 
 def test_failing_fallback_raises_a_convergence_error(
@@ -350,7 +349,7 @@ def test_rtol_is_checked(rtol: float) -> None:
 
 
 def test_unmet_rtol_is_reported(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Orders 4 and 8 cannot integrate a padded encounter to 1e-4.
+    # Orders 4 and 8 cannot integrate a padded encounter to 1e-15.
     time_integral_orders(monkeypatch, start=4, largest=8)
     result = hall3d(TYPICAL_HEAD_ON, rtol=1e-15)
     (note,) = result.diagnostics
@@ -403,8 +402,8 @@ def test_automatic_window_grows_to_hold_a_displaced_peak(
     # One call, centred on TCA (the straight-line closest approach): the
     # window doubles once, to 17.2 sigma_y, which holds the 9.5 sigma_y peak.
     [initial] = widths
-    assert result.details["window_end_s"] == pytest.approx(2.0 * initial, rel=1e-12)
-    assert result.details["window_start_s"] == pytest.approx(-2.0 * initial, rel=1e-12)
+    assert result.details["window_end_s"] == approx(2.0 * initial, rel=1e-12)
+    assert result.details["window_start_s"] == approx(-2.0 * initial, rel=1e-12)
     assert result.diagnostics == ()
     # Pc ~ 1.1e-22, ten sigma out radially, so abs=0. Hall's Gaussian lives
     # in equinoctial elements linearised about the peak-overlap state; its
@@ -442,7 +441,7 @@ def test_automatic_window_stops_at_half_an_orbit() -> None:
     period = orbital_period(conjunction.primary.state)
     assert period is not None
     half_period = 0.5 * period
-    assert result.details["window_end_s"] == pytest.approx(half_period, rel=1e-3)
+    assert result.details["window_end_s"] == approx(half_period, rel=1e-3)
     assert any("pass window=" in note for note in result.diagnostics)
 
 
@@ -453,7 +452,7 @@ def test_states_before_closest_approach_find_the_encounter(dt: float) -> None:
     conjunction = shifted_back(TYPICAL_HEAD_ON, dt)
     expected = foster(conjunction.plane, 5.0).value
     result = hall3d(conjunction)
-    assert result.value == pytest.approx(expected, rel=1e-4)
+    assert result.value == approx(expected, rel=1e-4)
     assert result.details["window_end_s"] > dt
 
 
@@ -467,7 +466,7 @@ def test_an_encounter_beyond_the_initial_window_is_searched_for(
 
     window_search(monkeypatch, at_tca)
     conjunction = shifted_back(TYPICAL_HEAD_ON, 1.0)
-    assert hall3d(conjunction).value == pytest.approx(
+    assert hall3d(conjunction).value == approx(
         foster(conjunction.plane, 5.0).value, rel=1e-4
     )
 
@@ -528,7 +527,7 @@ def test_floored_combined_covariance_is_reported() -> None:
     )
     two_d = foster(conjunction.plane, 5.0)
     assert two_d.diagnostics[0].endswith("raised to 2.5e-07 m^2")
-    assert result.value == pytest.approx(two_d.value, rel=1e-3)
+    assert result.value == approx(two_d.value, rel=1e-3)
 
 
 def test_floored_inverse_keeps_a_tiny_axis_next_to_a_huge_one() -> None:
@@ -539,7 +538,7 @@ def test_floored_inverse_keeps_a_tiny_axis_next_to_a_huge_one() -> None:
     matrix = (rotation * np.array([0.0, 1e2, 1e10])) @ rotation.T
     inverse = overlap_module._floored_inverse(matrix, 4e-6)
     narrow = rotation[:, 0]
-    assert narrow @ inverse @ narrow == pytest.approx(1.0 / 4e-6, rel=1e-6)
+    assert narrow @ inverse @ narrow == approx(1.0 / 4e-6, rel=1e-6)
 
 
 @pytest.mark.parametrize("closest", [1e6, -1e6, 1234.5])

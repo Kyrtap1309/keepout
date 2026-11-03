@@ -72,6 +72,6 @@ class RequestLedger:
         return sent
 
     def write(self, queried: Mapping[str, float]) -> None:
-        """The record replaced by ``queried``: request class to Unix time [s]."""
+        """Replace the record by ``queried``: request class to Unix time [s]."""
         record = {"format": _LEDGER_FORMAT, "queried": dict(sorted(queried.items()))}
         store_json(self.path, record)

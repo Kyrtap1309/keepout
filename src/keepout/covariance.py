@@ -363,8 +363,15 @@ class Covariance:
         return covariance
 
     def at(self, epoch: Time) -> Covariance:
-        """The same matrix at another epoch, as a model holds it fixed; it is
-        not checked again."""
+        """The same matrix at another epoch, as a model holds it fixed.
+
+        The matrix is not checked again.
+
+        Parameters
+        ----------
+        epoch
+            The new epoch.
+        """
         moved = object.__new__(Covariance)
         for name in ("matrix", "frame", "repairs"):
             object.__setattr__(moved, name, getattr(self, name))

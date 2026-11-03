@@ -186,15 +186,15 @@ class ConjunctionEvent:
         policy: Policy = "repair",
         combined_hard_body_radius: float | None = None,
     ) -> tuple[PcObservation, ...]:
-        """Keepout's Pc of every CDM, oldest first.
+        """The Pc keepout computes for every CDM, oldest first.
 
-        Each CDM's Pc is computed by ``compute`` (in ``"auto"`` mode a slow
-        encounter can take up to a minute per CDM;
-        ``compute=computation("foster")`` takes milliseconds). A CDM whose Pc cannot be
-        computed (a :class:`~keepout.errors.KeepoutError`: a covariance or
-        geometry problem, no convergence) gives an observation with the
-        error instead of stopping the others. The originator's Pc is kept in
-        ``reported_pc``.
+        Each CDM's Pc is computed by ``compute``. In ``"auto"`` mode a slow
+        encounter can take up to a minute per CDM, while
+        ``compute=computation("foster")`` takes milliseconds. A CDM whose Pc
+        cannot be computed (a :class:`~keepout.errors.KeepoutError`: a
+        covariance or geometry problem, no convergence) gives an observation
+        with the error instead of stopping the others. The originator's Pc is
+        kept in ``reported_pc``.
 
         Parameters
         ----------
@@ -208,6 +208,14 @@ class ConjunctionEvent:
         combined_hard_body_radius
             Combined radius [m]; if ``None``, the sum of both objects'
             ``HBR`` in each CDM.
+
+        Returns
+        -------
+        tuple of PcObservation
+            One observation per CDM, in the order of :attr:`cdms`. Each holds
+            the time from the CDM's creation to TCA, keepout's Pc or the
+            error, the originator's Pc and the diagnostics; pass them to
+            :func:`~keepout.risk.assess`.
 
         Raises
         ------

@@ -75,6 +75,14 @@ class Thresholds:
     def value_of(self, observation: PcObservation) -> float:
         """The value of ``observation`` compared with the thresholds.
 
+        On the conservative basis this is the upper end of the observation's
+        confidence interval when it has one; otherwise it is its Pc.
+
+        Parameters
+        ----------
+        observation
+            An observation with a Pc.
+
         Raises
         ------
         ValueError
@@ -87,7 +95,13 @@ class Thresholds:
         return observation.pc
 
     def level(self, value: float) -> RiskLevel:
-        """The risk level of a Pc ``value``."""
+        """The risk level of a Pc ``value``.
+
+        Parameters
+        ----------
+        value
+            A Pc, e.g. from :meth:`value_of`.
+        """
         if value >= self.red_from:
             return RiskLevel.RED
         if value >= self.green_below:

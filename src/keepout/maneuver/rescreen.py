@@ -6,7 +6,8 @@ primary against a catalog twice over a window from the burn, without the burn
 and with it (:class:`~keepout.propagation.ManeuveredPropagator`), and reports
 the approaches that only the burn has, and the ones it brings closer. An
 approach of a secondary is the same one, moved, while the baseline has an
-approach of that secondary within :data:`~keepout._defaults.TCA_TOLERANCE`.
+approach of that secondary within 10 minutes (the TCA tolerance of an
+event).
 
 A burn can also bring the event's own pair back. The planner looks for the
 new TCA only near the old one, so in a slow encounter the two objects can
@@ -117,24 +118,24 @@ class RescreenResult:
         The approaches matched to the baseline whose range at TCA fell, by any
         amount, in chronological order: each against the baseline's approach
         of that secondary nearest in time. The event's own approach, that
-        secondary's within :data:`~keepout._defaults.TCA_TOLERANCE` of the
-        event's TCA, is not among them when it was screened: ``event_range``
-        has it. Without ``secondary_screened`` it cannot be told apart, so it
-        may appear here.
+        secondary's within 10 minutes of the event's TCA, is not among them
+        when it was screened: ``event_range`` has it. Without
+        ``secondary_screened`` it cannot be told apart, so it may appear
+        here.
     event_returns
         The new and closer approaches of the event's secondary further than
-        :data:`~keepout._defaults.TCA_TOLERANCE` from the event's TCA whose Pc
-        is at or above the plan's ``target_pc``, in chronological order: the
-        burn brings the pair back elsewhere above the bar it was planned to
-        clear. The event's own target is the bar for its own pair, whatever
-        the risk level; ``conflict`` stays for red.
+        10 minutes from the event's TCA whose Pc is at or above the plan's
+        ``target_pc``, in chronological order: the burn brings the pair back
+        elsewhere above the bar it was planned to clear. The event's own
+        target is the bar for its own pair, whatever the risk level;
+        ``conflict`` stays for red.
     event_range
-        Closest range to the event's secondary after the burn within
-        :data:`~keepout._defaults.TCA_TOLERANCE` of the event's TCA [m]. With
-        ``secondary_screened``, ``None`` means the burn leaves it outside the
-        screening volume there. Without it, ``None`` means it was **not
-        screened**, never that it is outside the volume. An approach of that
-        secondary further from the TCA is a new approach.
+        Closest range to the event's secondary after the burn within 10
+        minutes of the event's TCA [m]. With ``secondary_screened``, ``None``
+        means the burn leaves it outside the screening volume there. Without
+        it, ``None`` means it was **not screened**, never that it is outside
+        the volume. An approach of that secondary further from the TCA is a
+        new approach.
     window
         Start and end of the screening; the start is the burn.
     catalog_objects
@@ -452,8 +453,8 @@ def rescreen(
         are the catalog numbers of the primary and the secondary.
     option
         The burn, ``burn_lead`` before the event's TCA. The window must hold
-        that TCA and :data:`~keepout._defaults.TCA_TOLERANCE` either side, so
-        the baseline of a plan, with no lead, cannot be re-screened.
+        that TCA and 10 minutes either side (the TCA tolerance of an event),
+        so the baseline of a plan, with no lead, cannot be re-screened.
     catalog
         Element sets to screen against; must hold the event's primary. Without
         its secondary the rest is still screened
@@ -485,14 +486,20 @@ def rescreen(
     Raises
     ------
     ManeuverError
-        If the primary's designator is not a catalog number, the catalog has
-        no element set of it, the window does not hold the event's TCA and
-        the tolerance either side, or SGP4 reports an error for it anywhere in
-        the window, every :data:`_PRIMARY_STEP` and at its end, all before
-        anything is
-        screened; or if screening leaves the primary out (stale or unsupported
-        elements, no volume, SGP4 failing inside the window), or the burn
-        cannot be integrated.
+        Checked before anything is screened:
+
+        - the primary's designator is not a catalog number;
+        - the catalog has no element set of the primary;
+        - the window does not hold the event's TCA and 10 minutes either
+          side;
+        - SGP4 reports an error for the primary anywhere in the window
+          (checked every minute and at the window's end).
+
+        Found while screening:
+
+        - screening leaves the primary out (stale or unsupported elements,
+          no volume, SGP4 failing inside the window);
+        - the burn cannot be integrated.
     ValueError
         If ``duration`` or ``workers`` is out of range, or ``option.delta_v``
         is not finite.

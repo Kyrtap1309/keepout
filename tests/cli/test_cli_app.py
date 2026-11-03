@@ -1,5 +1,6 @@
 import json
 import math
+import re
 
 import pytest
 import typer
@@ -24,7 +25,13 @@ from keepout.errors import CdmParseError, SourceUnavailable
 
 
 def test_exit_codes() -> None:
-    assert [int(code) for code in ExitCode] == [0, 1, 2, 3, 4]
+    assert {code.name: int(code) for code in ExitCode} == {
+        "OK": 0,
+        "ERROR": 1,
+        "USAGE": 2,
+        "MANOEUVRE": 3,
+        "NO_SAFE_BURN": 4,
+    }
 
 
 def test_version() -> None:
@@ -33,14 +40,25 @@ def test_version() -> None:
     assert result.stdout == f"keepout {package.__version__}\n"
 
 
+def commands(help_text: str) -> list[str]:
+    """The command names in the Commands box of ``help_text``."""
+    box = help_text.split("─ Commands ─", 1)[1]
+    return re.findall(r"^│ (\w+) ", box, re.MULTILINE)
+
+
 def test_help_lists_the_commands() -> None:
     result = keepout("--help")
     assert result.exit_code == ExitCode.OK
-    for command in ("fetch", "screen", "assess", "maneuver", "validate"):
-        assert command in result.stdout
+    assert commands(result.stdout) == [
+        "screen",
+        "assess",
+        "maneuver",
+        "validate",
+        "fetch",
+    ]
     fetch = keepout("fetch", "--help")
-    for source in ("catalog", "cdm", "cara", "kelvins"):
-        assert source in fetch.stdout
+    assert fetch.exit_code == ExitCode.OK
+    assert commands(fetch.stdout) == ["catalog", "cdm", "cara", "kelvins"]
 
 
 @pytest.mark.parametrize(

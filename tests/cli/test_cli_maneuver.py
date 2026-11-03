@@ -2,9 +2,12 @@
 
 52939 crosses 47826 at 6 km/s, 19.6 h after the CDM's creation (1029 m, green
 at the CDM's hard-body radii). A radius of 100 m puts it above the target and
-of 1 km in the red. The plans use the small grid below, a run a fraction of a
-second, unless a test restores the default one, and most re-screens a catalog of
-the objects near that orbit.
+of 1 km in the red. The plans use the small grid below, a fraction of a second
+a plan, unless a test restores the default one. A real re-screen, of a week,
+takes seconds: most screen a catalog of the objects near that orbit, a command
+line run as text and as JSON re-screens once (``rescreen_once``), and the tests
+of what is shown of a re-screen make its result without screening
+(:func:`replace_rescreen`).
 """
 
 import dataclasses
@@ -15,24 +18,29 @@ import subprocess
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Final, NamedTuple
+from typing import Final
 
+import astropy.units as u
 import pytest
 from astropy.time import Time
 from cli_builders import (
-    DAYS,
     FIXTURE_CSV,
-    FLEET_TOML,
     START,
     FakeWeb,
+    calculated,
     celestrak_pages,
     keepout,
+    operator_kvn,
+    operator_run,
+    usage_error,
+    without_hbr,
+    write,
 )
 from inline_snapshot import snapshot
 from typer.testing import Result
 
 from keepout import maneuver
-from keepout.cdm import kvn
+from keepout._defaults import SCREENING_DURATION
 from keepout.cli.output import ExitCode, minute
 from keepout.events import ConjunctionEvent
 from keepout.maneuver import (
@@ -46,29 +54,6 @@ from keepout.omm import Omm, load
 from keepout.omm.celestrak import dumps_csv
 from keepout.risk import RiskLevel
 from keepout.screening import CloseApproach, screen
-from keepout.synthetic import read_fleet, run
-
-
-class _Operator(NamedTuple):
-    crossing: str
-    drifting: str
-    crossing_id: str
-
-
-@functools.cache
-def operator_cdms() -> _Operator:
-    """The synthetic operator's two CDMs, as KVN: 52939 against 47826
-    (maneuverable), and 44476 against 55841 (not); computed once, on first
-    use rather than on import."""
-    result = run(
-        read_fleet(FLEET_TOML),
-        load(FIXTURE_CSV),
-        Time(START, scale="utc"),
-        float(DAYS) * 86400.0,
-    )
-    crossing, drifting = (kvn.dumps(cdm) for cdm in result.cdms)
-    return _Operator(crossing, drifting, result.cdms[0].message_id)
-
 
 PRIMARY: Final = 52939
 SECONDARY: Final = 47826
@@ -88,14 +73,9 @@ def small_grid(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(maneuver, "plan_maneuver", small)
 
 
-def write(folder: Path, name: str, text: str) -> str:
-    path = folder / name
-    path.write_text(text, encoding="utf-8")
-    return str(path)
-
-
 def crossing(folder: Path) -> str:
-    return write(folder, "crossing.kvn", operator_cdms().crossing)
+    """The operator's CDM of 52939 against 47826 (maneuverable), written."""
+    return write(folder, "crossing.kvn", operator_kvn()[0])
 
 
 def catalog_of(folder: Path, numbers: frozenset[int] = NEIGHBOURS) -> str:
@@ -104,11 +84,30 @@ def catalog_of(folder: Path, numbers: frozenset[int] = NEIGHBOURS) -> str:
     return write(folder, "catalog.csv", dumps_csv(chosen))
 
 
+def quiet_rescreen(
+    plan: ManeuverPlan, option: ManeuverOption, omms: Sequence[Omm]
+) -> RescreenResult:
+    """A re-screen of ``option`` against ``omms`` that finds no approach and
+    leaves the event's secondary outside the volume, made without screening."""
+    start = plan.conjunction.tca - option.burn_lead * u.s
+    return RescreenResult(
+        option=option,
+        new_approaches=(),
+        closer_approaches=(),
+        event_returns=(),
+        event_range=None,
+        window=(start, start + SCREENING_DURATION * u.s),
+        catalog_objects=len(omms),
+        secondary_screened=True,
+        skipped_objects=0,
+    )
+
+
 def replace_rescreen(
     monkeypatch: pytest.MonkeyPatch, change: Callable[[RescreenResult], RescreenResult]
 ) -> None:
-    """Re-screens that are real up to ``change``."""
-    real = maneuver.rescreen
+    """Re-screens that are :func:`quiet_rescreen`'s up to ``change``: none
+    screens, the tests of what the command shows of a result take seconds."""
 
     def rescreen(
         plan: ManeuverPlan,
@@ -117,7 +116,33 @@ def replace_rescreen(
         *,
         workers: int | None,
     ) -> RescreenResult:
-        return change(real(plan, option, omms, workers=workers))
+        return change(quiet_rescreen(plan, option, omms))
+
+    monkeypatch.setattr(maneuver, "rescreen", rescreen)
+
+
+@pytest.fixture
+def rescreen_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Real re-screens, each burn's run once in the test: the same command
+    line run again (as text, then as JSON) takes its results."""
+    real = maneuver.rescreen
+    done: dict[tuple[float, float, tuple[int, ...]], RescreenResult] = {}
+
+    def rescreen(
+        plan: ManeuverPlan,
+        option: ManeuverOption,
+        omms: Sequence[Omm],
+        *,
+        workers: int | None,
+    ) -> RescreenResult:
+        key = (
+            option.burn_lead,
+            option.delta_v,
+            tuple(omm.catalog_number for omm in omms),
+        )
+        if key not in done:
+            done[key] = real(plan, option, omms, workers=workers)
+        return done[key]
 
     monkeypatch.setattr(maneuver, "rescreen", rescreen)
 
@@ -258,6 +283,7 @@ No burn on the grid meets the target Pc 1.00e-05 (exit status 4).
     assert json.loads(as_json.stdout)["options"] == []
 
 
+@pytest.mark.usefixtures("rescreen_once")
 def test_conflict_exits_four(tmp_path: Path) -> None:
     catalog = catalog_of(tmp_path)
     burn = ("--burn-before", "19", "--dv", "1")
@@ -273,7 +299,7 @@ no burn                -         -  4.25e-02       1029  foster  missed
 prograde            19.0        +1  0.00e+00     188388  foster  met   \n\
 Note: every Pc rests on an assumed covariance (COVARIANCE_METHOD = DEFAULT)
 Note: drag is off: the CDM gives the primary no positive CD_AREA_OVER_MASS
-prograde re-screened against 5 objects (<catalog>) from 2026-10-06T00:36:42 to 2026-10-13T00:36:42 UTC; 0 catalog objects left out, of which it says nothing.
+prograde re-screened against 5 objects (<catalog>) from 2026-10-06T00:36:42 to 2026-10-13T00:36:42 UTC; 0 catalog objects left out (not checked).
   Event secondary 47826 on the element sets (SGP4, not the CDM's orbit): no approach within 10 min of the CDM's TCA after the burn.
   CONFLICT: a new or closer approach is at red.
   1 new approach:
@@ -292,6 +318,7 @@ This burn brings an approach at red (exit status 4).
     assert option["rescreen"]["event_range_m"] is None
 
 
+@pytest.mark.slow
 def test_one_clean_option_and_one_conflict_exit_zero_and_show_both(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -311,13 +338,13 @@ prograde              16.5  +0.00794  9.96e-06       1330  foster  met   \n\
 retrograde            17.2   -0.0316  9.76e-06       5960  foster  met   \n\
 Note: every Pc rests on an assumed covariance (COVARIANCE_METHOD = DEFAULT)
 Note: drag is off: the CDM gives the primary no positive CD_AREA_OVER_MASS
-prograde re-screened against 217 objects (<catalog>) from 2026-10-06T03:09:04 to 2026-10-13T03:09:04 UTC; 5 catalog objects left out, of which it says nothing.
+prograde re-screened against 217 objects (<catalog>) from 2026-10-06T03:09:04 to 2026-10-13T03:09:04 UTC; 5 catalog objects left out (not checked).
   Event secondary 47826 on the element sets (SGP4, not the CDM's orbit): range 1330 m after the burn.
   No new or closer approach at red among the objects screened.
   1 new approach:
     57087 at 2026-10-11 15:48 UTC: range 3386 m, assumed Pc 2.12e-08, green
   Covariances are assumed (keepout's model of GP element set errors), not orbit determination.
-retrograde re-screened against 217 objects (<catalog>) from 2026-10-06T02:21:48 to 2026-10-13T02:21:48 UTC; 5 catalog objects left out, of which it says nothing.
+retrograde re-screened against 217 objects (<catalog>) from 2026-10-06T02:21:48 to 2026-10-13T02:21:48 UTC; 5 catalog objects left out (not checked).
   Event secondary 47826 on the element sets (SGP4, not the CDM's orbit): no approach within 10 min of the CDM's TCA after the burn.
   CONFLICT: a new or closer approach is at red.
   1 new approach:
@@ -504,12 +531,13 @@ def test_explicit_burn_that_misses_the_target_exits_four(tmp_path: Path) -> None
     assert option["meets_target"] is False
 
 
-def test_burn_before_without_dv_is_a_usage_error(tmp_path: Path) -> None:
-    alone = (("--burn-before", "19"), ("--dv", "0.1"))
-    for option in alone:
-        result = keepout("maneuver", crossing(tmp_path), *option)
-        assert result.exit_code == ExitCode.USAGE
-        assert "give --burn-before and --dv together" in result.stderr
+@pytest.mark.parametrize("alone", [("--burn-before", "19"), ("--dv", "0.1")])
+def test_burn_before_without_dv_is_a_usage_error(
+    tmp_path: Path, alone: tuple[str, str]
+) -> None:
+    result = keepout("maneuver", crossing(tmp_path), *alone)
+    assert result.exit_code == ExitCode.USAGE
+    assert "give --burn-before and --dv together" in result.stderr
 
 
 def test_catalog_and_source_together_are_a_usage_error(tmp_path: Path) -> None:
@@ -522,7 +550,7 @@ def test_catalog_and_source_together_are_a_usage_error(tmp_path: Path) -> None:
 def test_two_events_exit_one_listing_the_pairs(tmp_path: Path) -> None:
     files = (
         crossing(tmp_path),
-        write(tmp_path, "drifting.kvn", operator_cdms().drifting),
+        write(tmp_path, "drifting.kvn", operator_kvn()[1]),
     )
     result = keepout("maneuver", *files)
     assert result.exit_code == ExitCode.ERROR
@@ -536,8 +564,8 @@ def test_two_events_exit_one_listing_the_pairs(tmp_path: Path) -> None:
 def test_cdms_of_one_event_are_planned_from_the_latest(tmp_path: Path) -> None:
     # 19 h before TCA comes before a CDM created 18.6 h before it.
     later = (
-        operator_cdms()
-        .crossing.replace(operator_cdms().crossing_id, "UPDATE")
+        operator_kvn()[0]
+        .replace(operator_run().cdms[0].message_id, "UPDATE")
         .replace(
             "CREATION_DATE                  = 2026-10-06T00",
             "CREATION_DATE                  = 2026-10-06T01",
@@ -564,12 +592,8 @@ def test_assumed_covariance_is_labelled(tmp_path: Path) -> None:
 
 
 def test_a_calculated_covariance_is_not_labelled_assumed(tmp_path: Path) -> None:
-    calculated = operator_cdms().crossing.replace(
-        "COVARIANCE_METHOD              = DEFAULT",
-        "COVARIANCE_METHOD              = CALCULATED",
-    )
-    assert "= DEFAULT" not in calculated
-    args = (write(tmp_path, "calculated.kvn", calculated), "--hbr", "1000")
+    file = write(tmp_path, "calculated.kvn", calculated(operator_kvn()[0]))
+    args = (file, "--hbr", "1000")
     assert "assumed" not in keepout("maneuver", *args).stdout
     assert (
         json.loads(keepout("maneuver", *args, "--json").stdout)["assumed_covariance"]
@@ -579,12 +603,9 @@ def test_a_calculated_covariance_is_not_labelled_assumed(tmp_path: Path) -> None
 
 def test_pc_of_an_approach_of_the_catalog_is_labelled_assumed(tmp_path: Path) -> None:
     # Even for a CDM with covariances of its own: element sets have none.
-    calculated = operator_cdms().crossing.replace(
-        "COVARIANCE_METHOD              = DEFAULT",
-        "COVARIANCE_METHOD              = CALCULATED",
-    )
+    file = write(tmp_path, "c.kvn", calculated(operator_kvn()[0]))
     burn = ("--burn-before", "19", "--dv", "1", "--workers", "1")
-    args = (write(tmp_path, "c.kvn", calculated), "--hbr", "1000", *burn)
+    args = (file, "--hbr", "1000", *burn)
     result = keepout("maneuver", *args, "--catalog", catalog_of(tmp_path))
     lines = result.stdout.splitlines()
     assert any("assumed Pc" in line and "100000" in line for line in lines)
@@ -595,9 +616,8 @@ def test_pc_of_an_approach_of_the_catalog_is_labelled_assumed(tmp_path: Path) ->
 
 
 def test_missing_hbr_exits_one(tmp_path: Path) -> None:
-    lines = operator_cdms().crossing.splitlines(keepends=True)
-    without = "".join(line for line in lines if not line.startswith("HBR"))
-    result = keepout("maneuver", write(tmp_path, "crossing.kvn", without))
+    file = write(tmp_path, "crossing.kvn", without_hbr(operator_kvn()[0]))
+    result = keepout("maneuver", file)
     assert result.exit_code == ExitCode.ERROR
     assert result.stderr.startswith("Error: no hard-body radius for 52939, 47826")
 
@@ -642,25 +662,27 @@ def test_help_gives_the_exit_status_and_the_library_defaults() -> None:
 
 
 @pytest.mark.parametrize(
-    ("option", "value"),
+    ("option", "value", "reason"),
     [
-        ("--target-pc", "0"),
-        ("--target-pc", "1"),
-        ("--target-pc", "nan"),
-        ("--dv", "0"),
-        ("--dv", "nan"),
-        ("--dv", "inf"),
-        ("--burn-before", "0"),
-        ("--burn-before", "-1"),
-        ("--burn-before", "nan"),
-        ("--hbr", "0"),
-        ("--workers", "0"),
+        ("--target-pc", "0", "must be in (0, 1), got 0.0"),
+        ("--target-pc", "1", "must be in (0, 1), got 1.0"),
+        ("--target-pc", "nan", "must be in (0, 1), got nan"),
+        ("--dv", "0", "must be a finite, non-zero number, got 0.0"),
+        ("--dv", "nan", "must be a finite, non-zero number, got nan"),
+        ("--dv", "inf", "must be a finite, non-zero number, got inf"),
+        ("--burn-before", "0", "must be a positive number, got 0.0"),
+        ("--burn-before", "-1", "must be a positive number, got -1.0"),
+        ("--burn-before", "nan", "must be a positive number, got nan"),
+        ("--hbr", "0", "must be a positive number, got 0.0"),
+        ("--workers", "0", "0 is not in the range x>=1."),
     ],
 )
-def test_bad_options_are_usage_errors(tmp_path: Path, option: str, value: str) -> None:
+def test_bad_options_are_usage_errors(
+    tmp_path: Path, option: str, value: str, reason: str
+) -> None:
     result = keepout("maneuver", crossing(tmp_path), option, value)
     assert result.exit_code == ExitCode.USAGE
-    assert option in result.stderr
+    assert f"Invalid value for '{option}': {reason}" in usage_error(result)
 
 
 def test_no_cdm_is_a_usage_error() -> None:
@@ -677,9 +699,7 @@ def test_a_file_that_is_no_cdm_is_named(tmp_path: Path) -> None:
 
 
 def test_a_primary_that_cannot_manoeuvre_exits_one(tmp_path: Path) -> None:
-    result = keepout(
-        "maneuver", write(tmp_path, "drifting.kvn", operator_cdms().drifting)
-    )
+    result = keepout("maneuver", write(tmp_path, "drifting.kvn", operator_kvn()[1]))
     assert result.exit_code == ExitCode.ERROR
     assert "cannot manoeuvre (MANEUVERABLE = NO)" in result.stderr
 
@@ -736,6 +756,7 @@ def rescreen_lines(result: Result, catalog: str) -> list[str]:
     return lines[lines.index(first) :]
 
 
+@pytest.mark.usefixtures("rescreen_once")
 def test_secondary_still_near_after_the_burn_gives_its_range(tmp_path: Path) -> None:
     catalog = catalog_of(tmp_path)
     burn = ("--burn-before", "16", "--dv", "0.008", "--workers", "1")
@@ -743,7 +764,7 @@ def test_secondary_still_near_after_the_burn_gives_its_range(tmp_path: Path) -> 
     result = keepout("maneuver", *args)
     assert rescreen_lines(result, catalog) == snapshot(
         [
-            "prograde re-screened against 5 objects (<catalog>) from 2026-10-06T03:36:42 to 2026-10-13T03:36:42 UTC; 0 catalog objects left out, of which it says nothing.",
+            "prograde re-screened against 5 objects (<catalog>) from 2026-10-06T03:36:42 to 2026-10-13T03:36:42 UTC; 0 catalog objects left out (not checked).",
             "  Event secondary 47826 on the element sets (SGP4, not the CDM's orbit): range 1288 m after the burn.",
             "  No new or closer approach at red among the objects screened.",
             "  1 new approach:",
@@ -756,6 +777,7 @@ def test_secondary_still_near_after_the_burn_gives_its_range(tmp_path: Path) -> 
     assert option["rescreen"]["event_range_m"] == pytest.approx(1288.0, abs=1.0)
 
 
+@pytest.mark.usefixtures("rescreen_once")
 def test_a_secondary_not_screened_says_nothing_of_the_event(tmp_path: Path) -> None:
     catalog = catalog_of(tmp_path, NEIGHBOURS - {SECONDARY})
     burn = ("--burn-before", "19", "--dv", "0.1", "--workers", "1")
@@ -765,7 +787,7 @@ def test_a_secondary_not_screened_says_nothing_of_the_event(tmp_path: Path) -> N
     assert result.exit_code == ExitCode.OK
     assert rescreen_lines(result, catalog) == snapshot(
         [
-            "prograde re-screened against 4 objects (<catalog>) from 2026-10-06T00:36:42 to 2026-10-13T00:36:42 UTC; 0 catalog objects left out, of which it says nothing.",
+            "prograde re-screened against 4 objects (<catalog>) from 2026-10-06T00:36:42 to 2026-10-13T00:36:42 UTC; 0 catalog objects left out (not checked).",
             "  Event secondary 47826 was NOT screened: this re-screen says nothing of the event.",
             "  No new or closer approach at red among the objects screened.",
             "  1 new approach:",
@@ -789,7 +811,7 @@ def test_objects_left_out_are_counted(
     burn = ("--burn-before", "19", "--dv", "1", "--workers", "1")
     args = (crossing(tmp_path), "--hbr", "1000", *burn)
     result = keepout("maneuver", *args, "--catalog", catalog_of(tmp_path))
-    assert "; 1 catalog object left out, of which it says nothing." in result.stdout
+    assert "; 1 catalog object left out (not checked)." in result.stdout
 
 
 def test_a_long_list_of_approaches_is_cut_in_the_text_not_in_the_json(
@@ -797,7 +819,7 @@ def test_a_long_list_of_approaches_is_cut_in_the_text_not_in_the_json(
 ) -> None:
     # Chronological, Pc rising: the highest are last in time, first in the text.
     def crowded(result: RescreenResult) -> RescreenResult:
-        one = result.new_approaches[0]
+        one = NewApproach(approach=later_approach(), pc=1e-7, level=RiskLevel.GREEN)
         many = tuple(
             dataclasses.replace(one, pc=(index + 1) * 1e-7) for index in range(28)
         )
@@ -822,7 +844,6 @@ def test_source_is_read_as_a_catalog(
 ) -> None:
     web = FakeWeb(monkeypatch, celestrak_pages())
     seen: list[tuple[int, int | None]] = []
-    real = maneuver.rescreen
 
     def rescreen(
         plan: ManeuverPlan,
@@ -833,7 +854,9 @@ def test_source_is_read_as_a_catalog(
     ) -> RescreenResult:
         seen.append((len(omms), workers))
         near = [omm for omm in omms if omm.catalog_number in NEIGHBOURS]
-        return real(plan, option, near, workers=workers)
+        return dataclasses.replace(
+            quiet_rescreen(plan, option, near), new_approaches=(red(),)
+        )
 
     monkeypatch.setattr(maneuver, "rescreen", rescreen)
     burn = ("--burn-before", "19", "--dv", "1", "--workers", "1")

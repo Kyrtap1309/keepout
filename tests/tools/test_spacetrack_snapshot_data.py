@@ -1,4 +1,4 @@
-"""The committed Space-Track GP catalog: digests, and that every file follows
+"""The committed Space-Track GP catalog: that every file follows
 from the catalog and the manifest."""
 
 import pytest
@@ -20,16 +20,15 @@ def inputs() -> snapshot.Inputs:
     return snapshot.inputs_from_data(DATA)
 
 
-def test_files_match_the_manifest(manifest: snapshot.Manifest) -> None:
+def test_the_manifest_lists_every_file(manifest: snapshot.Manifest) -> None:
     assert set(manifest["files"]) == {snapshot.SNAPSHOT, snapshot.NOTICE}
     assert sorted(path.name for path in DATA.iterdir()) == sorted(
         [snapshot.SNAPSHOT, snapshot.NOTICE, snapshot_files.MANIFEST]
     )
-    stored = {name: (DATA / name).read_bytes() for name in manifest["files"]}
-    assert snapshot_files.file_digests(stored) == manifest["files"]
 
 
 def test_every_file_follows_from_the_data(inputs: snapshot.Inputs) -> None:
+    # The manifest too, so its digests are those of the committed files.
     for name, stored in snapshot.stored_files(DATA, inputs).items():
         assert (DATA / name).read_bytes() == stored, name
 

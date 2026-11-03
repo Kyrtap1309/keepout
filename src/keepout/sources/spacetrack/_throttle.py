@@ -57,7 +57,7 @@ class Throttle:
         self._sent: deque[float] = deque(maxlen=max(per_minute, per_hour))
 
     def wait(self) -> None:
-        """A wait until a request may be sent, which then counts as sent."""
+        """Wait until a request may be sent; it then counts as sent."""
         now = self._clock()
         due = now
         for window, limit in self._limits:

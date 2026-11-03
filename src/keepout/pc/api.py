@@ -212,16 +212,21 @@ def compute_pc(
     Returns
     -------
     PcResult
-        ``diagnostics`` start with the conjunction's own (covariance repairs,
-        unknown covariances), then applicability warnings, then the method's.
-        Applicability warnings are added, whatever the method, whenever the
-        encounter plane is defined (non-zero relative velocity) and they
-        fire, also with a covariance unknown (maximum Pc): the distance
-        from closest approach along the relative velocity does not depend on
-        the covariances, and the
-        duration from the known covariance alone is a lower bound, so its
-        warning still holds. ``details["encounter_duration_s"]`` is added
-        only when both covariances are known.
+        The Pc (``value``) and the ``method`` that computed it, its ``kind``
+        (an estimate or an upper bound), a confidence ``interval`` (Monte
+        Carlo only), ``diluted`` (dilution only), method-specific
+        ``details`` and the ``diagnostics``.
+
+        The diagnostics start with the conjunction's own (covariance
+        repairs, unknown covariances), then the applicability warnings, then
+        the method's. Applicability warnings are added whatever the method,
+        whenever the encounter plane is defined (non-zero relative velocity)
+        and they fire. That includes a covariance unknown (maximum Pc): the
+        distance from closest approach along the relative velocity does not
+        depend on the covariances, and a duration from the known covariance
+        alone is a lower bound, so its warning still holds.
+        ``details["encounter_duration_s"]`` is added only when both
+        covariances are known.
 
     Raises
     ------

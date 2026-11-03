@@ -110,9 +110,9 @@ class ManeuveredPropagator:
     base stays, with its NaN state, and the integration ignores it; the state
     at the burn must have none.
 
-    Against a Cowell integration of the whole orbit after the burn the
-    difference is off by metres at 1 m/s over 7 days; the measurements are
-    under "Re-screen accuracy" in ``docs/assumptions.md``.
+    Against a Cowell integration of the whole orbit after the burn, the
+    difference is off by metres at 1 m/s over 7 days. The measurements are
+    under "Re-screen" in ``docs/maneuver.md``.
 
     Times after ``burn_time + horizon`` have no state: :meth:`propagate` and
     :meth:`radius_bounds` refuse them, so that a window past the horizon never

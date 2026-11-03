@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 import validation_report as report
 from builders import case_with_reference
+from report_builders import assert_writes_then_checks
 
 from keepout.pc.result import PcResult
 from keepout.validation.criteria import MONTE_CARLO, BoundCriterion
@@ -43,10 +44,8 @@ def test_main_writes_then_checks(
     monkeypatch.setattr(report, "load_all", lambda: [case])
     page, readme = tmp_path / "validation.md", empty_readme(tmp_path)
     args = ["--page", str(page), "--readme", str(readme)]
-    assert report.main(["--check", *args]) == 1
-    assert report.main(args) == 0
+    assert_writes_then_checks(report.main, args)
     assert "| CARA unit tests | foster | 1 / 1 |" in readme.read_text(encoding="utf-8")
-    assert report.main(["--check", *args]) == 0
 
 
 def test_main_fails_when_a_case_fails(

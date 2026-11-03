@@ -25,7 +25,7 @@ def sphere_rule(
 def test_weights_cover_the_sphere() -> None:
     nodes, weights = sphere_rule(np.diag([1.0, 4.0, 9.0]), np.zeros(3), 1.0)
     np.testing.assert_allclose(np.linalg.norm(nodes, axis=1), 1.0, atol=1e-14)
-    assert weights.sum() == pytest.approx(4.0 * math.pi, rel=1e-12)
+    assert weights.sum() == approx(4.0 * math.pi, rel=1e-12)
 
 
 def surface_mass(
@@ -110,7 +110,7 @@ def test_density_integral_matches_a_reference(
     covariance = rotation @ np.diag(np.square(sigmas)) @ rotation.T
     centre = rotation @ np.array(mean)
     nodes, weights = sphere_rule(covariance, centre, radius)
-    assert weights.sum() == pytest.approx(4.0 * math.pi, rel=1e-12)
+    assert weights.sum() == approx(4.0 * math.pi, rel=1e-12)
     got = surface_mass(nodes, weights, covariance, centre, radius)
     if min(sigmas) > radius:
         points, lebedev = lebedev_rule(131)

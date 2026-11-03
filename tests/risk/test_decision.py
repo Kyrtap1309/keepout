@@ -137,74 +137,70 @@ def test_a_floored_pc_says_so() -> None:
     assert "below the source's reporting floor" in decision.reasons[0]
 
 
-def test_a_missing_latest_pc_is_monitored() -> None:
-    seen = [*series((3.0, 1e-9)), at(1.0, None, error="GeometryError: no plane")]
-    decision = decide(analyse_trend(seen))
-    assert decision.action is Action.MONITOR
-    assert decision.reasons == (
-        "latest observation has no Pc: GeometryError: no plane",
-    )
+NO_PC = "latest observation has no Pc: GeometryError: no plane"
+RED_THEN = "the latest observation with a Pc was red: Pc 1.00e-03, {} d before TCA"
+PREPARE = "before the decision point (2.00 d before TCA): prepare a manoeuvre"
+WITHIN = "within the decision point (2.00 d before TCA)"
 
 
-def test_a_missing_latest_pc_after_an_early_red_one_prepares_a_manoeuvre() -> None:
-    seen = [*series((4.0, 1e-3)), at(3.0, None)]
-    decision = decide(analyse_trend(seen))
-    assert decision.action is Action.PREPARE_MANOEUVRE
-    assert decision.reasons == (
-        "latest observation has no Pc: GeometryError: no plane",
-        "the latest observation with a Pc was red: Pc 1.00e-03, 4.00 d before TCA",
-        "trend undetermined",
-        "before the decision point (2.00 d before TCA): prepare a manoeuvre",
-    )
-
-
-def test_a_missing_latest_pc_does_not_downgrade_a_manoeuvre() -> None:
-    seen = [*series((1.5, 1e-3)), at(1.0, None)]
-    decision = decide(analyse_trend(seen))
-    assert decision.action is Action.MANOEUVRE
-    assert decision.reasons == (
-        "latest observation has no Pc: GeometryError: no plane",
-        "the latest observation with a Pc was red: Pc 1.00e-03, 1.50 d before TCA",
-        "trend undetermined",
-        "within the decision point (2.00 d before TCA)",
-    )
-
-
-def test_a_missing_pc_simultaneous_with_a_red_one_is_manoeuvred() -> None:
-    seen = [*series((1.0, 1e-3)), at(1.0, None)]
-    decision = decide(analyse_trend(seen))
-    assert decision.action is Action.MANOEUVRE
-    assert decision.reasons == (
-        "latest observation has no Pc: GeometryError: no plane",
-        "the latest observation with a Pc was red: Pc 1.00e-03, 1.00 d before TCA",
-        "trend undetermined",
-        "within the decision point (2.00 d before TCA)",
-    )
-
-
-def test_a_missing_latest_pc_after_a_red_upper_bound_names_the_concern() -> None:
-    seen = [at(3.0, 1e-3, kind="upper_bound"), at(2.5, None)]
-    decision = decide(analyse_trend(seen))
-    assert decision.action is Action.PREPARE_MANOEUVRE
-    assert decision.reasons == (
-        "latest observation has no Pc: GeometryError: no plane",
+@pytest.mark.parametrize(
+    ("seen", "action", "reasons"),
+    [
         (
-            "the latest observation with a Pc was red: Pc 1.00e-03 (an upper bound: "
-            "a covariance is unknown), 3.00 d before TCA"
+            [*series((3.0, 1e-9)), at(1.0, None, error="GeometryError: no plane")],
+            Action.MONITOR,
+            (NO_PC,),
         ),
-        "trend undetermined",
-        "before the decision point (2.00 d before TCA): prepare a manoeuvre",
-        "the Pc is an upper bound, not an estimate",
-    )
-
-
-def test_a_missing_latest_pc_follows_the_latest_pc_not_an_older_red_one() -> None:
-    seen = [*series((6.0, 1e-3), (3.0, 1e-9), (2.0, 1e-9)), at(1.0, None)]
+        (
+            [*series((4.0, 1e-3)), at(3.0, None)],
+            Action.PREPARE_MANOEUVRE,
+            (NO_PC, RED_THEN.format("4.00"), "trend undetermined", PREPARE),
+        ),
+        (
+            [*series((1.5, 1e-3)), at(1.0, None)],
+            Action.MANOEUVRE,
+            (NO_PC, RED_THEN.format("1.50"), "trend undetermined", WITHIN),
+        ),
+        (
+            [*series((1.0, 1e-3)), at(1.0, None)],
+            Action.MANOEUVRE,
+            (NO_PC, RED_THEN.format("1.00"), "trend undetermined", WITHIN),
+        ),
+        (
+            [at(3.0, 1e-3, kind="upper_bound"), at(2.5, None)],
+            Action.PREPARE_MANOEUVRE,
+            (
+                NO_PC,
+                (
+                    "the latest observation with a Pc was red: Pc 1.00e-03 (an "
+                    "upper bound: a covariance is unknown), 3.00 d before TCA"
+                ),
+                "trend undetermined",
+                PREPARE,
+                "the Pc is an upper bound, not an estimate",
+            ),
+        ),
+        (
+            [*series((6.0, 1e-3), (3.0, 1e-9), (2.0, 1e-9)), at(1.0, None)],
+            Action.MONITOR,
+            (NO_PC,),
+        ),
+    ],
+    ids=[
+        "after-green-is-monitored",
+        "after-early-red-prepares-a-manoeuvre",
+        "does-not-downgrade-a-manoeuvre",
+        "simultaneous-with-red-is-manoeuvred",
+        "after-red-upper-bound-names-the-concern",
+        "follows-the-latest-pc-not-an-older-red-one",
+    ],
+)
+def test_a_missing_latest_pc_is_judged_by_the_latest_one_that_exists(
+    seen: list[PcObservation], action: Action, reasons: tuple[str, ...]
+) -> None:
     decision = decide(analyse_trend(seen))
-    assert decision.action is Action.MONITOR
-    assert decision.reasons == (
-        "latest observation has no Pc: GeometryError: no plane",
-    )
+    assert decision.action is action
+    assert decision.reasons == reasons
 
 
 def test_an_event_past_tca_is_monitored() -> None:

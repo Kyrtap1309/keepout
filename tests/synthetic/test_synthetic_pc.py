@@ -13,6 +13,7 @@ from keepout.units import DAY
 BY_NUMBER = fixture_by_number()
 START = max(omm.epoch for omm in BY_NUMBER.values())
 MODEL = SyntheticCovarianceModel()
+# The Pc values below are regression snapshots of keepout's own results.
 
 
 def first_approach(primary: int, secondary: int, days: float) -> CloseApproach:

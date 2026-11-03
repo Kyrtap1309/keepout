@@ -64,6 +64,7 @@ __all__ = [
     "SOCRATES_URL",
     "TTL",
     "SocratesReport",
+    "download_once",
     "fetch_catalog",
     "fetch_group",
     "fetch_socrates",
@@ -106,6 +107,20 @@ _SOCRATES_COLUMN: Final = COLUMNS[0]
 """A column of the SOCRATES CSV header, to recognise the report."""
 
 _T = TypeVar("_T")
+
+
+def download_once(url: str) -> bytes:
+    """The body at ``url``, downloaded once: CelesTrak blocks clients that
+    retry after an error, so nothing is retried.
+
+    Raises
+    ------
+    HttpStatusError
+        If CelesTrak answers with a status other than 200 OK.
+    SourceUnavailable
+        On any other network or HTTP error.
+    """
+    return http_download(url, retry_delays=())
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,7 +166,7 @@ def fetch_group(
     *,
     cache: Path | None = None,
     max_age: float = TTL,
-    download: Downloader = http_download,
+    download: Downloader = download_once,
     now: Callable[[], float] = time.time,
 ) -> CatalogPart:
     """The element sets of one GP group, from the cache or CelesTrak.
@@ -165,12 +180,13 @@ def fetch_group(
     name
         The group, e.g. ``active`` (case-insensitive).
     cache
-        Cache root; :func:`~keepout.sources._store.cache_dir` if ``None``.
+        Cache root; if ``None``, ``$KEEPOUT_CACHE_DIR`` or else the
+        platform's user cache directory for keepout.
     max_age
         Seconds a cached copy is used without asking CelesTrak; at least
         :data:`TTL`.
     download
-        Downloads a URL.
+        Downloads a URL; :func:`download_once` (no retries) by default.
     now
         Gives the current Unix time [s], by which cached copies age.
 
@@ -204,7 +220,7 @@ def fetch_catalog(
     *,
     cache: Path | None = None,
     max_age: float = TTL,
-    download: Downloader = http_download,
+    download: Downloader = download_once,
     now: Callable[[], float] = time.time,
 ) -> Catalog:
     """The element sets of several GP groups, one per object.
@@ -218,12 +234,13 @@ def fetch_catalog(
     groups
         Group names; a name given twice is fetched once.
     cache
-        Cache root; :func:`~keepout.sources._store.cache_dir` if ``None``.
+        Cache root; if ``None``, ``$KEEPOUT_CACHE_DIR`` or else the
+        platform's user cache directory for keepout.
     max_age
         Seconds a cached copy is used without asking CelesTrak; at least
         :data:`TTL`.
     download
-        Downloads a URL.
+        Downloads a URL; :func:`download_once` (no retries) by default.
     now
         Gives the current Unix time [s], by which cached copies age.
 
@@ -253,7 +270,7 @@ def fetch_socrates(
     *,
     cache: Path | None = None,
     max_age: float = TTL,
-    download: Downloader = http_download,
+    download: Downloader = download_once,
     now: Callable[[], float] = time.time,
 ) -> SocratesReport:
     """The latest SOCRATES Plus report (:data:`SOCRATES_URL`).
@@ -265,12 +282,13 @@ def fetch_socrates(
     Parameters
     ----------
     cache
-        Cache root; :func:`~keepout.sources._store.cache_dir` if ``None``.
+        Cache root; if ``None``, ``$KEEPOUT_CACHE_DIR`` or else the
+        platform's user cache directory for keepout.
     max_age
         Seconds a cached copy is used without asking CelesTrak; at least
         :data:`TTL`.
     download
-        Downloads a URL.
+        Downloads a URL; :func:`download_once` (no retries) by default.
     now
         Gives the current Unix time [s], by which cached copies age.
 

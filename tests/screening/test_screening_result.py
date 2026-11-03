@@ -8,7 +8,7 @@ import astropy.units as u
 import numpy as np
 import pytest
 from astropy.time import Time
-from hypothesis import given
+from hypothesis import assume, given
 from hypothesis import strategies as st
 from hypothesis.extra.numpy import arrays
 from screening_data import load_fixture
@@ -83,8 +83,7 @@ def test_the_miss_vector_is_the_relative_position_in_rtn(
     r: FloatArray, v: FloatArray, miss: FloatArray
 ) -> None:
     angular = np.linalg.norm(np.cross(r, v))
-    if angular <= 1e-6 * np.linalg.norm(r) * np.linalg.norm(v):
-        return  # no RTN frame
+    assume(angular > 1e-6 * np.linalg.norm(r) * np.linalg.norm(v))  # an RTN frame
     primary = StateVector(TCA, r, v, "GCRF")
     secondary = StateVector(TCA, r + miss, v, "GCRF")
     approach = CloseApproach(1, 2, primary, secondary)

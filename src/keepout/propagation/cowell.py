@@ -112,7 +112,7 @@ def integrate(
     solver's error norm is a root mean square over them, so one difficult
     object in a large batch is held to a looser tolerance than alone. The
     tolerances may not bound the error of drag on an orbit that crosses bands
-    of the density table (see "The atmosphere" in ``docs/assumptions.md``).
+    of the density table (see "The atmosphere" in ``docs/maneuver.md``).
 
     Parameters
     ----------

@@ -34,7 +34,6 @@ from keepout.cdm.builder import (
 from keepout.conjunction import Conjunction
 from keepout.covariance import Covariance
 from keepout.events import ConjunctionEvent
-from keepout.frames import relative_position_rtn
 from keepout.objects import ObjectState
 from keepout.screening import ScreeningVolume
 from keepout.state import StateVector
@@ -219,19 +218,32 @@ def numbers(section: Section, *keywords: str) -> list[float]:
 
 
 def test_relative_fields_are_in_the_primary_rtn_frame() -> None:
-    cdm = example()
+    # An inclined primary off the axes: its RTN axes are not GCRF's.
+    r1 = np.array([4000e3, 4000e3, 3500e3])
+    v1 = np.array([-5000.0, 2000.0, 4000.0])
+    r2 = r1 + np.array([300.0, -200.0, 150.0])
+    v2 = v1 + np.array([100.0, 7000.0, -2000.0])
+    item = Conjunction(
+        gcrf_object("25544", r1, v1, DIAGONAL_COVARIANCE, 5.0),
+        gcrf_object("49863", r2, v2, DIAGONAL_COVARIANCE, 2.5),
+        7.5,
+    )
+    cdm = make_cdm(item, ISS, DEBRIS, created=CREATED)
+    radial = r1 / np.linalg.norm(r1)
+    normal = np.cross(r1, v1) / np.linalg.norm(np.cross(r1, v1))
+    rtn = np.array([radial, np.cross(normal, radial), normal])
+    miss, closing = rtn @ (r2 - r1), rtn @ (v2 - v1)
+    assert not np.allclose(miss, r2 - r1)
     relative = cdm.relative
     assert cdm.tca.precision == 6
     assert abs(float((cdm.tca - TCA).to_value("s"))) < 1e-9
-    miss = relative_position_rtn(LEO_R, LEO_V, SECONDARY_R)
     position = numbers(relative, *(f"RELATIVE_POSITION_{axis}" for axis in "RTN"))
-    np.testing.assert_allclose(position, miss, rtol=1e-12)
-    assert cdm.miss_distance == pytest.approx(float(np.linalg.norm(miss)), rel=1e-12)
-    # LEO_R lies along x and LEO_V along y: R, T, N are x, y, z.
+    np.testing.assert_allclose(position, miss, rtol=1e-12, atol=1e-9)
     velocity = numbers(relative, *(f"RELATIVE_VELOCITY_{axis}" for axis in "RTN"))
-    np.testing.assert_allclose(velocity, SECONDARY_V - LEO_V, rtol=1e-12)
+    np.testing.assert_allclose(velocity, closing, rtol=1e-12, atol=1e-9)
+    assert cdm.miss_distance == pytest.approx(float(np.linalg.norm(miss)), rel=1e-12)
     speed = relative.get("RELATIVE_SPEED")
-    assert speed == pytest.approx(float(np.linalg.norm(SECONDARY_V - LEO_V)), rel=1e-12)
+    assert speed == pytest.approx(float(np.linalg.norm(closing)), rel=1e-12)
     assert relative.comments == ()
     assert relative.get("START_SCREEN_PERIOD") is None
     assert relative.get("SCREEN_VOLUME_X") is None
@@ -403,10 +415,6 @@ def test_metadata_takes_the_ccsds_text_of_its_enumerations() -> None:
     assert metadata.object_type is ObjectType.ROCKET_BODY
     assert metadata.maneuverable is Maneuverable.NO
     assert metadata.covariance_method is CovarianceMethod.DEFAULT
-
-
-def test_an_unknown_manoeuvrability_is_written_n_a() -> None:
-    assert str(Maneuverable.NOT_APPLICABLE) == "N/A"
 
 
 @pytest.mark.parametrize(

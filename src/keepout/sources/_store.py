@@ -76,15 +76,15 @@ def _signature(path: Path) -> _Signature | None:
 
 
 def _remember(path: Path, sha256: str, signature: _Signature | None) -> None:
-    """The record that ``path``, with ``signature``, has digest ``sha256``."""
+    """Record that ``path``, with ``signature``, has digest ``sha256``."""
     if signature is not None:
         with _verified_lock:
             _verified[path] = (sha256, signature)
 
 
 def forget_verified() -> None:
-    """The end of this process's record of the cached files it has verified
-    (or written).
+    """Forget this process's record of the cached files it has verified (or
+    written).
 
     The next :func:`has_digest` of each file hashes it again, even if its
     inode, size and modification time are unchanged: for a file changed
@@ -129,7 +129,7 @@ class _Hashing:
 def store(
     target: Path, write: Callable[[Sink], object], sha256: str, source: str
 ) -> None:
-    """The atomic write of ``target``, kept only if its digest is ``sha256``.
+    """Write ``target`` atomically, keeping it only if its digest is ``sha256``.
 
     Parameters
     ----------
@@ -157,7 +157,7 @@ def store(
 
 
 def store_bytes(target: Path, data: bytes) -> str:
-    """The atomic write of ``data`` to ``target``, as :func:`store` does it.
+    """Write ``data`` to ``target`` atomically, as :func:`store` does.
 
     For contents already in memory, so there is no digest to check them
     against; the one computed while writing is returned.
@@ -178,7 +178,7 @@ def store_bytes(target: Path, data: bytes) -> str:
 
 
 def store_json(target: Path, record: Mapping[str, object]) -> str:
-    """The atomic write of ``record`` to ``target`` as indented JSON text.
+    """Write ``record`` to ``target`` atomically, as indented JSON text.
 
     Returns
     -------

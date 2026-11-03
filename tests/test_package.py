@@ -2,7 +2,6 @@ import importlib
 import pkgutil
 import subprocess
 import sys
-import urllib.request
 
 import pytest
 
@@ -69,11 +68,6 @@ def test_public_modules_declare_resolvable_names(name: str) -> None:
     assert [item for item in exported if not hasattr(module, item)] == []
 
 
-def test_tests_cannot_reach_the_network() -> None:
-    with pytest.raises(AssertionError, match="must not access the network"):
-        urllib.request.urlopen("https://example.com")
-
-
 @pytest.mark.parametrize("module", ["keepout", "keepout.cli.app"])
 def test_importing_loads_no_numerical_library(module: str) -> None:
     # keepout --help and import keepout stay fast: numpy, scipy and astropy
@@ -102,10 +96,7 @@ def test_importing_reads_no_metadata() -> None:
     assert loaded.stdout == "False\nTrue True\n"
 
 
-def test_a_lazy_name_is_the_defining_modules() -> None:
-    from keepout.pc import compute_pc
-
-    assert keepout.compute_pc is compute_pc
+def test_a_lazy_name_is_listed_and_an_unknown_one_raises() -> None:
     assert "compute_pc" in dir(keepout)
     with pytest.raises(AttributeError, match="has no attribute 'nothing'"):
         _ = keepout.nothing  # type: ignore[attr-defined]

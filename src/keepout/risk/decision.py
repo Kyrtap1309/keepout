@@ -285,6 +285,13 @@ def assess(
     decision_config
         The decision point.
 
+    Returns
+    -------
+    Assessment
+        The trend of the observations and the action decided from it, with
+        its reasons. :attr:`Assessment.level` is the risk level of the latest
+        Pc.
+
     Raises
     ------
     ValueError

@@ -42,13 +42,17 @@ __all__ = [
 def loads(text: str) -> Cdm:
     """The CDM in KVN or XML ``text``, told apart by the first non-blank character.
 
+    Line numbers in errors count from the first non-blank line for XML (whose
+    declaration must open the document), from the first line for KVN.
+
     Parameters
     ----------
     text
         The message.
     """
-    stripped = strip_bom(text).lstrip(" \t\r\n")
-    return xml.loads(stripped) if stripped.startswith("<") else kvn.loads(stripped)
+    body = strip_bom(text)
+    start = body.lstrip()
+    return xml.loads(start) if start.startswith("<") else kvn.loads(body)
 
 
 def load(path: str | Path) -> Cdm:

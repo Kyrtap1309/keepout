@@ -1,6 +1,8 @@
 """Helpers of the command-line tests: run ``keepout`` in-process, fake the
-web and Space-Track, and a fleet with approaches in the screening fixture."""
+web and Space-Track, a fleet with approaches in the screening fixture and
+the CDMs the synthetic operator issues for it."""
 
+import functools
 import time
 import urllib.request
 from collections.abc import Mapping
@@ -8,15 +10,19 @@ from pathlib import Path
 from typing import Final
 
 import pytest
+from astropy.time import Time
 from screening_data import DATA, FIXTURE
 from spacetrack_builders import IDENTITY, PASSWORD, FakeSpaceTrack
 from typer.testing import CliRunner, Result
 from web_builders import FakeResponse
 
+from keepout.cdm import kvn
 from keepout.cli.app import app
+from keepout.omm import load
 from keepout.omm.celestrak import dumps_csv
 from keepout.sources import celestrak, spacetrack
 from keepout.sources.spacetrack import _client
+from keepout.synthetic import OperatorResult, read_fleet, run
 
 
 def keepout(*args: str, env: Mapping[str, str | None] | None = None) -> Result:
@@ -31,6 +37,11 @@ def keepout(*args: str, env: Mapping[str, str | None] | None = None) -> Result:
     runner = CliRunner()
     environ = {"COLUMNS": "80", **(env or {})}
     return runner.invoke(app, list(args), env=environ, catch_exceptions=False)
+
+
+def usage_error(result: Result) -> str:
+    """The error of a refused command line, out of Rich's box and unwrapped."""
+    return " ".join(result.stderr.replace("│", " ").split())
 
 
 class FakeWeb:
@@ -121,3 +132,46 @@ def write_fleet(folder: Path, text: str = FLEET_TOML) -> Path:
     path = folder / "fleet.toml"
     path.write_text(text, encoding="utf-8")
     return path
+
+
+@functools.cache
+def operator_run() -> OperatorResult:
+    """The synthetic operator's run of :data:`FLEET_TOML` over the fixture
+    for :data:`DAYS` from :data:`START`: two CDMs, 52939 against a Starlink
+    0.82 d after creation (green, maneuverable) and Intelsat 39 against
+    Luch-5X 2.50 d after it (yellow, not); computed once, on first use."""
+    return run(
+        read_fleet(FLEET_TOML),
+        load(FIXTURE_CSV),
+        Time(START, scale="utc"),
+        float(DAYS) * 86400.0,
+    )
+
+
+def operator_kvn() -> tuple[str, str]:
+    """The two CDMs of :func:`operator_run` as KVN, crossing then drifting."""
+    crossing, drifting = (kvn.dumps(cdm) for cdm in operator_run().cdms)
+    return crossing, drifting
+
+
+def write(folder: Path, name: str, text: str) -> str:
+    """``text`` written to ``folder/name``; the path."""
+    path = folder / name
+    path.write_text(text, encoding="utf-8")
+    return str(path)
+
+
+def without_hbr(text: str) -> str:
+    """The KVN CDM ``text`` without its ``HBR`` lines."""
+    lines = text.splitlines(keepends=True)
+    return "".join(line for line in lines if not line.startswith("HBR"))
+
+
+def calculated(text: str) -> str:
+    """The KVN CDM ``text`` with its covariances calculated, not assumed."""
+    changed = text.replace(
+        "COVARIANCE_METHOD              = DEFAULT",
+        "COVARIANCE_METHOD              = CALCULATED",
+    )
+    assert "= DEFAULT" not in changed
+    return changed

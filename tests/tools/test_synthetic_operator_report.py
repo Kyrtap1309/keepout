@@ -1,40 +1,38 @@
 import copy
 import dataclasses
-import gzip
 import shutil
 from pathlib import Path
 
 import pytest
 import screening_snapshot as snapshot
-import snapshot_files
 import synthetic_operator_report as report
 from astropy.time import Time
 from cli_builders import write_fleet
 from generated import read_json
+from report_builders import assert_writes_then_checks, fixture_data
 from screening_data import FIXTURE_START, load_fixture
 
 from keepout.cdm import kvn
-from keepout.omm.celestrak import dumps_csv
 from keepout.synthetic import Fleet, FleetSatellite, run
 from keepout.units import DAY
 
 
 def arguments(tmp_path: Path) -> list[str]:
     """The fixture as the catalog, the manifest, a fleet file and the page."""
-    data = tmp_path / "data"
-    data.mkdir()
-    csv = dumps_csv(load_fixture()).encode()
-    (data / snapshot.SNAPSHOT).write_bytes(gzip.compress(csv))
-    shutil.copy(snapshot.DATA / snapshot_files.MANIFEST, data / snapshot_files.MANIFEST)
-    fleet = write_fleet(tmp_path)
-    page = tmp_path / "docs" / "synthetic-operator.md"
+    fixture_data(tmp_path)
+    write_fleet(tmp_path)
+    return arguments_of(tmp_path)
+
+
+def arguments_of(folder: Path) -> list[str]:
+    """The arguments of a run on the files of ``folder``."""
     return [
         "--data",
-        str(data),
+        str(folder / "data"),
         "--fleet",
-        str(fleet),
+        str(folder / "fleet.toml"),
         "--page",
-        str(page),
+        str(folder / "docs" / "synthetic-operator.md"),
         "--workers",
         "1",
     ]
@@ -52,15 +50,12 @@ def page(tmp_path: Path) -> str:
 def generated(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """A directory where the report was written once from the fixture."""
     tmp_path = tmp_path_factory.mktemp("report")
-    report.main(arguments(tmp_path))
+    assert report.main(arguments(tmp_path)) == 0
     return tmp_path
 
 
 def test_main_writes_then_checks(tmp_path: Path) -> None:
-    args = arguments(tmp_path)
-    assert report.main(["--check", *args]) == 1
-    assert report.main(args) == 0
-    assert report.main(["--check", *args]) == 0
+    assert_writes_then_checks(report.main, arguments(tmp_path))
 
 
 def test_the_summary_has_the_settings_catalog_fleet_and_actions(
@@ -71,7 +66,7 @@ def test_the_summary_has_the_settings_catalog_fleet_and_actions(
     assert settings["fleet"] == (generated / "fleet.toml").as_posix()
     assert settings["start"] == "2026-10-06T00:00:00.000"
     assert settings["days"] == 7.0
-    assert settings["volume"] == "5 km sphere (as CelesTrak SOCRATES)"
+    assert settings["volume"] == "5 km sphere (as in CelesTrak's SOCRATES)"
     assert (settings["green_below"], settings["red_from"]) == (1e-7, 1e-4)
     assert settings["decision_point_days"] == 2.0
     assert summary["catalog"] == {
@@ -148,10 +143,12 @@ def test_the_page_states_the_assumption_and_shows_the_closest_cdm(
 
 
 def test_check_fails_when_a_file_is_out_of_date(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    generated: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    args = arguments(tmp_path)
-    assert report.main(args) == 0
+    shutil.copytree(generated, tmp_path, dirs_exist_ok=True)
+    args = arguments_of(tmp_path)
+    # The fleet stays generated's: the summary records its path.
+    args[args.index("--fleet") + 1] = str(generated / "fleet.toml")
     json_file = tmp_path / "docs" / "synthetic-operator.json"
     json_file.write_text("{}\n", encoding="utf-8")
     assert report.main(["--check", *args]) == 1

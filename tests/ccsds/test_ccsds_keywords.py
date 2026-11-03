@@ -1,6 +1,8 @@
 """CCSDS keyword values: units, numbers and UTC epochs (on CDM keywords)."""
 
 import datetime
+import math
+import sys
 import warnings
 from decimal import Decimal
 
@@ -311,13 +313,19 @@ def test_writing_a_value_loses_nothing(
     st.sampled_from(["X", "X_DOT", "RECOMMENDED_OD_SPAN", "CR_R"]),
     st.floats(allow_nan=False, allow_infinity=False),
 )
-def test_the_message_number_is_the_written_text_read_back(
+def test_any_value_written_reads_back_within_one_ulp(
     keyword: str, value: float
 ) -> None:
     entry = SEGMENT[keyword]
+    # Below this the message number is subnormal and has fewer digits.
+    assume(value == 0.0 or abs(value) >= entry.scale * sys.float_info.min)
     written, _ = format_value(entry, value)
-    assert message_number(value, entry.scale) == float(written)
-    assert repr(message_number(value, entry.scale)).upper() == written
+    back = parse_value(entry, written, entry.unit)
+    assert back in (
+        math.nextafter(value, -math.inf),
+        value,
+        math.nextafter(value, math.inf),
+    )
 
 
 def test_the_message_number_of_an_unscaled_value_is_the_value() -> None:
@@ -482,23 +490,41 @@ def test_epochs_parsed_together_are_those_parsed_one_by_one(texts: list[str]) ->
 
 
 @pytest.mark.parametrize(
-    "texts",
+    ("texts", "parsed"),
     [
         # Leap seconds, day of year, Z, and every number of fraction digits.
-        ["2016-12-31T23:59:60.5", "2016-366T23:59:60Z", "2016-366T12:00:00"]
-        + [f"2026-02-28T23:59:59{'.' + '7' * n if n else ''}" for n in range(10)],
+        (
+            ["2016-12-31T23:59:60.5", "2016-366T23:59:60Z", "2016-366T12:00:00"]
+            + [f"2026-02-28T23:59:59{'.' + '7' * n if n else ''}" for n in range(10)],
+            [False, False] + [True] * 11,
+        ),
         # A day 30 of February among valid epochs of the same form.
-        ["2026-02-27T00:00:00.123456", "2026-02-30T00:00:00.123456"],
-        # Rounded past the end of its minute; non-ASCII digits.
-        ["2026-01-01T00:00:59.9999999999", "\u0662026-01-01T00:00:00"],
+        (
+            ["2026-02-27T00:00:00.123456", "2026-02-30T00:00:00.123456"],
+            [True, False],
+        ),
+        # Rounded past the end of its minute; non-ASCII digits; one just before.
+        (
+            [
+                "2026-01-01T00:00:59.9999999999",
+                "\u0662026-01-01T00:00:00",
+                "2026-01-01T00:00:59.999999999",
+            ],
+            [False, False, True],
+        ),
         # Years outside ERFA's leap-second table, and before 1972.
-        ["1955-01-01T00:00:00.5", "2035-06-30T12:00:00", "1964-12-31T23:59:60.05"],
+        (
+            ["1955-01-01T00:00:00.5", "2035-06-30T12:00:00", "1964-12-31T23:59:60.05"],
+            [True, True, False],
+        ),
     ],
 )
 def test_unusual_epochs_parsed_together_are_those_parsed_one_by_one(
-    texts: list[str],
+    texts: list[str], parsed: list[bool]
 ) -> None:
-    for text, epoch in zip(texts, preparse_epochs(texts), strict=True):
+    epochs = preparse_epochs(texts)
+    assert [epoch is not None for epoch in epochs] == parsed
+    for text, epoch in zip(texts, epochs, strict=True):
         if epoch is not None:
             assert _time_state(epoch) == _epoch_outcome(text), text
 

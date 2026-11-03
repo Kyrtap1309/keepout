@@ -1,14 +1,14 @@
 # Manoeuvre planning
 
 When an event stays red, its operator plans a collision-avoidance
-manoeuvre: a burn of the primary, some hours before TCA, that takes the Pc
-below a target without bringing the primary close to anything else. keepout
-plans such a burn from the CDMs of one event. It computes the Pc of a grid
-of burns, picks the smallest burn each way that meets the target, and can
-screen each burn against a catalog for the approaches it brings.
+manoeuvre. That is a burn of the primary, some hours before TCA, that takes
+the Pc below a target without bringing the primary close to anything else.
+keepout plans such a burn from the CDMs of one event. It computes the Pc of
+a grid of burns, picks the smallest burn each way that meets the target,
+and can screen each burn against a catalog for the approaches it brings.
 
 The burns are impulsive, ideal and along the velocity, and the CDM's
-covariances are used unchanged; [Assumptions](assumptions.md#manoeuvre-planning)
+covariances are used unchanged. [Assumptions and limits](#assumptions-and-limits)
 lists everything the planner leaves out, with measured numbers. The
 [report](maneuver-report.md) shows the planner on a CARA test event and the
 re-screen on the frozen public catalog.
@@ -33,104 +33,135 @@ plan's event, on the grid or off it, with the event's own Pc method. The
 command line runs the same as `keepout maneuver`
 ([Command line](cli.md#maneuver)).
 
-## The burn as a difference
-
-A CDM gives both objects' states and covariances at TCA, from the
-originator's orbit determination; keepout has no better orbit than that.
-So the planner does not propagate the CDM's state to TCA and compare: it
-computes what a burn *changes* there and adds that change to the CDM's
-state.
-
-From the primary's state at TCA, a Cowell integration (DOP853, gravity to
-J6, drag if the CDM gives `CD_AREA_OVER_MASS`) goes back to the earliest
-burn time, then forward to TCA with every cell of the grid in one batch:
-the orbit without a burn and, for each burn time, the orbits with each Δv
-added along the velocity there. The change at TCA is a cell minus the
-orbit without a burn, carried in the same batch. The solver's steps are
-shared, so its error is nearly the same with and without the burn and
-cancels in the difference; on Metop-B's CDM the integration back and forth
-ended 1.5 cm from where it started (one measurement). The secondary is not integrated: the burn does not
-move it.
-
-For small burns the change grows as the along-track drift does, about
-3·Δv·Δt. On the Metop-B CDM of the report (25.1 h from the CDM's creation
-to TCA, gravity to J6 without drag), the burn at the CDM's creation moves
-the primary at TCA by 2.73 km for 0.01 m/s, 27.3 km for 0.1 m/s and
-273.0 km for 1 m/s, against 2.72, 27.2 and 271.5 km from 3·Δv·Δt.
-
-## The new closest approach
-
-After a burn the objects no longer meet at the CDM's TCA. Each cell finds
-its own closest approach by Newton's method on the range of a second-order
-expansion of both relative positions about TCA (position, velocity and
-the acceleration of the force model). The expansion is trusted within a
-twentieth of the primary's orbital period. Where it has no minimum there,
-or its curvature is not positive (a slow, nearly co-orbital encounter, in
-which a small change of speed can move the minimum by hours), the cell
-gets no Pc, is never an option and is counted in a note: a miss distance
-the expansion cannot vouch for would read as a safe burn.
-
-The planner looks for the new TCA only within that twentieth of an orbit.
-In a slow encounter a burn can bring the same two objects back hours later,
-outside it, at a Pc no cell of the grid shows: only a
-[re-screen](#re-screen) shows it. Below 100 m/s of relative speed the plan
-notes this.
-
-Both objects are then moved to the new TCA along the same expansion, with
-the CDM's covariances, and the cell's Pc is computed there.
-
 ## The grid
+
+The planner computes the Pc of a grid of burns. These terms are used on the
+rest of this page:
+
+- A **cell** is one burn of the grid: a burn time and a signed Δv.
+- A burn's **lead** (`burn_lead`) is the time from the burn to TCA, in
+  seconds.
+- The **baseline** is the event without a burn: the Pc of the latest CDM,
+  by the event's own method.
+- An **option** is the smallest burn in one direction that meets the
+  target, confirmed by the event's own method (see
+  [The options](#the-options)).
+- An **event return** is the event's own pair meeting again, away from its
+  TCA, at or above the target. Only a [re-screen](#re-screen) finds one.
 
 | | Default |
 |---|---|
 | Burn times | from 2 days before TCA, or the latest CDM's creation if that is later, to 6 hours before TCA, 8 per orbital period of the primary |
 | Δv | 1 mm/s to 1 m/s, 31 values per direction, geometrically spaced; prograde (positive) and retrograde (negative) |
 | Pc | Foster's 2-D Pc in every cell, with the CDM's covariances unchanged |
-| Target | Pc below 1e-5, keepout's default: one order of magnitude below `red_from` (1e-4), as a margin. Compared on the thresholds' basis (the conservative basis takes the upper end of a Monte Carlo interval) |
+| Target | Pc below 1e-5 (`TARGET_PC`) |
 
-A burn before the CDM's creation is left out: the operator did not know of
-the event then. The last burn time is 6 hours before TCA because an
-along-track burn acts through the drift it builds up, which has little time
-to grow so close to TCA. `BurnGrid` changes any of these, and `--target-pc`
-or `target_pc` the target.
+A burn before the CDM's creation is left out, since the operator did not
+know of the event then. The last burn time is 6 hours before TCA because an
+along-track burn acts through the drift it builds up. That drift has little
+time to grow so close to TCA. `BurnGrid` changes any of these, and
+`--target-pc` or `target_pc` the target.
 
-Every cell uses Foster's Pc, whatever the event's own method: Foster takes
-about 0.1 ms per cell, Hall 3D-Nc 0.1 to 0.2 s, so Hall on the 12 896 cells
-of a full grid would take over 15 minutes. The event's own method (the one
-`auto` chose for the CDM, or the one given) confirms the options instead.
+The default target, 1e-5, is ten times below the red
+threshold `red_from` (1e-4). The margin leaves the event clearly out of the
+red rather than just under it. The target is compared on the thresholds'
+basis. On the default, conservative basis a Monte Carlo Pc counts by the
+upper end of its confidence interval.
+
+Every cell uses Foster's Pc, whatever the event's own method. Foster takes
+about 0.1 ms per cell and Hall 3D-Nc 0.1 to 0.2 s, so Hall on the 12 896
+cells of a full grid would take over 15 minutes. Instead the event's own
+method (the one `auto` chose for the CDM, or the one given) confirms the
+options. A cell that Foster puts below the target but the event's method
+does not is therefore never an option. The rest of the grid, and the
+heatmap, are Foster's.
+
+## The burn as a difference
+
+A CDM gives both objects' states and covariances at TCA, from the
+originator's orbit determination. keepout has no better orbit than that.
+So the planner does not integrate a burned orbit and compare it with the
+CDM. It computes what the burn changes at TCA and adds that change to the
+CDM's state.
+
+From the primary's state at TCA, a Cowell integration goes back to the
+earliest burn time. It uses DOP853, gravity to J6, and drag if the CDM
+gives `CD_AREA_OVER_MASS`. The integration then goes forward to TCA with
+every cell of the grid in one batch: the orbit without a burn and, for each
+burn time, the orbits with each Δv added along the velocity there. The
+change at TCA is a cell minus the orbit without a burn, carried in the same
+batch. The solver's steps are shared, so its error is nearly the same with
+and without the burn and cancels in the difference. On Metop-B's CDM the
+integration back and forth ended 1.5 cm from where it started (one
+measurement). The secondary is not integrated, since the burn does not
+move it.
+
+For small burns the change grows as the along-track drift does, about
+3·Δv·Δt. Take the Metop-B CDM of the report: 25.1 h from the CDM's creation
+to TCA, gravity to J6 without drag. A burn at the CDM's creation moves the
+primary at TCA by 2.73 km for 0.01 m/s, 27.3 km for 0.1 m/s and 273.0 km
+for 1 m/s. The estimate 3·Δv·Δt gives 2.72, 27.2 and 271.5 km.
+
+## The new closest approach
+
+After a burn the objects no longer meet at the CDM's TCA. Each cell finds
+its own closest approach by Newton's method on the range of a second-order
+expansion of both relative positions about TCA. The expansion uses
+position, velocity and the acceleration of the force model, and is trusted
+within a twentieth of the primary's orbital period.
+
+The expansion may have no minimum there, or a curvature that is not
+positive. That happens in a slow, nearly co-orbital encounter, in which a
+small change of speed can move the minimum by hours. Such a cell gets no
+Pc, is never an option and is counted in a note. A miss distance the
+expansion cannot vouch for would read as a safe burn.
+
+The planner looks for the new TCA only within that twentieth of an orbit.
+In a slow encounter a burn can bring the same two objects back hours later,
+outside it, at a Pc no cell of the grid shows. Only a
+[re-screen](#re-screen) shows such an event return. Below 100 m/s of
+relative speed the plan notes this.
+
+Both objects are then moved to the new TCA along the same expansion, with
+the CDM's covariances, and the cell's Pc is computed there.
 
 ## The options
 
 In each direction, the candidates are the cells below the target on
-Foster's Pc, from the smallest |Δv| and, among equals, from the latest burn
-(the one decided with the most information). The event's own method
-computes the Pc of each candidate in turn, at most 8 per direction, and the
-first it also puts below the target is the option of that direction. An
-option is therefore always confirmed by the method that gave the baseline
-Pc; a direction without one has no option, and the notes say how many
-candidates the method refused or failed on.
+Foster's Pc. They are taken from the smallest |Δv| and, among equals, from
+the latest burn (the one decided with the most information). The event's
+own method computes the Pc of each candidate in turn, at most 8 per
+direction. The first candidate it also puts below the target is the option
+of that direction. An option is therefore always confirmed by the method
+that gave the baseline Pc. A direction without one has no option, and the
+notes say how many candidates the method refused or failed on.
 
 `ManeuverPlan` keeps the whole grid (`burn_leads`, `delta_v`, `pc`,
-`range_at_tca`), the baseline (the CDM's own Pc with no burn), both
-options and the notes: assumed covariances, drag left off (a warning with
-measured numbers when the perigee is below 450 km), a slow encounter, and
-the cells without a Pc.
+`range_at_tca`), the baseline, both options and the notes. The notes cover:
+
+- assumed covariances;
+- drag left off (a warning with measured numbers when the perigee is below
+  450 km);
+- a slow encounter;
+- the cells without a Pc.
 
 ## Re-screen
 
 A burn that clears one event moves the primary for days afterwards, into
 approaches it did not have. `rescreen(plan, option, catalog)` screens the
 primary against a GP catalog twice for 7 days from the burn, with the same
-[screening](screening.md) as everywhere else: once as SGP4 gives it, and
-once with the burn. The burn is a `ManeuveredPropagator`: SGP4's states
-plus the Cowell difference of the burn, rotated to TEME at every node.
-Against a Cowell integration of the whole orbit after the burn, at 1 m/s
-over 7 days, that difference reached 2.24 m at worst on the 38 fixture
-orbits with an eccentricity above 0.3, and below 0.3 0.09 m on 68377 (a
-circular LEO) and 0.82 m on 89251 (e = 0.28, perigee near 500 km); the
-tests hold the eccentric orbits to 3 m and 68377 to 1 m. These are
-measurements on those orbits, not a bound.
-The screening volume is kilometres.
+[screening](screening.md) as everywhere else. One run uses the primary as
+SGP4 gives it, the other adds the burn. The burn is a
+`ManeuveredPropagator`: SGP4's states plus the Cowell difference of the
+burn, rotated to TEME at every node.
+
+Against a Cowell integration of the whole orbit after a 1 m/s burn, that
+difference over 7 days reached at most 2.24 m on the 38 fixture orbits with
+e > 0.3. On less eccentric orbits it was 0.09 m for 68377 (a circular LEO)
+and 0.82 m for 89251 (e = 0.28, perigee near 500 km). The tests hold the
+eccentric orbits to 3 m and 68377 to 1 m. These are measurements on those
+orbits, not a bound, and other orbits are not covered by them. All are far
+below a screening volume of kilometres.
 
 The result compares the two screenings:
 
@@ -141,43 +172,121 @@ The result compares the two screenings:
   (its secondary within 10 minutes of the event's TCA) is not among them.
 - **Event returns**: the new and closer approaches of the event's own
   secondary more than 10 minutes from the event's TCA whose Pc is at or
-  above the plan's target: the burn clears the event at its TCA but brings
+  above the plan's target. The burn clears the event at its TCA but brings
   the pair back elsewhere above the bar it was planned to clear.
 - **The event's range** after the burn, if its secondary was screened.
-- **Coverage**: whether the event's secondary was screened at all (an
-  analyst object is in no public catalog; `secondary_screened` is then
-  false and the re-screen says nothing of the event) and how many catalog
-  objects screening left out.
+- **Coverage**: whether the event's secondary was screened at all, and how
+  many catalog objects screening left out. An analyst object is in no
+  public catalog. `secondary_screened` is then false, and the re-screen
+  says nothing of the event.
 
-Each new and closer approach gets the synthetic operator's Pc (`auto`
-unless `compute` says otherwise, on the conservative basis of the
-thresholds) on the [synthetic covariance model](assumptions.md) of both
-element sets, an assumed covariance, and a risk level; `conflict` is true when one is red,
-and `clean` when there is no conflict and no event return.
+Each new or closer approach gets a Pc and a risk level. The Pc is the
+synthetic operator's: `auto` unless `compute` says otherwise, compared on
+the conservative basis of the thresholds. `conflict` is true when any of
+these approaches is red. `clean` is true when there is no conflict and no
+event return.
+
+!!! warning "Assumed covariances"
+    GP element sets have no covariance. The Pc of an approach the re-screen
+    finds rests on the [synthetic covariance model](assumptions.md) of both
+    element sets, with all its limits. It is labelled assumed wherever it
+    is shown.
+
 The primary must be in the catalog and screened in both runs, and SGP4
-must carry it through the whole window: otherwise `rescreen` raises
+must carry it through the whole window. Otherwise `rescreen` raises
 `ManeuverError`, so "nothing new" never stands for "nothing looked at".
 
-The re-screen checks the options; it does not search for another one when
+The re-screen checks the options. It does not search for another one when
 an option brings an approach. Weighing a burn that clears one event against
-an approach it brings is left to the analyst, who can evaluate any burn
-with `evaluate_burn` or `keepout maneuver --burn-before --dv` and re-screen
-it.
+an approach it brings is left to the analyst. The analyst can evaluate any
+burn with `evaluate_burn` or `keepout maneuver --burn-before --dv` and
+re-screen it.
 
 ## Time
 
-Measured on an Intel Core i5-14600K, 3 runs each (2026-11-03): the default
-grid on a LEO event 48 h before TCA (12 896 cells) took 29.9 to 31.2 s with
-the numerical libraries on one thread and 33.4 to 46.1 s on their default
-threads; most of it is the batched integration. On the report's Metop-B
-event (25.1 h, 5 642 cells) it took 9.7 to 10.1 s on one thread and 12.3 to
-16.2 s on the default threads (the report's own runs), at about twenty times the one-thread CPU
-time. Setting
-`OMP_NUM_THREADS=1` (and `OPENBLAS_NUM_THREADS=1`) is therefore faster as
-well as cheaper. A confirmation by Hall 3D-Nc adds 0.1 to 0.2 s per
-candidate, and by Monte Carlo up to about a minute for a slow encounter. A
-re-screen of the report's GEO burn against the public catalog took 4.2 s
+All times were measured on an Intel Core i5-14600K, 3 runs each, on
+2026-11-03:
+
+| Run | One thread | Default threads |
+|---|---|---|
+| Default grid, LEO event 48 h before TCA (12 896 cells) | 29.9 to 31.2 s | 33.4 to 46.1 s |
+| The report's Metop-B event, 25.1 h (5 642 cells, the report's own runs) | 9.7 to 10.1 s | 12.3 to 16.2 s |
+
+Most of the time is the batched integration. With default threading the
+run uses about 20 times more CPU time and is still slower. So set
+`OMP_NUM_THREADS=1` (and `OPENBLAS_NUM_THREADS=1`).
+
+A confirmation by Hall 3D-Nc adds 0.1 to 0.2 s per candidate. A
+confirmation by Monte Carlo adds up to about a minute for a slow encounter.
+A re-screen of the report's GEO burn against the public catalog took 4.2 s
 with 4 workers in each of 3 runs.
+
+## Assumptions and limits
+
+The planner answers "what does this burn do to the event", from the CDM's
+states and covariances. These assumptions apply to any CDM. The numbers
+below are measurements on sample cases, not bounds.
+
+- **The burn.** Impulsive, ideal (no execution error, no attitude or
+  thrust profile) and along the primary's velocity only. There are no
+  radial or normal burns, and no burn of the secondary. An along-track
+  burn acts through the drift it builds up, so it loses effect close to
+  TCA. That is why the latest burn time is 6 hours before TCA, not
+  because later burns are impossible.
+- **The CDM's state is the truth.** The planner adds the change a burn
+  makes at TCA to the CDM's state. It has no better orbit to start from.
+- **Covariances unchanged.** Every cell uses the CDM's covariances of
+  both objects. This treats the burn as adding no uncertainty, and the
+  orbit determination as not changing with time.
+- **The target.** 1e-5 by default, ten times below the red threshold (see
+  [The grid](#the-grid)). `--target-pc` or `target_pc` sets another.
+- **Forces.** Zonal gravity to J6 (EGM2008) about a pole fixed for the
+  integration. There are no tesseral terms, no third bodies (Moon, Sun)
+  and no solar radiation pressure. These matter most at GEO, where
+  lunisolar gravity and SRP dominate the perturbations. A GEO plan
+  therefore rests on a simpler orbit than a LEO one.
+- **Drag only with CD·A/m.** Drag is on only when the CDM gives the
+  primary's `CD_AREA_OVER_MASS`. Otherwise the plan says it is off. What
+  that costs depends on the altitude. It was measured on one circular
+  orbit per altitude, with CD·A/m = 0.02 and burns up to 25 h before TCA
+  on the default grid. Switching drag on moved log10 Pc by at most 0.003
+  at 630 km, 0.03 at 500 km, 0.18 at 400 km and 1.29 at 300 km. Below a
+  450 km perigee the note without drag is a warning with these numbers.
+- **The atmosphere.** An exponential density table by altitude band
+  (Vallado, table 8-4), without solar activity or the day-night bulge.
+  Its density is a rough guess for any given day. The table's bands do
+  not join exactly: up to 0.14 % at 25 km, 0.01 % or less above. An orbit
+  whose altitude swings across band edges integrates less accurately than
+  the solver's tolerances suggest. Three eccentric orbits were integrated
+  for 25 h and compared with tolerances 10 times tighter (rtol 1e-12):
+
+    | Orbit | Difference |
+    |---|---|
+    | 240 km, e = 0.005, CD·A/m = 0.05 | 1.5 m |
+    | 300 km, e = 0.01, CD·A/m = 0.02 | 4.1 m |
+    | 400 km, e = 0.02, CD·A/m = 0.1 | 9.5 m |
+    | 300 km, circular, CD·A/m = 0.02 | 0.03 m |
+
+    Drag itself moved these orbits by 170 to 2 650 km. The planner works
+    on differences of orbits integrated together, in which most of this
+    error cancels.
+- **Foster on the grid.** Every cell uses Foster's 2-D Pc, for speed, and
+  the event's own method confirms the options (see
+  [The grid](#the-grid)).
+- **Slow encounters.** The planner looks for each cell's new closest
+  approach only within a twentieth of an orbit of TCA (see
+  [The new closest approach](#the-new-closest-approach)). A burn can bring
+  the pair back hours later, outside that window. Only a re-screen shows
+  such an event return. Inside the window, the new TCA of a cell was
+  measured up to 28 m off at 10 m/s among the cells sampled. The
+  covariances there are hundreds of metres.
+- **Re-screen accuracy.** The burned orbit of a re-screen is SGP4 plus a
+  Cowell difference, accurate to metres on the orbits measured (see
+  [Re-screen](#re-screen)).
+- **Re-screen Pc assumed.** The Pc of a new or closer approach rests on
+  the [synthetic covariance model](assumptions.md). The re-screen also
+  sees only the objects in the catalog given, and the public catalog
+  lacks most debris (see [Screening](screening.md#the-public-catalog)).
 
 ## References
 

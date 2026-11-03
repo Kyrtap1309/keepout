@@ -51,7 +51,7 @@ TINY = 1e-300
 """Below this a relative comparison means nothing (near the float64 floor)."""
 
 
-def approx(expected: float, rel: float) -> object:
+def approx(expected: object, rel: float) -> object:
     """``pytest.approx`` that is relative only.
 
     ``pytest.approx(x, rel=r)`` also accepts anything within its default
@@ -165,6 +165,22 @@ Sharing it is safe: a :class:`~keepout.conjunction.Conjunction` is frozen,
 its states and covariances are read-only, and its cached plane depends on
 nothing a test patches.
 """
+
+UNBOUND_V = np.array([0.0, 15000.0, 0.0])
+"""15 km/s at :data:`LEO_R`: above escape speed, so there is no orbit period."""
+
+
+def unbound_crossing(z_offset: float = 0.0) -> Conjunction:
+    """An unbound primary (:data:`UNBOUND_V`, 1e4 m sigmas) crossed at 1 m/s
+    along z by a secondary (1 m sigmas) 30 m away along x and ``z_offset`` m
+    along the relative velocity; 5 m hard-body radius."""
+    primary = object_state(LEO_R, UNBOUND_V, 1e8 * np.eye(3))
+    secondary = object_state(
+        LEO_R + np.array([30.0, 0.0, z_offset]),
+        UNBOUND_V + np.array([0.0, 0.0, 1.0]),
+        np.eye(3),
+    )
+    return Conjunction(primary, secondary, 5.0)
 
 
 def case_with_reference(

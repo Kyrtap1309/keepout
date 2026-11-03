@@ -150,7 +150,13 @@ class Fleet:
 
     def find(self, catalog_number: int) -> FleetSatellite | None:
         """The satellite with this catalog number, or ``None`` if it is not
-        in the fleet."""
+        in the fleet.
+
+        Parameters
+        ----------
+        catalog_number
+            NORAD catalog number of the satellite.
+        """
         for satellite in self.satellites:
             if satellite.catalog_number == catalog_number:
                 return satellite
@@ -216,6 +222,11 @@ def _satellite(item: object, where: str) -> FleetSatellite:
 def read_fleet(text: str) -> Fleet:
     """The fleet of a fleet file's text (TOML; see the module's description).
 
+    Parameters
+    ----------
+    text
+        The fleet file's text.
+
     Raises
     ------
     FleetError
@@ -246,6 +257,11 @@ def read_fleet(text: str) -> Fleet:
 
 def load_fleet(path: str | Path) -> Fleet:
     """The fleet of a fleet file (UTF-8 TOML; see :func:`read_fleet`).
+
+    Parameters
+    ----------
+    path
+        The fleet file.
 
     Raises
     ------

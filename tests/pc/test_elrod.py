@@ -1,5 +1,5 @@
 import pytest
-from builders import TYPICAL_HEAD_ON, head_on
+from builders import TYPICAL_HEAD_ON, approx, head_on
 from reference_pc import isotropic_pc, principal_axes_pc
 
 from keepout.pc.elrod import MAX_ORDER, START_ORDER, elrod
@@ -14,8 +14,8 @@ def test_adaptive_order_resolves_a_thin_covariance() -> None:
     fixed = elrod(conjunction.plane, 15.0, order=CARA_ORDER)
     # Miss along the wide (x) axis.
     reference = principal_axes_pc(5.0, 0.0, 100.0, 0.3, 15.0)
-    assert adaptive.value == pytest.approx(reference, rel=1e-8)
-    assert fixed.value != pytest.approx(reference, rel=1e-8)
+    assert adaptive.value == approx(reference, rel=1e-8)
+    assert fixed.value != approx(reference, rel=1e-8)
     assert adaptive.details["order"] > START_ORDER
     assert fixed.details["order"] == CARA_ORDER
 
@@ -44,7 +44,7 @@ def test_starting_order_follows_the_covariance() -> None:
     result = elrod(conjunction.plane, 20.0)
     # 2 pi R / sigma = 1257 nodes, rounded up to the nested order 2^11 - 1.
     assert result.details["order"] >= 2047
-    assert result.value == pytest.approx(isotropic_pc(19.0, 0.1, 20.0), rel=1e-8)
+    assert result.value == approx(isotropic_pc(19.0, 0.1, 20.0), rel=1e-8)
 
 
 def test_non_convergence_at_the_order_cap_is_reported() -> None:
@@ -54,7 +54,7 @@ def test_non_convergence_at_the_order_cap_is_reported() -> None:
     result = elrod(conjunction.plane, 1000.0)
     assert result.details["order"] == MAX_ORDER
     assert any("did not converge" in d for d in result.diagnostics)
-    assert result.value == pytest.approx(isotropic_pc(999.0, 0.1, 1000.0), rel=1e-8)
+    assert result.value == approx(isotropic_pc(999.0, 0.1, 1000.0), rel=1e-8)
 
 
 @pytest.mark.parametrize("order", [0, -64])

@@ -195,14 +195,39 @@ def test_one_segment_is_rejected() -> None:
         xml.loads(ElementTree.tostring(root, encoding="unicode"))
 
 
-def test_bad_unit_reports_the_element_path() -> None:
-    text = mutate(
-        b1_xml(), '<X units="km">2570.097065</X>', '<X units="m">2570.097065</X>'
-    )
-    with pytest.raises(CdmParseError, match=r"does not match expected \[km\]") as info:
-        xml.loads(text)
-    assert info.value.path == "cdm/body/segment[1]/data/stateVector/X"
-    assert info.value.keyword == "X"
+@pytest.mark.parametrize(
+    ("old", "new", "message", "path"),
+    [
+        pytest.param(
+            '<X units="km">2570.097065</X>',
+            '<X units="m">2570.097065</X>',
+            r"does not match expected \[km\]",
+            "cdm/body/segment[1]/data/stateVector/X",
+            id="unit",
+        ),
+        pytest.param(
+            '<MISS_DISTANCE units="m">715</MISS_DISTANCE>',
+            '<MISS_DISTANCE units="m">seven</MISS_DISTANCE>',
+            "invalid number 'seven'",
+            "cdm/body/relativeMetadataData/MISS_DISTANCE",
+            id="number",
+        ),
+        pytest.param(
+            "<TCA>2010-03-13T22:37:52.618</TCA>",
+            "<TCA>2010-13-40T22:37:52.618</TCA>",
+            "invalid CCSDS epoch",
+            "cdm/body/relativeMetadataData/TCA",
+            id="epoch",
+        ),
+    ],
+)
+def test_a_bad_value_is_refused_with_its_element_path(
+    old: str, new: str, message: str, path: str
+) -> None:
+    with pytest.raises(CdmParseError, match=message) as info:
+        xml.loads(mutate(b1_xml(), old, new))
+    assert info.value.path == path
+    assert info.value.keyword == path.rsplit("/", 1)[1]
 
 
 def test_duplicate_keyword() -> None:

@@ -1,15 +1,14 @@
 import dataclasses
-import io
 import json
 import math
-import urllib.request
+import urllib.error
 from collections.abc import Callable
 from pathlib import Path
 
 import astropy.units as u
 import pytest
 from celestrak_builders import SAMPLE
-from web_builders import START, Clock, FakeDownloader, FakeResponse, digest
+from web_builders import START, Clock, FakeDownloader, FakeUrlopen, digest
 
 from keepout.errors import HttpStatusError, SourceFormatError, SourceUnavailable
 from keepout.omm import Omm
@@ -39,6 +38,18 @@ SOCRATES_CSV = (
 @pytest.fixture
 def clock() -> Clock:
     return Clock()
+
+
+@pytest.fixture
+def primed(tmp_path: Path, clock: Clock) -> None:
+    """A copy of ``active`` in the cache at ``tmp_path``, downloaded at
+    :data:`~web_builders.START`."""
+    fetch_group(
+        "active",
+        cache=tmp_path,
+        download=FakeDownloader({ACTIVE: ACTIVE_CSV}),
+        now=clock,
+    )
 
 
 def later(omm: Omm, days: float) -> Omm:
@@ -103,15 +114,10 @@ def test_a_group_is_downloaded_read_and_cached(tmp_path: Path, clock: Clock) -> 
     }
 
 
+@pytest.mark.usefixtures("primed")
 def test_a_copy_younger_than_the_ttl_is_used_without_asking(
     tmp_path: Path, clock: Clock
 ) -> None:
-    fetch_group(
-        "active",
-        cache=tmp_path,
-        download=FakeDownloader({ACTIVE: ACTIVE_CSV}),
-        now=clock,
-    )
     clock.now = START + TTL - 1.0
     server = FakeDownloader({})
     group = fetch_group("ACTIVE", cache=tmp_path, download=server, now=clock)
@@ -120,13 +126,8 @@ def test_a_copy_younger_than_the_ttl_is_used_without_asking(
     assert group.retrieval.checked.unix == START
 
 
+@pytest.mark.usefixtures("primed")
 def test_an_expired_copy_is_downloaded_again(tmp_path: Path, clock: Clock) -> None:
-    fetch_group(
-        "active",
-        cache=tmp_path,
-        download=FakeDownloader({ACTIVE: ACTIVE_CSV}),
-        now=clock,
-    )
     clock.now = START + TTL
     newer = dumps_csv(SAMPLE[4:]).encode()
     server = FakeDownloader({ACTIVE: newer})
@@ -137,13 +138,8 @@ def test_an_expired_copy_is_downloaded_again(tmp_path: Path, clock: Clock) -> No
     assert (tmp_path / "celestrak" / "gp" / "active.csv").read_bytes() == newer
 
 
+@pytest.mark.usefixtures("primed")
 def test_a_longer_max_age_keeps_a_copy_longer(tmp_path: Path, clock: Clock) -> None:
-    fetch_group(
-        "active",
-        cache=tmp_path,
-        download=FakeDownloader({ACTIVE: ACTIVE_CSV}),
-        now=clock,
-    )
     clock.now = START + 10 * TTL
     server = FakeDownloader({})
     fetch_group("active", cache=tmp_path, max_age=math.inf, download=server, now=clock)
@@ -162,30 +158,20 @@ def test_a_max_age_below_the_ttl_is_refused(max_age: float, tmp_path: Path) -> N
     assert server.urls == []
 
 
+@pytest.mark.usefixtures("primed")
 def test_a_copy_checked_in_the_future_is_not_trusted(
     tmp_path: Path, clock: Clock
 ) -> None:
-    fetch_group(
-        "active",
-        cache=tmp_path,
-        download=FakeDownloader({ACTIVE: ACTIVE_CSV}),
-        now=clock,
-    )
     clock.now = START - 1.0
     server = FakeDownloader({ACTIVE: ACTIVE_CSV})
     fetch_group("active", cache=tmp_path, download=server, now=clock)
     assert server.urls == [ACTIVE]
 
 
+@pytest.mark.usefixtures("primed")
 def test_403_means_unchanged_and_returns_the_cached_copy(
     tmp_path: Path, clock: Clock
 ) -> None:
-    fetch_group(
-        "active",
-        cache=tmp_path,
-        download=FakeDownloader({ACTIVE: ACTIVE_CSV}),
-        now=clock,
-    )
     clock.now = START + 3 * TTL
     server = FakeDownloader({ACTIVE: 403})
     group = fetch_group("active", cache=tmp_path, download=server, now=clock)
@@ -210,30 +196,32 @@ def test_403_without_a_cached_copy_explains_itself(
 
 
 @pytest.mark.parametrize("status", [204, 301, 404, 429, 500, 503])
+@pytest.mark.usefixtures("primed")
 def test_any_other_status_raises_once_and_keeps_the_cache(
-    status: int, tmp_path: Path, clock: Clock
+    status: int, tmp_path: Path, clock: Clock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    fetch_group(
-        "active",
-        cache=tmp_path,
-        download=FakeDownloader({ACTIVE: ACTIVE_CSV}),
-        now=clock,
-    )
     meta = meta_path(tmp_path, "active").read_bytes()
     clock.now = START + TTL
-    server = FakeDownloader({ACTIVE: status})
+    # The default download, which tries no status again, 429 and 5xx too.
+    web = FakeUrlopen(monkeypatch, status)
     with pytest.raises(HttpStatusError) as caught:
-        fetch_group("active", cache=tmp_path, download=server, now=clock)
+        fetch_group("active", cache=tmp_path, now=clock)
     assert caught.value.status == status
-    assert server.urls == [ACTIVE]
+    assert web.urls == [ACTIVE]
+    assert web.waits == []
     assert meta_path(tmp_path, "active").read_bytes() == meta
 
 
-def test_a_network_failure_raises_once(tmp_path: Path, clock: Clock) -> None:
-    server = FakeDownloader({ACTIVE: SourceUnavailable("offline")})
+def test_a_network_failure_raises_once(
+    tmp_path: Path, clock: Clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    web = FakeUrlopen(monkeypatch, urllib.error.URLError("offline"))
     with pytest.raises(SourceUnavailable, match="offline"):
-        fetch_group("active", cache=tmp_path, download=server, now=clock)
-    assert server.urls == [ACTIVE]
+        fetch_group("active", cache=tmp_path, now=clock)
+    with pytest.raises(SourceUnavailable, match="offline"):
+        fetch_socrates(cache=tmp_path, now=clock)
+    assert web.urls == [ACTIVE, SOCRATES_URL]
+    assert web.waits == []
 
 
 @pytest.mark.parametrize(
@@ -294,15 +282,10 @@ CORRUPTIONS: dict[str, Callable[[Path], None]] = {
 
 
 @pytest.mark.parametrize("corrupt", CORRUPTIONS.values(), ids=CORRUPTIONS.keys())
+@pytest.mark.usefixtures("primed")
 def test_a_corrupt_cached_copy_is_downloaded_again(
     corrupt: Callable[[Path], None], tmp_path: Path, clock: Clock
 ) -> None:
-    fetch_group(
-        "active",
-        cache=tmp_path,
-        download=FakeDownloader({ACTIVE: ACTIVE_CSV}),
-        now=clock,
-    )
     corrupt(tmp_path)
     server = FakeDownloader({ACTIVE: ACTIVE_CSV})
     group = fetch_group("active", cache=tmp_path, download=server, now=clock)
@@ -316,15 +299,10 @@ def test_a_corrupt_cached_copy_is_downloaded_again(
 
 
 @pytest.mark.parametrize("corrupt", CORRUPTIONS.values(), ids=CORRUPTIONS.keys())
+@pytest.mark.usefixtures("primed")
 def test_403_with_a_corrupt_cached_copy_raises(
     corrupt: Callable[[Path], None], tmp_path: Path, clock: Clock
 ) -> None:
-    fetch_group(
-        "active",
-        cache=tmp_path,
-        download=FakeDownloader({ACTIVE: ACTIVE_CSV}),
-        now=clock,
-    )
     corrupt(tmp_path)
     with pytest.raises(SourceUnavailable, match="no usable copy"):
         fetch_group(
@@ -332,15 +310,10 @@ def test_403_with_a_corrupt_cached_copy_raises(
         )
 
 
+@pytest.mark.usefixtures("primed")
 def test_a_cached_copy_keepout_can_no_longer_read_is_not_used(
     tmp_path: Path, clock: Clock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    fetch_group(
-        "active",
-        cache=tmp_path,
-        download=FakeDownloader({ACTIVE: ACTIVE_CSV}),
-        now=clock,
-    )
     path = tmp_path / "celestrak" / "gp" / "active.csv"
     garbage = b"garbage"
     path.write_bytes(garbage)
@@ -472,13 +445,7 @@ def test_the_default_cache_is_keepouts(
 def test_requests_name_keepout_in_the_user_agent(
     tmp_path: Path, clock: Clock, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    requests: list[urllib.request.Request] = []
-
-    def fake_urlopen(request: urllib.request.Request, timeout: float) -> io.BytesIO:
-        requests.append(request)
-        return FakeResponse(ACTIVE_CSV)
-
-    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    web = FakeUrlopen(monkeypatch, ACTIVE_CSV)
     assert fetch_group("active", cache=tmp_path, now=clock).omms == SAMPLE[:4]
-    assert [request.full_url for request in requests] == [ACTIVE]
-    assert requests[0].get_header("User-agent") == _http.USER_AGENT
+    assert web.urls == [ACTIVE]
+    assert web.requests[0].get_header("User-agent") == _http.USER_AGENT

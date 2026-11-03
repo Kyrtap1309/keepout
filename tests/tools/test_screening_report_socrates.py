@@ -9,7 +9,7 @@ import screening_snapshot as snapshot
 
 from keepout.screening import screen
 
-pytestmark = pytest.mark.validation
+pytestmark = pytest.mark.slow
 
 
 @pytest.fixture(scope="module")

@@ -3,7 +3,7 @@ import dataclasses
 import astropy.units as u
 import numpy as np
 import pytest
-from builders import EPOCH, LEO_R, LEO_V, TYPICAL_HEAD_ON, head_on, object_state
+from builders import EPOCH, LEO_R, LEO_V, TYPICAL_HEAD_ON, approx, head_on, object_state
 
 from keepout.conjunction import Conjunction, combined_hard_body_radius
 from keepout.covariance import make_covariance
@@ -17,8 +17,8 @@ def with_radius(obj: ObjectState, radius: float | None) -> ObjectState:
 
 def test_conjunction_exposes_encounter_geometry() -> None:
     conjunction = head_on(miss=30.0, sigma_x=10.0, sigma_z=20.0, radius=5.0)
-    assert conjunction.miss_distance == pytest.approx(30.0, rel=1e-12)
-    assert conjunction.relative_speed == pytest.approx(2 * 7546.0, rel=1e-12)
+    assert conjunction.miss_distance == approx(30.0, rel=1e-12)
+    assert conjunction.relative_speed == approx(2 * 7546.0, rel=1e-12)
     assert conjunction.tca == EPOCH
     np.testing.assert_allclose(
         conjunction.plane.covariance, np.diag([100.0, 400.0]), atol=1e-9

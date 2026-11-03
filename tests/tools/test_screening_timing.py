@@ -2,6 +2,7 @@ import json
 import resource
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 import screening_snapshot as snapshot
@@ -70,12 +71,18 @@ def test_cpu_time_counts_finished_children() -> None:
     assert timing.cpu_time() - before >= children - 1e-9
 
 
-def test_timed_returns_the_screening() -> None:
+def test_timed_returns_the_screening_and_the_times_it_took(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clocks = {"wall": iter([100.0, 101.5]), "cpu": iter([10.0, 12.5])}
+    monkeypatch.setattr(
+        timing, "time", SimpleNamespace(perf_counter=lambda: next(clocks["wall"]))
+    )
+    monkeypatch.setattr(timing, "cpu_time", lambda: next(clocks["cpu"]))
     catalog = load_fixture()
     result, measured = timing.timed(
         catalog[:2], catalog, FIXTURE_START, 3600.0, DEFAULT_VOLUME, workers=1
     )
     assert result.start == FIXTURE_START
     assert result.duration == 3600.0
-    assert measured.wall > 0.0
-    assert measured.cpu >= 0.0
+    assert measured == timing.Timing(wall=1.5, cpu=2.5)

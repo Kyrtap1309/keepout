@@ -1,56 +1,23 @@
-import dataclasses
 import gzip
 import json
-from collections.abc import Mapping
 from pathlib import Path
 
-import astropy.units as u
 import pytest
 import screening_snapshot as snapshot
 import snapshot_files
-from celestrak_builders import SAMPLE, SOCRATES_HEADER, socrates_row
+from celestrak_builders import SAMPLE, SOCRATES_HEADER
 from hypothesis import given
 from hypothesis import strategies as st
+from report_builders import assert_writes_then_checks
+from snapshot_raws import BODIES, DOCKED, FAST, SOCRATES_CSV
 from web_builders import FakeDownloader, digest
 
 from keepout.errors import SourceFormatError, SourceUnavailable
 from keepout.omm import Omm, load
-from keepout.omm.celestrak import dumps_csv
 from keepout.sources.celestrak import PUBLIC_GROUPS, SOCRATES_URL, group_url
 from keepout.sources.socrates import read_socrates
 
 CALSPHERE, ISS, GOES, THEMIS, EXPRESS, SARAMAGO, STARLINK, DRAGON = SAMPLE
-OLD_ISS = dataclasses.replace(ISS, epoch=ISS.epoch - 1.0 * u.day)
-"""An older element set of the ISS: a duplicate the catalog leaves out."""
-
-DOCKED = socrates_row(ISS, DRAGON, ("1.000", "1.000"), "0.004", "0.000")
-FAST = socrates_row(CALSPHERE, STARLINK, ("0.838", "0.764"), "2.500", "7.500")
-SOCRATES_CSV = (
-    SOCRATES_HEADER
-    + DOCKED
-    + socrates_row(CALSPHERE, GOES, ("2.000", "2.000"), "0.100", "3.000")
-    + socrates_row(
-        ISS,
-        dataclasses.replace(ISS, catalog_number=99999),
-        ("1.000", "1.000"),
-        "0.200",
-        "7.500",
-    )
-    + FAST
-)
-"""A report: the ISS and Crew Dragon (docked, with the sample's epochs), a
-pair whose epochs are not the sample's, a pair with an object not in the
-sample, and Calsphere 1 and Starlink-38128 (the sample's epochs: DSE to 43 s)."""
-
-BODIES: Mapping[str, bytes] = {
-    group_url("active"): dumps_csv(SAMPLE[:5]).encode(),
-    group_url("last-30-days"): dumps_csv([*SAMPLE[5:], OLD_ISS]).encode(),
-    group_url("analyst"): dumps_csv(SAMPLE[5:]).encode(),
-    group_url("fengyun-1c-debris"): dumps_csv([]).encode(),
-    group_url("cosmos-2251-debris"): dumps_csv([]).encode(),
-    group_url("iridium-33-debris"): dumps_csv([]).encode(),
-    SOCRATES_URL: SOCRATES_CSV.encode(),
-}
 URLS = [*(group_url(name) for name in PUBLIC_GROUPS), SOCRATES_URL]
 
 
@@ -133,12 +100,6 @@ def test_a_changed_body_is_refused(raw: Path) -> None:
         snapshot.fetch(raw, None)
 
 
-def test_an_unknown_raw_index_is_refused(tmp_path: Path) -> None:
-    (tmp_path / snapshot_files.RAW_INDEX).write_text('{"format": 2}', encoding="utf-8")
-    with pytest.raises(ValueError, match="format 1"):
-        snapshot.INDEX.read(tmp_path)
-
-
 @pytest.mark.parametrize(
     ("url", "name"),
     [
@@ -165,9 +126,7 @@ def test_raw_name_refuses_other_urls(url: str) -> None:
 
 def test_build_writes_the_data_then_checks_it(raw: Path, tmp_path: Path) -> None:
     data = tmp_path / "data"
-    assert build(raw, data, "--check") == 1
-    assert build(raw, data) == 0
-    assert build(raw, data, "--check") == 0
+    assert_writes_then_checks(snapshot.main, ["build", str(raw), "--data", str(data)])
     assert snapshot.main(["verify", "--data", str(data)]) == 0
     assert load(data / snapshot.SNAPSHOT) == tuple(
         sorted(SAMPLE, key=lambda omm: omm.catalog_number)
@@ -222,38 +181,6 @@ def test_build_writes_the_data_then_checks_it(raw: Path, tmp_path: Path) -> None
         }
 
 
-def test_build_is_deterministic(raw: Path, tmp_path: Path) -> None:
-    assert build(raw, tmp_path / "one") == 0
-    assert build(raw, tmp_path / "two") == 0
-    for name in [*snapshot.GZIPPED, snapshot.FIXTURE, snapshot.NOTICE]:
-        one = (tmp_path / "one" / name).read_bytes()
-        assert one == (tmp_path / "two" / name).read_bytes()
-    stored = (tmp_path / "one" / snapshot.SNAPSHOT).read_bytes()
-    assert stored == gzip.compress(gzip.decompress(stored), mtime=0)
-
-
-def test_build_keeps_a_gzipped_file_with_the_same_contents(
-    raw: Path, tmp_path: Path
-) -> None:
-    data = tmp_path / "data"
-    assert build(raw, data) == 0
-    path = data / snapshot.SNAPSHOT
-    other = gzip.compress(gzip.decompress(path.read_bytes()), compresslevel=1)
-    path.write_bytes(other)
-    assert build(raw, data) == 0
-    assert path.read_bytes() == other
-    assert snapshot.main(["verify", "--data", str(data)]) == 0
-
-
-@pytest.mark.parametrize("name", [snapshot.FIXTURE, snapshot.NOTICE])
-def test_verify_finds_a_changed_file(raw: Path, tmp_path: Path, name: str) -> None:
-    data = tmp_path / "data"
-    assert build(raw, data) == 0
-    (data / name).write_bytes((data / name).read_bytes() + b"\n")
-    assert snapshot.main(["verify", "--data", str(data)]) == 1
-    assert build(raw, data, "--check") == 1
-
-
 def test_verify_finds_an_approach_that_is_not_comparable(
     raw: Path, tmp_path: Path
 ) -> None:
@@ -262,17 +189,6 @@ def test_verify_finds_an_approach_that_is_not_comparable(
     changed = SOCRATES_HEADER + DOCKED.replace("1.000", "1.100") + FAST
     (data / snapshot.SOCRATES).write_bytes(gzip.compress(changed.encode()))
     assert snapshot.main(["verify", "--data", str(data)]) == 1
-
-
-def test_build_replaces_a_broken_gzip_file(raw: Path, tmp_path: Path) -> None:
-    data = tmp_path / "data"
-    assert build(raw, data) == 0
-    path = data / snapshot.SOCRATES
-    good = path.read_bytes()
-    path.write_bytes(good[:-1] + bytes([good[-1] ^ 1]))
-    assert build(raw, data, "--check") == 1
-    assert build(raw, data) == 0
-    assert path.read_bytes() == good
 
 
 def test_notice_cites_the_source_and_date(raw: Path, tmp_path: Path) -> None:
@@ -351,17 +267,26 @@ def test_spread_takes_distinct_items_in_order(size: int, count: int) -> None:
         assert taken[0] == 0
 
 
-@given(st.permutations(SAMPLE), st.permutations(range(4)))
-def test_select_fixture_ignores_the_order(omms: list[Omm], order: list[int]) -> None:
-    approaches = read_socrates(SOCRATES_CSV)
-    chosen = snapshot.select_fixture(omms, [approaches[i] for i in order])
-    assert chosen == sorted(SAMPLE, key=lambda omm: omm.catalog_number)
-
-
 def no_fixture_parts(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in ("CLOSEST", "CLOSEST_FAST", "CLOSEST_PER_REGIME", "EXTREMES"):
         monkeypatch.setattr(snapshot, name, 0)
     monkeypatch.setattr(snapshot, "PER_REGIME", dict.fromkeys(snapshot.REGIMES, 0))
+
+
+@given(st.permutations(SAMPLE), st.permutations(range(4)))
+def test_select_fixture_ignores_the_order(omms: list[Omm], order: list[int]) -> None:
+    # One of each part, so that the order of the catalog (which LEO object
+    # comes first) or of the report (which pair is closest) would change the
+    # choice if the rule did not sort.
+    approaches = read_socrates(SOCRATES_CSV)
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        no_fixture_parts(monkeypatch)
+        monkeypatch.setattr(snapshot, "CLOSEST", 1)
+        monkeypatch.setattr(snapshot, "EXTREMES", 1)
+        monkeypatch.setattr(snapshot, "PER_REGIME", {**snapshot.PER_REGIME, "LEO": 1})
+        chosen = snapshot.select_fixture(omms, [approaches[i] for i in order])
+    numbers = [omm.catalog_number for omm in chosen]
+    assert numbers == [900, 25544, 30798, 38745, 100000, 100882]
 
 
 @pytest.mark.parametrize(

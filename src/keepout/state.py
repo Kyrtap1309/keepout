@@ -86,7 +86,7 @@ class StateVector:
 
 
 def require_frame(state: StateVector, frame: RefFrame, what: str) -> None:
-    """A check that ``state`` is in ``frame``.
+    """Raise :class:`GeometryError` unless ``state`` is in ``frame``.
 
     Parameters
     ----------

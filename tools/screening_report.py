@@ -118,15 +118,15 @@ KNOWN_DIFFERENCES: Final[Mapping[int, str]] = {
     47834: (
         "STARLINK-2424 (47834) has one comparable approach, with FENGYUN 1C DEB "
         "(38513), and it differs; the ten other comparable approaches of 38513 "
-        "agree. SOCRATES's element set of 47834 has the snapshot's epoch to the "
-        "43 s that DSE resolves, but evidently other values."
+        "agree. SOCRATES used an element set of 47834 with the same epoch (to "
+        "DSE's 43 s resolution) but evidently different elements."
     ),
     100379: (
         "All four comparable approaches of STARLINK-38284 (100379) differ, by a "
         "TCA growing with the time since its epoch (0.21 s after 6.3 days, 0.31 s "
         "after 7.8 days). A B* 3.4 % lower than the snapshot's reproduces all four "
-        "to 2.3 ms and 2.8 m: SOCRATES used an element set of the same epoch, to "
-        "the 43 s that DSE resolves, with other values."
+        "to 2.3 ms and 2.8 m: SOCRATES used an element set with the same epoch "
+        "(to DSE's 43 s resolution) but different elements."
     ),
 }
 """Objects whose element set in the snapshot is evidently not the one
@@ -858,10 +858,11 @@ def _introduction(summary: Summary) -> list[str]:
             f"(TCA {minute_text(socrates['first_tca'])} to "
             f"{minute_text(socrates['last_tca'])} UTC), "
             f"{socrates['comparable']} have both objects in the public catalog with "
-            "the epochs SOCRATES used; these are compared. SOCRATES's "
-            f"{settings['primaries']} first objects are the primaries, its "
-            f"{settings['objects']} objects the catalog (an approach depends on its "
-            "own pair only, so the rest of the catalog changes nothing). Each "
+            "the epochs SOCRATES used; these are compared. The "
+            f"{settings['primaries']} objects that SOCRATES lists first in a pair "
+            "are screened as primaries against all "
+            f"{settings['objects']} objects (an approach depends on its own pair "
+            "only, so the rest of the catalog changes nothing). Each "
             "SOCRATES approach is matched with keepout's approach of the same pair "
             f"whose TCA is nearest, within {settings['match_window']:g} s. "
             f"*Fast* approaches are those of {settings['fast_from'] / KM:g} km/s or "

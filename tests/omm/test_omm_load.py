@@ -1,4 +1,7 @@
 import gzip
+import importlib
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -11,6 +14,7 @@ from omm_builders import (
     SAMPLE_JSON,
 )
 
+import keepout.omm
 from keepout.errors import OmmParseError
 from keepout.omm import celestrak, kvn, load, loads, tle, xml
 
@@ -82,3 +86,30 @@ def test_broken_files_are_refused(tmp_path: Path, data: bytes, message: str) -> 
 def test_unknown_data_is_refused(text: str) -> None:
     with pytest.raises(OmmParseError, match="not OMM data"):
         loads(text)
+
+
+FORMATS = ["celestrak", "kvn", "tle", "xml"]
+
+
+@pytest.mark.parametrize("name", FORMATS)
+def test_a_format_module_is_an_attribute_of_the_package(name: str) -> None:
+    assert getattr(keepout.omm, name) is importlib.import_module(f"keepout.omm.{name}")
+    assert name in dir(keepout.omm)
+
+
+def test_an_unknown_name_is_not_an_attribute_of_the_package() -> None:
+    with pytest.raises(AttributeError, match=r"'keepout\.omm' has no attribute 'csv'"):
+        _ = keepout.omm.csv  # type: ignore[attr-defined]
+
+
+def test_a_format_module_is_imported_on_first_use() -> None:
+    code = (
+        "import sys, keepout.omm\n"
+        "def loaded(): return sorted(m for m in sys.modules "
+        f"if m in {[f'keepout.omm.{name}' for name in FORMATS]})\n"
+        "print(loaded()); keepout.omm.tle; print(loaded())"
+    )
+    loaded = subprocess.run(  # noqa: S603 (this interpreter, fixed code)
+        [sys.executable, "-c", code], capture_output=True, text=True, check=True
+    )
+    assert loaded.stdout == "[]\n['keepout.omm.tle']\n"

@@ -65,7 +65,7 @@ class Sink(Protocol):
     """Where streamed bytes go: anything with a binary ``write``."""
 
     def write(self, data: bytes, /) -> object:
-        """The next chunk, taken."""
+        """Take the next chunk."""
 
 
 def http_request(
@@ -114,7 +114,7 @@ def network_errors(message: str) -> Generator[None]:
 
 
 def http_stream(url: str, sink: Sink) -> None:
-    """The download of ``url`` into ``sink``, in chunks of :data:`CHUNK_SIZE` bytes.
+    """Download ``url`` into ``sink``, in chunks of :data:`CHUNK_SIZE` bytes.
 
     For files too large to hold in memory at once. The request names keepout
     in the ``User-Agent`` (:data:`USER_AGENT`). Redirects are followed; any

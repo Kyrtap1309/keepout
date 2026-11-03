@@ -3,6 +3,7 @@ import math
 
 import numpy as np
 import pytest
+from builders import approx
 from pc_builders import ANISOTROPIC, PlaneCase
 from scipy import optimize, special
 
@@ -48,7 +49,7 @@ def test_frisbee_is_the_maximum_over_added_covariances(case: PlaneCase) -> None:
         )
     # ... and is reached, by the variance it reports along the miss.
     along = added_along_miss(plane, result.details["added_variance_m2"])
-    assert result.value == pytest.approx(pc_with(plane, along, case.radius), rel=1e-12)
+    assert result.value == approx(pc_with(plane, along, case.radius), rel=1e-12)
 
 
 def test_frisbee_adds_the_small_body_optimum_along_the_miss() -> None:
@@ -60,9 +61,9 @@ def test_frisbee_adds_the_small_body_optimum_along_the_miss() -> None:
     assert result.details["mahalanobis"] == pytest.approx(20.0)
     assert result.details["added_variance_m2"] == pytest.approx(analytic)
     pc_analytic = pc_with(plane, np.diag([20.0**2 + analytic, 10.0**2]), 5.0)
-    assert result.details["pc_analytic"] == pytest.approx(pc_analytic, rel=1e-12)
+    assert result.details["pc_analytic"] == approx(pc_analytic, rel=1e-12)
     along = np.diag([20.0**2 + result.details["added_variance_m2"], 10.0**2])
-    assert result.value == pytest.approx(pc_with(plane, along, 5.0), rel=1e-12)
+    assert result.value == approx(pc_with(plane, along, 5.0), rel=1e-12)
     assert result.value >= result.details["pc_analytic"]
 
 
@@ -84,6 +85,14 @@ bounded search converges to 1e-9 decades and to within
 :data:`~keepout.pc.maxpc.SEARCH_GAIN_RTOL` (1e-8) of its maximum."""
 
 
+LARGE_HARD_BODY = [
+    PlaneCase(15.0, 0.0, 1.0, 1.0, 0.0, 10.0),
+    PlaneCase(12.0, 0.0, 0.5, 0.5, 0.0, 10.0),
+    PlaneCase(10.5, 0.0, 0.1, 0.1, 0.0, 10.0),
+]
+"""Hard bodies of 10 m against sigmas of 1 m and less, just outside the miss."""
+
+
 def along_miss_grid_max(plane: EncounterPlane, radius: float) -> float:
     """Independent dense sweep of the added variance along the miss."""
     return max(
@@ -92,30 +101,16 @@ def along_miss_grid_max(plane: EncounterPlane, radius: float) -> float:
     )
 
 
-@pytest.mark.parametrize(
-    "case",
-    [
-        PlaneCase(15.0, 0.0, 1.0, 1.0, 0.0, 10.0),
-        PlaneCase(12.0, 0.0, 0.5, 0.5, 0.0, 10.0),
-        PlaneCase(10.5, 0.0, 0.1, 0.1, 0.0, 10.0),
-    ],
-)
+@pytest.mark.parametrize("case", LARGE_HARD_BODY)
 def test_frisbee_is_an_upper_bound_for_a_large_hard_body(case: PlaneCase) -> None:
     plane = with_unknown(case, "secondary")
     result = frisbee(plane, case.radius)
     grid_max = along_miss_grid_max(plane, case.radius)
     assert grid_max * (1.0 - 1e-9) <= result.value
-    assert result.value == pytest.approx(grid_max, rel=ALONG_MISS_RTOL)
+    assert result.value == approx(grid_max, rel=ALONG_MISS_RTOL)
 
 
-@pytest.mark.parametrize(
-    "case",
-    [
-        PlaneCase(15.0, 0.0, 1.0, 1.0, 0.0, 10.0),
-        PlaneCase(12.0, 0.0, 0.5, 0.5, 0.0, 10.0),
-        PlaneCase(10.5, 0.0, 0.1, 0.1, 0.0, 10.0),
-    ],
-)
+@pytest.mark.parametrize("case", LARGE_HARD_BODY)
 def test_frisbee_for_a_large_hard_body_beats_the_analytic_variance(
     case: PlaneCase,
 ) -> None:
@@ -158,7 +153,7 @@ def test_dilution_is_the_maximum_over_scale_factors(case: PlaneCase) -> None:
         for k in np.linspace(-6.0, 6.0, 241)
     )
     assert grid_max * (1.0 - 1e-9) <= result.value
-    assert result.value == pytest.approx(grid_max, rel=SCALE_GRID_RTOL)
+    assert result.value == approx(grid_max, rel=SCALE_GRID_RTOL)
 
 
 @pytest.mark.parametrize("case", ANISOTROPIC[:4])
@@ -220,8 +215,8 @@ def test_alfano_maximum_matches_a_numerical_search(d: float, radius: float) -> N
         method="bounded",
         options={"xatol": 1e-12},
     )
-    assert result.value == pytest.approx(-search.fun, rel=1e-9)
-    assert result.details["sigma_m"] == pytest.approx(10.0**search.x, rel=1e-4)
+    assert result.value == approx(-search.fun, rel=1e-9)
+    assert result.details["sigma_m"] == approx(10.0**search.x, rel=1e-4)
 
 
 def test_alfano_bounds_every_covariance() -> None:

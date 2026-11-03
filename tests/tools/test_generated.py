@@ -1,6 +1,6 @@
 import argparse
+import importlib
 import json
-import re
 from pathlib import Path
 from typing import Literal, TypedDict
 
@@ -80,11 +80,39 @@ def test_a_count_below_one_is_refused(text: str) -> None:
         positive(text)
 
 
-def test_every_workers_option_takes_only_positive_counts() -> None:
-    for tool in sorted((REPO / "tools").glob("*.py")):
-        text = tool.read_text(encoding="utf-8")
-        if '"--workers"' in text and tool.name != "screening_timing.py":
-            assert re.search(r'"--workers",\s*type=positive', text), tool.name
+WORKERS_ARGUMENTS = {
+    "maneuver_report": ["--workers", "0"],
+    "screening_benchmark": ["--workers", "0"],
+    "screening_report": ["--workers", "0"],
+    "spacetrack_snapshot": ["compare", "raw", "--workers", "0"],
+    "synthetic_operator_report": ["--workers", "0"],
+    "validation_report": ["--workers", "0"],
+}
+"""Each tool with a ``--workers`` option, and a command line giving it 0.
+
+``screening_timing.py`` is left out: ``screening_benchmark.py compare`` runs it
+with an older tree's keepout, so it imports nothing else from ``tools/``
+(``positive`` included), and that tool always passes ``--workers 1``."""
+
+
+def test_every_tool_with_a_workers_option_is_listed() -> None:
+    with_workers = {
+        tool.stem
+        for tool in (REPO / "tools").glob("*.py")
+        if '"--workers"' in tool.read_text(encoding="utf-8")
+    }
+    assert with_workers - {"screening_timing"} == set(WORKERS_ARGUMENTS)
+
+
+@pytest.mark.parametrize("name", sorted(WORKERS_ARGUMENTS))
+def test_every_workers_option_takes_only_positive_counts(
+    name: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    tool = importlib.import_module(name)
+    with pytest.raises(SystemExit) as raised:
+        tool.main(WORKERS_ARGUMENTS[name])
+    assert raised.value.code == 2
+    assert "argument --workers: must be at least 1" in capsys.readouterr().err
 
 
 class Inner(TypedDict):

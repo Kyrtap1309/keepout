@@ -110,7 +110,7 @@ from keepout.units import DAY
 __all__ = ["DEFAULT_DURATION", "MAX_AGE", "MAX_LEAD", "screen"]
 
 DEFAULT_DURATION: Final = SCREENING_DURATION
-"""Length of the window unless told otherwise [s]: 7 days, as SOCRATES."""
+"""Length of the window unless told otherwise [s]: 7 days, as in SOCRATES."""
 
 MAX_AGE: Final = 30 * DAY
 """Longest time from an element epoch to the end of the window [s] unless

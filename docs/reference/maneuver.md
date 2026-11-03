@@ -1,7 +1,15 @@
 # Manoeuvres
 
+::: keepout.maneuver
+
+## How the planner and the re-screen work
+
 ::: keepout.maneuver.planner
+    options:
+      members: false
+      show_root_heading: false
 
 ::: keepout.maneuver.rescreen
-
-::: keepout.maneuver._differential
+    options:
+      members: false
+      show_root_heading: false

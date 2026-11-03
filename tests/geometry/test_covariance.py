@@ -1,7 +1,7 @@
 import astropy.units as u
 import numpy as np
 import pytest
-from builders import DIAGONAL_COVARIANCE, EPOCH
+from builders import DIAGONAL_COVARIANCE, EPOCH, approx
 from hypothesis import given
 from hypothesis import strategies as st
 from hypothesis.extra.numpy import arrays
@@ -141,8 +141,8 @@ def test_make_covariance_symmetrises_with_diagnostic() -> None:
     assert covariance.repairs == (
         "symmetrised covariance (max relative asymmetry 0.005)",
     )
-    assert covariance.matrix[0, 1] == pytest.approx(0.5, rel=1e-12)
-    assert covariance.matrix[1, 0] == pytest.approx(0.5, rel=1e-12)
+    assert covariance.matrix[0, 1] == approx(0.5, rel=1e-12)
+    assert covariance.matrix[1, 0] == approx(0.5, rel=1e-12)
 
 
 def test_valid_matrix_is_not_touched_by_repair_policy() -> None:
@@ -217,6 +217,17 @@ def test_repair_always_yields_a_valid_covariance(
     fixed, _ = repair(scaled)
     assert problems(fixed) == ()
     Covariance(fixed, "RTN", EPOCH)
+    # Checked again without problems(): exactly symmetric, and PSD in
+    # correlation units (the variances are scaled out so mm/s and km blocks
+    # count alike; a variance below the smallest normal float, or 1e-200 of
+    # the largest entry, is negligible and keeps its row as is).
+    np.testing.assert_array_equal(fixed, fixed.T)
+    variances = np.abs(np.diag(fixed))
+    floor = max(np.finfo(np.float64).tiny, 1e-200 * float(np.max(np.abs(fixed))))
+    deviations = np.where(variances >= floor, np.sqrt(variances), 1.0)
+    normalised = fixed / np.outer(deviations, deviations)
+    # PSD_RTOL is 1e-10; eigvalsh on a unit-scale matrix rounds at ~1e-15.
+    assert np.linalg.eigvalsh(normalised)[0] >= -1e-9
 
 
 @given(
@@ -280,16 +291,17 @@ def test_position_only_covariance_has_a_zero_velocity_block() -> None:
     assert covariance.in_rtn(STATE).position_only
 
 
-@pytest.mark.parametrize(("row", "column"), [(3, 3), (5, 5), (4, 0), (0, 5)])
-def test_any_velocity_term_makes_a_covariance_more_than_position(
-    row: int, column: int
+# A velocity-position term alone cannot be PSD (it needs both variances), so
+# each case is one velocity variance and nothing else past the position block.
+@pytest.mark.parametrize("axis", [3, 4, 5])
+def test_any_velocity_variance_makes_a_covariance_more_than_position(
+    axis: int,
 ) -> None:
     matrix = np.zeros((6, 6))
     matrix[:3, :3] = np.eye(3)
-    matrix[3:, 3:] = 1e-12 * np.eye(3)
-    matrix[row, column] = matrix[column, row] = 1e-9 if row != column else 1e-6
+    matrix[axis, axis] = 1e-6
     assert not Covariance(matrix, "GCRF", EPOCH).position_only
-    assert not Covariance(VALID, "GCRF", EPOCH).position_only
+    assert Covariance.from_position(np.eye(3), "GCRF", EPOCH).position_only
 
 
 def test_position_only_covariance_must_be_3x3() -> None:

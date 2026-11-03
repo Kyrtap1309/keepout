@@ -8,7 +8,7 @@ import synthetic_operator_report as report
 from keepout.screening import DEFAULT_DURATION, DEFAULT_VOLUME
 from keepout.synthetic import load_fleet, run
 
-pytestmark = pytest.mark.validation
+pytestmark = pytest.mark.slow
 
 
 @pytest.fixture(scope="module")

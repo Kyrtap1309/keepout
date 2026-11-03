@@ -4,6 +4,7 @@ processes."""
 
 import dataclasses
 import functools
+import math
 from collections.abc import Callable, Sequence
 
 import astropy.units as u
@@ -50,7 +51,7 @@ from keepout.screening import (
     screen,
 )
 from keepout.screening.tca import DERIVATIVE_STEP, PERTURBATION
-from keepout.units import DAY, HOUR
+from keepout.units import DAY, HOUR, KM
 
 START = FIXTURE_START
 FIXTURE = load_fixture()
@@ -79,9 +80,9 @@ def without(*numbers: int) -> list[Omm]:
     return [omm for omm in FIXTURE if omm.catalog_number not in numbers]
 
 
-def summary(result: ScreeningResult) -> list[object]:
-    """Everything in a result, exact, for comparisons."""
-    approaches: list[object] = [
+def approaches_of(result: ScreeningResult) -> list[object]:
+    """The approaches of a result, exact, for comparisons."""
+    return [
         (
             a.primary_number,
             a.secondary_number,
@@ -94,9 +95,13 @@ def summary(result: ScreeningResult) -> list[object]:
         )
         for a in result.approaches
     ]
+
+
+def summary(result: ScreeningResult) -> list[object]:
+    """Everything in a result, exact, for comparisons."""
     skipped = [(s.elements, s.role, s.reason, s.detail) for s in result.skipped]
     return [
-        *approaches,
+        *approaches_of(result),
         skipped,
         dict(result.volumes),
         result.catalog_count,
@@ -199,7 +204,7 @@ def test_the_newest_of_several_element_sets_is_screened() -> None:
         f"epoch {older[0].epoch.isot}; the element set of epoch "
         f"{BY_NUMBER[56156].epoch.isot} is used"
     )
-    assert summary(result)[:-4] == summary(plain)[:-4]
+    assert approaches_of(result) == approaches_of(plain)
     assert list(result.volumes) == [58199, 68377, 56156]  # as first given
 
 
@@ -246,6 +251,31 @@ def test_element_sets_too_far_from_the_window_are_left_out() -> None:
     assert result.approaches
 
 
+@pytest.mark.parametrize(
+    ("limit", "reason"),
+    [("max_age", SkipReason.STALE), ("max_lead", SkipReason.FUTURE_EPOCH)],
+)
+def test_an_element_set_exactly_at_a_limit_is_screened(
+    limit: str, reason: SkipReason
+) -> None:
+    # Left out only when further than the limit: a day's window from the
+    # epoch ends a day after it, one from a day before starts a day ahead
+    # (whole days of a Time, so exactly 86400 s).
+    primary = BY_NUMBER[FORMATION[0]]
+    start = primary.epoch if limit == "max_age" else primary.epoch - 1 * u.day
+    assert (primary.epoch - start).to_value(u.s) in (0.0, DAY)
+    loose = {"max_age": 30 * DAY, "max_lead": 30 * DAY}
+    catalog = elements(FORMATION[1:])
+
+    def skipped(at: float) -> list[SkipReason]:
+        limits = loose | {limit: at}
+        result = screen([primary], catalog, start, DAY, **limits)  # type: ignore[arg-type]
+        return [s.reason for s in result.skipped if s.role == "primary"]
+
+    assert skipped(DAY) == []
+    assert skipped(math.nextafter(DAY, 0.0)) == [reason]
+
+
 def test_default_ages_keep_sgp4_within_the_searchs_assumption() -> None:
     # Acceleration beyond point mass and J2 from MAX_LEAD before each epoch
     # to MAX_AGE after it, every 12 hours, from positions 1 s apart, until
@@ -283,7 +313,7 @@ def test_objects_sgp4_fails_for_are_left_out_with_their_approaches() -> None:
     ]
     assert not set(FAILING) & set(result.volumes)
     rest = screen(elements(FORMATION), without(*FAILING), START, 2 * DAY)
-    assert summary(result)[:-4] == summary(rest)[:-4]
+    assert approaches_of(result) == approaches_of(rest)
     assert result.catalog_count == rest.catalog_count
 
 
@@ -328,7 +358,7 @@ def test_element_sets_sgp4_cannot_take_are_left_out() -> None:
         "catalog number 400000 is above 339999, the largest an SGP4 record holds"
     )
     plain = screen(elements(FORMATION), FIXTURE, START, DAY)
-    assert summary(result)[:-4] == summary(plain)[:-4]
+    assert approaches_of(result) == approaches_of(plain)
     assert result.catalog_count == plain.catalog_count
 
 
@@ -360,7 +390,7 @@ def test_a_primary_without_a_volume_is_left_out(error: Exception) -> None:
     others = screen(
         elements([68377, 58199]), FIXTURE, START, DAY, ScreeningVolume.nasa_gp_data()
     )
-    assert summary(result)[:-4] == summary(others)[:-4]
+    assert approaches_of(result) == approaches_of(others)
 
 
 @pytest.mark.parametrize(
@@ -380,9 +410,8 @@ def test_a_volume_rule_must_give_volumes() -> None:
         screen(elements(FORMATION), FIXTURE, START, DAY, lambda primary: 5e3)  # type: ignore[arg-type,return-value]
 
 
-@pytest.mark.validation
 def test_every_socrates_approach_of_the_fixture_is_found_in_gcrf() -> None:
-    # Offline, about 4 s. SOCRATES prints TCA to the millisecond, range and
+    # About 4 s. SOCRATES prints TCA to the millisecond, range and
     # relative speed to the metre (per second); a slow pair's TCA is
     # ill-conditioned.
     socrates = [
@@ -493,16 +522,21 @@ def test_a_burn_moves_the_primary_in_the_approaches(workers: int) -> None:
     burned = screen(
         primary, FIXTURE, START, DAY, workers=workers, adjust_primaries=hook
     )
-    whole = screen(primary, FIXTURE, START, DAY)
-    assert burned.approaches != whole.approaches
     assert burned.approaches
-    moved = ManeuveredPropagator(Sgp4Propagator(primary), START, delta_v, horizon)
+    plain = Sgp4Propagator(primary)
+    moved = ManeuveredPropagator(plain, START, delta_v, horizon)
+    shifts = []
     for approach in burned.approaches:
         offset = (approach.tca - START).to_value(u.s)
         state = moved.propagate(START, offset)
         r, v = teme_to_gcrf(approach.tca, state.r[0, 0], state.v[0, 0])
         assert approach.primary_state.r == pytest.approx(r, abs=1e-3)
         assert approach.primary_state.v == pytest.approx(v, abs=1e-6)
+        unburned = plain.propagate(START, offset)
+        r, _ = teme_to_gcrf(approach.tca, unburned.r[0, 0], unburned.v[0, 0])
+        shifts.append(np.linalg.norm(approach.primary_state.r - r))
+    # The burn's along-track drift, 3 dv t: 5 km by the last approach, 9 h in.
+    assert max(shifts) > 4 * KM
 
 
 def dense_minima(

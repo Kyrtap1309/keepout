@@ -6,7 +6,6 @@ drifting past Luch-5X), whose primary the fleet below makes manoeuvrable.
 """
 
 import copy
-import gzip
 import math
 import shutil
 from pathlib import Path
@@ -16,18 +15,15 @@ import astropy.units as u
 import maneuver_report as report
 import numpy as np
 import pytest
-import screening_snapshot as snapshot
-import snapshot_files
 from astropy.time import Time
 from cli_builders import write_fleet
-from generated import json_text, read_json
-from screening_data import load_fixture
+from generated import json_text, read_json, readme_with, relative
+from report_builders import fixture_data, readme_with_markers
 
 from keepout.cdm import Maneuverable, ObjectMetadata, kvn, make_cdm
 from keepout.conjunction import Conjunction
 from keepout.covariance import Covariance
 from keepout.objects import ObjectState
-from keepout.omm.celestrak import dumps_csv
 from keepout.orbits import EARTH_MU
 from keepout.propagation import EARTH_RADIUS
 from keepout.sources import cara
@@ -78,15 +74,10 @@ def builder_cdm() -> str:
 def arguments(tmp_path: Path) -> list[str]:
     """The builder CDM, the fixture as the catalog, the fleet, the page, the
     images and a README with the markers."""
-    data = tmp_path / "data"
-    data.mkdir()
-    csv = dumps_csv(load_fixture()).encode()
-    (data / snapshot.SNAPSHOT).write_bytes(gzip.compress(csv))
-    shutil.copy(snapshot.DATA / snapshot_files.MANIFEST, data / snapshot_files.MANIFEST)
+    fixture_data(tmp_path)
     cdm = tmp_path / f"{NAME}.kvn"
     cdm.write_text(builder_cdm(), encoding="utf-8")
-    readme = tmp_path / "README.md"
-    readme.write_text(f"intro\n{report.START}\n{report.END}\n", encoding="utf-8")
+    readme_with_markers(tmp_path, report.START, report.END)
     write_fleet(tmp_path, FLEET)
     return arguments_of(tmp_path)
 
@@ -131,18 +122,25 @@ def generated(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return folder
 
 
-def test_main_writes_then_checks(tmp_path: Path) -> None:
-    args = arguments(tmp_path)
-    assert report.main(["--check", *args]) == 1
-    assert report.main(args) == 0
-    assert report.main(["--check", *args]) == 0
+def copied(generated: Path, folder: Path) -> list[str]:
+    """The arguments of a run on a copy of ``generated`` in ``folder``.
+
+    The fleet stays ``generated``'s: the summary records its path.
+    """
+    shutil.copytree(generated, folder, dirs_exist_ok=True)
+    args = arguments_of(folder)
+    args[args.index("--fleet") + 1] = str(generated / "fleet.toml")
+    return args
+
+
+def test_check_passes_on_the_written_report(generated: Path) -> None:
+    assert report.main(["--check", *arguments_of(generated)]) == 0
 
 
 def test_check_fails_on_a_stale_report(
     generated: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    shutil.copytree(generated, tmp_path, dirs_exist_ok=True)
-    args = arguments_of(tmp_path)
+    args = copied(generated, tmp_path)
     json_file = tmp_path / "docs" / "maneuver-report.json"
     summary = written(tmp_path)
     summary["event"]["baseline"]["pc"] = 0.5
@@ -154,15 +152,72 @@ def test_check_fails_on_a_stale_report(
 def test_check_needs_the_heatmap(
     generated: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    shutil.copytree(generated, tmp_path, dirs_exist_ok=True)
+    args = copied(generated, tmp_path)
     (tmp_path / "docs" / "img" / "maneuver" / report.HEATMAP).unlink()
-    assert report.main(["--check", *arguments_of(tmp_path)]) == 1
+    assert report.main(["--check", *args]) == 1
     assert "heatmap.svg is missing" in capsys.readouterr().out
 
 
-def test_the_heatmap_is_a_reproducible_svg(generated: Path) -> None:
+def with_timings(folder: Path, timings: report.Timings) -> None:
+    """The report in ``folder`` rewritten with other timings, consistently."""
+    summary = written(folder)
+    summary["timings"] = timings
+    docs = folder / "docs"
+    images = docs / "img" / "maneuver"
+    (docs / "maneuver-report.json").write_text(json_text(summary), encoding="utf-8")
+    (docs / "maneuver-report.md").write_text(
+        report.render_page(summary, relative(images, docs)), encoding="utf-8"
+    )
+    readme = folder / "README.md"
+    block = report.render_summary(summary, relative(images, folder))
+    readme.write_text(
+        readme_with(readme, report.START, report.END, block), encoding="utf-8"
+    )
+
+
+OTHER_TIMINGS: report.Timings = {
+    "cpu_model": "another CPU",
+    "logical_cpus": 64,
+    "python": "3.99.0",
+    "date": "2000-01-01",
+    "one_thread": False,
+    "runs": 7,
+    "wall": [0.1, 0.2],
+    "cpu": [0.3, 0.4],
+}
+
+
+def test_check_takes_the_committed_timings(generated: Path, tmp_path: Path) -> None:
+    # The times depend on the machine: --check shows the committed ones and
+    # checks the rest.
+    args = copied(generated, tmp_path)
+    with_timings(tmp_path, OTHER_TIMINGS)
+    assert report.main(["--check", *args]) == 0
+    assert "over 7 runs on 2000-01-01, another CPU (64 logical CPUs)" in page(tmp_path)
+
+
+def test_keep_timings_writes_without_measuring_again(
+    generated: Path, tmp_path: Path
+) -> None:
+    args = copied(generated, tmp_path)
+    with_timings(tmp_path, OTHER_TIMINGS)
+    (tmp_path / "docs" / "maneuver-report.md").write_text("stale", encoding="utf-8")
+    assert report.main(["--keep-timings", *args]) == 0
+    assert written(tmp_path)["timings"] == OTHER_TIMINGS
+    assert "another CPU (64 logical CPUs)" in page(tmp_path)
+
+
+def test_the_heatmap_is_a_reproducible_svg(generated: Path, tmp_path: Path) -> None:
+    event, _ = report.load_event(generated / f"{NAME}.kvn")
+    plan, _, _ = report.timed_plan(event, 10.0, 1)
+    title = report.heatmap_title(written(generated)["event"])
+    one, two = tmp_path / "one.svg", tmp_path / "two.svg"
+    report.plot(plan, title, one)
+    report.plot(plan, title, two)
+    assert one.read_bytes() == two.read_bytes()
     heatmap = generated / "docs" / "img" / "maneuver" / report.HEATMAP
-    text = heatmap.read_text(encoding="utf-8")
+    assert one.read_bytes() == heatmap.read_bytes()
+    text = one.read_text(encoding="utf-8")
     assert text.startswith("<?xml")
     assert "<dc:date>" not in text
     assert "retrograde" in text
@@ -282,10 +337,13 @@ def test_the_page_states_the_assumptions_and_the_sources(generated: Path) -> Non
     assert text.startswith("# Manoeuvre planning on a CARA test event\n")
     assert "Combined hard-body radius: HBR 10 m, given with `--hbr`." in text
     assert "with HBR 10 m, given with `--hbr`; gravity" in text
-    assert "(keepout's default, a decade below red from 1e-04, as a margin)" in text
+    assert "(keepout's default: ten times below the red threshold, 1e-04)" in text
     assert f"CARA test CDM `{NAME}`" in text
     assert f"commit `{CARA_COMMIT}`" in text
-    assert "PRIMARY SAT (1001) passing DEBRIS (2002), 2026 test data, red" in text
+    assert (
+        "a 2026 test conjunction of PRIMARY SAT (1001) with DEBRIS (2002) at "
+        "11815 m/s, red without a burn."
+    ) in text
     assert "and no drag (the CDM gives the primary no CD·A/m)." in text
     alt = "Pc after an along-track burn of PRIMARY SAT (1001)"
     assert f"![{alt}](img/maneuver/heatmap.svg)" in (text)
@@ -384,15 +442,26 @@ def test_without_hbr_the_radius_is_caras(
     assert settings["hard_body_radius"] == 12.0
     assert settings["hard_body_radius_source"] == "cara"
     assert "Combined hard-body radius: HBR 12 m, CARA's value" in page(tmp_path)
-    rows.pop()
+
+
+def test_caras_radius_needs_the_cdms_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rows = [{"Conjunction_ID": "another", "HBR_m": 99}]
+    monkeypatch.setattr(cara, "load_xlsx", lambda path: rows)
     with pytest.raises(ValueError, match="has no row builder_event"):
-        report.cara_radius(table, NAME)
+        report.cara_radius(tmp_path / "table.xlsx", NAME)
 
 
 @pytest.mark.parametrize("radius", ["0", "-1", "nan", "inf"])
-def test_a_radius_must_be_positive(radius: str) -> None:
-    with pytest.raises(SystemExit):
+def test_a_radius_must_be_positive(
+    radius: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as raised:
         report.main(["--hbr", radius])
+    assert raised.value.code == 2
+    message = f"argument --hbr: must be finite and above 0, got {radius}"
+    assert message in capsys.readouterr().err
 
 
 def test_delta_v_keeps_three_figures_both_ways() -> None:

@@ -10,7 +10,7 @@ from screening_data import load_fixture
 
 from keepout.ccsds.epochs import parse_epoch
 from keepout.errors import UnsupportedElements
-from keepout.omm.keywords import DEGREE, KEYWORDS, REVOLUTION_PER_DAY
+from keepout.omm.keywords import KEYWORDS
 from keepout.omm.model import (
     MAX_CATALOG_NUMBER,
     MAX_ELEMENT_SET_NO,
@@ -40,12 +40,6 @@ def test_the_elements_are_held_in_si_units() -> None:
     assert ISS_OMM.classification == "U"
     assert ISS_OMM.element_set_no == 999
     assert ISS_OMM.rev_at_epoch == 58893
-
-
-def test_the_angle_unit_is_sgp4s() -> None:
-    # sgp4.omm multiplies degrees by pi / 180.0: the same double.
-    assert math.pi / 180.0 == DEGREE
-    assert 2.0 * math.pi / 86400.0 == REVOLUTION_PER_DAY
 
 
 def test_keywords_give_back_the_message_values() -> None:

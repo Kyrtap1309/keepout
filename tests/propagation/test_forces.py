@@ -6,6 +6,7 @@ from typing import Any, Final
 import numpy as np
 import pytest
 from astropy.time import Time
+from builders import EARTH_ROTATION_RATE
 from scipy.spatial.transform import Rotation
 from scipy.special import eval_legendre
 
@@ -14,9 +15,6 @@ from keepout.orbits import EARTH_MU
 from keepout.propagation._atmosphere import density
 from keepout.propagation.forces import EARTH_RADIUS, ForceModel, earth_pole
 from keepout.units import KM
-
-EARTH_ROTATION: Final = 7.292115e-5
-"""Earth rotation [rad/s], as the brief of the force model gives it."""
 
 NORMALISED_ZONALS: Final = {
     2: -0.484165143790815e-3,
@@ -205,7 +203,7 @@ def drag_of(force: ForceModel, r: FloatArray, v: FloatArray) -> FloatArray:
 def test_drag_opposes_air_relative_velocity() -> None:
     r, v = positions()[:4], velocities()[:4]
     pole = np.array([0.0, 0.6, 0.8])
-    relative = v - EARTH_ROTATION * np.cross(pole, r)
+    relative = v - EARTH_ROTATION_RATE * np.cross(pole, r)
     drag = drag_of(ForceModel(pole, drag_term=0.01), r, v)
     assert np.all(np.sum(drag * relative, axis=1) < 0.0)
 
@@ -215,7 +213,7 @@ def test_drag_has_the_size_of_the_formula() -> None:
     v = np.array([[0.0, 7_700.0, 0.0]])
     drag_term = 0.02
     # The air at the equator moves along +y, with the Earth.
-    air_speed = 7_700.0 - EARTH_ROTATION * r[0, 0]
+    air_speed = 7_700.0 - EARTH_ROTATION_RATE * r[0, 0]
     expected = -0.5 * 2.418e-11 * drag_term * air_speed**2
     drag = drag_of(ForceModel(Z, drag_term=drag_term), r, v)
     assert drag == pytest.approx(np.array([[0.0, expected, 0.0]]), rel=1e-6, abs=1e-12)
@@ -288,7 +286,8 @@ def test_density_decreases_with_altitude(
     # table is not continuous, and the first band ends 0.14 % under the second.
     altitudes = np.linspace(row[0], above[0], 21)[:-1] * KM
     assert np.all(np.diff(density(altitudes)) < 0.0)
-    assert above[1] < row[1]
+    bases = density(np.array([row[0], above[0]]) * KM)
+    assert bases[1] < bases[0]
 
 
 def test_density_above_the_table_extends_the_last_row() -> None:

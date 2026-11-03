@@ -4,37 +4,37 @@ from pathlib import Path
 from typing import get_args
 
 import pytest
-from astropy.time import Time
-from cli_builders import DAYS, FIXTURE_CSV, FLEET_TOML, START, keepout
+from cli_builders import (
+    calculated,
+    keepout,
+    operator_kvn,
+    operator_run,
+    without_hbr,
+    write,
+)
 from inline_snapshot import snapshot
 
-from keepout.cdm import kvn, xml
+from keepout.cdm import xml
 from keepout.cli.assess import AUTO_METHOD, PcMethod, method_choice
 from keepout.cli.output import ExitCode
-from keepout.omm import load
 from keepout.pc import METHODS, Method
-from keepout.synthetic import read_fleet, run
-
-RESULT = run(
-    read_fleet(FLEET_TOML),
-    load(FIXTURE_CSV),
-    Time(START, scale="utc"),
-    float(DAYS) * 86400.0,
-)
-"""Two CDMs: 52939 against a Starlink 0.82 d after creation (green), and
-Intelsat 39 against Luch-5X 2.50 d after it (yellow)."""
-
-GREEN, YELLOW = (kvn.dumps(cdm) for cdm in RESULT.cdms)
 
 
-def write(folder: Path, name: str, text: str) -> str:
-    path = folder / name
-    path.write_text(text, encoding="utf-8")
-    return str(path)
+def green() -> str:
+    """52939 against a Starlink 0.82 d after creation (green), as KVN."""
+    return operator_kvn()[0]
+
+
+def yellow() -> str:
+    """Intelsat 39 against Luch-5X 2.50 d after creation (yellow), as KVN."""
+    return operator_kvn()[1]
 
 
 def test_assess_prints_each_event_and_why(tmp_path: Path) -> None:
-    files = [write(tmp_path, "green.kvn", GREEN), write(tmp_path, "yellow.kvn", YELLOW)]
+    files = [
+        write(tmp_path, "green.kvn", green()),
+        write(tmp_path, "yellow.kvn", yellow()),
+    ]
     result = keepout("assess", *files)
     assert result.exit_code == ExitCode.OK
     assert result.stdout == snapshot("""\
@@ -50,8 +50,8 @@ TCA (UTC)         Objects        Miss (m)  CDMs        Pc  Level   Action \n\
 
 
 def test_assess_exits_with_3_when_an_event_needs_a_manoeuvre(tmp_path: Path) -> None:
-    files = [write(tmp_path, "green.kvn", GREEN), write(tmp_path, "yellow.xml", "")]
-    Path(files[1]).write_text(xml.dumps(RESULT.cdms[1]), encoding="utf-8")
+    files = [write(tmp_path, "green.kvn", green()), write(tmp_path, "yellow.xml", "")]
+    Path(files[1]).write_text(xml.dumps(operator_run().cdms[1]), encoding="utf-8")
     result = keepout("assess", *files, "--hbr", "1000")
     assert result.exit_code == ExitCode.MANOEUVRE
     assert result.stdout == snapshot("""\
@@ -80,16 +80,19 @@ At least one event needs a manoeuvre (exit status 3).
 
 
 def test_assess_follows_the_trend_of_an_event_over_its_cdms(tmp_path: Path) -> None:
-    later = RESULT.cdms[1]
+    later = operator_run().cdms[1]
     newer = re.sub(
         r"(CREATION_DATE *= )2026-10-06",
         r"\g<1>2026-10-07",
         re.sub(
-            r"(HBR *= )20.0", r"\g<1>60.0", YELLOW.replace(later.message_id, "UPDATE")
+            r"(HBR *= )20.0", r"\g<1>60.0", yellow().replace(later.message_id, "UPDATE")
         ),
     )
     assert newer.count("UPDATE") == 1
-    files = [write(tmp_path, "first.kvn", YELLOW), write(tmp_path, "second.kvn", newer)]
+    files = [
+        write(tmp_path, "first.kvn", yellow()),
+        write(tmp_path, "second.kvn", newer),
+    ]
     result = keepout("assess", *files, "--json")
     assert result.exit_code == ExitCode.OK
     (event,) = json.loads(result.stdout)["events"]
@@ -101,7 +104,7 @@ def test_assess_follows_the_trend_of_an_event_over_its_cdms(tmp_path: Path) -> N
 
 
 def test_assess_computes_with_the_method_given(tmp_path: Path) -> None:
-    file = write(tmp_path, "green.kvn", GREEN)
+    file = write(tmp_path, "green.kvn", green())
     result = keepout("assess", file, "--method", "elrod", "--json")
     assert result.exit_code == ExitCode.OK
     (event,) = json.loads(result.stdout)["events"]
@@ -109,7 +112,7 @@ def test_assess_computes_with_the_method_given(tmp_path: Path) -> None:
 
 
 def test_assess_names_a_file_it_cannot_read(tmp_path: Path) -> None:
-    good = write(tmp_path, "green.kvn", GREEN)
+    good = write(tmp_path, "green.kvn", green())
     bad = write(tmp_path, "bad.kvn", "CCSDS_CDM_VERS = 1.0\nNOT A LINE\n")
     result = keepout("assess", good, bad)
     assert result.exit_code == ExitCode.ERROR
@@ -119,16 +122,17 @@ def test_assess_names_a_file_it_cannot_read(tmp_path: Path) -> None:
 
 
 def test_assess_reports_cdms_that_do_not_make_an_event(tmp_path: Path) -> None:
-    files = [write(tmp_path, "a.kvn", GREEN), write(tmp_path, "b.kvn", GREEN)]
+    files = [write(tmp_path, "a.kvn", green()), write(tmp_path, "b.kvn", green())]
     result = keepout("assess", *files)
     assert result.exit_code == ExitCode.ERROR
-    assert result.stderr == f"Error: MESSAGE_ID repeated: {RESULT.cdms[0].message_id}\n"
+    assert (
+        result.stderr
+        == f"Error: MESSAGE_ID repeated: {operator_run().cdms[0].message_id}\n"
+    )
 
 
 def test_assess_needs_both_hard_body_radii_or_hbr(tmp_path: Path) -> None:
-    lines = GREEN.splitlines(keepends=True)
-    without = "".join(line for line in lines if not line.startswith("HBR"))
-    file = write(tmp_path, "green.kvn", without)
+    file = write(tmp_path, "green.kvn", without_hbr(green()))
     result = keepout("assess", file)
     assert result.exit_code == ExitCode.ERROR
     assert result.stderr.startswith("Error: no HBR for both objects in ")
@@ -152,7 +156,7 @@ def test_assess_refuses_a_wrong_command_line(
     expected: str,
 ) -> None:
     monkeypatch.chdir(tmp_path)
-    write(tmp_path, "green.kvn", GREEN)
+    write(tmp_path, "green.kvn", green())
     result = keepout("assess", *args)
     assert result.exit_code == ExitCode.USAGE
     assert expected in result.stderr
@@ -183,11 +187,11 @@ def with_velocity_of_object1(text: str) -> str:
 
 
 def test_assess_shows_a_pc_that_failed_or_is_missing(tmp_path: Path) -> None:
-    failed = write(tmp_path, "failed.kvn", with_velocity_of_object1(GREEN))
+    failed = write(tmp_path, "failed.kvn", with_velocity_of_object1(green()))
     late = write(
         tmp_path,
         "late.kvn",
-        re.sub(r"(CREATION_DATE *= )2026-10-06", r"\g<1>2026-10-09", YELLOW),
+        re.sub(r"(CREATION_DATE *= )2026-10-06", r"\g<1>2026-10-09", yellow()),
     )
     result = keepout("assess", failed, late, "--method", "foster")
     assert result.exit_code == ExitCode.OK
@@ -210,19 +214,14 @@ TCA (UTC)         Objects        Miss (m)  CDMs      Pc  Level  Action \n\
 
 
 def test_assess_counts_in_the_singular(tmp_path: Path) -> None:
-    result = keepout("assess", write(tmp_path, "green.kvn", GREEN))
+    result = keepout("assess", write(tmp_path, "green.kvn", green()))
     assert "1 event from 1 CDM: 1 ignore." in result.stdout
 
 
 def test_assess_labels_events_whose_covariances_are_assumed(tmp_path: Path) -> None:
-    calculated = YELLOW.replace(
-        "COVARIANCE_METHOD              = DEFAULT",
-        "COVARIANCE_METHOD              = CALCULATED",
-    )
-    assert "= DEFAULT" not in calculated
     files = [
-        write(tmp_path, "green.kvn", GREEN),
-        write(tmp_path, "yellow.kvn", calculated),
+        write(tmp_path, "green.kvn", green()),
+        write(tmp_path, "yellow.kvn", calculated(yellow())),
     ]
     result = keepout("assess", *files, "--hbr", "1000")
     assert result.exit_code == ExitCode.MANOEUVRE

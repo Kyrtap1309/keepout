@@ -29,7 +29,7 @@ EPOCH_TOLERANCE: Final = 1e-3
 
 
 def require_same_epoch(first: Time, second: Time, what: str) -> None:
-    """A check that two epochs agree to the tolerance (:class:`GeometryError` if not).
+    """Raise :class:`GeometryError` unless two epochs agree to the tolerance.
 
     Parameters
     ----------

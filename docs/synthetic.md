@@ -3,18 +3,19 @@
 A satellite operator receives conjunction data messages (CDMs) from a
 conjunction assessment service, computes the risk of each event and
 decides whether to manoeuvre. keepout can play the service itself on
-public data: it screens a fleet of real satellites against the GP catalog,
-issues a CCSDS CDM for every close approach and assesses each, so the whole
-workflow runs end to end without access to an operational service. This is
-the *synthetic operator*.
+public data. It screens a fleet of real satellites against the GP catalog,
+issues a CCSDS CDM for every close approach and assesses each. The whole
+workflow thus runs end to end without access to an operational service.
+This is the *synthetic operator*.
 
 !!! warning "The covariances are assumed"
     GP element sets carry no covariance, and a Pc needs one. The synthetic
     operator gives every object the covariance of keepout's model of GP
-    element-set errors: a documented assumption from the literature, not
-    orbit determination. Its Pc values show what the model implies, not the
-    risk of the real satellites. [Assumptions](assumptions.md) explains the
-    model, its sources and its limits.
+    element-set errors. The model is a documented assumption from the
+    literature, not orbit determination. Its Pc values show what the model
+    implies, not the risk of the real satellites.
+    [Assumptions](assumptions.md) explains the model, its sources and its
+    limits.
 
 ```python
 from pathlib import Path
@@ -23,8 +24,7 @@ from astropy.time import Time
 
 import keepout.omm
 from keepout.cdm import kvn
-from keepout.synthetic import load_fleet
-from keepout.synthetic import run
+from keepout.synthetic import load_fleet, run
 
 
 def main() -> None:
@@ -52,10 +52,10 @@ if __name__ == "__main__":  # needed for workers > 1
     main()
 ```
 
-Run from a clone of the repository (the example fleet and the public
-catalog frozen on 2026-10-06 are committed), it prints the twelve close
-approaches of the week, writes their CDMs to `cdms/` and takes about 7 s
-with 4 workers:
+Run it from a clone of the repository, where the example fleet and the
+public catalog frozen on 2026-10-06 are committed. It prints the twelve
+close approaches of the week and writes their CDMs to `cdms/`. It takes
+about 7 s with 4 workers:
 
 ```text
 2026-10-06T05:12 25544 58180 4633 m Pc 1.4e-30 ignore
@@ -73,17 +73,17 @@ with 4 workers:
 ```
 
 The same run from the terminal is `keepout screen` (see
-[Command line](cli.md#a-week-of-a-synthetic-operator)), and
+[Command line](cli.md#a-week-of-a-synthetic-operator)).
 [Synthetic operator on public data](synthetic-operator.md) is its generated
-report: the fleet, the model's parameters, every approach with its Pc and
-maximum Pc, and an example CDM.
+report. It shows the fleet, the model's parameters, every approach with its
+Pc and maximum Pc, and an example CDM.
 
 ## The fleet file
 
-A fleet file (TOML) names the satellites to protect by catalog number, with
-what GP data does not say about them: each satellite's hard-body radius
-(the radius of a sphere enclosing it) and whether it can manoeuvre, and the
-radius assumed for every other object. The example,
+A fleet file (TOML) names the satellites to protect by catalog number. It
+adds what GP data does not say about them: each satellite's hard-body
+radius (the radius of a sphere enclosing it) and whether it can manoeuvre.
+It also gives the radius assumed for every other object. The example,
 `examples/synthetic-operator/fleet.toml`, starts:
 
 ```toml
@@ -101,15 +101,15 @@ maneuverable = true
 
 and adds Metop-B (38771, a sun-synchronous orbit at about 820 km, 10 m) and
 Intelsat 39 (44476, geostationary, 20 m). The three were chosen by
-screening candidates against the frozen catalog: each has close approaches
-in the week of 2026-10-06 (no GPS or other MEO satellite had one). The radii
-are illustrative round numbers, not their operators' values, and keepout is
-not their operator.
+screening candidates against the frozen catalog. Each has close approaches
+in the week of 2026-10-06, while no GPS or other MEO satellite had one. The
+radii are illustrative round numbers, not their operators' values, and
+keepout is not their operator.
 
-Every key but `name` is required and no other key is allowed: a typo is an
+Every key but `name` is required and no other key is allowed. A typo is an
 error, not a silent default, since a hard-body radius changes every Pc.
 `keepout.synthetic.load_fleet(path)` reads a file and `read_fleet(text)` its
-text; both raise `FleetError` naming the satellite and the key at fault.
+text. Both raise `FleetError` naming the satellite and the key at fault.
 
 ## What a run does
 
@@ -119,40 +119,41 @@ does what a conjunction assessment service does for an operator:
 1. **Element sets.** Each fleet satellite's newest element set is taken
    from the catalog; a satellite missing from it is a `FleetError`.
 2. **Screening.** The fleet is screened against the catalog with
-   [`screen`](screening.md) (by default 7 days and a 5 km sphere, as
-   CelesTrak's SOCRATES; any `ScreeningVolume` or rule per satellite works).
-3. **Conjunctions.** At each approach's TCA both objects get the
-   covariance of the model for their own element sets (by default
-   `DEFAULT_MODEL`; `model=` takes another) and their hard-body radii: a
-   fleet satellite its own, any other object the fleet's
+   [`screen`](screening.md). The default is 7 days and a 5 km sphere,
+   matching CelesTrak's SOCRATES. Any `ScreeningVolume` or rule per
+   satellite works.
+3. **Conjunctions.** At each approach's TCA both objects get the model's
+   covariance for their own element sets (by default `DEFAULT_MODEL`;
+   `model=` takes another). They also get their hard-body radii: a fleet
+   satellite its own, any other object the fleet's
    `catalog_hard_body_radius`.
 4. **CDMs.** Each conjunction becomes a CDM (below).
-5. **Risk.** Each CDM is assessed as its recipient would assess it: the Pc
+5. **Risk.** Each CDM is assessed as its recipient would assess it. The Pc
    is computed from the message (`"auto"` by default; `compute=` takes a
-   `keepout.pc.computation`), and the event
-   is assessed with keepout's [risk rules](risk.md) (`thresholds=` and
-   `decision_config=` change them).
+   `keepout.pc.computation`). The event is then assessed with keepout's
+   [risk rules](risk.md), which `thresholds=` and `decision_config=`
+   change.
 
 The result (`OperatorResult`) holds the screening, with the element sets it
-left out, and one `OperatorEvent` per approach: the approach, its event
-(one CDM), keepout's Pc of it and the assessment; `result.cdms` lists the
-messages.
+left out. It also holds one `OperatorEvent` per approach: the approach,
+its event (one CDM), keepout's Pc of it and the assessment. `result.cdms`
+lists the messages.
 
 **One event per approach.** Two close approaches of the same pair are two
 local minima of their range, however close in time, so each is its own
-event with a single CDM. With a single Pc the trend is undetermined, and
-the decision rests on the Pc's risk level and the time from the CDM's
-creation to TCA: a red Pc within 2 days of TCA is `manoeuvre`, a red Pc
-further ahead `prepare manoeuvre`. Two fleet satellites approaching each
+event with a single CDM. With a single Pc the trend is undetermined. The
+decision rests on the Pc's risk level and the time from the CDM's creation
+to TCA. A red Pc within 2 days of TCA is `manoeuvre`, and a red Pc further
+ahead `prepare manoeuvre`. Two fleet satellites approaching each
 other give two events, one CDM for each satellite, as a service sends each
 operator its own.
 
 ## The CDMs
 
-The messages are built by `keepout.cdm.make_cdm`, which turns any
+The messages are built by `keepout.cdm.make_cdm`. It turns any
 `Conjunction` into a CDM and knows nothing of where its covariances come
-from; they read back to the same conjunction, also after a KVN or XML
-round trip. For the synthetic operator:
+from. The messages read back to the same conjunction, also after a KVN or
+XML round trip. For the synthetic operator:
 
 - **Header.** `ORIGINATOR = KEEPOUT`; `MESSAGE_FOR` the fleet satellite's
   name; `CREATION_DATE` the start of the window unless `created=` says
@@ -182,11 +183,12 @@ The [report](synthetic-operator.md#example-cdm) shows one in full.
 ## Running it again
 
 The `MESSAGE_ID` carries the creation time, so a run on another day issues
-new messages: the CDMs of one approach from several runs (the same pair,
-TCAs within 10 minutes) are successive CDMs of one event for
-`keepout assess` and `keepout.events.group_events`, which then follow the Pc's
-trend. With new element sets the TCA and the Pc move as an operational
-service's would; with unchanged element sets only the time to TCA changes.
+new messages. The CDMs of one approach from several runs (the same pair,
+TCAs within 10 minutes) are then successive CDMs of one event. Both
+`keepout assess` and `keepout.events.group_events` treat them so, and
+follow the Pc's trend. With new element sets the TCA and the Pc move as an
+operational service's would. With unchanged element sets only the time to
+TCA changes.
 
 ## References
 

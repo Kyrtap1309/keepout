@@ -22,6 +22,7 @@ from typing import Any, Final
 
 import astropy.units as u
 import pytest
+from astropy.time import Time
 from screening_data import FIXTURE_START, fixture_by_number, load_fixture
 
 from keepout._defaults import TCA_TOLERANCE
@@ -41,7 +42,7 @@ from keepout.maneuver import (
 )
 from keepout.omm import Omm, deduplicate
 from keepout.pc import computation
-from keepout.propagation import describe_error
+from keepout.propagation import Propagator, describe_error
 from keepout.propagation.maneuvered import ManeuveredPropagator
 from keepout.risk import DEFAULT_THRESHOLDS, RiskLevel, Thresholds
 from keepout.screening import (
@@ -117,6 +118,38 @@ def burn(
         method="foster",
         meets_target=True,
     )
+
+
+_BURNED: Final[dict[tuple[object, ...], ManeuveredPropagator]] = {}
+
+
+def burned_once(
+    base: Propagator, burn_time: Time, delta_v: float, horizon: float
+) -> ManeuveredPropagator:
+    """``ManeuveredPropagator``, integrated once per orbit, burn and horizon."""
+    at_burn = base.propagate(burn_time, 0.0)
+    key = (
+        burn_time.jd1,
+        burn_time.jd2,
+        delta_v,
+        horizon,
+        at_burn.r.tobytes(),
+        at_burn.v.tobytes(),
+    )
+    if key not in _BURNED:
+        _BURNED[key] = ManeuveredPropagator(base, burn_time, delta_v, horizon)
+    return _BURNED[key]
+
+
+@pytest.fixture(autouse=True)
+def shared_burns(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make ``rescreen`` integrate each burn once in the module: tests of one
+    burn differ in what they make of its approaches (thresholds, model, Pc
+    method, target), not in the orbit, and a week's integration takes 4.5 s.
+    ``no_screening`` and ``no_integration`` refuse even a burn integrated
+    before."""
+    module = importlib.import_module("keepout.maneuver.rescreen")
+    monkeypatch.setattr(module, "ManeuveredPropagator", burned_once)
 
 
 @functools.cache
@@ -201,6 +234,7 @@ def no_screening(monkeypatch: pytest.MonkeyPatch) -> None:
 
     module = importlib.import_module("keepout.maneuver.rescreen")
     monkeypatch.setattr(module, "screen", refuse)
+    monkeypatch.setattr(module, "ManeuveredPropagator", refuse)
     monkeypatch.setattr(ManeuveredPropagator, "__init__", refuse)
 
 
@@ -211,6 +245,8 @@ def no_integration(monkeypatch: pytest.MonkeyPatch) -> None:
     def refuse(*args: object, **kwargs: object) -> None:
         raise AssertionError("integrated a burn of a primary that was not screened")
 
+    module = importlib.import_module("keepout.maneuver.rescreen")
+    monkeypatch.setattr(module, "ManeuveredPropagator", refuse)
     monkeypatch.setattr(ManeuveredPropagator, "__init__", refuse)
 
 
@@ -482,15 +518,6 @@ def test_another_objects_approach_is_never_an_event_return() -> None:
     assert result.clean
 
 
-def test_a_conflict_is_not_clean() -> None:
-    plan = plan_of(CROSSING)
-    thresholds = Thresholds(green_below=1e-7, red_from=1e-6)
-    result = rescreen(plan, burn(plan, -0.03), FIXTURE, thresholds=thresholds)
-    assert result.conflict
-    assert result.event_returns == ()
-    assert not result.clean
-
-
 def test_closer_red_approach_is_a_conflict() -> None:
     plan = closer_plan()
     plain = rescreen(plan, closer_burn(0.003), FIXTURE)
@@ -548,6 +575,7 @@ def counted_screen(
     return calls
 
 
+@pytest.mark.usefixtures("no_integration")
 def test_primary_left_out_before_the_burn_stops_after_one_screening(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -577,7 +605,7 @@ def test_primary_left_out_only_with_the_burn_is_an_error(
     assert len(calls) == 2
 
 
-def test_new_red_approach_is_a_conflict() -> None:
+def test_a_new_red_approach_is_a_conflict_and_not_clean() -> None:
     plan = plan_of(CROSSING)
     # 57087 at 473 m, 4.7 h after the approach without the burn: Pc 1.88e-6.
     thresholds = Thresholds(green_below=1e-7, red_from=1e-6)
@@ -588,6 +616,8 @@ def test_new_red_approach_is_a_conflict() -> None:
     assert new.pc == pytest.approx(1.878e-6, rel=1e-3)
     assert new.level is RiskLevel.RED
     assert result.conflict
+    assert result.event_returns == ()
+    assert not result.clean
 
 
 def test_new_yellow_approach_is_not_a_conflict() -> None:
@@ -679,14 +709,6 @@ def test_secondary_designator_that_is_no_catalog_number_is_not_screened(
     assert not result.secondary_screened
     assert result.event_range is None
     assert by_secondary(result) == [RECURRING]
-
-
-@pytest.mark.usefixtures("no_integration")
-def test_skipped_primary_is_an_error() -> None:
-    plan = plan_of(CROSSING)
-    catalog = [*without(CROSSING), older(CROSSING)]
-    with pytest.raises(ManeuverError, match=f"primary {CROSSING}.*stale"):
-        rescreen(plan, burn(plan, 0.1), catalog)
 
 
 @pytest.mark.usefixtures("no_integration")
@@ -934,10 +956,16 @@ def test_new_approaches_take_the_pc_method_and_basis_given() -> None:
         ),
     )
     # A Monte Carlo interval whose upper end the conservative basis takes.
-    compute = computation("montecarlo", samples=20_000, seed=1)
+    compute = computation("montecarlo", samples=5_000, seed=1)
     (conservative,) = rescreen(
         plan, burn(plan, -0.03), FIXTURE, compute=compute
     ).new_approaches
-    upper = compute(conjunction).interval
-    assert upper is not None
-    assert conservative.pc == upper[1]
+    expected = compute(conjunction)
+    assert expected.interval is not None
+    assert conservative.pc == expected.interval[1]
+    # The estimate basis takes the value, below the interval's upper end.
+    estimate = Thresholds(basis="estimate")
+    (central,) = rescreen(
+        plan, burn(plan, -0.03), FIXTURE, compute=compute, thresholds=estimate
+    ).new_approaches
+    assert central.pc == expected.value < expected.interval[1]

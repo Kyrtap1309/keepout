@@ -10,6 +10,7 @@ import astropy.units as u
 import numpy as np
 import pytest
 from astropy.time import Time
+from builders import EARTH_ROTATION_RATE
 from screening_data import FIXTURE_START, fixture_by_number
 
 from keepout._types import FloatArray
@@ -37,9 +38,6 @@ J2_ONLY: Final = ForceModel(POLE, degree=2)
 FULL: Final = ForceModel(POLE)
 J2: Final = 0.484165143790815e-3 * math.sqrt(5.0)
 """J2 of EGM2008, from the normalised coefficient."""
-
-EARTH_ROTATION: Final = 7.292115e-5
-"""The Earth's rotation rate [rad/s] (WGS 84), which the air turns with."""
 
 
 def state_of(
@@ -301,7 +299,7 @@ def test_cowell_propagator_starts_at_the_given_states() -> None:
     np.testing.assert_array_equal(first.v[:, 0], OBJECTS[:, 3:])
 
 
-def test_radius_bounds_hold_every_state() -> None:
+def test_cowell_gives_no_radius_bounds() -> None:
     bounds = PROPAGATOR.radius_bounds(EPOCH, 3.0 * HOUR)
     np.testing.assert_array_equal(bounds.lowest, np.zeros(3))
     np.testing.assert_array_equal(bounds.highest, np.full(3, np.inf))
@@ -412,7 +410,8 @@ def test_the_ends_of_the_span_are_inside_it_from_a_shifted_epoch(
 def test_many_shifted_epochs_reach_the_end_of_the_span() -> None:
     generator = np.random.default_rng(11)
     for shift in generator.uniform(0.0, SPAN[1], 300):
-        PROPAGATOR.propagate(EPOCH + shift * u.s, SPAN[1] - shift)
+        ephemeris = PROPAGATOR.propagate(EPOCH + shift * u.s, SPAN[1] - shift)
+        assert np.all(ephemeris.errors == NO_ERROR)
 
 
 def test_a_microsecond_is_the_slack_of_the_span() -> None:
@@ -465,7 +464,15 @@ def test_the_span_is_covered_when_the_step_does_not_divide_it() -> None:
 
 def test_a_step_longer_than_the_span_gives_its_two_ends() -> None:
     propagator = CowellPropagator(EPOCH, LEO[None], (FULL,), (0.0, 30.0), step=60.0)
-    assert np.all(propagator.propagate(EPOCH, 15.0).errors == NO_ERROR)
+    ephemeris = propagator.propagate(EPOCH, np.array([0.0, 15.0, 30.0]))
+    assert np.all(ephemeris.errors == NO_ERROR)
+    later = integrate(FULL, LEO[None], np.array([15.0, 30.0]))[:, 0]
+    exact = np.concatenate((LEO[None], later))
+    gap = np.linalg.norm(ephemeris.r[0] - exact[:, :3], axis=1)
+    # The ends are the nodes; between them the cubic is off by about
+    # h^4 n^4 r / 384 = 2 cm (h 30 s, n the mean motion).
+    assert gap[[0, 2]].max() < 1e-6
+    assert gap[1] < 0.05
 
 
 def _decayed() -> tuple[CowellPropagator, Ephemeris, FloatArray]:
@@ -522,7 +529,9 @@ def test_close_to_sgp4_over_a_short_arc() -> None:
     force = ForceModel(earth_pole(FIXTURE_START))
     propagator = CowellPropagator(FIXTURE_START, state, (force,), (0.0, 2.0 * HOUR))
     cowell = propagator.propagate(FIXTURE_START, offsets)
-    assert np.linalg.norm(cowell.r[0] - r, axis=1).max() < 20 * KM
+    # 182 m apart after 2 h (SGP4's theory and drag against these forces):
+    # 0.5 km allows for that, and a TEME state taken for GCRF is 6 to 48 km off.
+    assert np.linalg.norm(cowell.r[0] - r, axis=1).max() < 0.5 * KM
 
 
 def test_cowell_propagator_pickles() -> None:
@@ -572,7 +581,7 @@ def test_drag_decays_a_circular_orbit_at_the_analytic_rate(altitude: float) -> N
     decay = -EARTH_MU / (2.0 * energy(end)) - semi_major_axis
     speed = math.sqrt(EARTH_MU / semi_major_axis)
     rho = float(density(np.array(altitude)))
-    co_rotation = (1.0 - EARTH_ROTATION * semi_major_axis / speed) ** 2
+    co_rotation = (1.0 - EARTH_ROTATION_RATE * semi_major_axis / speed) ** 2
     rate = -rho * term * math.sqrt(EARTH_MU * semi_major_axis) * co_rotation
     assert decay == pytest.approx(rate * HOUR, rel=0.02)
 
