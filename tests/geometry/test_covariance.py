@@ -1,3 +1,4 @@
+import astropy.units as u
 import numpy as np
 import pytest
 from builders import DIAGONAL_COVARIANCE, EPOCH
@@ -26,6 +27,16 @@ def test_valid_covariance_is_frozen() -> None:
     np.testing.assert_array_equal(covariance.position, VALID[:3, :3])
     with pytest.raises(ValueError, match="read-only"):
         covariance.matrix[0, 0] = 1.0
+
+
+def test_a_covariance_moves_to_another_epoch_unchanged() -> None:
+    covariance = Covariance(VALID, "RTN", EPOCH, repairs=("a repair",))
+    later = EPOCH + 60 * u.s
+    moved = covariance.at(later)
+    assert moved.epoch == later
+    assert (moved.frame, moved.repairs) == (covariance.frame, covariance.repairs)
+    np.testing.assert_array_equal(moved.matrix, covariance.matrix)
+    assert covariance.epoch == EPOCH
 
 
 def test_zero_covariance_is_valid() -> None:

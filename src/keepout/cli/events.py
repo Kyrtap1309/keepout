@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, NamedTuple, Protocol
 
 from rich.table import Table
 
-from keepout.cli.output import JsonOut, isot, minute, pc_text, table
+from keepout.cli.output import JsonOut, isot, minute, objects, pc_text, table
 
 if TYPE_CHECKING:
     from keepout.cdm import CdmObject
@@ -68,7 +68,7 @@ def events_table(events: Sequence[Assessed], title: str) -> Table:
         level = item.assessment.level
         rows.add_row(
             minute(latest.tca),
-            f"{latest.object1.object_id} / {latest.object2.object_id}",
+            objects(latest),
             f"{latest.miss_distance:.0f}",
             str(len(item.event.cdms)),
             _pc(item.assessment.trend.latest_observation),

@@ -32,6 +32,7 @@ from keepout.errors import CovarianceError, GeometryError, PcConvergenceError
 from keepout.objects import ObjectState
 from keepout.orbits import orbital_period
 from keepout.pc import (
+    AUTO,
     METHODS,
     PcResult,
     alfano,
@@ -539,6 +540,31 @@ def test_auto_falls_back_to_monte_carlo_on_hall_s_scan(
     # ``auto`` reproducible and bounded.
     (scan,) = scans
     assert calls == [(scan, {"max_samples": AUTO_MC_SAMPLES, "seed": AUTO_MC_SEED})]
+
+
+def test_the_resolved_fallback_reproduces_autos_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    overlap_failing_while_integrating(monkeypatch)
+    auto_monte_carlo_budget(monkeypatch, MC_BATCH)
+    result = AUTO(SLOW_ALONG_TRACK)
+    resolved = AUTO.resolved(result)
+    assert resolved.method == "montecarlo"
+    assert resolved(SLOW_ALONG_TRACK).value == result.value
+
+
+def test_auto_resolves_to_the_method_it_chose_with_its_defaults() -> None:
+    result = AUTO(TYPICAL_HEAD_ON)
+    assert result.method == "foster"
+    resolved = AUTO.resolved(result)
+    assert (resolved.method, dict(resolved.options)) == ("foster", {})
+
+
+def test_an_explicit_computation_resolves_to_itself() -> None:
+    run = computation("elrod", order=16)
+    assert run.resolved(run(TYPICAL_HEAD_ON)) is run
+    with pytest.raises(ValueError, match="a foster result is not one of elrod's"):
+        run.resolved(compute_pc(TYPICAL_HEAD_ON, "foster"))
 
 
 def test_fallback_matches_an_explicit_monte_carlo(

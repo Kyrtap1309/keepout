@@ -12,6 +12,7 @@ import keepout as package
 from keepout.cli.output import (
     ExitCode,
     JsonOut,
+    duration_words,
     fail,
     minute,
     plural,
@@ -23,7 +24,7 @@ from keepout.errors import CdmParseError, SourceUnavailable
 
 
 def test_exit_codes() -> None:
-    assert [int(code) for code in ExitCode] == [0, 1, 2, 3]
+    assert [int(code) for code in ExitCode] == [0, 1, 2, 3, 4]
 
 
 def test_version() -> None:
@@ -35,7 +36,7 @@ def test_version() -> None:
 def test_help_lists_the_commands() -> None:
     result = keepout("--help")
     assert result.exit_code == ExitCode.OK
-    for command in ("fetch", "screen", "assess", "validate"):
+    for command in ("fetch", "screen", "assess", "maneuver", "validate"):
         assert command in result.stdout
     fetch = keepout("fetch", "--help")
     for source in ("catalog", "cdm", "cara", "kelvins"):
@@ -143,6 +144,22 @@ def test_plural() -> None:
     assert plural(0, "event") == "0 events"
     assert plural(2, "approach", "approaches") == "2 approaches"
     assert plural(1, "approach", "approaches") == "1 approach"
+
+
+@pytest.mark.parametrize(
+    ("seconds", "words"),
+    [
+        (86400.0, "a day"),
+        (172800.0, "2 days"),
+        (3600.0, "an hour"),
+        (21600.0, "6 hours"),
+        (60.0, "a minute"),
+        (600.0, "10 minutes"),
+        (90.0, "90 s"),
+    ],
+)
+def test_duration_words(seconds: float, words: str) -> None:
+    assert duration_words(seconds) == words
 
 
 def test_times_in_utc() -> None:

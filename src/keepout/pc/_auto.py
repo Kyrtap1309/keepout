@@ -18,7 +18,7 @@ from keepout.pc.foster import foster
 from keepout.pc.hall3d import hall3d_over_scan
 from keepout.pc.maxpc import alfano, frisbee
 from keepout.pc.montecarlo import montecarlo_over_scan
-from keepout.pc.result import PcResult
+from keepout.pc.result import Method, PcResult
 
 __all__ = [
     "AUTO_MC_SAMPLES",
@@ -28,6 +28,7 @@ __all__ = [
     "applicability",
     "assess",
     "auto",
+    "auto_options",
     "known_only_in_position",
 ]
 
@@ -140,6 +141,15 @@ def _three_d(
             conjunction, encounters, max_samples=AUTO_MC_SAMPLES, seed=AUTO_MC_SEED
         )
         return result, Assessment((*notes, fallback), details)
+
+
+def auto_options(method: Method) -> dict[str, object]:
+    """The options :func:`auto` runs ``method`` with, where they are not the
+    method's defaults: the seed and sample budget of its Monte Carlo
+    fallback."""
+    if method == "montecarlo":
+        return {"max_samples": AUTO_MC_SAMPLES, "seed": AUTO_MC_SEED}
+    return {}
 
 
 def _both_orbits_elliptic(conjunction: Conjunction) -> bool:

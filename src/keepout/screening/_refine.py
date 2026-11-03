@@ -19,6 +19,7 @@ from keepout.screening.volume import ScreeningVolume
 
 __all__ = [
     "DERIVATIVE_STEP",
+    "SEARCH_REACH",
     "SLOW_STEP",
     "TCA_TOLERANCE",
     "Failed",
@@ -47,6 +48,10 @@ TCA_TOLERANCE: Final = 1e-6
 _CENTRAL_OFFSETS: Final = np.array([-2.0, -1.0, 1.0, 2.0]) * DERIVATIVE_STEP
 """Offsets [s] of the four positions of the central difference that gives
 ``f``, from the time it is computed at."""
+
+SEARCH_REACH: Final = float(np.max(np.abs(_CENTRAL_OFFSETS)))
+"""How far past a window's end the search reads states [s]: the reach of
+the central difference."""
 
 _CENTRAL_WEIGHTS: Final = np.array([1.0, -8.0, 8.0, -1.0]) / (24.0 * DERIVATIVE_STEP)
 """Weights of ``|rho|^2`` at :data:`_CENTRAL_OFFSETS`: its fourth-order

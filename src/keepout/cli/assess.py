@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import enum
 from collections import Counter
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Final, TypeAlias
 
@@ -31,10 +32,19 @@ from keepout.errors import KeepoutError
 # The library is imported where it is used: keepout --help need not load the
 # numerical libraries (keepout._methods loads none).
 
-__all__ = ["AUTO_METHOD", "PcMethod", "assess_command", "method_choice"]
+__all__ = [
+    "AUTO_METHOD",
+    "HardBodyRadius",
+    "PcMethod",
+    "assess_command",
+    "load_cdms",
+    "method_choice",
+]
 
 if TYPE_CHECKING:
     from typing_extensions import TypeIs
+
+    from keepout.cdm import Cdm
 
     class PcMethod(enum.StrEnum):
         """``--method``: the Pc methods of :func:`keepout.pc.compute_pc`."""
@@ -99,6 +109,19 @@ HardBodyRadius: TypeAlias = Annotated[
 """``--hbr``: the combined hard-body radius instead of the CDMs'."""
 
 
+def load_cdms(files: Sequence[Path]) -> list[Cdm]:
+    """The CDMs of ``files``; one that cannot be read ends the command, named."""
+    from keepout import cdm
+
+    messages = []
+    for path in files:
+        try:
+            messages.append(cdm.load(path))
+        except KeepoutError as exc:
+            fail(f"{path}: {exc}")
+    return messages
+
+
 def assess_command(
     files: Files,
     *,
@@ -115,17 +138,11 @@ def assess_command(
     {decision_point} of TCA). Exits with status 3 if at least one event's
     action is to manoeuvre.
     """
-    from keepout import cdm
     from keepout.events import group_events
     from keepout.pc import computation
     from keepout.risk import Action, assess
 
-    messages = []
-    for path in files:
-        try:
-            messages.append(cdm.load(path))
-        except KeepoutError as exc:
-            fail(f"{path}: {exc}")
+    messages = load_cdms(files)
     compute = computation(method_choice(method.value))
     assessed = [
         AssessedEvent(

@@ -2,7 +2,7 @@
 
 Every command is a function of a command module (:mod:`keepout.cli.fetch`,
 :mod:`keepout.cli.screen`, :mod:`keepout.cli.assess`,
-:mod:`keepout.cli.validate`) registered here through
+:mod:`keepout.cli.maneuver`, :mod:`keepout.cli.validate`) registered here through
 :func:`~keepout.cli.output.reported`, so keepout's errors end the command
 with ``Error: ...`` and status 1 instead of a traceback.
 """
@@ -17,6 +17,7 @@ import typer
 import keepout
 from keepout.cli.assess import assess_command
 from keepout.cli.fetch import fetch_cara, fetch_catalog, fetch_cdm, fetch_kelvins
+from keepout.cli.maneuver import maneuver_command
 from keepout.cli.output import reported
 from keepout.cli.screen import screen_command
 from keepout.cli.validate import validate_command
@@ -75,6 +76,7 @@ _add(fetch_app, "cara", fetch_cara)
 _add(fetch_app, "kelvins", fetch_kelvins)
 _add(app, "screen", screen_command)
 _add(app, "assess", assess_command)
+_add(app, "maneuver", maneuver_command)
 _add(app, "validate", validate_command)
 
 

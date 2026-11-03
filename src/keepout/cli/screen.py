@@ -10,10 +10,10 @@ from typing import TYPE_CHECKING, Annotated, TypeAlias
 import typer
 
 from keepout._defaults import SCREENING_DURATION, SOCRATES_RADIUS
+from keepout.cli.catalog_input import CatalogFile, catalog_input, require_one_catalog
 from keepout.cli.events import event_json, events_table, reasons
 from keepout.cli.options import CacheDir, JsonFlag, SourceOption, Workers, positive
-from keepout.cli.output import JsonOut, isot, plural, show, utc
-from keepout.sources.catalog import CATALOG_SOURCES, DEFAULT_SOURCE, CatalogSourceName
+from keepout.cli.output import ASSUMED_COVARIANCES, JsonOut, isot, plural, show, utc
 from keepout.units import DAY, KM
 
 # The library is imported in the command: keepout --help need not load the
@@ -22,7 +22,6 @@ if TYPE_CHECKING:
     from astropy.time import Time
     from rich.console import RenderableType
 
-    from keepout.omm import Omm
     from keepout.screening import SkippedObject
     from keepout.synthetic import Fleet, OperatorEvent, OperatorResult
 
@@ -74,20 +73,6 @@ Start: TypeAlias = Annotated[
 """``--start``: the start of the window and the CDMs' creation date, read by
 :func:`parse_time` in the command."""
 
-CatalogFile: TypeAlias = Annotated[
-    Path | None,
-    typer.Option(
-        "--catalog",
-        exists=True,
-        dir_okay=False,
-        help=(
-            "Screen against the element sets in this file (OMM KVN or XML, "
-            "CelesTrak CSV or JSON, TLE; gzipped or not) instead of a source."
-        ),
-    ),
-]
-"""``--catalog``: a local catalog file instead of a source."""
-
 CdmDir: TypeAlias = Annotated[
     Path | None,
     typer.Option(
@@ -122,14 +107,11 @@ def screen_command(
     new download; --catalog reads a file instead.
     """
     window_start = None if start is None else _start_time(start)
-    if catalog is not None and source is not None:
-        raise typer.BadParameter(
-            "give either --catalog or --source, not both", param_hint="--source"
-        )
+    require_one_catalog(catalog, source)
     from keepout.synthetic import load_fleet, run
 
     satellites = load_fleet(fleet)
-    omms, catalog_label = _catalog_input(catalog, source, cache_dir)
+    omms, catalog_label = catalog_input(catalog, source, cache_dir)
     if window_start is None:
         window_start = _now()
     result = run(satellites, omms, window_start, days * DAY, workers=workers)
@@ -164,19 +146,6 @@ def _now() -> Time:
     from astropy.time import Time
 
     return Time(int(time.time()), format="unix", scale="utc")
-
-
-def _catalog_input(
-    catalog: Path | None, source: CatalogSourceName | None, cache_dir: Path | None
-) -> tuple[tuple[Omm, ...], str]:
-    """The element sets to screen against, from ``--catalog`` or a source,
-    and how the summary names them."""
-    if catalog is not None:
-        from keepout.omm import load
-
-        return load(catalog), str(catalog)
-    described = CATALOG_SOURCES[source or DEFAULT_SOURCE]
-    return described.fetch(cache_dir).omms, described.title
 
 
 def _write_cdms(result: OperatorResult, cdm_dir: Path) -> dict[str, Path]:
@@ -252,10 +221,7 @@ def _summary(
             "future epochs, SGP4 failures; --json lists them)."
         )
     tail += reasons(result.events, Action.MONITOR)
-    tail.append(
-        "Covariances are assumed (keepout's model of GP element set errors), "
-        "not orbit determination."
-    )
+    tail.append(ASSUMED_COVARIANCES)
     if cdm_dir is not None:
         tail.append(f"{plural(len(files), 'CDM')} written to {cdm_dir}")
     events = result.events

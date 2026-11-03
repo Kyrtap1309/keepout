@@ -120,6 +120,7 @@ from keepout.propagation import (
 )
 from keepout.screening._refine import (
     DERIVATIVE_STEP,
+    SEARCH_REACH,
     SLOW_STEP,
     TCA_TOLERANCE,
     Failed,
@@ -151,6 +152,7 @@ __all__ = [
     "GRAVITY_MARGIN",
     "MIN_RADIUS",
     "PERTURBATION",
+    "SEARCH_REACH",
     "SLOW_STEP",
     "SPEED_BOUND_MARGIN",
     "TCA_TOLERANCE",

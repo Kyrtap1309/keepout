@@ -339,6 +339,16 @@ class CdmObject:
         return _optional_number(self.section, "HBR")
 
     @property
+    def maneuverable(self) -> str:
+        """``MANEUVERABLE``, as written."""
+        return _text(self.section, "MANEUVERABLE")
+
+    @property
+    def cd_area_over_mass(self) -> float | None:
+        """CD·A/m [m²/kg] (``CD_AREA_OVER_MASS``), if given."""
+        return _optional_number(self.section, "CD_AREA_OVER_MASS")
+
+    @property
     def covariance_method(self) -> CovarianceMethod:
         """``COVARIANCE_METHOD``.
 

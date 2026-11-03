@@ -13,8 +13,8 @@ blob to ``@reproduce_failure``); pick one with ``HYPOTHESIS_PROFILE``.
 
 Layout: ``geometry/`` tests the top-level domain modules (state, objects,
 covariance, frames, orbits, equinoctial, encounter, conjunction); the other
-directories mirror the ``keepout`` subpackages (``cdm``, ``cli``, ``omm``, ``pc``,
-``propagation``, ``risk``, ``screening``, ``sources``, ``synthetic``,
+directories mirror the ``keepout`` subpackages (``cdm``, ``cli``, ``maneuver``,
+``omm``, ``pc``, ``propagation``, ``risk``, ``screening``, ``sources``, ``synthetic``,
 ``validation``) and ``tools``.
 """
 

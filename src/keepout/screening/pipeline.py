@@ -26,6 +26,11 @@ theory) and a window, and returns a
    (:func:`keepout.frames.frame_to_gcrf`) into a
    :class:`~keepout.screening.result.CloseApproach`.
 
+**After a burn.** ``adjust_primaries`` replaces the primaries' propagator
+after step 1, Element sets: step 2, Pairs, and step 3, Search, see a
+:class:`~keepout.propagation.base.Propagator` only, and an element set still
+names the primary.
+
 **Element age.** The search's guarantee that no minimum is missed assumes
 every acceleration beyond the point mass and J2 stays below
 :data:`~keepout.screening.tca.PERTURBATION` (1 m/s^2). On the public catalog
@@ -52,7 +57,7 @@ script read from standard input (``python -``) cannot.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Final
 
@@ -92,7 +97,7 @@ from keepout.screening.search_result import (
     RangeMinimum,
     SearchResult,
 )
-from keepout.screening.tca import DEFAULT_STEP, ApproachSearch
+from keepout.screening.tca import DEFAULT_STEP, SEARCH_REACH, ApproachSearch
 from keepout.screening.volume import (
     DEFAULT_VOLUME,
     ScreeningVolume,
@@ -129,6 +134,7 @@ def screen(
     max_lead: float = MAX_LEAD,
     step: float = DEFAULT_STEP,
     max_states: int = CHUNK_STATES,
+    adjust_primaries: Callable[[Propagator], Propagator] | None = None,
 ) -> ScreeningResult:
     """Every close approach of the primaries with the catalog in a window.
 
@@ -168,6 +174,15 @@ def screen(
     max_states
         Most states (objects x times) a process propagates at once; bounds
         the memory (about 49 bytes per state).
+    adjust_primaries
+        Called once, in this process, with the SGP4 propagator of the primaries
+        that are screened, when there are any; what it returns (the same
+        objects in order, in the catalog's frame, TEME) is screened in its
+        place, as a :class:`~keepout.propagation.ManeuveredPropagator` for a
+        burn. It must give states to
+        :data:`~keepout.screening.tca.SEARCH_REACH` past the
+        end of the window, where the search reads them, which is checked
+        once. ``None`` screens SGP4.
 
     Returns
     -------
@@ -179,10 +194,17 @@ def screen(
     ------
     ValueError
         If ``start`` is not one time, or ``duration``, ``max_age``,
-        ``max_lead``, ``step``, ``workers`` or ``max_states`` is out of range.
+        ``max_lead``, ``step``, ``workers`` or ``max_states`` is out of range,
+        or the propagator of ``adjust_primaries`` changes the number of
+        primaries or their frame or stops short of the states the search
+        reads.
     TypeError
         If the volume rule returns something other than a
         :class:`~keepout.screening.volume.ScreeningVolume`.
+    PropagationError
+        If ``adjust_primaries`` raises it, as a
+        :class:`~keepout.propagation.ManeuveredPropagator` does for an orbit
+        it cannot integrate.
     """
     require_single_time(start, "start")
     require_non_negative(duration, "duration")
@@ -202,10 +224,11 @@ def screen(
     current_catalog, out_of_window_catalog = _within_window(
         unique_catalog, ScreeningRole.CATALOG, settings, max_age, max_lead
     )
-    primary_propagator, volumes, skipped_unusable_primaries = _primaries(
+    sgp4_primaries, volumes, skipped_unusable_primaries = _primaries(
         current_primaries, volume
     )
-    primary_omms = primary_propagator.omms
+    primary_omms = sgp4_primaries.omms
+    primary_propagator = _adjusted(sgp4_primaries, adjust_primaries, settings)
     parts = _parts(
         primary_propagator, primary_omms, volumes, current_catalog, settings, processes
     )
@@ -338,6 +361,45 @@ def _primaries(
         chosen.append(index)
     subset = initialised.subset(np.array(chosen, dtype=np.intp))
     return subset, volumes, skipped
+
+
+def _adjusted(
+    primaries: Sgp4Propagator,
+    adjust: Callable[[Propagator], Propagator] | None,
+    settings: _SearchSettings,
+) -> Propagator:
+    """The propagator to screen ``primaries`` with.
+
+    The search would reach past the window only when a minimum lies near its
+    end, so a propagator that cannot is refused here, on any data.
+
+    Raises
+    ------
+    ValueError
+        If ``adjust`` changes the number of primaries or their frame, or
+        gives no states as far past the window as the search reads them.
+    """
+    if adjust is None or len(primaries) == 0:
+        return primaries
+    adjusted = adjust(primaries)
+    if len(adjusted) != len(primaries):
+        raise ValueError(
+            f"adjust_primaries must keep the {len(primaries)} primaries, "
+            f"got {len(adjusted)}"
+        )
+    if adjusted.frame != primaries.frame:
+        raise ValueError(
+            f"adjust_primaries must keep the frame {primaries.frame}, "
+            f"got {adjusted.frame}"
+        )
+    try:
+        adjusted.propagate(settings.start, settings.duration + SEARCH_REACH)
+    except ValueError as error:
+        raise ValueError(
+            f"adjust_primaries must give states to {SEARCH_REACH} s past the end of "
+            f"the window: {error}"
+        ) from error
+    return adjusted
 
 
 def _unsupported(

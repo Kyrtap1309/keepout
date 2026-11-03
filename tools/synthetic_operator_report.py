@@ -179,7 +179,8 @@ def window_start(manifest: snapshot.Manifest) -> Time:
     return Time(day_text(manifest["socrates"]["first_tca"]), scale="utc")
 
 
-def _level(event: OperatorEvent) -> str | None:
+def level_key(event: OperatorEvent) -> str | None:
+    """The key of an event's risk level; ``None`` without one."""
     level = event.assessment.level
     return None if level is None else level.key
 
@@ -237,7 +238,7 @@ def _event(
         "max_pc": max_pc,
         "scale_factor": scale,
         "diluted": diluted,
-        "level": _level(event),
+        "level": level_key(event),
         "action": event.action.label,
         "notes": notes,
     }

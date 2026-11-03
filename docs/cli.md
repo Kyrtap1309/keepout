@@ -2,8 +2,9 @@
 
 The `keepout` command runs the library's main workflows from a terminal:
 download data, screen a fleet and issue CDMs as a
-[synthetic operator](synthetic.md), assess CDM files, and check keepout's
-Pc against NASA CARA's test cases. It is a thin layer over the library
+[synthetic operator](synthetic.md), assess CDM files, plan a
+collision-avoidance burn, and check keepout's Pc against NASA CARA's test
+cases. It is a thin layer over the library
 functions the other pages describe, so it computes exactly what they do.
 
 ```bash
@@ -24,6 +25,7 @@ the tables); the library itself never imports either. Without the extra,
 | `keepout fetch kelvins` | Download ESA's Kelvins collision avoidance data set (221 MB) |
 | `keepout screen --fleet FILE [--days 7] [--cdm-dir DIR]` | Screen a fleet, issue a CDM per approach, assess each |
 | `keepout assess CDM...` | Compute each CDM's Pc and each event's risk and action |
+| `keepout maneuver CDM... [--catalog FILE]` | Find the smallest burn each way that takes an event below a target Pc, and re-screen it |
 | `keepout validate` | Compare keepout's Pc with CARA's on every validation case |
 
 `keepout COMMAND --help` lists every option of a command.
@@ -178,6 +180,94 @@ a model is not taken for one from tracking.
 The exit status is 3 when at least one event's action is `manoeuvre`,
 whether or not its covariances are assumed.
 
+## `maneuver`
+
+`keepout maneuver` plans an along-track burn of an event's primary
+(`OBJECT1`), as in [Manoeuvre planning](maneuver.md). It reads CDM files
+as `assess` does; they must make one event (several are an error that
+lists them), and the burns are planned from its latest CDM. After the
+week of the synthetic operator above, this plans the yellow Intelsat 39
+event, with the target green, and re-screens both burns against the
+frozen catalog:
+
+```bash
+keepout maneuver cdms/44476_55841_*.kvn --target-pc 1e-7 \
+    --catalog tests/screening/data/celestrak-public.csv.gz
+```
+
+```text
+Event 44476/55841/2026-10-08T12:03:02.771792: 44476 / 55841, TCA 2026-10-08 12:03 UTC, target Pc 1.00e-07.
+Burns of the primary
+Option      Before TCA (h)  Δv (m/s)        Pc  Range (m)  Method  Target
+─────────────────────────────────────────────────────────────────────────
+no burn                  -         -  7.38e-06       3647  foster  missed
+prograde              12.1   +0.0794  6.54e-08       7771  foster  met
+retrograde            12.1   -0.0398  4.64e-08       9157  foster  met
+Note: 2-D Pc assumptions questionable: the encounter lasts about 2.51e+03 s, 2.9% of the primary's orbital period (limit 1%); a 3-D Pc may differ
+Note: the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used
+Note: every Pc rests on an assumed covariance (COVARIANCE_METHOD = DEFAULT)
+Note: drag is off: the CDM gives the primary no positive CD_AREA_OVER_MASS
+Note: relative speed 1.99 m/s is below 100 m/s: the planner looks for the new TCA only within 1/20 of an orbit of TCA, so after a burn the pair can meet again hours away, at a Pc no cell shows; only a re-screen shows it (inside that window the new TCA was measured up to 28 m off at 10 m/s)
+Note: 240 of 930 cells have no Pc and are never options: 240 without a closest approach to trust, 0 where Foster's Pc failed
+Note: prograde: 2-D Pc assumptions questionable: the encounter lasts about 8.4e+03 s, 9.7% of the primary's orbital period (limit 1%); a 3-D Pc may differ
+Note: retrograde: 2-D Pc assumptions questionable: the encounter lasts about 7.17e+03 s, 8.3% of the primary's orbital period (limit 1%); a 3-D Pc may differ
+prograde re-screened against 19879 objects (tests/screening/data/celestrak-public.csv.gz) from 2026-10-07T23:57:11 to 2026-10-14T23:57:11 UTC; 35 catalog objects left out, of which it says nothing.
+  Event secondary 55841 on the element sets (SGP4, not the CDM's orbit): no approach within 10 min of the CDM's TCA after the burn.
+  No new or closer approach at red among the objects screened.
+  The burn brings this pair back at 2026-10-09 00:07 UTC at Pc 9.87e-06 (assumed), above the target.
+  1 new approach:
+    55841 at 2026-10-09 00:07 UTC: range 4113 m, assumed Pc 9.87e-06, yellow
+  Covariances are assumed (keepout's model of GP element set errors), not orbit determination.
+retrograde re-screened against 19879 objects (tests/screening/data/celestrak-public.csv.gz) from 2026-10-07T23:57:11 to 2026-10-14T23:57:11 UTC; 35 catalog objects left out, of which it says nothing.
+  Event secondary 55841 on the element sets (SGP4, not the CDM's orbit): no approach within 10 min of the CDM's TCA after the burn.
+  No new or closer approach at red among the objects screened.
+```
+
+It took 8.7 to 10.6 s over 3 runs (Intel Core i5-14600K). The table gives the event without a burn and the
+smallest burn each way that meets the target: its time before TCA, its
+signed Δv (negative is retrograde), the Pc and range at the new closest
+approach and the method that confirmed it (the event's own). The notes
+are the plan's; here the slow GEO encounter leaves a quarter of the grid
+without a trusted closest approach. Each re-screen then says what became
+of the event's secondary on the element sets (SGP4, not the CDM's orbit),
+whether any new or closer approach is at red, when the burn brings the
+event's own pair back away from its TCA at or above the target, and lists
+the approaches, the highest Pc first (at most 5 of each kind; `--json`
+lists all). Here the prograde burn clears the event at its TCA but brings
+the same object back twelve hours later at 9.87e-06, above the target: the
+planner looks for the new TCA only within a twentieth of an orbit, so only
+the re-screen sees it, and that option is not clean. The retrograde burn
+is clean, so the command exits with status 0 and shows both. These Pc
+values rest on assumed covariances, as the output says.
+
+- **Target.** `--target-pc P` (default 1e-5), compared on the
+  conservative basis as in `assess`.
+- **One burn.** `--burn-before HOURS` and `--dv M/S` (together) report
+  that burn, with the event's method, instead of the smallest burn each
+  way; it may be off the grid. The whole grid is still computed first,
+  so this takes as long as a plan.
+- **Radius.** `--hbr METRES` as for `assess`.
+- **Re-screen.** `--catalog FILE` or `--source celestrak|spacetrack` (as
+  for `screen`, with `--cache-dir` and `--workers`) screens each burn
+  against the catalog for 7 days from the burn. The primary must be in the
+  catalog; the secondary need not be (an analyst object is in no public
+  catalog), and then the output says in capitals that the event was NOT
+  screened. Without a catalog there is no re-screen, and the output says
+  that nothing is known of the approaches a burn brings.
+
+Planning takes tens of seconds on the default grid, plus a run of the
+event's own method per candidate burn (up to a minute each for a slow
+encounter on Monte Carlo). A primary with `MANEUVERABLE = NO`, a latest
+CDM created later than 6 h before TCA, an unknown covariance, or a primary
+the re-screen cannot find or carry is an error (status 1).
+
+The exit status is 4 when no burn on the grid meets the target, when the
+burn given with `--burn-before` and `--dv` misses it, or when every burn
+brings an approach at red or the event's own pair back above the target
+(away from its TCA, by the re-screen); the last line then says which. One
+burn that does neither is enough for status 0, and the others are shown
+with what they bring.
+
 ## `validate`
 
 `keepout validate` runs every CARA validation case (2-D, 3-D and maximum Pc;
@@ -196,6 +286,7 @@ repository by `tools/validation_report.py`.
 | 1 | An error in the data, a download or a file: one line `Error: ...` on standard error, no traceback (also for a refused Space-Track query, with the time to wait). |
 | 2 | A usage error: an unknown option, a bad value, a missing file. |
 | 3 | `assess`: at least one event needs a manoeuvre. |
+| 4 | `maneuver`: no burn on the grid meets the target, the burn given with `--burn-before` and `--dv` misses it, or every burn brings an approach at red or the event's pair back above the target. |
 
 ## JSON output
 
@@ -215,3 +306,21 @@ for `screen`. `screen` adds each approach's `relative_speed_m_s` and
 `cdm_file`, and lists the element sets it `skipped` with the reason;
 `assess` adds `cdm_count` (the CDMs read) and `manoeuvre` (true when it
 exits with status 3).
+
+`maneuver` gives `event`, `primary`, `secondary`, `target_pc`, `method`
+(the event's own), `assumed_covariance`, `baseline` (`pc`,
+`range_at_tca_m`, `method`, `meets_target`), `notes` and `options`: one
+per burn, with `direction`, `burn_lead_s`, `delta_v_m_s`, the four keys
+of `baseline` and `rescreen` (`null` without a catalog). A `rescreen` has
+`conflict` (a new or closer approach is red), `secondary_screened`,
+`event_range_m` (`null` when the secondary has no approach within 10
+minutes of the CDM's TCA, or was not screened: read
+`secondary_screened`), `catalog_objects` (the element sets screened),
+`skipped_objects`, `window_start` and `window_end` (UTC, ISO 8601, as
+every time in the JSON; the start is the burn), and `new_approaches`,
+`closer_approaches` and `event_returns` (the new or closer approaches of
+the event's own secondary more than 10 minutes from its TCA at or above
+`target_pc`; any makes the burn count like a conflict for status 4), each
+approach with `secondary`, `tca`, `range_at_tca_m`, `relative_speed_m_s`,
+`pc`, `level` and `assumed_covariance` (always true). With no burn on the
+grid, `options` is empty.

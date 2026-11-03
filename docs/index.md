@@ -6,7 +6,7 @@ risk trends, a synthetic operator on public data, a command line and
 collision-avoidance manoeuvre planning.
 
 !!! warning "Pre-alpha"
-    Milestone M6 — synthetic operator and command line. APIs will change.
+    Milestone M7 — manoeuvre planning. APIs will change.
 
 ## Reading a CDM
 
@@ -98,6 +98,27 @@ determination. See [Synthetic operator](synthetic.md) for what a run does,
 for the full catalog, and the [report](synthetic-operator.md) for the
 week's approaches.
 
+## Manoeuvre planning
+
+```python
+import keepout.cdm
+from keepout import ConjunctionEvent
+from keepout.maneuver import plan_maneuver
+
+event = ConjunctionEvent.from_cdms([keepout.cdm.load("event.cdm")])
+plan = plan_maneuver(event, combined_hard_body_radius=20.0)  # target Pc 1e-5
+print(plan.baseline.pc, plan.retrograde, plan.prograde, plan.notes)
+```
+
+From the latest CDM of an event, keepout computes the Pc of a grid of
+impulsive along-track burns of the primary, finds the smallest burn each
+way that meets the target, and can screen each burn against a catalog for
+the approaches it brings (`keepout maneuver` on the command line). See
+[Manoeuvre planning](maneuver.md) for the method,
+[Assumptions](assumptions.md#manoeuvre-planning) for what it leaves out,
+and the [report](maneuver-report.md) for the Δv × burn-time heatmap of a
+CARA test event.
+
 ## Validation philosophy
 
 Every Pc algorithm in keepout is implemented from the published literature
@@ -121,6 +142,7 @@ uv run python tools/screening_report.py   # SOCRATES screening report (offline)
 uv run python tools/screening_benchmark.py   # screening benchmark (offline, minutes)
 uv run python tools/screening_benchmark.py --source spacetrack   # on the full catalog
 uv run python tools/synthetic_operator_report.py   # synthetic operator report (offline)
+uv run python tools/maneuver_report.py   # manoeuvre report (downloads one CARA CDM)
 uv run python tools/spacetrack_snapshot.py verify   # frozen Space-Track catalog (offline)
 uv run mkdocs serve           # this documentation
 ```
