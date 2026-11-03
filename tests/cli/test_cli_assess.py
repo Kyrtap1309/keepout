@@ -53,29 +53,29 @@ def test_assess_exits_with_3_when_an_event_needs_a_manoeuvre(tmp_path: Path) -> 
     files = [write(tmp_path, "green.kvn", green()), write(tmp_path, "yellow.xml", "")]
     Path(files[1]).write_text(xml.dumps(operator_run().cdms[1]), encoding="utf-8")
     result = keepout("assess", *files, "--hbr", "1000")
-    assert result.exit_code == ExitCode.MANOEUVRE
+    assert result.exit_code == ExitCode.MANEUVER
     assert result.stdout == snapshot("""\
 Conjunction events
 TCA (UTC)         Objects        Miss (m)  CDMs        Pc  Level  Action        \n\
 ────────────────────────────────────────────────────────────────────────────────
-2026-10-06 19:36  52939 / 47826      1029     1  4.25e-02  red    manoeuvre     \n\
+2026-10-06 19:36  52939 / 47826      1029     1  4.25e-02  red    maneuver      \n\
 2026-10-08 12:03  44476 / 55841      3647     1  1.73e-02  red    prepare       \n\
-                                                                  manoeuvre     \n\
-2 events from 2 CDMs: 1 manoeuvre, 1 prepare manoeuvre.
+                                                                  maneuver      \n\
+2 events from 2 CDMs: 1 maneuver, 1 prepare maneuver.
 2 of 2 events rest on assumed covariances (COVARIANCE_METHOD = DEFAULT), not orbit determination.
-52939/47826/2026-10-06T19:36:42.717332: manoeuvre (latest Pc 4.25e-02 is red, 0.82 d before TCA; trend undetermined; within the decision point (2.00 d before TCA))
-44476/55841/2026-10-08T12:03:02.771792: prepare manoeuvre (latest Pc 1.73e-02 is red, 2.50 d before TCA; trend undetermined; before the decision point (2.00 d before TCA): prepare a manoeuvre; diagnostic: 2-D Pc assumptions questionable: the encounter lasts about 3.5e+03 s, 4.1% of the primary's orbital period (limit 1%); a 3-D Pc may differ; diagnostic: the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used)
+52939/47826/2026-10-06T19:36:42.717332: maneuver (latest Pc 4.25e-02 is red, 0.82 d before TCA; trend undetermined; within the decision point (2.00 d before TCA))
+44476/55841/2026-10-08T12:03:02.771792: prepare maneuver (latest Pc 1.73e-02 is red, 2.50 d before TCA; trend undetermined; before the decision point (2.00 d before TCA): prepare a manoeuvre; diagnostic: 2-D Pc assumptions questionable: the encounter lasts about 3.5e+03 s, 4.1% of the primary's orbital period (limit 1%); a 3-D Pc may differ; diagnostic: the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used)
 At least one event needs a manoeuvre (exit status 3).
 """)
     assert result.stderr == ""
     as_json = keepout("assess", *files, "--hbr", "1000", "--json")
-    assert as_json.exit_code == ExitCode.MANOEUVRE
+    assert as_json.exit_code == ExitCode.MANEUVER
     payload = json.loads(as_json.stdout)
     assert payload["cdm_count"] == 2
-    assert payload["manoeuvre"] is True
+    assert payload["maneuver"] is True
     assert [event["action"] for event in payload["events"]] == [
-        "manoeuvre",
-        "prepare_manoeuvre",
+        "maneuver",
+        "prepare_maneuver",
     ]
 
 
@@ -224,13 +224,13 @@ def test_assess_labels_events_whose_covariances_are_assumed(tmp_path: Path) -> N
         write(tmp_path, "yellow.kvn", calculated(yellow())),
     ]
     result = keepout("assess", *files, "--hbr", "1000")
-    assert result.exit_code == ExitCode.MANOEUVRE
+    assert result.exit_code == ExitCode.MANEUVER
     assert (
         "1 of 2 events rests on assumed covariances (COVARIANCE_METHOD = "
         "DEFAULT), not orbit determination."
     ) in result.stdout.splitlines()
     as_json = keepout("assess", *files, "--hbr", "1000", "--json")
-    assert as_json.exit_code == ExitCode.MANOEUVRE
+    assert as_json.exit_code == ExitCode.MANEUVER
     payload = json.loads(as_json.stdout)
     assert payload["assumed_covariance_events"] == 1
     assert [e["assumed_covariance"] for e in payload["events"]] == [True, False]

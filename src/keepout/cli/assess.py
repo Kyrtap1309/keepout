@@ -152,13 +152,13 @@ def assess_command(
         for event in group_events(messages)
     ]
     actions = Counter(item.assessment.decision.action for item in assessed)
-    manoeuvre = actions[Action.MANOEUVRE] > 0
+    maneuver = actions[Action.MANEUVER] > 0
     assumed = sum(item.event.assumed_covariance for item in assessed)
     payload: dict[str, JsonOut] = {
         "cdm_count": len(messages),
         "events": [event_json(item) for item in assessed],
         "assumed_covariance_events": assumed,
-        "manoeuvre": manoeuvre,
+        "maneuver": maneuver,
     }
     counted = ", ".join(
         f"{actions[action]} {action.label}" for action in sorted(actions, reverse=True)
@@ -176,10 +176,10 @@ def assess_command(
             "(COVARIANCE_METHOD = DEFAULT), not orbit determination."
         )
     text += reasons(assessed, Action.MONITOR)
-    if manoeuvre:
+    if maneuver:
         text.append(
             "At least one event needs a manoeuvre "
-            f"(exit status {int(ExitCode.MANOEUVRE)})."
+            f"(exit status {int(ExitCode.MANEUVER)})."
         )
     show(
         payload,
@@ -187,8 +187,8 @@ def assess_command(
         *text,
         as_json=as_json,
     )
-    if manoeuvre:
-        raise typer.Exit(ExitCode.MANOEUVRE)
+    if maneuver:
+        raise typer.Exit(ExitCode.MANEUVER)
 
 
 # The defaults in the help are the library's own (none under python -OO).

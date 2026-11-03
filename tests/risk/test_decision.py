@@ -31,9 +31,9 @@ def decision_for(seen: list[PcObservation], **config: float) -> Action:
     [
         (series((3.0, 1e-9), (1.0, 1e-9)), Action.IGNORE),
         (series((3.0, 1e-6), (1.0, 1e-6)), Action.MONITOR),
-        (series((3.0, 1e-3), (1.0, 1e-3)), Action.MANOEUVRE),
-        (series((4.0, 1e-3), (3.0, 1e-3)), Action.PREPARE_MANOEUVRE),
-        (series((3.0, 1e-3), (2.0, 1e-3)), Action.MANOEUVRE),
+        (series((3.0, 1e-3), (1.0, 1e-3)), Action.MANEUVER),
+        (series((4.0, 1e-3), (3.0, 1e-3)), Action.PREPARE_MANEUVER),
+        (series((3.0, 1e-3), (2.0, 1e-3)), Action.MANEUVER),
         (series((3.0, 1e-12), (2.0, 1e-10), (1.0, 1e-8)), Action.MONITOR),
         (series((3.0, 1e-8), (2.0, 1e-10), (1.0, 1e-12)), Action.IGNORE),
         (series((3.0, 1e-18), (2.0, 1e-17), (1.0, 1e-16)), Action.IGNORE),
@@ -83,7 +83,7 @@ def test_rising_is_judged_against_the_trends_thresholds() -> None:
 
 def test_decision_point_is_configurable() -> None:
     seen = series((4.0, 1e-3), (3.0, 1e-3))
-    assert decision_for(seen, decision_point=3.5 * 86400) == Action.MANOEUVRE
+    assert decision_for(seen, decision_point=3.5 * 86400) == Action.MANEUVER
 
 
 def test_a_manoeuvre_says_why() -> None:
@@ -118,13 +118,13 @@ def test_a_green_pc_with_diagnostics_is_monitored() -> None:
 
 def test_a_red_upper_bound_names_the_concern() -> None:
     decision = decide(analyse_trend([at(1.0, 1e-3, kind="upper_bound")]))
-    assert decision.action is Action.MANOEUVRE
+    assert decision.action is Action.MANEUVER
     assert decision.reasons[-1] == "the Pc is an upper bound, not an estimate"
 
 
 def test_the_interval_end_is_named_when_it_decides() -> None:
     decision = decide(analyse_trend([at(1.0, 5e-5, ci_high=2e-4)]))
-    assert decision.action is Action.MANOEUVRE
+    assert decision.action is Action.MANEUVER
     assert decision.reasons[0] == (
         "latest Pc 2.00e-04 is red (upper end of the Monte Carlo confidence "
         "interval), 1.00 d before TCA"
@@ -153,22 +153,22 @@ WITHIN = "within the decision point (2.00 d before TCA)"
         ),
         (
             [*series((4.0, 1e-3)), at(3.0, None)],
-            Action.PREPARE_MANOEUVRE,
+            Action.PREPARE_MANEUVER,
             (NO_PC, RED_THEN.format("4.00"), "trend undetermined", PREPARE),
         ),
         (
             [*series((1.5, 1e-3)), at(1.0, None)],
-            Action.MANOEUVRE,
+            Action.MANEUVER,
             (NO_PC, RED_THEN.format("1.50"), "trend undetermined", WITHIN),
         ),
         (
             [*series((1.0, 1e-3)), at(1.0, None)],
-            Action.MANOEUVRE,
+            Action.MANEUVER,
             (NO_PC, RED_THEN.format("1.00"), "trend undetermined", WITHIN),
         ),
         (
             [at(3.0, 1e-3, kind="upper_bound"), at(2.5, None)],
-            Action.PREPARE_MANOEUVRE,
+            Action.PREPARE_MANEUVER,
             (
                 NO_PC,
                 (
@@ -218,7 +218,7 @@ def test_invalid_decision_point_is_refused(seconds: float) -> None:
 def test_assess_combines_trend_and_decision() -> None:
     assessment = assess(series((1.0, 2e-3), (3.0, 1e-3)))
     assert assessment.level is RiskLevel.RED
-    assert assessment.decision.action is Action.MANOEUVRE
+    assert assessment.decision.action is Action.MANEUVER
     assert assessment.trend.direction == "steady"
     assert assessment.thresholds == Thresholds()
 
@@ -238,8 +238,8 @@ def test_a_doubtful_simultaneous_pc_counts_as_latest(doubtful: dict[str, Any]) -
 
 
 def test_actions_are_ordered_and_not_numbers() -> None:
-    assert Action.IGNORE < Action.MONITOR < Action.PREPARE_MANOEUVRE
-    assert Action.PREPARE_MANOEUVRE < Action.MANOEUVRE
+    assert Action.IGNORE < Action.MONITOR < Action.PREPARE_MANEUVER
+    assert Action.PREPARE_MANEUVER < Action.MANEUVER
     assert not isinstance(Action.IGNORE, int)
 
 
@@ -297,8 +297,8 @@ def test_an_action_is_labelled_in_words() -> None:
     assert [action.label for action in Action] == [
         "ignore",
         "monitor",
-        "prepare manoeuvre",
-        "manoeuvre",
+        "prepare maneuver",
+        "maneuver",
     ]
 
 
@@ -306,6 +306,6 @@ def test_an_action_has_a_stable_key_for_data() -> None:
     assert [action.key for action in Action] == [
         "ignore",
         "monitor",
-        "prepare_manoeuvre",
-        "manoeuvre",
+        "prepare_maneuver",
+        "maneuver",
     ]

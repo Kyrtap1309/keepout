@@ -39,8 +39,8 @@ At the approaches' TCAs, sigma_T is 1.041 to 20.413 km.
 |---|---|
 | ignore | 10 |
 | monitor | 2 |
-| prepare manoeuvre | 0 |
-| manoeuvre | 0 |
+| prepare maneuver | 0 |
+| maneuver | 0 |
 
 Each approach is an event with a single CDM, issued at the start of the window, so the trend is undetermined and the decision rests on the Pc's level and the time from the CDM to TCA.
 

@@ -82,8 +82,8 @@ def test_the_summary_has_the_settings_catalog_fleet_and_actions(
     assert summary["actions"] == {
         "ignore": 2,
         "monitor": 1,
-        "prepare manoeuvre": 0,
-        "manoeuvre": 0,
+        "prepare maneuver": 0,
+        "maneuver": 0,
     }
     assert summary["example"] == "52939_47826_20261006T193642.717Z_20261006T000000.000Z"
 

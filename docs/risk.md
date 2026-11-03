@@ -3,7 +3,7 @@
 A conjunction is rarely a single message: the screening service sends a CDM
 every few hours for days before TCA, and each one gives a new Pc. keepout
 turns that sequence into a recommendation: **ignore**, **monitor**,
-**prepare manoeuvre** or **manoeuvre**, always with the reasons.
+**prepare maneuver** or **maneuver**, always with the reasons.
 
 ```python
 from pathlib import Path
@@ -93,12 +93,12 @@ they behave on 15 321 real events.
 
 `decide` looks at the latest observation before TCA. The actions are
 ordered from the mildest to the most drastic (`Action.IGNORE <
-Action.MONITOR < Action.PREPARE_MANOEUVRE < Action.MANOEUVRE`):
+Action.MONITOR < Action.PREPARE_MANEUVER < Action.MANEUVER`):
 
 | Latest observation | Action |
 |---|---|
-| red, at most `decision_point` before TCA (2 days by default) | **manoeuvre** |
-| red, earlier | **prepare manoeuvre** (monitor and prepare a manoeuvre) |
+| red, at most `decision_point` before TCA (2 days by default) | **maneuver** |
+| red, earlier | **prepare maneuver** (monitor and prepare a manoeuvre) |
 | yellow | **monitor** |
 | green, rising fast enough to reach yellow by TCA | **monitor** |
 | green, an upper bound or with diagnostics | **monitor** |
@@ -108,7 +108,7 @@ Action.MONITOR < Action.PREPARE_MANOEUVRE < Action.MANOEUVRE`):
 
 When the latest observation has no Pc but the latest observation with a Pc
 was red, the red rules apply, judged at the failed observation's time. That
-gives manoeuvre within the decision point and prepare manoeuvre before it.
+gives maneuver within the decision point and prepare maneuver before it.
 
 A green Pc that rises is projected to TCA along the fitted slope. A rise
 from 1e-18 to 1e-17 is reported but does not need attention. A doubtful

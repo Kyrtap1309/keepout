@@ -71,7 +71,7 @@ class OrderedEnum(enum.Enum):
     @property
     def key(self) -> str:
         """The member's stable name in data such as JSON: its name in lower
-        case, ``prepare_manoeuvre``."""
+        case, ``prepare_maneuver``."""
         return self.name.lower()
 
 

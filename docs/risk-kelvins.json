@@ -13,8 +13,8 @@
   "actions": {
     "ignore": 13823,
     "monitor": 1468,
-    "prepare manoeuvre": 6,
-    "manoeuvre": 24
+    "prepare maneuver": 6,
+    "maneuver": 24
   },
   "directions": {
     "rising": 947,
@@ -57,17 +57,17 @@
       "high": 484,
       "low": 984
     },
-    "prepare manoeuvre": {
+    "prepare maneuver": {
       "high": 6,
       "low": 0
     },
-    "manoeuvre": {
+    "maneuver": {
       "high": 24,
       "low": 0
     }
   },
   "examples": {
-    "manoeuvre": 734,
+    "maneuver": 734,
     "prepare": 17487,
     "rising": 4401,
     "falling": 9860

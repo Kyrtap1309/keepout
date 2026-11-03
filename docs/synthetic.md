@@ -143,8 +143,8 @@ lists the messages.
 local minima of their range, however close in time, so each is its own
 event with a single CDM. With a single Pc the trend is undetermined. The
 decision rests on the Pc's risk level and the time from the CDM's creation
-to TCA. A red Pc within 2 days of TCA is `manoeuvre`, and a red Pc further
-ahead `prepare manoeuvre`. Two fleet satellites approaching each
+to TCA. A red Pc within 2 days of TCA is `maneuver`, and a red Pc further
+ahead `prepare maneuver`. Two fleet satellites approaching each
 other give two events, one CDM for each satellite, as a service sends each
 operator its own.
 

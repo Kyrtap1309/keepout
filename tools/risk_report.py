@@ -158,14 +158,14 @@ class Example:
 
 EXAMPLES: Final = (
     Example(
-        "manoeuvre",
-        "Red within the decision point: manoeuvre",
-        lambda a: a.decision.action is Action.MANOEUVRE,
+        "maneuver",
+        "Red within the decision point: maneuver",
+        lambda a: a.decision.action is Action.MANEUVER,
     ),
     Example(
         "prepare",
         "Red before the decision point: monitor and prepare a manoeuvre",
-        lambda a: a.decision.action is Action.PREPARE_MANOEUVRE,
+        lambda a: a.decision.action is Action.PREPARE_MANEUVER,
     ),
     Example(
         "rising",

@@ -41,16 +41,16 @@ class Action(OrderedEnum):
     """Nothing to do."""
     MONITOR = 1
     """Watch the next messages."""
-    PREPARE_MANOEUVRE = 2
+    PREPARE_MANEUVER = 2
     """Watch the next messages and prepare an avoidance manoeuvre (a red
     event before the decision point, or a red event whose latest Pc is
     missing)."""
-    MANOEUVRE = 3
+    MANEUVER = 3
     """Plan and execute an avoidance manoeuvre."""
 
     @property
     def label(self) -> str:
-        """The action in words, as keepout prints it: ``prepare manoeuvre``."""
+        """The action in words, as keepout prints it: ``prepare maneuver``."""
         return self.key.replace("_", " ")
 
 
@@ -159,9 +159,9 @@ def _red(
     )
     if time_to_tca <= config.decision_point:
         within = f"within {decision_point_text}"
-        return Decision(Action.MANOEUVRE, (*reasons, within, *concerns))
+        return Decision(Action.MANEUVER, (*reasons, within, *concerns))
     timing = f"before {decision_point_text}: prepare a manoeuvre"
-    return Decision(Action.PREPARE_MANOEUVRE, (*reasons, timing, *concerns))
+    return Decision(Action.PREPARE_MANEUVER, (*reasons, timing, *concerns))
 
 
 def decide(
@@ -175,8 +175,8 @@ def decide(
       observation with a Pc. If that one was red, the red rule below applies,
       judged at the time of the observation without a Pc; otherwise (no
       observation with a Pc, or it was not red) ``MONITOR``;
-    - red: ``MANOEUVRE`` within the decision point, else
-      ``PREPARE_MANOEUVRE``;
+    - red: ``MANEUVER`` within the decision point, else
+      ``PREPARE_MANEUVER``;
     - yellow: ``MONITOR``;
     - green: ``IGNORE``, unless the Pc is an upper bound, has diagnostics
       (covariance repairs, questionable assumptions) or is rising fast

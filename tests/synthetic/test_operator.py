@@ -226,7 +226,7 @@ def test_the_options_reach_the_cdms_and_the_assessment() -> None:
     assert event.assessment.thresholds.red_from == 1e-14
     # Red within the decision point.
     assert event.assessment.level is RiskLevel.RED
-    assert event.action is Action.MANOEUVRE
+    assert event.action is Action.MANEUVER
 
 
 def test_names_and_designators_the_catalog_lacks_are_unknown() -> None:

@@ -45,15 +45,15 @@ def test_main_writes_then_checks(tmp_path: Path) -> None:
     assert summary["actions"] == {
         "ignore": 4,
         "monitor": 1,
-        "prepare manoeuvre": 0,
-        "manoeuvre": 1,
+        "prepare maneuver": 0,
+        "maneuver": 1,
     }
-    assert summary["examples"] == {"manoeuvre": 5490}
+    assert summary["examples"] == {"maneuver": 5490}
     assert (tmp_path / "docs" / "img" / "event-5490.svg").exists()
     page = (tmp_path / "docs" / "risk-kelvins.md").read_text(encoding="utf-8")
     assert "![Kelvins event 5490](img/event-5490.svg)" in page
     readme = (tmp_path / "README.md").read_text(encoding="utf-8")
-    assert "| manoeuvre | 1 | 16.7% |" in readme
+    assert "| maneuver | 1 | 16.7% |" in readme
     assert "(docs/img/event-5490.svg)" in readme
 
 
@@ -88,7 +88,7 @@ def test_examples_pick_matching_events_of_the_excerpt() -> None:
     assessed = {
         e.event_id: real_assess(e.observations()) for e in kelvins.load(EXCERPT)
     }
-    assert report.choose(report.EXAMPLES, assessed) == {"manoeuvre": 5490}
+    assert report.choose(report.EXAMPLES, assessed) == {"maneuver": 5490}
 
 
 def test_each_example_picks_its_kind_of_event() -> None:
@@ -99,7 +99,7 @@ def test_each_example_picks_its_kind_of_event() -> None:
         4: real_assess(series((3.0, 1e-3), (1.0, 1e-3))),
     }
     assert report.choose(report.EXAMPLES, assessed) == {
-        "manoeuvre": 4,
+        "maneuver": 4,
         "prepare": 1,
         "rising": 2,
         "falling": 3,

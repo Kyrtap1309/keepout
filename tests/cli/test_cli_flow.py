@@ -56,12 +56,12 @@ def screen_and_assess(folder: Path, source: str) -> list[str]:
     assessed = keepout("assess", *files, "--json")
     assert assessed.exit_code == ExitCode.OK
     payload = json.loads(assessed.stdout)
-    assert payload["manoeuvre"] is False
+    assert payload["maneuver"] is False
     assert [e["action"] for e in payload["events"]] == ["ignore", "monitor"]
     assert [e["pc"] for e in payload["events"]] == [e["pc"] for e in events]
     red = keepout("assess", *files, "--hbr", "1000")
-    assert red.exit_code == ExitCode.MANOEUVRE
-    assert "2 events from 2 CDMs: 1 manoeuvre, 1 prepare manoeuvre." in red.stdout
+    assert red.exit_code == ExitCode.MANEUVER
+    assert "2 events from 2 CDMs: 1 maneuver, 1 prepare maneuver." in red.stdout
     return [Path(file).read_text(encoding="utf-8") for file in sorted(files)]
 
 

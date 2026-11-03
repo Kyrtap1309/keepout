@@ -86,8 +86,8 @@
   "actions": {
     "ignore": 10,
     "monitor": 2,
-    "prepare manoeuvre": 0,
-    "manoeuvre": 0
+    "prepare maneuver": 0,
+    "maneuver": 0
   },
   "events": [
     {

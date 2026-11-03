@@ -63,7 +63,7 @@ class ExitCode(enum.IntEnum):
     or :class:`OSError`), a failed validation, or the ``cli`` extra missing."""
     USAGE = 2
     """A wrong command line (Typer's status for it)."""
-    MANOEUVRE = 3
+    MANEUVER = 3
     """``keepout assess``: at least one event's decision is to manoeuvre."""
     NO_SAFE_BURN = 4
     """``keepout maneuver``: no burn exists, the burn given misses the target,

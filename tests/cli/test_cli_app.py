@@ -29,7 +29,7 @@ def test_exit_codes() -> None:
         "OK": 0,
         "ERROR": 1,
         "USAGE": 2,
-        "MANOEUVRE": 3,
+        "MANEUVER": 3,
         "NO_SAFE_BURN": 4,
     }
 
@@ -129,8 +129,8 @@ def test_fail_prints_the_message_and_exits_with_the_status(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     with pytest.raises(typer.Exit) as exit_:
-        fail("it broke", ExitCode.MANOEUVRE)
-    assert exit_.value.exit_code == ExitCode.MANOEUVRE
+        fail("it broke", ExitCode.MANEUVER)
+    assert exit_.value.exit_code == ExitCode.MANEUVER
     assert capsys.readouterr().err == "Error: it broke\n"
 
 

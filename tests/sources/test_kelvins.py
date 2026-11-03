@@ -78,7 +78,7 @@ def test_the_floor_is_below_floor(events: dict[int, KelvinsEvent]) -> None:
         (97, Action.IGNORE, "steady"),
         (505, Action.IGNORE, "steady"),
         (907, Action.IGNORE, "steady"),
-        (5490, Action.MANOEUVRE, "steady"),
+        (5490, Action.MANEUVER, "steady"),
     ],
 )
 def test_assessment_of_the_excerpt(
