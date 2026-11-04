@@ -56,6 +56,26 @@ def test_check_reports_a_stale_file_without_writing(
     assert same.stat().st_mtime_ns == before
 
 
+def test_check_shows_how_a_stale_text_file_differs(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    stale = tmp_path / "stale.json"
+    stale.write_text('{\n  "a": 1,\n  "b": 2\n}\n', encoding="utf-8")
+    fresh = '{\n  "a": 1,\n  "b": 3\n}\n'
+    assert write_or_check({stale: fresh}, check=True, tool="tool.py") == 1
+    assert capsys.readouterr().out == (
+        f"{stale} is out of date; run tool.py\n"
+        f"--- {stale} (committed)\n"
+        f"+++ {stale} (generated)\n"
+        "@@ -1,4 +1,4 @@\n"
+        " {\n"
+        '   "a": 1,\n'
+        '-  "b": 2\n'
+        '+  "b": 3\n'
+        " }\n"
+    )
+
+
 def test_write_creates_stale_files_and_leaves_current_ones(
     files: dict[Path, str],
 ) -> None:

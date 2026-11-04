@@ -6,6 +6,7 @@ writing or checking files."""
 from __future__ import annotations
 
 import argparse
+import difflib
 import json
 import os
 from collections.abc import Mapping, Sequence
@@ -167,8 +168,21 @@ def threshold_text(green_below: float, red_from: float) -> str:
     return f"green below {green_below:.0e}, red from {red_from:.0e}"
 
 
+def _diff(path: Path, content: str) -> str:
+    """How ``content`` differs from the text of ``path``, as a unified diff."""
+    return "".join(
+        difflib.unified_diff(
+            path.read_text(encoding="utf-8").splitlines(keepends=True),
+            content.splitlines(keepends=True),
+            f"{path} (committed)",
+            f"{path} (generated)",
+        )
+    )
+
+
 def write_or_check(files: Mapping[Path, str | bytes], *, check: bool, tool: str) -> int:
-    """The files whose contents differ, written, or with ``check`` reported.
+    """The files whose contents differ, written, or with ``check`` reported
+    (a text file that exists with its diff).
 
     Text is written as UTF-8, bytes as they are.
 
@@ -184,6 +198,10 @@ def write_or_check(files: Mapping[Path, str | bytes], *, check: bool, tool: str)
             continue
         if check:
             print(f"{path} is out of date; run {tool}")
+            if isinstance(content, str) and path.exists():
+                # Shown so a difference only another machine sees can be read
+                # in that machine's log.
+                print(_diff(path, content), end="")
             status = 1
         else:
             path.parent.mkdir(parents=True, exist_ok=True)
