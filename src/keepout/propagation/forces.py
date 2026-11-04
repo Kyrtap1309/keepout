@@ -162,7 +162,8 @@ class ForceModel:
         relative = v - air_velocity
         speed = np.linalg.norm(relative, axis=1, keepdims=True)
         rho = density(radius - EARTH_RADIUS)
-        return gravity - 0.5 * rho * self.drag_term * speed * relative
+        total: FloatArray = gravity - 0.5 * rho * self.drag_term * speed * relative
+        return total
 
     def derivative(self, state: FloatArray) -> FloatArray:
         """Time derivative of N states, for an ODE solver.

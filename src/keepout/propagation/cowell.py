@@ -183,8 +183,11 @@ def integrate(
         if solution.status < 0:
             raise PropagationError(f"integration failed: {solution.message}")
         if solution.status > 0 and not stop_at_surface:
-            when = solution.t_events[0][0]
-            lowest = np.argmin(_radii(solution.y_events[0][0]))
+            # Lists, not None: solve_ivp was given events.
+            t_events: list[FloatArray] = solution.t_events or []
+            y_events: list[FloatArray] = solution.y_events or []
+            when = t_events[0][0]
+            lowest = np.argmin(_radii(y_events[0][0]))
             raise PropagationError(
                 f"object {lowest} fell below the Earth's surface at t = {when:.1f} s"
             )
