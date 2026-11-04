@@ -277,6 +277,13 @@ class Summary(TypedDict):
     timings: Timings | None
 
 
+def _time_text(time: Time) -> str:
+    """A time in UTC to the millisecond: the microseconds of a computed time
+    (a TCA, a burn) differ with the machine's floating-point library."""
+    text: str = Time(time, precision=3).utc.isot
+    return text
+
+
 def _round_hours(seconds: float) -> float:
     return round(seconds / HOUR, 2)
 
@@ -307,8 +314,8 @@ def plan_summary(plan: ManeuverPlan) -> Plan:
         "primary_name": cdm.object1.name,
         "secondary": cdm.object2.object_id,
         "secondary_name": cdm.object2.name,
-        "tca": cdm.tca.utc.isot,
-        "created": cdm.creation_date.utc.isot,
+        "tca": _time_text(cdm.tca),
+        "created": _time_text(cdm.creation_date),
         "hours_to_tca": _round_hours(time_to_tca(cdm)),
         "relative_speed": round(plan.conjunction.relative_speed, 3),
         "primary_drag_term": cdm.object1.cd_area_over_mass,
@@ -344,7 +351,7 @@ def _approach(item: NewApproach) -> Approach:
     approach = item.approach
     return {
         "secondary": approach.secondary_number,
-        "tca": approach.tca.utc.isot,
+        "tca": _time_text(approach.tca),
         "range_at_tca": round(approach.range_at_tca, 1),
         "relative_speed": round(approach.relative_speed, 3),
         "pc": significant(item.pc),
@@ -357,8 +364,8 @@ def rescreen_summary(result: RescreenResult) -> Rescreen:
     start, end = result.window
     return {
         "direction": str(result.option.direction),
-        "start": start.utc.isot,
-        "end": end.utc.isot,
+        "start": _time_text(start),
+        "end": _time_text(end),
         "catalog_objects": result.catalog_objects,
         "skipped_objects": result.skipped_objects,
         "secondary_screened": result.secondary_screened,
@@ -1131,7 +1138,7 @@ def demonstration_summary(
     return {
         "fleet": shown(fleet),
         "retrieved": snapshot.retrieval_day(manifest),
-        "start": start.utc.isot,
+        "start": _time_text(start),
         "days": DEFAULT_DURATION / DAY,
         "volume": DEFAULT_VOLUME.label,
         "pc": None if pc is None else significant(pc),

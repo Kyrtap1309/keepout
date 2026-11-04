@@ -77,7 +77,7 @@
       "primary_name": "INTELSAT 39 (IS-39)",
       "secondary": "55841",
       "secondary_name": "LUCH-5X (OLYMP-K 2)",
-      "tca": "2026-10-08T12:03:02.771792",
+      "tca": "2026-10-08T12:03:02.772",
       "created": "2026-10-06T00:00:00.000",
       "hours_to_tca": 60.05,
       "relative_speed": 1.988,
@@ -128,8 +128,8 @@
     "rescreens": [
       {
         "direction": "prograde",
-        "start": "2026-10-07T23:57:11.092089",
-        "end": "2026-10-14T23:57:11.092089",
+        "start": "2026-10-07T23:57:11.092",
+        "end": "2026-10-14T23:57:11.092",
         "catalog_objects": 19879,
         "skipped_objects": 35,
         "secondary_screened": true,
@@ -139,7 +139,7 @@
         "new_approaches": [
           {
             "secondary": 55841,
-            "tca": "2026-10-09T00:07:28.973197",
+            "tca": "2026-10-09T00:07:28.973",
             "range_at_tca": 4112.8,
             "relative_speed": 1.891,
             "pc": 9.87e-06,
@@ -150,7 +150,7 @@
         "event_returns": [
           {
             "secondary": 55841,
-            "tca": "2026-10-09T00:07:28.973197",
+            "tca": "2026-10-09T00:07:28.973",
             "range_at_tca": 4112.8,
             "relative_speed": 1.891,
             "pc": 9.87e-06,
@@ -160,8 +160,8 @@
       },
       {
         "direction": "retrograde",
-        "start": "2026-10-07T23:57:11.092089",
-        "end": "2026-10-14T23:57:11.092089",
+        "start": "2026-10-07T23:57:11.092",
+        "end": "2026-10-14T23:57:11.092",
         "catalog_objects": 19879,
         "skipped_objects": 35,
         "secondary_screened": true,
