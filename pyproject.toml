@@ -35,6 +35,10 @@ validation = [
     "openpyxl>=3.1.5",
     "xlrd>=2.0.2",
 ]
+store = [
+    "alembic>=1.20.1",
+    "sqlalchemy>=2.1.8",
+]
 
 [build-system]
 requires = ["uv_build>=0.13.5,<0.14"]
@@ -156,7 +160,7 @@ dev = [
     "hypothesis>=6.170.9",
     "import-linter>=2.15",
     "inline-snapshot>=0.36.1",
-    "keepout[cli,validation]",
+    "keepout[cli,validation,store]",
     "matplotlib>=3.11.2",
     "mkdocs>=1.6,<2",
     "mkdocs-material>=9.8.0",
@@ -205,6 +209,7 @@ name = "Layers: data sources and formats above the geometry they build"
 type = "layers"
 layers = [
     "keepout.cli",
+    "keepout.store",
     "keepout.validation",
     "keepout.maneuver",
     "keepout.sources | keepout.synthetic",
@@ -229,3 +234,10 @@ type = "forbidden"
 source_modules = ["keepout"]
 forbidden_modules = ["typer", "rich"]
 ignore_imports = ["keepout.cli.** -> typer", "keepout.cli.** -> rich"]
+
+[[tool.importlinter.contracts]]
+name = "Only the store uses the store extra"
+type = "forbidden"
+source_modules = ["keepout"]
+forbidden_modules = ["sqlalchemy", "alembic"]
+ignore_imports = ["keepout.store.** -> sqlalchemy", "keepout.store.** -> alembic"]

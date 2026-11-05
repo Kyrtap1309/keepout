@@ -17,6 +17,8 @@ rest is in subpackages:
 - :mod:`keepout.maneuver`: avoidance manoeuvre planning.
 - :mod:`keepout.sources`: data sources (CelesTrak, Space-Track, CARA,
   Kelvins).
+- :mod:`keepout.store`: the conjunction store, a SQLite database (needs the
+  ``store`` extra).
 
 The ``keepout`` command (:mod:`keepout.cli`) needs the ``cli`` extra.
 """
@@ -49,6 +51,7 @@ from keepout.errors import (
     RateLimited,
     SourceFormatError,
     SourceUnavailable,
+    StoreError,
     UnsupportedElements,
     UnsupportedFrame,
 )
@@ -162,6 +165,7 @@ __all__ = [
     "SourceFormatError",
     "SourceUnavailable",
     "StateVector",
+    "StoreError",
     "UnsupportedElements",
     "UnsupportedFrame",
     "__version__",

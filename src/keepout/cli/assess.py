@@ -3,48 +3,32 @@
 from __future__ import annotations
 
 import enum
-from collections import Counter
-from collections.abc import Sequence
-from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Final, TypeAlias
 
 import typer
 
 from keepout._defaults import DECISION_POINT, TCA_TOLERANCE
 from keepout._methods import METHOD_CHOICES, MethodChoice
-from keepout.cli.events import (
-    AssessedEvent,
-    event_json,
-    events_table,
-    reasons,
-)
-from keepout.cli.options import JsonFlag, positive
-from keepout.cli.output import (
-    ExitCode,
-    JsonOut,
-    duration_words,
-    fail,
-    plural,
-    show,
-)
-from keepout.errors import KeepoutError
+from keepout.cli.cdm_input import CdmFiles, load_cdms
+from keepout.cli.events import AssessedEvent, show_assessed
+from keepout.cli.options import HardBodyRadius, JsonFlag
+from keepout.cli.output import duration_words
+from keepout.cli.store import StoreOption, add_and_show
 
 # The library is imported where it is used: keepout --help need not load the
 # numerical libraries (keepout._methods loads none).
 
 __all__ = [
     "AUTO_METHOD",
-    "HardBodyRadius",
     "PcMethod",
     "assess_command",
-    "load_cdms",
     "method_choice",
 ]
 
 if TYPE_CHECKING:
     from typing_extensions import TypeIs
 
-    from keepout.cdm import Cdm
+    from keepout.store.config import Settings
 
     class PcMethod(enum.StrEnum):
         """``--method``: the Pc methods of :func:`keepout.pc.compute_pc`."""
@@ -78,16 +62,6 @@ def method_choice(name: str) -> MethodChoice:
     return name
 
 
-Files: TypeAlias = Annotated[
-    list[Path],
-    typer.Argument(
-        exists=True,
-        dir_okay=False,
-        help="CDM files, KVN or XML, gzipped or not.",
-    ),
-]
-"""The CDM files to assess."""
-
 MethodOption: TypeAlias = Annotated[
     PcMethod,
     typer.Option(
@@ -97,36 +71,13 @@ MethodOption: TypeAlias = Annotated[
 ]
 """``--method``: the Pc method."""
 
-HardBodyRadius: TypeAlias = Annotated[
-    float | None,
-    typer.Option(
-        "--hbr",
-        callback=positive,
-        metavar="METRES",
-        help="Combined hard-body radius [m] (default: the sum of the CDMs' HBR).",
-    ),
-]
-"""``--hbr``: the combined hard-body radius instead of the CDMs'."""
-
-
-def load_cdms(files: Sequence[Path]) -> list[Cdm]:
-    """The CDMs of ``files``; one that cannot be read ends the command, named."""
-    from keepout import cdm
-
-    messages = []
-    for path in files:
-        try:
-            messages.append(cdm.load(path))
-        except KeepoutError as exc:
-            fail(f"{path}: {exc}")
-    return messages
-
 
 def assess_command(
-    files: Files,
+    files: CdmFiles,
     *,
     method: MethodOption = AUTO_METHOD,
     hbr: HardBodyRadius = None,
+    store: StoreOption = None,
     as_json: JsonFlag = False,
 ) -> None:
     """Compute the Pc of each CDM and the risk and action of each event.
@@ -135,15 +86,27 @@ def assess_command(
     event. Each CDM's Pc is computed from its states and covariances, and
     the event's risk level, Pc trend and recommended action are decided as
     of the latest CDM's creation date (a manoeuvre needs a red Pc within
-    {decision_point} of TCA). Exits with status 3 if at least one event's
-    action is to manoeuvre.
+    {decision_point} of TCA). With --store the CDMs are added to the store
+    and each event is the stored one, with its id and every CDM stored of
+    it. Exits with status 3 if at least one event's action is to manoeuvre.
     """
-    from keepout.events import group_events
     from keepout.pc import computation
-    from keepout.risk import Action, assess
+
+    compute = computation(method_choice(method.value))
+    if store is not None:
+
+        def settings() -> Settings:
+            from keepout.store.config import Settings
+
+            return Settings(compute=compute, combined_hard_body_radius=hbr)
+
+        add_and_show(store, files, settings, as_json=as_json)
+        return
+
+    from keepout.events import group_events
+    from keepout.risk import assess
 
     messages = load_cdms(files)
-    compute = computation(method_choice(method.value))
     assessed = [
         AssessedEvent(
             event,
@@ -151,44 +114,7 @@ def assess_command(
         )
         for event in group_events(messages)
     ]
-    actions = Counter(item.assessment.decision.action for item in assessed)
-    maneuver = actions[Action.MANEUVER] > 0
-    assumed = sum(item.event.assumed_covariance for item in assessed)
-    payload: dict[str, JsonOut] = {
-        "cdm_count": len(messages),
-        "events": [event_json(item) for item in assessed],
-        "assumed_covariance_events": assumed,
-        "maneuver": maneuver,
-    }
-    counted = ", ".join(
-        f"{actions[action]} {action.label}" for action in sorted(actions, reverse=True)
-    )
-    text = [
-        (
-            f"{plural(len(assessed), 'event')} from {plural(len(messages), 'CDM')}: "
-            f"{counted}."
-        ),
-    ]
-    if assumed:
-        text.append(
-            f"{assumed} of {plural(len(assessed), 'event')} "
-            f"{'rests' if assumed == 1 else 'rest'} on assumed covariances "
-            "(COVARIANCE_METHOD = DEFAULT), not orbit determination."
-        )
-    text += reasons(assessed, Action.MONITOR)
-    if maneuver:
-        text.append(
-            "At least one event needs a manoeuvre "
-            f"(exit status {int(ExitCode.MANEUVER)})."
-        )
-    show(
-        payload,
-        events_table(assessed, "Conjunction events"),
-        *text,
-        as_json=as_json,
-    )
-    if maneuver:
-        raise typer.Exit(ExitCode.MANEUVER)
+    show_assessed(assessed, cdm_count=len(messages), store=None, as_json=as_json)
 
 
 # The defaults in the help are the library's own (none under python -OO).

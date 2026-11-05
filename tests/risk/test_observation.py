@@ -121,3 +121,9 @@ def test_monte_carlo_keeps_the_upper_end_of_its_interval() -> None:
 def test_a_result_without_an_interval_has_no_upper_end() -> None:
     result = PcResult(2e-4, "hall3d", details={"nc": 2e-4})
     assert PcObservation.from_result(result, time_to_tca=DAY).ci_high is None
+
+
+def test_from_result_names_the_method() -> None:
+    result = PcResult(2e-4, "montecarlo", interval=(1e-4, 3e-4))
+    assert PcObservation.from_result(result, time_to_tca=DAY).method == "montecarlo"
+    assert observation().method is None

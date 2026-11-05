@@ -57,6 +57,10 @@ print(result.method, result.value, result.diagnostics)
 - [Manoeuvre planning](docs/maneuver.md): the smallest burn that clears an
   event, and what it brings.
 - [Command line](docs/cli.md) and [Space-Track data](docs/spacetrack.md).
+- [The conjunction store](docs/store.md): `keepout[store]` keeps CDMs,
+  events and their Pc in a local SQLite file: `--store` on `screen` and
+  `assess`, `keepout store add`, and `keepout maneuver --event ID`, with
+  each event under a stable 8-character id.
 
 ## Validation
 

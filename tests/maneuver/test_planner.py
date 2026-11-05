@@ -40,6 +40,7 @@ from keepout.maneuver import (
     TARGET_PC,
     BurnDirection,
     BurnGrid,
+    ManeuverContext,
     ManeuverOption,
     ManeuverPlan,
     burn_effects,
@@ -277,6 +278,20 @@ def test_a_context_is_the_plan_without_its_grid(plan: ManeuverPlan) -> None:
     assert evaluated == evaluate_burn(
         plan, burn_lead=option.burn_lead, delta_v=option.delta_v
     )
+
+
+def test_a_context_made_without_a_fallback_has_none() -> None:
+    made = prepare_maneuver(leo_event())
+    given = {
+        item.name: getattr(made, item.name)
+        for item in dataclasses.fields(ManeuverContext)
+        if item.name != "fallback"
+    }
+    assert ManeuverContext(**given).fallback is None
+    assert [item.name for item in dataclasses.fields(ManeuverContext)][-2:] == [
+        "notes",
+        "fallback",
+    ]
 
 
 def test_a_context_accepts_a_cdm_inside_the_burn_window() -> None:
@@ -545,6 +560,107 @@ def test_explicit_options_are_what_confirms_and_evaluates(
     assert runs == [expected]
 
 
+@dataclass
+class HallFails:
+    """:func:`api._compute`, but the next ``hall3d`` run raises after ``skip``
+    of them; ``runs`` are the methods run."""
+
+    skip: int = 0
+    armed: bool = True
+    runs: list[str] = field(default_factory=list)
+
+    def __call__(
+        self,
+        conjunction: Conjunction,
+        method: MethodChoice,
+        options: Mapping[str, object],
+    ) -> PcResult:
+        self.runs.append(method)
+        if method == "hall3d" and self.armed:
+            if self.skip == 0:
+                self.armed = False
+                raise PcConvergenceError("Nc is not finite")
+            self.skip -= 1
+        return REAL_COMPUTE(conjunction, method, options)
+
+
+REAL_COMPUTE: Final = api._compute
+
+
+def test_a_hall3d_failure_on_a_candidate_falls_back_to_monte_carlo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cap = 20_000
+    monkeypatch.setattr("keepout.pc._auto.AUTO_MC_SAMPLES", cap)
+    spy = HallFails()
+    monkeypatch.setattr(api, "_compute", spy)
+    event = event_of(as_cdm(slow_conjunction()))
+    plan = plan_maneuver(event, target_pc=1e-3, grid=SMALL)
+    assert plan.baseline.method == "hall3d"
+    assert plan.fallback is not None
+    assert plan.fallback.method == "montecarlo"
+    assert plan.fallback.options == {"max_samples": cap, "seed": AUTO_MC_SEED}
+    option = plan.option(BurnDirection.PROGRADE)
+    assert option is not None
+    assert option.method == "montecarlo"
+    expected = "hall3d failed (Nc is not finite); Monte Carlo used instead"
+    assert expected in option.notes
+    assert f"prograde: {expected}" in plan.notes
+    assert not any("failed on" in note for note in plan.notes)
+
+    spy.armed = True
+    evaluated = evaluate_burn(plan, burn_lead=option.burn_lead, delta_v=option.delta_v)
+    assert evaluated.method == "montecarlo"
+    assert expected in evaluated.notes
+
+
+def test_an_explicit_hall3d_gets_no_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The baseline is the first hall3d run; the first prograde candidate fails.
+    spy = HallFails(skip=1)
+    monkeypatch.setattr(api, "_compute", spy)
+    event = event_of(as_cdm(slow_conjunction()))
+    plan = plan_maneuver(event, grid=SMALL, compute=computation("hall3d"))
+    assert plan.fallback is None
+    assert "montecarlo" not in spy.runs
+    assert plan.prograde is not None
+    assert plan.prograde.method == "hall3d"
+    assert not any("Monte Carlo used instead" in note for note in plan.notes)
+    assert any(
+        note.startswith("prograde: ") and "failed on 1" in note for note in plan.notes
+    )
+
+    spy.armed = True
+    with pytest.raises(PcConvergenceError, match="Nc is not finite"):
+        evaluate_burn(
+            plan, burn_lead=plan.prograde.burn_lead, delta_v=plan.prograde.delta_v
+        )
+
+
+def test_a_foster_baseline_gets_no_fallback(plan: ManeuverPlan) -> None:
+    assert plan.baseline.method == "foster"
+    assert plan.fallback is None
+
+
+def test_evaluate_burn_returns_the_burns_own_diagnostics() -> None:
+    @dataclass(frozen=True, eq=False)
+    class Noting(PcComputation):
+        @override
+        def __call__(self, conjunction: Conjunction) -> PcResult:
+            result = compute_pc(conjunction, "foster")
+            miss = conjunction.miss_distance
+            note = () if miss == pytest.approx(MISS) else (f"burnt {miss:.0f}",)
+            return dataclasses.replace(result, diagnostics=("shared", *note))
+
+    plan = plan_maneuver(leo_event(), grid=SMALL, compute=Noting("foster"))
+    assert "shared" in plan.notes
+    assert plan.baseline.notes == ()
+    option = plan.prograde
+    assert option is not None
+    assert option.notes == (f"burnt {option.range_at_tca:.0f}",)
+    evaluated = evaluate_burn(plan, burn_lead=option.burn_lead, delta_v=option.delta_v)
+    assert evaluated.notes == (f"burnt {evaluated.range_at_tca:.0f}",)
+
+
 def test_assumed_covariance_is_carried() -> None:
     cdm = as_cdm(leo_conjunction(), method=CovarianceMethod.DEFAULT)
     plan = plan_maneuver(event_of(cdm), grid=SMALL)
@@ -695,6 +811,36 @@ def test_a_burn_into_the_earth_names_the_event(
     monkeypatch.setattr(planner, "burn_effects", falling)
     with pytest.raises(ManeuverError, match=r"EVENT-7.*below the Earth's surface"):
         plan_maneuver(leo_event(), grid=SMALL)
+
+
+INTO_THE_SURFACE: Final = BurnGrid(
+    steps_per_orbit=1, delta_v_per_direction=6, largest_delta_v=500.0
+)
+""":data:`SMALL` up to 500 m/s, which retrograde takes the primary 1900 km
+below the surface; 36 m/s next to it takes 130 km off its perigee."""
+
+
+def test_plan_counts_failed_cells_in_its_notes() -> None:
+    plan = plan_maneuver(leo_event(), grid=INTO_THE_SURFACE, compute=FOSTER)
+    rows = len(plan.burn_leads)
+    assert np.isnan(plan.pc[:, 0]).all()
+    assert np.isnan(plan.range_at_tca[:, 0]).all()
+    assert np.isfinite(plan.pc[:, 1:]).any()
+    no_pc = int(np.count_nonzero(np.isnan(plan.pc)))
+    note = (
+        f"{no_pc} of {plan.pc.size} cells have no Pc and are never options: "
+        f"{no_pc - rows} without a closest approach to trust, "
+        f"{rows} where the burn or Foster's Pc failed"
+    )
+    assert note in plan.notes
+    assert plan.retrograde is None or plan.retrograde.delta_v != -500.0
+
+
+def test_evaluate_burn_refuses_a_burn_into_the_surface(plan: ManeuverPlan) -> None:
+    with pytest.raises(
+        ManeuverError, match=r"EVENT-7.*-500 m/s.*7\.0 h before TCA.*surface"
+    ):
+        evaluate_burn(plan, burn_lead=7 * HOUR, delta_v=-500.0)
 
 
 def test_evaluate_burn_matches_the_grid_cell(plan: ManeuverPlan) -> None:

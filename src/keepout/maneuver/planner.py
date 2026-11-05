@@ -25,7 +25,12 @@ from keepout._validation import require_at_least, require_non_negative, require_
 from keepout.cdm import Cdm, CdmObject, Maneuverable
 from keepout.conjunction import Conjunction
 from keepout.covariance import Policy
-from keepout.errors import KeepoutError, ManeuverError, PropagationError
+from keepout.errors import (
+    KeepoutError,
+    ManeuverError,
+    PcConvergenceError,
+    PropagationError,
+)
 from keepout.events import ConjunctionEvent, time_to_tca
 from keepout.maneuver._differential import (
     BurnEffects,
@@ -35,6 +40,7 @@ from keepout.maneuver._differential import (
 from keepout.objects import ObjectState
 from keepout.orbits import orbital_period, perigee_radius
 from keepout.pc import AUTO, Method, PcComputation, PcResult, computation
+from keepout.pc._auto import auto_options
 from keepout.propagation.forces import EARTH_RADIUS, ForceModel, earth_pole
 from keepout.risk import DEFAULT_THRESHOLDS, Thresholds
 from keepout.state import StateVector
@@ -183,6 +189,9 @@ class ManeuverOption:
         The method ``pc`` comes from.
     meets_target
         Whether ``pc`` is below the target.
+    notes
+        What the burn's own Pc says that the baseline's does not, and whether
+        Monte Carlo stood in for Hall's method; empty for the baseline.
     """
 
     burn_lead: float
@@ -191,6 +200,10 @@ class ManeuverOption:
     range_at_tca: float
     method: Method
     meets_target: bool
+    notes: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "notes", tuple(self.notes))
 
     @property
     def direction(self) -> BurnDirection:
@@ -230,6 +243,11 @@ class ManeuverContext:
         options that keep it reproducible.
     notes
         What a reader must know.
+    fallback
+        What confirms a burn where ``confirmation`` does not converge: Monte
+        Carlo with ``"auto"``'s seed and sample budget when ``"auto"`` chose
+        Hall's method for the baseline; ``None`` (the default) otherwise,
+        and such a burn fails.
     """
 
     event: ConjunctionEvent
@@ -239,6 +257,7 @@ class ManeuverContext:
     baseline: ManeuverOption
     confirmation: PcComputation
     notes: tuple[str, ...]
+    fallback: PcComputation | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "notes", tuple(self.notes))
@@ -265,8 +284,8 @@ class ManeuverPlan(ManeuverContext):
         Signed Δv along the velocity [m/s], shape ``(D,)``, ascending, without
         0.
     pc
-        Foster's Pc of each cell, shape ``(B, D)``. NaN where it failed or
-        where the cell has no closest approach it can trust.
+        Foster's Pc of each cell, shape ``(B, D)``. NaN where it or the burn
+        failed, or where the cell has no closest approach it can trust.
     range_at_tca
         Range at each cell's new closest approach [m], shape ``(B, D)``; NaN
         where the cell has none.
@@ -398,13 +417,14 @@ def _effects(
     delta_v: FloatArray,
     force: ForceModel,
 ) -> BurnEffects:
-    """:func:`burn_effects` for an event.
+    """:func:`burn_effects` for an event; a cell that falls below the Earth's
+    surface or that the solver fails on is NaN.
 
     Raises
     ------
     ManeuverError
-        If a cell falls below the Earth's surface or the solver fails: nothing
-        is known of the grid then, not even of its other cells.
+        If the orbit without a burn falls below the Earth's surface or the
+        solver fails on it: nothing is known of the grid then.
     """
     try:
         return burn_effects(state, leads, delta_v, force)
@@ -508,6 +528,7 @@ def _option(
     range_at_tca: float,
     target_pc: float,
     thresholds: Thresholds,
+    notes: tuple[str, ...] = (),
 ) -> ManeuverOption:
     """The option of a method's result, on the basis of the thresholds."""
     value = thresholds.value_of_result(result)
@@ -518,7 +539,38 @@ def _option(
         range_at_tca=range_at_tca,
         method=result.method,
         meets_target=value < target_pc,
+        notes=notes,
     )
+
+
+def _confirm(
+    computation: PcComputation, fallback: PcComputation | None, conjunction: Conjunction
+) -> tuple[PcResult, tuple[str, ...]]:
+    """The Pc of a burn's conjunction by ``computation``, or by ``fallback``
+    where it does not converge, and the note that says so.
+
+    Raises
+    ------
+    PcConvergenceError
+        If ``computation`` does not converge and there is no ``fallback``.
+    KeepoutError
+        If either fails otherwise.
+    """
+    try:
+        return computation(conjunction), ()
+    except PcConvergenceError as exc:
+        if fallback is None:
+            raise
+        note = f"hall3d failed ({exc}); Monte Carlo used instead"
+        return fallback(conjunction), (note,)
+
+
+def _own_notes(
+    result: PcResult, retry: tuple[str, ...], baseline: tuple[str, ...]
+) -> tuple[str, ...]:
+    """The notes of a burn: its result's diagnostics not in ``baseline``,
+    then the note of a retry."""
+    return (*(note for note in result.diagnostics if note not in baseline), *retry)
 
 
 @dataclass(frozen=True, eq=False, slots=True)
@@ -532,6 +584,7 @@ class _Search:
     pc: FloatArray
     target_pc: float
     confirmation: PcComputation
+    fallback: PcComputation | None
     thresholds: Thresholds
     baseline_notes: tuple[str, ...]
 
@@ -542,49 +595,47 @@ class _Search:
         order = np.lexsort((self.leads[rows], np.abs(self.delta_v[columns])))
         return [(int(rows[i]), int(columns[i])) for i in order]
 
-    def confirm(self, index: tuple[int, int]) -> tuple[ManeuverOption, PcResult]:
-        """The option of one cell, by the event's method, and its result.
+    def confirm(self, index: tuple[int, int]) -> ManeuverOption:
+        """The option of one cell, by the event's method or its fallback.
 
         Raises
         ------
         KeepoutError
-            If the method fails there.
+            If the method fails there, and its fallback too if it has one.
         """
-        result = self.confirmation(
-            _cell_conjunction(self.conjunction, self.cells, index)
+        result, retry = _confirm(
+            self.confirmation,
+            self.fallback,
+            _cell_conjunction(self.conjunction, self.cells, index),
         )
-        option = _option(
+        return _option(
             result,
             burn_lead=float(self.leads[index[0]]),
             delta_v=float(self.delta_v[index[1]]),
             range_at_tca=float(self.cells.ranges[index]),
             target_pc=self.target_pc,
             thresholds=self.thresholds,
+            notes=_own_notes(result, retry, self.baseline_notes),
         )
-        return option, result
 
     def option(
         self, direction: BurnDirection
     ) -> tuple[ManeuverOption | None, tuple[str, ...]]:
-        """The smallest confirmed burn of a direction, and its notes: what the
-        burn's Pc adds to the baseline's, and how candidates fell through."""
+        """The smallest confirmed burn of a direction, and its notes: the
+        burn's own, and how candidates fell through."""
         candidates = self.candidates(direction)
         refused = failed = 0
         found = None
         notes: list[str] = []
         for index in candidates[:MAX_CONFIRMATIONS]:
             try:
-                option, result = self.confirm(index)
+                option = self.confirm(index)
             except KeepoutError:
                 failed += 1
                 continue
             if option.meets_target:
                 found = option
-                notes += [
-                    f"{direction}: {note}"
-                    for note in result.diagnostics
-                    if note not in self.baseline_notes
-                ]
+                notes += [f"{direction}: {note}" for note in option.notes]
                 break
             refused += 1
         if refused or failed:
@@ -640,15 +691,19 @@ def _notes(baseline: PcResult, cdm: Cdm, conjunction: Conjunction) -> tuple[str,
     return tuple(notes)
 
 
-def _grid_notes(pc: FloatArray, *, no_minimum: int, failed: int) -> tuple[str, ...]:
-    """The note of the cells without a Pc, if any."""
+def _grid_notes(
+    pc: FloatArray, *, no_minimum: int, failed: int, failed_burns: int
+) -> tuple[str, ...]:
+    """The note of the cells without a Pc, if any; ``failed`` counts the
+    ``failed_burns`` too."""
     if not no_minimum and not failed:
         return ()
+    what = "the burn or Foster's Pc" if failed_burns else "Foster's Pc"
     return (
         (
             f"{no_minimum + failed} of {pc.size} cells have no Pc and are never "
             f"options: {no_minimum} without a closest approach to trust, "
-            f"{failed} where Foster's Pc failed"
+            f"{failed} where {what} failed"
         ),
     )
 
@@ -726,6 +781,11 @@ def _prepare(
         ),
         confirmation=compute.resolved(result),
         notes=_notes(result, cdm, conjunction),
+        fallback=(
+            PcComputation("montecarlo", auto_options("montecarlo"))
+            if compute.method == "auto" and result.method == "hall3d"
+            else None
+        ),
     )
     return context, result
 
@@ -752,7 +812,9 @@ def prepare_maneuver(
         The Pc method of the baseline, from :func:`~keepout.pc.computation`.
         An explicit method confirms burns with its own options; the method
         ``"auto"`` chose confirms them with defaults, or with ``"auto"``'s
-        seed and sample budget if it is the Monte Carlo fallback.
+        seed and sample budget if it is the Monte Carlo fallback. Where
+        ``"auto"`` chose Hall's method and it does not converge on a burn,
+        Monte Carlo confirms that burn as ``"auto"`` would.
     policy
         Covariance policy; see :func:`keepout.covariance.make_covariance`.
     combined_hard_body_radius
@@ -836,8 +898,9 @@ def plan_maneuver(
         If ``target_pc`` is not in (0, 1).
     ManeuverError
         As :func:`prepare_maneuver`, and if the CDM comes after the burn
-        window has closed, or a cell falls below the Earth's surface or fails
-        to integrate (for the whole grid: nothing is decided then).
+        window has closed, or the orbit without a burn falls below the
+        Earth's surface or fails to integrate (a cell that does so is only
+        left without a Pc).
     KeepoutError
         If the CDM's conjunction or its Pc cannot be computed, e.g.
         :class:`~keepout.errors.HardBodyRadiusError` for a missing radius.
@@ -867,12 +930,14 @@ def plan_maneuver(
         pc=pc,
         target_pc=target_pc,
         confirmation=context.confirmation,
+        fallback=context.fallback,
         thresholds=thresholds,
         baseline_notes=result.diagnostics,
     )
     prograde, prograde_notes = search.option(BurnDirection.PROGRADE)
     retrograde, retrograde_notes = search.option(BurnDirection.RETROGRADE)
-    no_minimum = int(np.count_nonzero(np.isnan(cells.shift)))
+    failed_burns = int(np.count_nonzero(effects.failed))
+    no_minimum = int(np.count_nonzero(np.isnan(cells.shift))) - failed_burns
     return ManeuverPlan(
         event=event,
         conjunction=conjunction,
@@ -888,10 +953,16 @@ def plan_maneuver(
         retrograde=retrograde,
         notes=(
             *context.notes,
-            *_grid_notes(pc, no_minimum=no_minimum, failed=failed),
+            *_grid_notes(
+                pc,
+                no_minimum=no_minimum,
+                failed=failed + failed_burns,
+                failed_burns=failed_burns,
+            ),
             *prograde_notes,
             *retrograde_notes,
         ),
+        fallback=context.fallback,
     )
 
 
@@ -902,7 +973,8 @@ def evaluate_burn(
     delta_v: float,
 ) -> ManeuverOption:
     """One burn of an event, on or off a plan's grid, by the confirmation of
-    ``plan`` and on the basis of its thresholds.
+    ``plan`` (its fallback where that does not converge) and on the basis of
+    its thresholds.
 
     Parameters
     ----------
@@ -916,7 +988,9 @@ def evaluate_burn(
     Returns
     -------
     ManeuverOption
-        The burn, whether it meets the target of ``plan`` or not.
+        The burn, whether it meets the target of ``plan`` or not; its notes
+        are its Pc's diagnostics that ``plan`` does not already give, and
+        the fallback's if it stood in.
 
     Raises
     ------
@@ -924,9 +998,9 @@ def evaluate_burn(
         If ``burn_lead`` is negative, or either is not finite.
     ManeuverError
         If the burn comes before the latest CDM, falls below the Earth's
-        surface, or has no closest approach to trust.
+        surface or fails to integrate, or has no closest approach to trust.
     KeepoutError
-        If the method fails on the burn.
+        If the method fails on the burn, and its fallback too if it has one.
     """
     event, conjunction = plan.event, plan.conjunction
     cdm = event.latest
@@ -943,6 +1017,12 @@ def evaluate_burn(
         np.array([delta_v]),
         forces.primary,
     )
+    if effects.failed[0, 0]:
+        raise ManeuverError(
+            f"event {event.event_id}: a burn of {delta_v:g} m/s "
+            f"{before_tca(burn_lead)} falls below the Earth's surface or fails "
+            "to integrate"
+        )
     limit = _SHIFT_LIMIT * _period(event, conjunction)
     cells = _closest_approaches(conjunction, effects, forces, limit)
     if np.isnan(cells.shift[0, 0]):
@@ -950,7 +1030,11 @@ def evaluate_burn(
             f"event {event.event_id}: a burn of {delta_v:g} m/s "
             f"{before_tca(burn_lead)} has no closest approach to trust"
         )
-    result = plan.confirmation(_cell_conjunction(conjunction, cells, (0, 0)))
+    result, retry = _confirm(
+        plan.confirmation,
+        plan.fallback,
+        _cell_conjunction(conjunction, cells, (0, 0)),
+    )
     return _option(
         result,
         burn_lead=burn_lead,
@@ -958,4 +1042,5 @@ def evaluate_burn(
         range_at_tca=float(cells.ranges[0, 0]),
         target_pc=plan.target_pc,
         thresholds=plan.thresholds,
+        notes=_own_notes(result, retry, plan.notes),
     )

@@ -3,6 +3,7 @@ web and Space-Track, a fleet with approaches in the screening fixture and
 the CDMs the synthetic operator issues for it."""
 
 import functools
+import sys
 import time
 import urllib.request
 from collections.abc import Mapping
@@ -25,9 +26,11 @@ from keepout.sources.spacetrack import _client
 from keepout.synthetic import OperatorResult, read_fleet, run
 
 
-def keepout(*args: str, env: Mapping[str, str | None] | None = None) -> Result:
+def keepout(
+    *args: str, env: Mapping[str, str | None] | None = None, stdin: str | None = None
+) -> Result:
     """The result of ``keepout ARGS`` run in-process, standard output and
-    error kept apart.
+    error kept apart, ``stdin`` its input (none if ``None``).
 
     A bug (any exception but :class:`SystemExit`) is raised, not hidden in
     the result. ``env`` sets (or, with ``None``, unsets) environment
@@ -36,7 +39,9 @@ def keepout(*args: str, env: Mapping[str, str | None] | None = None) -> Result:
     """
     runner = CliRunner()
     environ = {"COLUMNS": "80", **(env or {})}
-    return runner.invoke(app, list(args), env=environ, catch_exceptions=False)
+    return runner.invoke(
+        app, list(args), input=stdin, env=environ, catch_exceptions=False
+    )
 
 
 def usage_error(result: Result) -> str:
@@ -175,3 +180,12 @@ def calculated(text: str) -> str:
     )
     assert "= DEFAULT" not in changed
     return changed
+
+
+def block_store_extra(module: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make ``module`` (a package of the store extra) look uninstalled, and
+    forget keepout.store so that it is imported again."""
+    for name in [m for m in sys.modules if m.partition(".")[0] == module]:
+        monkeypatch.setitem(sys.modules, name, None)
+    for name in [m for m in sys.modules if m.startswith("keepout.store")]:
+        monkeypatch.delitem(sys.modules, name)

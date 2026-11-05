@@ -9,10 +9,10 @@ from cdm_builders import (
     B1_XML,
     TRACSS,
     assert_equivalent,
-    cdms,
     minimal_cdm,
     mutate,
 )
+from cdm_strategies import cdms
 from hypothesis import given, settings
 
 from keepout.cdm import Cdm, Field, Section, kvn, xml

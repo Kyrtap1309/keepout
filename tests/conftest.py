@@ -50,6 +50,13 @@ def pytest_xdist_auto_num_workers(config: pytest.Config) -> int | None:
     return min(MAX_AUTO_WORKERS, os.cpu_count() or 1)
 
 
+@pytest.fixture(autouse=True)
+def _no_store_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A store exported in the shell must not be read or written by a test;
+    # a test that needs $KEEPOUT_STORE sets it.
+    monkeypatch.delenv("KEEPOUT_STORE", raising=False)
+
+
 @pytest.fixture(autouse=True, scope="session")
 def _offline_iers() -> Iterator[None]:
     # Without downloads the bundled table ages; refusing its predictions

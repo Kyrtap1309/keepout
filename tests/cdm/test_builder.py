@@ -12,7 +12,8 @@ import pytest
 import xmlschema
 from astropy.time import Time
 from builders import DIAGONAL_COVARIANCE, LEO_R, LEO_V, known
-from cdm_builders import assert_equivalent, epochs, words
+from cdm_builders import assert_equivalent
+from cdm_strategies import epochs, words
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 from hypothesis.extra.numpy import arrays

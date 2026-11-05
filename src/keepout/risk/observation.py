@@ -61,6 +61,10 @@ class PcObservation:
         Whether the message gives an object's covariance as assumed
         (``COVARIANCE_METHOD = DEFAULT``), not from orbit determination:
         ``pc`` then rests on a model.
+    method
+        The Pc method that gave ``pc``, e.g. ``"foster"``, when keepout
+        computed it; kept without :attr:`result`, as when the observation is
+        read back from a store.
 
     Raises
     ------
@@ -82,6 +86,7 @@ class PcObservation:
     diagnostics: tuple[str, ...] = ()
     result: PcResult | None = None
     assumed_covariance: bool = False
+    method: str | None = None
 
     def __post_init__(self) -> None:
         if not math.isfinite(self.time_to_tca):
@@ -134,7 +139,7 @@ class PcObservation:
         method gives an ``"upper_bound"``), and so is the upper end of its
         confidence interval (Monte Carlo) in ``ci_high``. The source is
         :attr:`~keepout.pc.PcComputation.label` of the method that gave the
-        value.
+        value, and :attr:`method` is that method.
 
         Parameters
         ----------
@@ -162,4 +167,5 @@ class PcObservation:
             diagnostics=(*result.diagnostics, *notes),
             result=result,
             assumed_covariance=assumed_covariance,
+            method=result.method,
         )

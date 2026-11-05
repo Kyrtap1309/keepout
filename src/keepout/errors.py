@@ -23,6 +23,7 @@ __all__ = [
     "RateLimited",
     "SourceFormatError",
     "SourceUnavailable",
+    "StoreError",
     "UnsupportedElements",
     "UnsupportedFrame",
 ]
@@ -217,3 +218,9 @@ class PropagationError(KeepoutError):
 
 class ManeuverError(KeepoutError):
     """An avoidance manoeuvre cannot be planned or checked for this event."""
+
+
+class StoreError(KeepoutError):
+    """A conjunction store (``keepout[store]``) cannot be opened or does not
+    hold what was asked: no file, a file of another keepout version, or
+    stored data that contradicts itself."""

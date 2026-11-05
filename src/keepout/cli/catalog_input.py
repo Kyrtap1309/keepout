@@ -7,7 +7,12 @@ from typing import TYPE_CHECKING, Annotated, NamedTuple, TypeAlias
 
 import typer
 
-from keepout.sources.catalog import CATALOG_SOURCES, DEFAULT_SOURCE, CatalogSourceName
+from keepout.sources.catalog import (
+    CATALOG_SOURCES,
+    DEFAULT_SOURCE,
+    CatalogReference,
+    CatalogSourceName,
+)
 
 # The library is imported in the function: keepout --help need not load the
 # numerical libraries.
@@ -37,6 +42,9 @@ class CatalogInput(NamedTuple):
     omms: tuple[Omm, ...]
     label: str
     """How the summary names them: the file, or the source's title."""
+    reference: CatalogReference
+    """The files they were read from, with their digests: what a store
+    keeps with the CDMs screened against them."""
 
 
 def require_one_catalog(catalog: Path | None, source: CatalogSourceName | None) -> None:
@@ -56,10 +64,20 @@ def require_one_catalog(catalog: Path | None, source: CatalogSourceName | None) 
 def catalog_input(
     catalog: Path | None, source: CatalogSourceName | None, cache_dir: Path | None
 ) -> CatalogInput:
-    """The element sets to screen against, from ``--catalog`` or a source."""
+    """The element sets to screen against, from ``--catalog`` or a source,
+    and the reference of the files they were read from.
+
+    A ``--catalog`` file's digest is taken before it is read, and a
+    source's is the one its cache verified on the bytes it read: either
+    way, a file changed meanwhile no longer matches its reference.
+    """
     if catalog is not None:
         from keepout.omm import load
 
-        return CatalogInput(load(catalog), str(catalog))
+        reference = CatalogReference.of_file(catalog)
+        return CatalogInput(load(catalog), str(catalog), reference)
     described = CATALOG_SOURCES[source or DEFAULT_SOURCE]
-    return CatalogInput(described.fetch(cache_dir).omms, described.title)
+    fetched = described.fetch(cache_dir)
+    return CatalogInput(
+        fetched.omms, described.title, fetched.reference(described.title)
+    )

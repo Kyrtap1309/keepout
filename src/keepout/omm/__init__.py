@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from keepout.ccsds.files import strip_bom
+from keepout.ccsds.files import decode_file, strip_bom
 from keepout.errors import OmmParseError
 from keepout.omm import celestrak, kvn, tle, xml
 from keepout.omm._io import OMM
@@ -28,6 +28,7 @@ __all__ = [
     "deduplicate",
     "kvn",
     "load",
+    "load_data",
     "loads",
     "tle",
     "xml",
@@ -93,4 +94,22 @@ def load(path: str | Path) -> tuple[Omm, ...]:
     OmmParseError
         If the file is broken gzip data, not UTF-8 text, or not OMM data.
     """
-    return OMM.load(path, loads)
+    return load_data(Path(path).read_bytes(), path)
+
+
+def load_data(data: bytes, path: str | Path) -> tuple[Omm, ...]:
+    """The OMMs in a file's bytes, read as :func:`load` reads the file.
+
+    Parameters
+    ----------
+    data
+        The file's bytes: UTF-8 text, gzip-compressed or not.
+    path
+        The file, for error messages.
+
+    Raises
+    ------
+    OmmParseError
+        If the data is broken gzip data, not UTF-8 text, or not OMM data.
+    """
+    return loads(decode_file(data, path, OMM))

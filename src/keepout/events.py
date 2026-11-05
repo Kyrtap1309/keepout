@@ -21,6 +21,7 @@ __all__ = [
     "ConjunctionEvent",
     "group_events",
     "time_to_tca",
+    "without_hard_body_radius",
 ]
 
 DEFAULT_TCA_TOLERANCE: Final = TCA_TOLERANCE
@@ -32,6 +33,23 @@ pair are at least a large fraction of an orbit apart."""
 def time_to_tca(cdm: Cdm) -> float:
     """Seconds from the CDM's creation to its TCA (negative after TCA)."""
     return elapsed_seconds(cdm.creation_date, cdm.tca)
+
+
+def without_hard_body_radius(cdms: Iterable[Cdm]) -> tuple[str, ...]:
+    """The ``MESSAGE_ID`` of each CDM that lacks ``HBR`` for an object, in
+    the order given: their Pc needs a combined hard-body radius from
+    elsewhere.
+
+    Parameters
+    ----------
+    cdms
+        The CDMs.
+    """
+    return tuple(
+        cdm.message_id
+        for cdm in cdms
+        if cdm.object1.hard_body_radius is None or cdm.object2.hard_body_radius is None
+    )
 
 
 def _pair(cdm: Cdm) -> tuple[str, str]:
@@ -224,12 +242,7 @@ class ConjunctionEvent:
             object (checked before any Pc is computed).
         """
         if combined_hard_body_radius is None:
-            missing = [
-                cdm.message_id
-                for cdm in self.cdms
-                if cdm.object1.hard_body_radius is None
-                or cdm.object2.hard_body_radius is None
-            ]
+            missing = without_hard_body_radius(self.cdms)
             if missing:
                 raise HardBodyRadiusError(
                     f"no HBR for both objects in {', '.join(missing)}: pass "

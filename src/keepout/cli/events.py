@@ -1,13 +1,26 @@
-"""How ``keepout screen`` and ``keepout assess`` show assessed events."""
+"""How ``keepout screen``, ``keepout assess`` and ``keepout store add`` show
+assessed events."""
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections import Counter
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, NamedTuple, Protocol
 
+import typer
 from rich.table import Table
 
-from keepout.cli.output import JsonOut, isot, minute, objects, pc_text, table
+from keepout.cli.output import (
+    ExitCode,
+    JsonOut,
+    isot,
+    minute,
+    objects,
+    pc_text,
+    plural,
+    show,
+    table,
+)
 
 if TYPE_CHECKING:
     from keepout.cdm import CdmObject
@@ -20,6 +33,7 @@ __all__ = [
     "event_json",
     "events_table",
     "reasons",
+    "show_assessed",
 ]
 
 
@@ -94,12 +108,11 @@ def _cdm_object_json(cdm_object: CdmObject) -> dict[str, JsonOut]:
 
 
 def _observation_json(observation: PcObservation) -> dict[str, JsonOut]:
-    result = observation.result
     return {
         "message_id": observation.message_id,
         "time_to_tca_s": observation.time_to_tca,
         "pc": observation.pc,
-        "method": None if result is None else result.method,
+        "method": observation.method,
         "error": observation.error,
         "reported_pc": observation.reported_pc,
         "diagnostics": list(observation.diagnostics),
@@ -129,3 +142,80 @@ def event_json(item: Assessed) -> dict[str, JsonOut]:
         "observations": [_observation_json(o) for o in trend.observations],
         "assumed_covariance": event.assumed_covariance,
     }
+
+
+def show_assessed(
+    assessed: Sequence[Assessed],
+    *,
+    cdm_count: int,
+    store: Mapping[str, JsonOut] | None,
+    store_lines: Sequence[str] = (),
+    as_json: bool,
+) -> None:
+    """The output of ``keepout assess`` and ``keepout store add``: the events
+    table, the counts of actions and why each event needs more than
+    ``ignore``; then an exit with :attr:`ExitCode.MANEUVER` if one needs a
+    manoeuvre.
+
+    Parameters
+    ----------
+    assessed
+        The events and their assessments, in the table's order.
+    cdm_count
+        The CDMs read.
+    store
+        What the store did, as JSON values (``None`` without a store).
+    store_lines
+        The same for people, after the counts.
+    as_json
+        Whether ``--json`` was given.
+
+    Raises
+    ------
+    typer.Exit
+        With :attr:`ExitCode.MANEUVER` if at least one event's action is to
+        manoeuvre.
+    """
+    from keepout.risk import Action
+
+    actions = Counter(item.assessment.decision.action for item in assessed)
+    maneuver = actions[Action.MANEUVER] > 0
+    assumed = sum(item.event.assumed_covariance for item in assessed)
+    payload: dict[str, JsonOut] = {
+        "cdm_count": cdm_count,
+        "events": [event_json(item) for item in assessed],
+        "assumed_covariance_events": assumed,
+        "maneuver": maneuver,
+        "store": store,
+    }
+    counted = ", ".join(
+        f"{actions[action]} {action.label}" for action in sorted(actions, reverse=True)
+    )
+    # A stored event holds its earlier CDMs too, not only those read.
+    source = (
+        f"from {plural(cdm_count, 'CDM')}"
+        if store is None
+        else f"in the store for the {plural(cdm_count, 'CDM')} read"
+    )
+    text = [f"{plural(len(assessed), 'event')} {source}: {counted}."]
+    if assumed:
+        text.append(
+            f"{assumed} of {plural(len(assessed), 'event')} "
+            f"{'rests' if assumed == 1 else 'rest'} on assumed covariances "
+            "(COVARIANCE_METHOD = DEFAULT), not orbit determination."
+        )
+    text += store_lines
+    text += reasons(assessed, Action.MONITOR)
+    if maneuver:
+        text.append(
+            "At least one event needs a manoeuvre "
+            f"(exit status {int(ExitCode.MANEUVER)})."
+        )
+    show(
+        payload,
+        events_table(assessed, "Conjunction events"),
+        *text,
+        as_json=as_json,
+    )
+    if maneuver:
+        raise typer.Exit(ExitCode.MANEUVER)
