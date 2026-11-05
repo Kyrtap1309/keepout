@@ -2,18 +2,34 @@
 
 from __future__ import annotations
 
+import dataclasses
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from contextlib import ExitStack
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, TypeAlias
+from typing import TYPE_CHECKING, Annotated, NamedTuple, TypeAlias
 
 import typer
 
 from keepout._defaults import SCREENING_DURATION, SOCRATES_RADIUS
 from keepout.cli.catalog_input import CatalogFile, catalog_input, require_one_catalog
 from keepout.cli.events import event_json, events_table, reasons
-from keepout.cli.options import CacheDir, JsonFlag, SourceOption, Workers, positive
+from keepout.cli.options import (
+    CacheDir,
+    JsonFlag,
+    SourceOption,
+    Workers,
+    parse_time,
+    positive,
+)
 from keepout.cli.output import ASSUMED_COVARIANCES, JsonOut, isot, plural, show, utc
+from keepout.cli.store import (
+    StoreOption,
+    ingest_screened,
+    open_cli_store,
+    store_json,
+    store_lines,
+)
 from keepout.units import DAY, KM
 
 # The library is imported in the command: keepout --help need not load the
@@ -22,27 +38,12 @@ if TYPE_CHECKING:
     from astropy.time import Time
     from rich.console import RenderableType
 
+    from keepout.events import ConjunctionEvent
     from keepout.screening import SkippedObject
+    from keepout.store import IngestReport
     from keepout.synthetic import Fleet, OperatorEvent, OperatorResult
 
 __all__ = ["parse_time", "screen_command"]
-
-
-def parse_time(text: str) -> Time:
-    """A time given on the command line: ISO 8601 in UTC, e.g.
-    ``2026-10-06`` or ``2026-10-06T12:00:00``.
-
-    Raises
-    ------
-    ValueError
-        If ``text`` is not such a time (Typer makes it a usage error).
-    """
-    from astropy.time import Time
-
-    try:
-        return Time(text, scale="utc")
-    except ValueError as exc:
-        raise ValueError(f"not an ISO 8601 UTC time: {text!r}") from exc
 
 
 FleetFile: TypeAlias = Annotated[
@@ -92,6 +93,7 @@ def screen_command(
     catalog: CatalogFile = None,
     source: SourceOption = None,
     cdm_dir: CdmDir = None,
+    store: StoreOption = None,
     workers: Workers = None,
     cache_dir: CacheDir = None,
     as_json: JsonFlag = False,
@@ -104,20 +106,33 @@ def screen_command(
     determination. Each CDM's Pc is computed and its risk assessed as of the
     start of the window, which is also the CDMs' creation date. The catalog
     is the cached copy of keepout fetch catalog while it is current, else a
-    new download; --catalog reads a file instead.
+    new download; --catalog reads a file instead. With --store the CDMs are
+    added to the store, with a copy of the catalog.
     """
     window_start = None if start is None else _start_time(start)
     require_one_catalog(catalog, source)
-    from keepout.synthetic import load_fleet, run
+    with ExitStack() as stack:
+        opened = None if store is None else stack.enter_context(open_cli_store(store))
+        from keepout.synthetic import load_fleet, run
 
-    satellites = load_fleet(fleet)
-    omms, catalog_label = catalog_input(catalog, source, cache_dir)
-    if window_start is None:
-        window_start = _now()
-    result = run(satellites, omms, window_start, days * DAY, workers=workers)
-    files = {} if cdm_dir is None else _write_cdms(result, cdm_dir)
-    payload = _payload(result, catalog_label, files, cdm_dir)
-    summary = _summary(result, catalog_label, files, cdm_dir)
+        satellites = load_fleet(fleet)
+        screened = catalog_input(catalog, source, cache_dir)
+        if window_start is None:
+            window_start = _now()
+        result = run(
+            satellites, screened.omms, window_start, days * DAY, workers=workers
+        )
+        files = {} if cdm_dir is None else _write_cdms(result, cdm_dir)
+        stored = (
+            None
+            if store is None or opened is None
+            else _Stored(
+                store, *ingest_screened(opened, result.cdms, screened.reference)
+            )
+        )
+    events = list(result.events) if stored is None else stored.rows(result.events)
+    payload = _payload(result, events, screened.label, files, cdm_dir, stored)
+    summary = _summary(result, events, screened.label, files, cdm_dir, stored)
     show(payload, *summary, as_json=as_json)
 
 
@@ -125,6 +140,41 @@ def screen_command(
 screen_command.__doc__ = (screen_command.__doc__ or "").format_map(
     {"radius": SOCRATES_RADIUS / KM}
 )
+
+
+class _Stored(NamedTuple):
+    """What ``--store`` did: the store, the ingest and the stored events it
+    touched, in the store's order."""
+
+    path: Path
+    report: IngestReport
+    events: Sequence[ConjunctionEvent]
+
+    def rows(self, approaches: Sequence[OperatorEvent]) -> list[OperatorEvent]:
+        """The approaches, each under the id of its stored event, in the
+        store's order of the events (an event's approaches in screening
+        order)."""
+        event_of = {
+            cdm.message_id: event.event_id
+            for event in self.events
+            for cdm in event.cdms
+        }
+        order = {event.event_id: index for index, event in enumerate(self.events)}
+        renamed = [
+            dataclasses.replace(
+                approach,
+                event=dataclasses.replace(
+                    approach.event, event_id=event_of[approach.cdm.message_id]
+                ),
+            )
+            for approach in approaches
+        ]
+        return sorted(renamed, key=lambda approach: order[approach.event.event_id])
+
+    def json(self) -> dict[str, JsonOut]:
+        """What the store did, as JSON values."""
+        ids = [event.event_id for event in self.events]
+        return store_json(self.path, self.report, ids)
 
 
 def _start_time(start: str) -> Time:
@@ -164,9 +214,11 @@ def _write_cdms(result: OperatorResult, cdm_dir: Path) -> dict[str, Path]:
 
 def _payload(
     result: OperatorResult,
+    events: Sequence[OperatorEvent],
     catalog_label: str,
     files: Mapping[str, Path],
     cdm_dir: Path | None,
+    stored: _Stored | None,
 ) -> dict[str, JsonOut]:
     """The result as JSON values, for ``--json``."""
     screening = result.screening
@@ -176,20 +228,23 @@ def _payload(
         "catalog_objects": screening.catalog_count,
         "start": isot(screening.start),
         "end": isot(screening.end),
-        "events": [_event_json(e, files) for e in result.events],
+        "events": [_event_json(e, files) for e in events],
         "assumed_covariance_events": sum(
             e.event.assumed_covariance for e in result.events
         ),
         "skipped": [_skipped_json(s) for s in screening.skipped],
         "cdm_dir": None if cdm_dir is None else str(cdm_dir),
+        "store": None if stored is None else stored.json(),
     }
 
 
 def _summary(
     result: OperatorResult,
+    events: Sequence[OperatorEvent],
     catalog_label: str,
     files: Mapping[str, Path],
     cdm_dir: Path | None,
+    stored: _Stored | None,
 ) -> list[RenderableType]:
     """The result for people: what was screened, the fleet satellites left
     out, the table of approaches and the notes after it."""
@@ -220,11 +275,12 @@ def _summary(
             f"{plural(len(screening.skipped), 'element set')} left out (stale, "
             "future epochs, SGP4 failures; --json lists them)."
         )
-    tail += reasons(result.events, Action.MONITOR)
+    tail += reasons(events, Action.MONITOR)
     tail.append(ASSUMED_COVARIANCES)
     if cdm_dir is not None:
         tail.append(f"{plural(len(files), 'CDM')} written to {cdm_dir}")
-    events = result.events
+    if stored is not None:
+        tail += store_lines(stored.path, stored.report, events)
     table = [events_table(events, "Close approaches")] if events else []
     return [*head, *table, *tail]
 

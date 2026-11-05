@@ -167,6 +167,11 @@ Other commands download data and check keepout against CARA:
 - `keepout fetch cdm` lists Space-Track's public CDM summaries.
 - `keepout validate` checks keepout's Pc against CARA's test cases.
 
+The `store` extra (`keepout[store]`) keeps CDMs, events and their Pc in a
+local SQLite file: `--store` on `screen` and `assess`, `keepout store add`,
+and `keepout maneuver --event ID`, with each event under a stable
+8-character id. See [The conjunction store](store.md).
+
 See [Synthetic operator](synthetic.md) for what a run does,
 [Command line](cli.md) for every command,
 [Space-Track data](spacetrack.md) for the full catalog and the

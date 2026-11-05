@@ -6,7 +6,8 @@ import numpy as np
 import pytest
 from builders import B1_KVN as B1
 from builders import known
-from cdm_builders import TRACSS, assert_equivalent, cdms, minimal_cdm
+from cdm_builders import TRACSS, assert_equivalent, minimal_cdm
+from cdm_strategies import cdms
 from hypothesis import given, settings
 
 from keepout.ccsds.epochs import format_epoch

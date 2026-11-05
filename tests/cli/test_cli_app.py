@@ -55,14 +55,26 @@ def test_help_lists_the_commands() -> None:
         "maneuver",
         "validate",
         "fetch",
+        "store",
     ]
     fetch = keepout("fetch", "--help")
     assert fetch.exit_code == ExitCode.OK
     assert commands(fetch.stdout) == ["catalog", "cdm", "cara", "kelvins"]
+    store = keepout("store", "--help")
+    assert store.exit_code == ExitCode.OK
+    assert commands(store.stdout) == ["add", "upgrade", "rebuild", "purge"]
 
 
 @pytest.mark.parametrize(
-    "args", [(), ("fetch",), ("nonsense",), ("fetch", "nonsense"), ("--nonsense",)]
+    "args",
+    [
+        (),
+        ("fetch",),
+        ("store",),
+        ("nonsense",),
+        ("fetch", "nonsense"),
+        ("--nonsense",),
+    ],
 )
 def test_a_wrong_or_missing_command_is_a_usage_error(args: tuple[str, ...]) -> None:
     result = keepout(*args)

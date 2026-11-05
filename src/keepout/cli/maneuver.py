@@ -16,9 +16,21 @@ from keepout._defaults import (
     TARGET_PC,
     TCA_TOLERANCE,
 )
-from keepout.cli.assess import HardBodyRadius, load_cdms
-from keepout.cli.catalog_input import CatalogFile, catalog_input, require_one_catalog
-from keepout.cli.options import CacheDir, JsonFlag, SourceOption, Workers, positive
+from keepout.cli.catalog_input import (
+    CatalogFile,
+    CatalogInput,
+    catalog_input,
+    require_one_catalog,
+)
+from keepout.cli.cdm_input import load_cdms
+from keepout.cli.options import (
+    CacheDir,
+    HardBodyRadius,
+    JsonFlag,
+    SourceOption,
+    Workers,
+    positive,
+)
 from keepout.cli.output import (
     ASSUMED_COVARIANCES,
     ExitCode,
@@ -33,6 +45,7 @@ from keepout.cli.output import (
     table,
     utc,
 )
+from keepout.cli.store import EventStore, open_cli_store
 from keepout.errors import ManeuverError
 from keepout.units import HOUR, MINUTE
 
@@ -51,6 +64,7 @@ if TYPE_CHECKING:
         NewApproach,
         RescreenResult,
     )
+    from keepout.sources.catalog import CatalogSourceName
 
 __all__ = ["maneuver_command"]
 
@@ -85,15 +99,33 @@ def _burn_size(value: float | None) -> float | None:
 
 
 Cdms: TypeAlias = Annotated[
-    list[Path],
+    list[Path] | None,
     typer.Argument(
         exists=True,
         dir_okay=False,
         metavar="CDMS",
-        help="The CDM files of one event, KVN or XML, gzipped or not.",
+        show_default=False,
+        help=(
+            "The CDM files of one event, KVN or XML, gzipped or not (or --event "
+            "instead)."
+        ),
     ),
 ]
-"""The CDM files of the event."""
+"""The CDM files of the event, unless ``--event`` gives it."""
+
+EventId: TypeAlias = Annotated[
+    str | None,
+    typer.Option(
+        "--event",
+        metavar="ID",
+        help=(
+            "Plan the stored event of this id, from the store of --store, "
+            "instead of CDM files; re-screened against the catalog it was "
+            "screened with, if any, unless --catalog or --source is given."
+        ),
+    ),
+]
+"""``--event``: a stored event to plan instead of CDM files."""
 
 TargetPc: TypeAlias = Annotated[
     float,
@@ -144,8 +176,10 @@ class _Burn(NamedTuple):
 
 
 def maneuver_command(
-    cdms: Cdms,
+    cdms: Cdms = None,
     *,
+    event_id: EventId = None,
+    store: EventStore = None,
     target_pc: TargetPc = TARGET_PC,
     burn_before: BurnBefore = None,
     dv: DeltaV = None,
@@ -158,22 +192,24 @@ def maneuver_command(
 ) -> None:
     """Find the smallest burn each way that takes an event below a target Pc.
 
-    The CDMs must make one event. From its latest CDM, along-track burns of the
-    primary are tried from {earliest} to {latest} before TCA, which takes tens
-    of seconds, and up to a minute per try if the event's Pc method is slow.
-    --burn-before and --dv evaluate that one burn instead. --catalog or --source
-    also screens each burn against the catalog for {duration} from the burn,
-    for the approaches it brings or brings closer; their Pc rests on assumed
-    covariances. Exits with status 4 if there is no burn, the burn given misses
-    the target, or every burn brings a red approach or the event's pair back
-    above the target.
+    The CDMs must make one event, or --event names a stored one. From its
+    latest CDM, along-track burns of the primary are tried from {earliest} to
+    {latest} before TCA, which takes tens of seconds, and up to a minute per
+    try if the event's Pc method is slow. --burn-before and --dv evaluate that
+    one burn instead. --catalog or --source also screens each burn against the
+    catalog for {duration} from the burn, for the approaches it brings or
+    brings closer; their Pc rests on assumed covariances. A stored event that
+    keepout screen found is re-screened against the catalog it was screened
+    with unless one is given. Exits with status 4 if there is no burn, the
+    burn given misses the target, or every burn brings a red approach or the
+    event's pair back above the target.
     """
     if (burn_before is None) != (dv is None):
         raise typer.BadParameter(
             "give --burn-before and --dv together", param_hint="--burn-before"
         )
+    _require_one_event(cdms, event_id, store)
     require_one_catalog(catalog, source)
-    from keepout.events import group_events
     from keepout.maneuver import (
         evaluate_burn,
         judge,
@@ -182,11 +218,8 @@ def maneuver_command(
         rescreen,
     )
 
-    event = _one_event(group_events(load_cdms(cdms)))
-    screened = (
-        None
-        if catalog is None and source is None
-        else catalog_input(catalog, source, cache_dir)
+    event, screened = _event_and_catalog(
+        cdms, event_id, store, catalog, source, cache_dir
     )
     plan: ManeuverContext
     if burn_before is None or dv is None:
@@ -216,7 +249,7 @@ def maneuver_command(
     )
     if not verdict.recommendable:
         text.append(_refusal(plan, verdict))
-    show(_payload(plan, burns), *text, as_json=as_json)
+    show(_payload(plan, burns, verdict), *text, as_json=as_json)
     if not verdict.recommendable:
         raise typer.Exit(ExitCode.NO_SAFE_BURN)
 
@@ -229,6 +262,78 @@ maneuver_command.__doc__ = (maneuver_command.__doc__ or "").format_map(
         "duration": duration_words(SCREENING_DURATION),
     }
 )
+
+
+def _require_one_event(
+    cdms: Sequence[Path] | None, event_id: str | None, store: Path | None
+) -> None:
+    """A check that the command line gives CDM files or a stored event, not
+    both, and a store to read the event from.
+
+    Raises
+    ------
+    typer.BadParameter
+        If it gives both or neither, or ``--event`` without a store: a usage
+        error.
+    """
+    if cdms and event_id is not None:
+        raise typer.BadParameter(
+            "give either CDM files or --event, not both", param_hint="--event"
+        )
+    if not cdms and event_id is None:
+        raise typer.BadParameter("give CDM files or --event", param_hint="CDMS")
+    if event_id is not None and store is None:
+        raise typer.BadParameter(
+            "--event needs --store (or $KEEPOUT_STORE)", param_hint="--event"
+        )
+
+
+def _event_and_catalog(
+    cdms: Sequence[Path] | None,
+    event_id: str | None,
+    store: Path | None,
+    catalog: Path | None,
+    source: CatalogSourceName | None,
+    cache_dir: Path | None,
+) -> tuple[ConjunctionEvent, CatalogInput | None]:
+    """The event to plan, and the catalog to re-screen its burns against
+    (``None``: no re-screen).
+
+    The event is that of the CDM files, or the stored one of ``--event``.
+    The catalog is that of ``--catalog`` or ``--source``; without either,
+    a stored event's is the one it was screened against, read again from
+    the store's copy, and the CDM files' is none.
+
+    Raises
+    ------
+    typer.Exit
+        If a CDM file cannot be read (status 1).
+    ManeuverError
+        If the CDM files make several events.
+    StoreError
+        If the store cannot be opened or holds no such event.
+    SourceUnavailable
+        If the stored catalog's file is gone; the message names it.
+    ChecksumMismatch
+        If the stored catalog's file changed; the message names it.
+    """
+    from keepout.events import group_events
+
+    if event_id is None or store is None:
+        event = _one_event(group_events(load_cdms(cdms or ())))
+        reference = None
+    else:
+        with open_cli_store(store, create=False) as opened:
+            event = opened.event(event_id)
+            reference = opened.catalog(event_id)
+    if catalog is not None or source is not None:
+        return event, catalog_input(catalog, source, cache_dir)
+    if reference is None:
+        return event, None
+    from keepout.sources.catalog import load_reference
+
+    omms = load_reference(reference)
+    return event, CatalogInput(omms, f"stored copy of {reference.label}", reference)
 
 
 def _one_event(events: Sequence[ConjunctionEvent]) -> ConjunctionEvent:
@@ -286,6 +391,7 @@ def _option_json(option: ManeuverOption) -> dict[str, JsonOut]:
         "range_at_tca_m": option.range_at_tca,
         "method": option.method,
         "meets_target": option.meets_target,
+        "notes": list(option.notes),
     }
 
 
@@ -331,8 +437,11 @@ def _burn_json(burn: _Burn) -> dict[str, JsonOut]:
     }
 
 
-def _payload(plan: ManeuverContext, burns: Sequence[_Burn]) -> dict[str, JsonOut]:
-    """The result as JSON values, for ``--json``."""
+def _payload(
+    plan: ManeuverContext, burns: Sequence[_Burn], verdict: BurnVerdict
+) -> dict[str, JsonOut]:
+    """The result as JSON values, for ``--json``; its ``refusal`` is the line
+    saying why no burn can be recommended (``None`` if one can)."""
     latest = plan.event.latest
     return {
         "event": plan.event.event_id,
@@ -344,6 +453,7 @@ def _payload(plan: ManeuverContext, burns: Sequence[_Burn]) -> dict[str, JsonOut
         "baseline": _option_json(plan.baseline),
         "options": [_burn_json(burn) for burn in burns],
         "notes": list(plan.notes),
+        "refusal": None if verdict.recommendable else _refusal(plan, verdict),
     }
 
 

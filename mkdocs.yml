@@ -59,6 +59,7 @@ nav:
       - Risk assessment: risk.md
       - Manoeuvre planning: maneuver.md
       - Command line: cli.md
+      - Conjunction store: store.md
       - Space-Track data: spacetrack.md
   - Background:
       - Synthetic covariance model: assumptions.md
@@ -98,6 +99,7 @@ nav:
           - CARA reference data: reference/cara.md
           - Kelvins data: reference/kelvins.md
           - Data cache: reference/cache.md
+          - Conjunction store: reference/store.md
       - Validation and errors:
           - Validation tooling: reference/validation.md
           - Errors: reference/errors.md

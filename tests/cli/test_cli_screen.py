@@ -1,6 +1,9 @@
+import hashlib
 import json
+import re
 import types
 from pathlib import Path
+from typing import Any
 
 import pytest
 from astropy.time import Time
@@ -21,6 +24,7 @@ from keepout.cli import screen
 from keepout.cli.output import ExitCode
 from keepout.omm import load
 from keepout.omm.celestrak import dumps_csv
+from keepout.store import open_store
 
 
 def screen_fixture(
@@ -282,3 +286,113 @@ def test_screen_of_a_quiet_window_reports_no_approach(tmp_path: Path) -> None:
 Screened 1 fleet satellite against 2 objects (<catalog>) from 2026-10-06T00:00:00 to 2026-10-06T12:00:00 UTC: 0 close approaches.
 Covariances are assumed (keepout's model of GP element set errors), not orbit determination.
 """)
+
+
+def test_screen_with_store_records_the_catalog_digest(tmp_path: Path) -> None:
+    db = tmp_path / "keepout.db"
+    result = keepout(*screen_fixture(tmp_path, "--store", str(db), "--json"))
+    assert result.exit_code == ExitCode.OK
+    payload = json.loads(result.stdout)
+    digest = hashlib.sha256(FIXTURE_CSV.read_bytes()).hexdigest()
+    with open_store(db, create=False) as store:
+        events = store.events()
+        assert [cdm.message_id for e in events for cdm in e.cdms] == [
+            e["cdms"][0] for e in payload["events"]
+        ]
+        ids = [event.event_id for event in events]
+        for event_id in ids:
+            reference = store.catalog(event_id)
+            assert reference is not None
+            (file,) = reference.files
+            assert file.sha256 == digest
+            assert file.path.parent == store.catalogs
+            assert file.path.read_bytes() == FIXTURE_CSV.read_bytes()
+    assert payload["store"] == {
+        "path": str(db),
+        "added": [e["cdms"][0] for e in payload["events"]],
+        "already_stored": [],
+        "events": ids,
+        "new_events": ids,
+    }
+    text = keepout(*screen_fixture(tmp_path, "--store", str(db)))
+    assert f"0 CDMs added to {db} (2 already stored), 0 new events.\n" in text.stdout
+
+
+def test_screen_without_store_gives_no_store(tmp_path: Path) -> None:
+    result = keepout(*screen_fixture(tmp_path, "--json"))
+    assert json.loads(result.stdout)["store"] is None
+
+
+def test_screen_with_store_shows_the_store_s_event_ids(tmp_path: Path) -> None:
+    db = tmp_path / "keepout.db"
+    cdms = tmp_path / "cdms"
+    payload = json.loads(
+        keepout(
+            *screen_fixture(
+                tmp_path, "--store", str(db), "--cdm-dir", str(cdms), "--json"
+            )
+        ).stdout
+    )
+    with open_store(db, create=False) as store:
+        stored = store.events()
+    ids = [event.event_id for event in stored]
+    assert all(re.fullmatch(r"[0-9a-f]{8}", event_id) for event_id in ids)
+    assert [event["event_id"] for event in payload["events"]] == ids
+    assert [event["cdms"] for event in payload["events"]] == [
+        [cdm.message_id for cdm in event.cdms] for event in stored
+    ]
+    assert payload["store"]["events"] == ids
+    text = keepout(*screen_fixture(tmp_path, "--store", str(db))).stdout
+    assert f"Event ids, row by row: {ids[0]}, {ids[1]}.\n" in text
+    assert f"\n{ids[1]}: monitor (latest Pc 7.38e-06" in text
+    # The Pc is cached with the default settings: store add finds it.
+    rebuilt = keepout("store", "rebuild", "--store", str(db))
+    assert rebuilt.stdout == f"Computed 0 Pc observations in {db}.\n"
+    added = keepout(
+        "store", "add", *sorted(map(str, cdms.iterdir())), "--store", str(db)
+    )
+    assert added.exit_code == ExitCode.OK
+    assert f"Event ids, row by row: {ids[0]}, {ids[1]}.\n" in added.stdout
+    assert keepout("store", "rebuild", "--store", str(db)).stdout == rebuilt.stdout
+
+
+def test_a_screen_row_stays_the_approach_screened_on_day_two(tmp_path: Path) -> None:
+    # The event keeps its id; its row shows the day's CDM, the store has both.
+    db = tmp_path / "keepout.db"
+    pair = {"object1": "44476", "object2": "55841"}
+
+    def screened(start: str) -> dict[str, Any]:
+        result = keepout(
+            *screen_fixture(tmp_path, "--store", str(db), "--json", start=start)
+        )
+        assert result.exit_code == ExitCode.OK
+        rows: list[dict[str, Any]] = [
+            event
+            for event in json.loads(result.stdout)["events"]
+            if {k: event[k]["object_id"] for k in pair} == pair
+        ]
+        (row,) = rows
+        return row
+
+    first = screened("2026-10-06")
+    second = screened("2026-10-07")
+    assert second["event_id"] == first["event_id"]
+    assert len(first["cdms"]) == len(second["cdms"]) == 1
+    assert second["cdms"] != first["cdms"]
+    assert len(second["observations"]) == 1
+    both = [*first["cdms"], *second["cdms"]]
+    with open_store(db, create=False) as store:
+        stored = store.event(str(first["event_id"]))
+        assert sorted(cdm.message_id for cdm in stored.cdms) == sorted(both)
+        texts = {cdm.message_id: kvn.dumps(cdm) for cdm in stored.cdms}
+    files = []
+    for message_id, text in texts.items():
+        path = tmp_path / f"{message_id}.kvn"
+        path.write_text(text, encoding="utf-8")
+        files.append(str(path))
+    for command in (("store", "add"), ("assess",)):
+        result = keepout(*command, *files, "--store", str(db), "--json")
+        (event,) = json.loads(result.stdout)["events"]
+        assert event["event_id"] == first["event_id"]
+        assert sorted(event["cdms"]) == sorted(both)
+        assert len(event["observations"]) == 2

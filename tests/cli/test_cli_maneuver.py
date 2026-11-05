@@ -14,6 +14,7 @@ import dataclasses
 import functools
 import json
 import re
+import shutil
 import subprocess
 import sys
 from collections.abc import Callable, Sequence
@@ -27,6 +28,7 @@ from cli_builders import (
     FIXTURE_CSV,
     START,
     FakeWeb,
+    block_store_extra,
     calculated,
     celestrak_pages,
     keepout,
@@ -42,6 +44,7 @@ from typer.testing import Result
 from keepout import maneuver
 from keepout._defaults import SCREENING_DURATION
 from keepout.cli.output import ExitCode, minute
+from keepout.cli.store import STORE_HINT
 from keepout.events import ConjunctionEvent
 from keepout.maneuver import (
     BurnGrid,
@@ -181,6 +184,7 @@ def test_json_has_the_documented_keys(tmp_path: Path) -> None:
         "baseline",
         "options",
         "notes",
+        "refusal",
     ]
     assert payload["event"] == "52939/47826/2026-10-06T19:36:42.717332"
     assert payload["primary"] == str(PRIMARY)
@@ -192,6 +196,7 @@ def test_json_has_the_documented_keys(tmp_path: Path) -> None:
         "range_at_tca_m",
         "method",
         "meets_target",
+        "notes",
     ]
     assert payload["baseline"]["pc"] == pytest.approx(0.04254, rel=1e-3)
     assert payload["baseline"]["meets_target"] is False
@@ -204,6 +209,7 @@ def test_json_has_the_documented_keys(tmp_path: Path) -> None:
         "range_at_tca_m",
         "method",
         "meets_target",
+        "notes",
         "rescreen",
     ]
     assert prograde["direction"] == "prograde"
@@ -281,6 +287,22 @@ No burn on the grid meets the target Pc 1.00e-05 (exit status 4).
     as_json = keepout("maneuver", *args, "--json")
     assert as_json.exit_code == ExitCode.NO_SAFE_BURN
     assert json.loads(as_json.stdout)["options"] == []
+
+
+def test_json_names_the_refusal_on_exit_4(tmp_path: Path) -> None:
+    result = keepout("maneuver", crossing(tmp_path), "--hbr", "500000", "--json")
+    payload = json.loads(result.stdout)
+    assert result.exit_code == ExitCode.NO_SAFE_BURN
+    assert payload["refusal"] == (
+        "No burn on the grid meets the target Pc 1.00e-05 (exit status 4)."
+    )
+
+
+def test_json_refusal_is_null_with_a_safe_option(tmp_path: Path) -> None:
+    result = keepout("maneuver", crossing(tmp_path), "--hbr", "1000", "--json")
+    payload = json.loads(result.stdout)
+    assert result.exit_code == ExitCode.OK
+    assert payload["refusal"] is None
 
 
 @pytest.mark.usefixtures("rescreen_once")
@@ -649,6 +671,8 @@ def test_help_gives_the_exit_status_and_the_library_defaults() -> None:
         "--burn-before",
         "--dv",
         "--hbr",
+        "--event ID",
+        "--store FILE",
         "--catalog",
         "--source",
         "--workers",
@@ -688,7 +712,7 @@ def test_bad_options_are_usage_errors(
 def test_no_cdm_is_a_usage_error() -> None:
     result = keepout("maneuver")
     assert result.exit_code == ExitCode.USAGE
-    assert "Missing argument 'CDMS'" in result.stderr
+    assert "give CDM files or --event" in usage_error(result)
 
 
 def test_a_file_that_is_no_cdm_is_named(tmp_path: Path) -> None:
@@ -866,3 +890,193 @@ def test_source_is_read_as_a_catalog(
     assert seen == [(222, 1)]
     assert web.urls
     assert "re-screened against 5 objects (CelesTrak" in result.stdout
+
+
+ONE_SATELLITE: Final = """\
+catalog_hard_body_radius = 1.0
+
+[[satellites]]
+catalog_number = 52939
+hard_body_radius = 5.0
+maneuverable = true
+"""
+"""A fleet of 52939 alone: one approach in :func:`catalog_of`'s catalog."""
+
+
+def stored_crossing(folder: Path) -> tuple[Path, str]:
+    """A store holding the operator's CDM of the crossing event (no catalog),
+    and the event's id."""
+    db = folder / "keepout.db"
+    added = keepout("store", "add", crossing(folder), "--store", str(db), "--json")
+    (event_id,) = json.loads(added.stdout)["store"]["events"]
+    return db, event_id
+
+
+@pytest.fixture(scope="module")
+def screened_store(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, str]:
+    """A store of :data:`ONE_SATELLITE` screened against :func:`catalog_of`'s
+    catalog (deleted since: the store keeps a copy), and the crossing
+    event's id; screened once, tests copy it (:func:`copied_store`)."""
+    folder = tmp_path_factory.mktemp("screened")
+    fleet = write(folder, "fleet.toml", ONE_SATELLITE)
+    catalog = catalog_of(folder)
+    db = folder / "keepout.db"
+    window = ("--start", START, "--days", "3", "--workers", "1")
+    args = ("--fleet", fleet, "--catalog", catalog, *window, "--store", str(db))
+    screened = keepout("screen", *args, "--json")
+    assert screened.exit_code == ExitCode.OK
+    (event_id,) = json.loads(screened.stdout)["store"]["events"]
+    Path(catalog).unlink()
+    return db, event_id
+
+
+def copied_store(screened: tuple[Path, str], folder: Path) -> tuple[Path, str]:
+    """The screened store and its catalog copies, copied into ``folder``."""
+    db, event_id = screened
+    shutil.copy(db, folder / db.name)
+    catalogs = f"{db.name}.catalogs"
+    shutil.copytree(db.parent / catalogs, folder / catalogs)
+    return folder / db.name, event_id
+
+
+def test_event_from_the_store_plans_like_its_files(tmp_path: Path) -> None:
+    db, event_id = stored_crossing(tmp_path)
+    options = ("--hbr", "1000", "--burn-before", "19", "--dv", "1")
+    stored = ("maneuver", "--event", event_id, "--store", str(db), *options)
+    from_files = keepout("maneuver", crossing(tmp_path), *options, "--json")
+    from_store = keepout(*stored, "--json")
+    assert from_store.exit_code == from_files.exit_code == ExitCode.OK
+    planned = json.loads(from_store.stdout)
+    assert planned["event"] == event_id
+    assert planned | {"event": ""} == json.loads(from_files.stdout) | {"event": ""}
+    text = keepout(*stored).stdout
+    assert text.startswith(f"Event {event_id}: 52939 / 47826, TCA ")
+    # Screened by no one: no catalog to re-screen against.
+    assert text.splitlines()[-1].startswith("Not re-screened: nothing is known")
+
+
+def test_event_rescreens_against_its_stored_catalog(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    screened_store: tuple[Path, str],
+) -> None:
+    db, event_id = copied_store(screened_store, tmp_path)
+    seen: list[set[int]] = []
+
+    def rescreen(
+        plan: ManeuverPlan,
+        option: ManeuverOption,
+        omms: Sequence[Omm],
+        *,
+        workers: int | None,
+    ) -> RescreenResult:
+        seen.append({omm.catalog_number for omm in omms})
+        return quiet_rescreen(plan, option, omms)
+
+    monkeypatch.setattr(maneuver, "rescreen", rescreen)
+    burn = ("--hbr", "1000", "--burn-before", "19", "--dv", "1")
+    stored = ("maneuver", "--event", event_id, "--store", str(db), *burn)
+    result = keepout(*stored)
+    assert result.exit_code == ExitCode.OK
+    in_fixture = {omm.catalog_number for omm in load(FIXTURE_CSV)}
+    assert seen == [NEIGHBOURS & in_fixture]
+    (reference,) = list((tmp_path / f"{db.name}.catalogs").iterdir())
+    screened_with = screened_store[0].parent / "catalog.csv"
+    assert (
+        f"prograde re-screened against {len(seen[0])} objects (stored copy of "
+        f"{screened_with}) from "
+    ) in result.stdout
+    assert reference.suffix == ".csv"
+    assert json.loads(keepout(*stored, "--json").stdout)["event"] == event_id
+    # --catalog still names the catalog to re-screen against.
+    seen.clear()
+    other = catalog_of(tmp_path, frozenset({PRIMARY, SECONDARY}))
+    assert keepout(*stored, "--catalog", other).exit_code == ExitCode.OK
+    assert seen == [{PRIMARY, SECONDARY}]
+
+
+@pytest.mark.parametrize(
+    ("change", "reason"),
+    [
+        (lambda path: path.write_text("changed\n"), "changed since it was referenced"),
+        (Path.unlink, "cannot read the catalog file"),
+    ],
+    ids=["changed", "deleted"],
+)
+def test_event_with_a_changed_catalog_file_fails_naming_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    screened_store: tuple[Path, str],
+    change: Callable[[Path], object],
+    reason: str,
+) -> None:
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise AssertionError("planned without the event's catalog")
+
+    monkeypatch.setattr(maneuver, "plan_maneuver", refuse)
+    db, event_id = copied_store(screened_store, tmp_path)
+    (copy,) = list((tmp_path / f"{db.name}.catalogs").iterdir())
+    change(copy)
+    result = keepout("maneuver", "--event", event_id, "--store", str(db))
+    assert result.exit_code == ExitCode.ERROR
+    assert result.stderr.startswith("Error: ")
+    assert str(copy) in result.stderr
+    assert reason in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("given", "reason"),
+    [
+        (("{cdm}", "--event", "deadbeef", "--store", "{db}"), "not both"),
+        ((), "give CDM files or --event"),
+        (("--event", "deadbeef"), "--event needs --store"),
+    ],
+    ids=["both", "neither", "no-store"],
+)
+def test_files_and_event_together_is_a_usage_error(
+    tmp_path: Path, given: tuple[str, ...], reason: str
+) -> None:
+    names = {"cdm": crossing(tmp_path), "db": str(tmp_path / "keepout.db")}
+    args = [item.format_map(names) for item in given]
+    result = keepout("maneuver", *args, env={"KEEPOUT_STORE": None})
+    assert result.exit_code == ExitCode.USAGE
+    assert reason in usage_error(result)
+    assert not (tmp_path / "keepout.db").exists()
+
+
+def test_unknown_event_id_is_named(tmp_path: Path) -> None:
+    db, _ = stored_crossing(tmp_path)
+    result = keepout("maneuver", "--event", "deadbeef", "--store", str(db))
+    assert result.exit_code == ExitCode.ERROR
+    assert result.stderr == "Error: no event deadbeef in the store\n"
+    missing = tmp_path / "missing.db"
+    result = keepout("maneuver", "--event", "deadbeef", "--store", str(missing))
+    assert result.exit_code == ExitCode.ERROR
+    assert result.stderr == f"Error: no store at {missing}\n"
+    assert not missing.exists()
+
+
+def test_store_is_read_from_the_environment(tmp_path: Path) -> None:
+    db, event_id = stored_crossing(tmp_path)
+    burn = ("--hbr", "1000", "--burn-before", "19", "--dv", "1", "--json")
+    env = {"KEEPOUT_STORE": str(db)}
+    result = keepout("maneuver", "--event", event_id, *burn, env=env)
+    assert json.loads(result.stdout)["event"] == event_id
+    # Files ignore it.
+    assert keepout("maneuver", crossing(tmp_path), *burn, env=env).exit_code == 0
+
+
+def test_the_store_extra_is_needed_only_with_event(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db = tmp_path / "keepout.db"
+    burn = ("--hbr", "1000", "--burn-before", "19", "--dv", "1", "--json")
+    env = {"KEEPOUT_STORE": str(db)}
+    block_store_extra("sqlalchemy", monkeypatch)
+    files = keepout("maneuver", crossing(tmp_path), *burn, env=env)
+    assert files.exit_code == ExitCode.OK
+    assert files.stderr == ""
+    event = keepout("maneuver", "--event", "deadbeef", *burn, env=env)
+    assert event.exit_code == ExitCode.ERROR
+    assert event.stderr == f"Error: {STORE_HINT}\n"
+    assert not db.exists()

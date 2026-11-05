@@ -48,3 +48,9 @@ def test_a_file_that_is_not_utf8_is_a_parse_error(tmp_path: Path) -> None:
     path.write_bytes(b"CCSDS_CDM_VERS = 1.0\n\xff\n")
     with pytest.raises(CdmParseError, match=r"broken\.kvn: not UTF-8 text"):
         keepout.cdm.load(path)
+
+
+def test_read_text_is_the_text_load_parses(tmp_path: Path) -> None:
+    packed = tmp_path / "b1.kvn.gz"
+    packed.write_bytes(gzip.compress(B1_KVN.read_bytes()))
+    assert keepout.cdm.read_text(packed) == B1_KVN.read_text(encoding="utf-8")

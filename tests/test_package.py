@@ -83,6 +83,20 @@ def test_importing_loads_no_numerical_library(module: str) -> None:
     assert loaded.stdout == "[]\n"
 
 
+def test_importing_keepout_loads_no_sqlalchemy() -> None:
+    # The store and its database libraries (the store extra) load only when
+    # a store is opened.
+    code = (
+        "import sys, keepout; "
+        "print(sorted(m for m in ('sqlalchemy', 'alembic', 'keepout.store') "
+        "if m in sys.modules))"
+    )
+    loaded = subprocess.run(  # noqa: S603 (this interpreter, fixed code)
+        [sys.executable, "-c", code], capture_output=True, text=True, check=True
+    )
+    assert loaded.stdout == "[]\n"
+
+
 def test_importing_reads_no_metadata() -> None:
     # importlib.metadata is most of the import time: __version__ is lazy.
     code = (

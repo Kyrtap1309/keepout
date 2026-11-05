@@ -33,7 +33,10 @@ plan's event, on the grid or off it, with the event's own Pc method. For a
 burn of your own, `prepare_maneuver(event)` gives the event's baseline
 without the grid, in a fraction of the time, and `evaluate_burn` takes it
 in place of a plan. The command line runs the same as `keepout maneuver`
-([Command line](cli.md#maneuver)).
+([Command line](cli.md#maneuver)). It also plans an event kept in a
+[conjunction store](store.md) by its id, `keepout maneuver --event ID`,
+and re-screens its burns against the catalog the event was screened with
+([Stored events](cli.md#stored-events)).
 
 ## The grid
 

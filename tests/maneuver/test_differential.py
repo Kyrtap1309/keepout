@@ -2,7 +2,7 @@
 
 import math
 from collections.abc import Callable
-from typing import Final
+from typing import Any, Final
 
 import numpy as np
 import pytest
@@ -13,7 +13,9 @@ from scipy.optimize import minimize_scalar
 from keepout._types import FloatArray
 from keepout.errors import GeometryError, PropagationError
 from keepout.maneuver import BurnEffects, burn_effects, closest_approach_shift
+from keepout.maneuver import _differential as differential
 from keepout.orbits import EARTH_MU
+from keepout.propagation.cowell import integrate
 from keepout.propagation.forces import EARTH_RADIUS, ForceModel
 from keepout.state import RefFrame, StateVector
 from keepout.units import HOUR, KM
@@ -202,14 +204,105 @@ def test_only_a_gcrf_state_can_burn() -> None:
         )
 
 
-def test_a_burn_into_the_earth_is_an_error() -> None:
+LOW: Final = EARTH_RADIUS + 200 * KM
+INTO_THE_SURFACE: Final = -300.0
+"""A retrograde Δv [m/s] that takes :data:`LOW` 1000 km below the surface."""
+
+
+FALL: Final = 900.0
+"""More than the time [s] :data:`INTO_THE_SURFACE` takes from :data:`LOW` to
+the surface, about 13 min, and less than any other lead of these tests."""
+
+
+@pytest.mark.parametrize(
+    "hours",
+    [
+        pytest.param([2.0, 1.0, 1 / 6], id="first leg"),
+        pytest.param([2.0, 1.9, 1.0, 1 / 6], id="later leg"),
+    ],
+)
+def test_a_burn_into_the_surface_marks_only_its_cells(hours: list[float]) -> None:
+    # The earlier burns fall below the surface, in the first leg or in the
+    # second; 10 min before TCA, the burn has not reached it yet.
+    leads = np.array(hours) * HOUR
+    delta_v = np.array([INTO_THE_SURFACE, -0.1, 0.0, 0.1, 0.5])
+    effects = burn_effects(circular(LOW), leads, delta_v, TWO_BODY)
+    assert effects.failed.shape == (len(leads), len(delta_v))
+    np.testing.assert_array_equal(effects.failed[:, 0], leads > FALL)
+    assert not effects.failed[:, 1:].any()
+    assert np.isnan(effects.dr[effects.failed]).all()
+    assert np.isnan(effects.dv[effects.failed]).all()
+    assert np.isfinite(effects.dr[~effects.failed]).all()
+    assert np.isfinite(effects.dv[~effects.failed]).all()
+    assert not effects.failed.flags.writeable
+
+
+def test_a_surviving_burn_of_a_failing_delta_v_is_that_burn_alone() -> None:
+    leads = np.array([2.0, 1.0, 1 / 6]) * HOUR
+    effects = burn_effects(
+        circular(LOW), leads, np.array([INTO_THE_SURFACE, 0.1]), TWO_BODY
+    )
+    alone = burn_effects(
+        circular(LOW), leads[-1:], np.array([INTO_THE_SURFACE]), TWO_BODY
+    )
+    np.testing.assert_array_equal(effects.dr[-1, 0], alone.dr[0, 0])
+    np.testing.assert_array_equal(effects.dv[-1, 0], alone.dv[0, 0])
+
+
+@pytest.mark.parametrize("hours", [[2.0, 1.0, 1 / 6], [2.0, 1.9, 1.0, 1 / 6]])
+@pytest.mark.parametrize("where", [0, 2, 5])
+def test_batch_split_equals_one_integration_of_the_others(
+    hours: list[float], where: int
+) -> None:
+    leads = np.array(hours) * HOUR
+    delta_v = np.array([-0.5, -0.1, 0.1, 0.5, 1.0, 2.0])
+    others = np.delete(delta_v, where)
+    delta_v[where] = INTO_THE_SURFACE
+    effects = burn_effects(circular(LOW), leads, delta_v, TWO_BODY)
+    alone = burn_effects(circular(LOW), leads, others, TWO_BODY)
+    kept = np.arange(len(delta_v)) != where
+    np.testing.assert_allclose(effects.dr[:, kept], alone.dr, rtol=1e-12)
+    np.testing.assert_allclose(effects.dv[:, kept], alone.dv, rtol=1e-12)
+
+
+def test_two_failing_delta_v_leave_the_others() -> None:
+    leads = np.array([2.0, 1.0, 1 / 6]) * HOUR
+    delta_v = np.array([-0.1, INTO_THE_SURFACE, 0.1, 0.5, 2 * INTO_THE_SURFACE])
+    effects = burn_effects(circular(LOW), leads, delta_v, TWO_BODY)
+    alone = burn_effects(circular(LOW), leads, delta_v[[0, 2, 3]], TWO_BODY)
+    np.testing.assert_allclose(effects.dr[:, [0, 2, 3]], alone.dr, rtol=1e-12)
+    assert effects.failed[:2, [1, 4]].all()
+    assert not effects.failed[:, [0, 2, 3]].any()
+
+
+def test_nothing_is_integrated_again_when_no_burn_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[int] = []
+
+    def counted(*args: Any, **kwargs: Any) -> FloatArray:
+        calls.append(1)
+        return integrate(*args, **kwargs)
+
+    monkeypatch.setattr(differential, "integrate", counted)
+    leads = np.array([2.0, 1.0, 1 / 6]) * HOUR
+    burn_effects(circular(), leads, np.array([-0.1, 0.1, 0.5]), TWO_BODY)
+    # Back to the earliest burn, then one leg per burn time.
+    assert len(calls) == 1 + len(leads)
+
+
+def test_nothing_fails_without_a_burn_into_the_surface() -> None:
+    effects = burn_effects(
+        circular(), np.array([2.0, 1.0]) * HOUR, np.array([-0.1, 0.1]), TWO_BODY
+    )
+    assert not effects.failed.any()
+
+
+def test_the_reference_failing_still_raises() -> None:
+    # Climbing straight up: back in time it falls below the surface.
+    rising = StateVector(EPOCH, [LOW, 0.0, 0.0], [1_000.0, 0.0, 0.0], "GCRF")
     with pytest.raises(PropagationError, match="surface"):
-        burn_effects(
-            circular(EARTH_RADIUS + 100 * KM),
-            np.array([HOUR]),
-            np.array([-1_000.0]),
-            TWO_BODY,
-        )
+        burn_effects(rising, np.array([HOUR]), np.array([0.1]), TWO_BODY)
 
 
 def test_shift_of_a_straight_line() -> None:

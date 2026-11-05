@@ -7,7 +7,7 @@ and :mod:`keepout.cdm.xml` read and write a specific one.
 
 from pathlib import Path
 
-from keepout.ccsds.files import strip_bom
+from keepout.ccsds.files import read_file, strip_bom
 from keepout.cdm import kvn, xml
 from keepout.cdm._io import CDM
 from keepout.cdm.builder import (
@@ -35,6 +35,7 @@ __all__ = [
     "loads",
     "make_cdm",
     "make_message_id",
+    "read_text",
     "xml",
 ]
 
@@ -63,4 +64,23 @@ def load(path: str | Path) -> Cdm:
     path
         File to read (UTF-8, gzip-compressed or not).
     """
-    return CDM.load(path, loads)
+    return loads(read_text(path))
+
+
+def read_text(path: str | Path) -> str:
+    """The text of a CDM file, as :func:`load` reads it: decompressed if it
+    is gzip data, without a byte-order mark.
+
+    Parameters
+    ----------
+    path
+        File to read (UTF-8, gzip-compressed or not).
+
+    Raises
+    ------
+    CdmParseError
+        If the file is broken gzip data or not UTF-8 text.
+    OSError
+        If it cannot be read.
+    """
+    return read_file(path, CDM)

@@ -93,3 +93,9 @@ FORMATS = ["celestrak", "kvn", "tle", "xml"]
 def test_a_format_module_is_an_attribute_of_the_package(name: str) -> None:
     assert getattr(keepout.omm, name) is importlib.import_module(f"keepout.omm.{name}")
     assert name in dir(keepout.omm)
+
+
+def test_load_data_reads_a_files_bytes() -> None:
+    assert keepout.omm.load_data(gzip.compress(SAMPLE_CSV.read_bytes()), "x") == SAMPLE
+    with pytest.raises(OmmParseError, match=r"x\.csv: not UTF-8 text"):
+        keepout.omm.load_data(b"OBJECT_NAME,\xff\n", "x.csv")

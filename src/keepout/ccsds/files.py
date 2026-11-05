@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Final
 if TYPE_CHECKING:
     from keepout.ccsds.message import Family
 
-__all__ = ["BOM", "read_file", "strip_bom"]
+__all__ = ["BOM", "decode_file", "read_file", "strip_bom"]
 
 _GZIP_MAGIC: Final = b"\x1f\x8b"
 
@@ -47,7 +47,26 @@ def read_file(path: str | Path, family: Family) -> str:
     CcsdsParseError
         The family's, if the file is broken gzip data or not UTF-8 text.
     """
-    data = Path(path).read_bytes()
+    return decode_file(Path(path).read_bytes(), path, family)
+
+
+def decode_file(data: bytes, path: str | Path, family: Family) -> str:
+    """The text of a file's bytes, as :func:`read_file` reads them.
+
+    Parameters
+    ----------
+    data
+        The file's bytes.
+    path
+        The file, for the error message.
+    family
+        The message family, whose parse error broken data raises.
+
+    Raises
+    ------
+    CcsdsParseError
+        The family's, if the data is broken gzip data or not UTF-8 text.
+    """
     if data.startswith(_GZIP_MAGIC):
         try:
             data = gzip.decompress(data)

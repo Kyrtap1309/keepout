@@ -2,7 +2,8 @@
 
 Every command is a function of a command module (:mod:`keepout.cli.fetch`,
 :mod:`keepout.cli.screen`, :mod:`keepout.cli.assess`,
-:mod:`keepout.cli.maneuver`, :mod:`keepout.cli.validate`) registered here through
+:mod:`keepout.cli.maneuver`, :mod:`keepout.cli.validate`,
+:mod:`keepout.cli.store`) registered here through
 :func:`~keepout.cli.output.reported`, so keepout's errors end the command
 with ``Error: ...`` and status 1 instead of a traceback.
 """
@@ -20,9 +21,10 @@ from keepout.cli.fetch import fetch_cara, fetch_catalog, fetch_cdm, fetch_kelvin
 from keepout.cli.maneuver import maneuver_command
 from keepout.cli.output import reported
 from keepout.cli.screen import screen_command
+from keepout.cli.store import store_add, store_purge, store_rebuild, store_upgrade
 from keepout.cli.validate import validate_command
 
-__all__ = ["app", "fetch_app", "run"]
+__all__ = ["app", "fetch_app", "run", "store_app"]
 
 app = typer.Typer(
     name="keepout",
@@ -41,6 +43,18 @@ fetch_app = typer.Typer(
 """``keepout fetch``: one command per source."""
 
 app.add_typer(fetch_app)
+
+store_app = typer.Typer(
+    name="store",
+    help=(
+        "Keep events, CDMs and their Pc in a conjunction store, a SQLite file "
+        "(needs the store extra)."
+    ),
+    no_args_is_help=True,
+)
+"""``keepout store``: the conjunction store's commands."""
+
+app.add_typer(store_app)
 
 
 def _print_version(*, value: bool) -> None:
@@ -78,6 +92,10 @@ _add(app, "screen", screen_command)
 _add(app, "assess", assess_command)
 _add(app, "maneuver", maneuver_command)
 _add(app, "validate", validate_command)
+_add(store_app, "add", store_add)
+_add(store_app, "upgrade", store_upgrade)
+_add(store_app, "rebuild", store_rebuild)
+_add(store_app, "purge", store_purge)
 
 
 def run() -> None:

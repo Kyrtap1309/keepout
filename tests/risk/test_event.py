@@ -8,7 +8,12 @@ from risk_builders import b1_cdm
 import keepout.cdm
 from keepout import EventError, PcConvergenceError, compute_pc
 from keepout.cdm import Cdm
-from keepout.events import ConjunctionEvent, group_events, time_to_tca
+from keepout.events import (
+    ConjunctionEvent,
+    group_events,
+    time_to_tca,
+    without_hard_body_radius,
+)
 from keepout.pc import MethodChoice, api, computation
 from keepout.risk import Action, assess
 from keepout.units import DAY
@@ -282,3 +287,16 @@ def test_group_events_of_nothing_is_empty() -> None:
 def test_group_events_refuses_an_invalid_tolerance() -> None:
     with pytest.raises(ValueError, match="tca_tolerance must be finite and >= 0"):
         group_events([b1_cdm()], tca_tolerance=-5.0)
+
+
+def test_the_cdms_without_hbr_are_listed_by_message_id() -> None:
+    text = (CDM_DATA / "tracss_v2.kvn").read_text(encoding="utf-8")
+    secondary = "MANEUVERABLE                   = NO\n"
+    with_hbr = keepout.cdm.loads(
+        text.replace(
+            secondary, f"{secondary}HBR                            = 1.00 [m]\n"
+        )
+    )
+    cdms = [b1_cdm("A"), with_hbr, b1_cdm("B")]
+    assert without_hard_body_radius(cdms) == ("A", "B")
+    assert without_hard_body_radius([with_hbr]) == ()

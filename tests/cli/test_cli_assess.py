@@ -238,3 +238,46 @@ def test_assess_labels_events_whose_covariances_are_assumed(tmp_path: Path) -> N
     assert "assumed covariances" not in only.stdout
     payload = json.loads(keepout("assess", files[1], "--json").stdout)
     assert payload["assumed_covariance_events"] == 0
+
+
+def test_assess_with_store_shows_the_same_ids_as_store_add(tmp_path: Path) -> None:
+    db = tmp_path / "keepout.db"
+    files = [
+        write(tmp_path, "green.kvn", green()),
+        write(tmp_path, "yellow.kvn", yellow()),
+    ]
+    plain = json.loads(keepout("assess", *files, "--json").stdout)
+    assert plain["store"] is None
+    stored = keepout("assess", *files, "--store", str(db), "--json")
+    assert stored.exit_code == ExitCode.OK
+    payload = json.loads(stored.stdout)
+    ids = [event["event_id"] for event in payload["events"]]
+    assert all(re.fullmatch(r"[0-9a-f]{8}", event_id) for event_id in ids)
+    assert payload["store"]["new_events"] == ids
+    # The same Pc, risk and action as without the store.
+    for key in ("pc", "level", "action", "cdms", "trend"):
+        assert [e[key] for e in payload["events"]] == [e[key] for e in plain["events"]]
+    added = json.loads(
+        keepout("store", "add", *files, "--store", str(db), "--json").stdout
+    )
+    assert [event["event_id"] for event in added["events"]] == ids
+    assert added["store"]["already_stored"] == payload["store"]["added"]
+    text = keepout("assess", *files, "--store", str(db))
+    assert f"Event ids, row by row: {ids[0]}, {ids[1]}.\n" in text.stdout
+    assert f"{ids[1]}: monitor (latest Pc 7.38e-06" in text.stdout
+
+
+def test_assess_with_store_computes_with_the_method_and_hbr_given(
+    tmp_path: Path,
+) -> None:
+    db = tmp_path / "keepout.db"
+    files = [write(tmp_path, "green.kvn", without_hbr(green()))]
+    args = ("assess", *files, "--store", str(db), "--json")
+    refused = keepout(*args)
+    assert refused.exit_code == ExitCode.ERROR
+    assert "no HBR for both objects" in refused.stderr
+    result = keepout(*args, "--method", "elrod", "--hbr", "1000")
+    assert result.exit_code == ExitCode.MANEUVER
+    (event,) = json.loads(result.stdout)["events"]
+    assert event["observations"][0]["method"] == "elrod"
+    assert event["action"] == "maneuver"

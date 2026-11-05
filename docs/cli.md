@@ -32,8 +32,10 @@ keywords do. The prose of these pages uses the British "manoeuvre".
 | `keepout fetch kelvins` | Download ESA's Kelvins collision avoidance data set (221 MB) |
 | `keepout screen --fleet FILE [--days 7] [--cdm-dir DIR]` | Screen a fleet, issue a CDM per approach, assess each |
 | `keepout assess CDM...` | Compute each CDM's Pc and each event's risk and action |
-| `keepout maneuver CDM... [--catalog FILE]` | Find the smallest burn each way that takes an event below a target Pc, and re-screen it |
+| `keepout maneuver CDM...\|--event ID [--catalog FILE]` | Find the smallest burn each way that takes an event below a target Pc, and re-screen it |
 | `keepout validate` | Compare keepout's Pc with CARA's on every validation case |
+| `keepout store add CDM... --store FILE` | Keep CDMs in a [conjunction store](store.md), each in its event, and assess the events |
+| `keepout store upgrade\|rebuild\|purge --store FILE` | Upgrade a store's schema, compute its missing Pc, delete its old events |
 
 `keepout COMMAND --help` lists every option of a command.
 
@@ -167,6 +169,16 @@ event.
   event.
 - **Workers.** `--workers N` processes (default: one per CPU, at most 4).
   Each runs its numerical libraries on one thread.
+- **Store.** `--store FILE` adds the CDMs to a
+  [conjunction store](#store), with a copy of the catalog file screened
+  against, so that `maneuver` can re-screen a stored event against the
+  same catalog later. It also caches their Pc with the default settings,
+  as `keepout store add` computes them. The rows are then in the store's
+  order, the reasons and `--json` name each approach by the id of its
+  stored event, and a line under the table gives those ids row by row.
+  Each row stays the approach as screened: its one CDM and its Pc. A
+  screening on a later day adds its CDM to the same stored event, and
+  `keepout store add` or `assess --store` show the event with all of them.
 
 `screen` exits with status 0 whatever the decisions: it reports, and
 `assess` decides.
@@ -186,6 +198,10 @@ action, decided as of the latest CDM's creation date.
 - `--hbr METRES` sets the combined hard-body radius. By default it is the
   sum of both objects' `HBR` (CDM 2.0), and a CDM without them is an error.
   keepout never falls back to a default radius.
+- `--store FILE` adds the CDMs to a [conjunction store](#store) first, as
+  `keepout store add` does with the same method and radius. Each event is
+  then the stored one: its id is the store's, and it has every CDM the
+  store holds of it, from earlier runs too.
 
 A CDM object whose `COVARIANCE_METHOD` is `DEFAULT` has an assumed
 covariance, not one from orbit determination. keepout's synthetic operator
@@ -202,10 +218,11 @@ whether or not its covariances are assumed.
 `keepout maneuver` plans an along-track burn of an event's primary
 (`OBJECT1`), as in [Manoeuvre planning](maneuver.md). It reads CDM files
 as `assess` does. They must make one event, and several are an error that
-lists them. The burns are planned from the event's latest CDM. After the
-week of the synthetic operator above, this plans the yellow Intelsat 39
-event with the target set to green. It then re-screens both burns against
-the frozen catalog:
+lists them. `--event ID` plans a stored event instead (see
+[Stored events](#stored-events) below). The burns are planned from the
+event's latest CDM. After the week of the synthetic operator above, this
+plans the yellow Intelsat 39 event with the target set to green. It then
+re-screens both burns against the frozen catalog:
 
 ```bash
 keepout maneuver cdms/44476_55841_*.kvn --target-pc 1e-7 \
@@ -281,6 +298,27 @@ clean, so the command exits with status 0 and shows both.
   re-screen, and the output says that nothing is known of the approaches a
   burn brings.
 
+### Stored events
+
+`--event ID --store FILE` (or `$KEEPOUT_STORE`) plans the event of that id
+in a [conjunction store](#store), from every CDM the store holds of it,
+in place of CDM files: give one or the other. The JSON `"event"` is then
+the store's id. The other options work as with files.
+
+An event that `screen --store` found is re-screened, without `--catalog`
+or `--source`, against the catalog it was screened with: the store's copy
+of it, checked against its SHA-256. The output names it as `stored copy
+of` the file or source screened. If that copy was deleted or changed
+since, the command stops with an error naming the file (status 1),
+before planning; it never re-screens against another catalog.
+`--catalog` or `--source` re-screens against the catalog given instead.
+An event whose latest CDM came from `assess --store` or `store add` was
+screened by no one, and is not re-screened without a catalog. After the
+`store add` below, for instance, this plans the Luch-5X event from the
+store, not re-screened:
+`keepout maneuver --event 81a87dfa --store keepout.db --target-pc 1e-7`.
+An id the store does not hold is an error (status 1).
+
 Planning takes tens of seconds on the default grid. Each candidate burn
 adds a run of the event's own method, up to a minute for a slow encounter
 on Monte Carlo ([Time](maneuver.md#time) has the measurements). These are
@@ -289,7 +327,9 @@ errors (status 1):
 - a primary with `MANEUVERABLE = NO`;
 - a latest CDM created later than 6 h before TCA;
 - an unknown covariance;
-- a primary the re-screen cannot find or carry.
+- a primary the re-screen cannot find or carry;
+- with `--event`, an id the store does not hold, or a stored catalog
+  copy deleted or changed.
 
 The exit status is 4 when no burn can be recommended:
 
@@ -300,6 +340,88 @@ The exit status is 4 when no burn can be recommended:
 
 The last line then says which. One burn that does neither is enough for
 status 0, and the others are shown with what they bring.
+
+## `store`
+
+`keepout store` keeps CDMs, their events and their Pc in a
+[conjunction store](store.md), a SQLite file. It needs the `store` extra
+(`pip install "keepout[store]"`, or `uv sync --extra store`). Without it,
+any command that uses a store prints the line to install it and exits with
+status 1. Every `store` command takes the file as `--store FILE`, or from
+`$KEEPOUT_STORE`, as `maneuver --event` does. `assess` and `screen` ignore
+the variable: they write to a store only when given `--store`. After the
+week of the synthetic operator above, this adds its CDMs to a new store:
+
+```bash
+keepout store add cdms/*.kvn --store keepout.db
+```
+
+```text
+Conjunction events
+TCA (UTC)         Objects        Miss (m)  CDMs        Pc  Level   Action
+──────────────────────────────────────────────────────────────────────────
+2026-10-06 05:12  25544 / 58180      4633     1  1.44e-30  green   ignore
+2026-10-06 09:25  38771 / 35434      4085     1  1.46e-17  green   ignore
+2026-10-06 12:10  25544 / 58180      4902     1  4.33e-59  green   ignore
+2026-10-06 23:45  38771 / 31882      3374     1  4.28e-33  green   ignore
+2026-10-07 08:06  38771 / 30041      4511     1  8.48e-30  green   ignore
+2026-10-07 16:10  25544 / 46275      4104     1  7.48e-10  green   ignore
+2026-10-07 22:10  38771 / 35884      3314     1  1.55e-09  green   ignore
+2026-10-08 12:03  44476 / 55841      3647     1  7.38e-06  yellow  monitor
+2026-10-09 09:20  38771 / 29734      1476     1  3.90e-10  green   ignore
+2026-10-10 14:08  25544 / 49773      2751     1  1.09e-18  green   ignore
+2026-10-11 10:56  38771 / 30131      2019     1  2.67e-10  green   ignore
+2026-10-12 11:28  38771 / 35196       212     1  4.86e-06  yellow  monitor
+12 events in the store for the 12 CDMs read: 2 monitor, 10 ignore.
+12 of 12 events rest on assumed covariances (COVARIANCE_METHOD = DEFAULT), not orbit determination.
+12 CDMs added to keepout.db (0 already stored), 12 new events.
+Event ids, row by row: 82b2bc7f, d051de7d, ebd423ba, 5d3234fc, 6356c251, 0e8e52d7, c562953a, 81a87dfa, 23b64c85, 35205006, 461d0688, 96aa11c4.
+81a87dfa: monitor (latest Pc 7.38e-06 is yellow, 2.50 d before TCA; trend undetermined; diagnostic: 2-D Pc assumptions questionable: the encounter lasts about 2.51e+03 s, 2.9% of the primary's orbital period (limit 1%); a 3-D Pc may differ; diagnostic: the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used)
+96aa11c4: monitor (latest Pc 4.86e-06 is yellow, 6.48 d before TCA; trend undetermined)
+```
+
+The output is that of `assess`, with the store's event ids. The counts
+line says the events are the store's, since a stored event may hold
+CDMs from earlier runs as well as those read. The ids are eight
+random hexadecimal characters each, given when an event's first CDM is
+stored and kept however many CDMs follow (yours differ). Adding the same
+files again stores nothing: the line under the counts then says
+`0 CDMs added to keepout.db (12 already stored), 0 new events.` A CDM
+from a later run joins its stored event, whose row then counts its CDMs
+and whose trend runs over all of them. The exit status is that of
+`assess`: 3 when an event needs a manoeuvre.
+
+- **`store add CDM...`** adds CDM files, KVN or XML, as they are. Each
+  joins the stored event of the same two objects whose TCAs it keeps
+  within 10 minutes, or starts a new event. The Pc of every CDM of those
+  events is computed, unless the store has it already. `--settings FILE`
+  gives the [operator settings](store.md#settings): Pc method, covariance
+  policy, hard-body radius and risk thresholds.
+- **`store upgrade`** brings a store made by an older keepout to this
+  keepout's schema, and prints the revisions, e.g.
+  `Upgraded keepout.db: base -> 0001.` Any other command refuses such a
+  store and says to run it. A store made by a newer keepout is refused and
+  left as it is.
+- **`store rebuild`** computes the Pc of every stored CDM that the store
+  lacks for the settings (`--settings FILE`), and prints how many. Without
+  `hbr_m` in the settings, it skips the CDMs without `HBR` and says how
+  many: `1 CDM without HBR skipped: set hbr_m in the settings file.`
+- **`store purge --before TIME`** deletes the events whose latest TCA is
+  before `TIME` (ISO 8601 UTC), with their CDMs, their Pc and the catalog
+  copies no other CDM needs. It asks `Delete N events with TCA before
+  ...? [y/N]` first; `--yes` does not ask:
+
+```bash
+keepout store purge --before 2026-10-09 --yes --store keepout.db
+```
+
+```text
+Deleted 8 events with TCA before 2026-10-09T00:00:00 UTC from keepout.db.
+```
+
+`screen --store` and `assess --store` add their CDMs to a store the same
+way, and show the store's ids too. [The conjunction store](store.md)
+explains what it keeps, and how to back it up.
 
 ## `validate`
 
@@ -362,6 +484,10 @@ Each observation has these keys:
 | `diagnostics` | array of strings | the Pc's diagnostics |
 | `assumed_covariance` | boolean | whether the CDM has an assumed covariance |
 
+With `--store`, `event_id` is the store's id of the event. For `assess`
+and `store add`, `cdms` and `observations` cover every CDM the store holds
+of it; for `screen`, they are the approach's own CDM.
+
 At the top level, `screen` gives:
 
 | Key | Type | Meaning |
@@ -374,6 +500,7 @@ At the top level, `screen` gives:
 | `assumed_covariance_events` | number | the events with an assumed covariance (every event, for `screen`) |
 | `skipped` | array of objects | the element sets left out: `catalog_number`, `role`, `reason`, `detail` |
 | `cdm_dir` | string or `null` | the `--cdm-dir` |
+| `store` | object or `null` | what `--store` did (below); `null` without it |
 
 At the top level, `assess` gives:
 
@@ -383,6 +510,31 @@ At the top level, `assess` gives:
 | `events` | array of objects | the events |
 | `assumed_covariance_events` | number | the events with an assumed covariance |
 | `maneuver` | boolean | true when the command exits with status 3 |
+| `store` | object or `null` | what `--store` did (below); `null` without it |
+
+`keepout store add` gives the same keys as `assess`, with `store` always
+set. A `store` has these keys:
+
+| Key | Type | Meaning |
+|---|---|---|
+| `path` | string | the store's file |
+| `added` | array of strings | the `MESSAGE_ID`s stored |
+| `already_stored` | array of strings | the `MESSAGE_ID`s given that were stored before, with the same content |
+| `events` | array of strings | the ids of the events the CDMs given belong to |
+| `new_events` | array of strings | the ids of those events that the command created |
+
+### `store upgrade`, `store rebuild` and `store purge`
+
+Each gives `path`, the store's file, and:
+
+| Command | Key | Type | Meaning |
+|---|---|---|---|
+| `store upgrade` | `from` | string or `null` | the schema revision before; `null` for none |
+| `store upgrade` | `to` | string | the revision after |
+| `store rebuild` | `computed` | number | the Pc observations computed |
+| `store rebuild` | `skipped` | array of strings | the `MESSAGE_ID`s of the CDMs skipped for lack of `HBR` |
+| `store purge` | `before` | string | the time given |
+| `store purge` | `deleted` | number | the events deleted |
 
 ### `maneuver`
 
@@ -393,11 +545,14 @@ At the top level, `assess` gives:
 | `target_pc` | number | the target Pc |
 | `method` | string | the event's own Pc method |
 | `assumed_covariance` | boolean | whether the latest CDM has an assumed covariance |
-| `baseline` | object | the event without a burn: `pc`, `range_at_tca_m`, `method`, `meets_target` |
+| `baseline` | object | the event without a burn: `pc`, `range_at_tca_m`, `method`, `meets_target`, `notes` (empty: the baseline's own are in the plan's `notes`) |
 | `notes` | array of strings | the plan's notes |
 | `options` | array of objects | one per burn (below); empty with no burn on the grid |
+| `refusal` | string or `null` | why no burn can be recommended, the text's last line, when the command exits with status 4; `null` otherwise |
 
-Each option has the four keys of `baseline` and these:
+Each option has the five keys of `baseline` and these; its `notes` are
+what its own Pc says that the plan's do not, such as Monte Carlo standing
+in where Hall's method did not converge:
 
 | Key | Type | Meaning |
 |---|---|---|
