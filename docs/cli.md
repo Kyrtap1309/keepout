@@ -382,9 +382,8 @@ Event ids, row by row: 82b2bc7f, d051de7d, ebd423ba, 5d3234fc, 6356c251, 0e8e52d
 
 The output is that of `assess`, with the store's event ids. The counts
 line says the events are the store's, since a stored event may hold
-CDMs from earlier runs as well as those read. The ids are eight
-random hexadecimal characters each, given when an event's first CDM is
-stored and kept however many CDMs follow (yours differ). Adding the same
+CDMs from earlier runs as well as those read. The
+[ids](store.md#event-ids) are random: yours differ. Adding the same
 files again stores nothing: the line under the counts then says
 `0 CDMs added to keepout.db (12 already stored), 0 new events.` A CDM
 from a later run joins its stored event, whose row then counts its CDMs
@@ -392,16 +391,15 @@ and whose trend runs over all of them. The exit status is that of
 `assess`: 3 when an event needs a manoeuvre.
 
 - **`store add CDM...`** adds CDM files, KVN or XML, as they are. Each
-  joins the stored event of the same two objects whose TCAs it keeps
-  within 10 minutes, or starts a new event. The Pc of every CDM of those
+  joins its stored event or starts a new one, by the rule in
+  [What it keeps](store.md#what-it-keeps). The Pc of every CDM of those
   events is computed, unless the store has it already. `--settings FILE`
   gives the [operator settings](store.md#settings): Pc method, covariance
   policy, hard-body radius and risk thresholds.
 - **`store upgrade`** brings a store made by an older keepout to this
   keepout's schema, and prints the revisions, e.g.
   `Upgraded keepout.db: base -> 0001.` Any other command refuses such a
-  store and says to run it. A store made by a newer keepout is refused and
-  left as it is.
+  store and says to run it ([Upgrading](store.md#upgrading)).
 - **`store rebuild`** computes the Pc of every stored CDM that the store
   lacks for the settings (`--settings FILE`), and prints how many. Without
   `hbr_m` in the settings, it skips the CDMs without `HBR` and says how

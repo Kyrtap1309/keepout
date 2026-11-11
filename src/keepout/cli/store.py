@@ -9,21 +9,18 @@ says how to install it (:func:`open_cli_store`).
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Final, NoReturn, TypeAlias
 
 import typer
 
-from keepout.cli.cdm_input import CdmFiles
+from keepout.cli.cdm_input import CdmFiles, read_cdm_files
 from keepout.cli.events import Assessed, AssessedEvent, show_assessed
-from keepout.cli.options import JsonFlag, dubious_years_ignored, parse_time
+from keepout.cli.options import JsonFlag, dubious_years_ignored, time_option
 from keepout.cli.output import JsonOut, fail, isot, plural, show, utc
-from keepout.errors import KeepoutError
 
 if TYPE_CHECKING:
-    from astropy.time import Time
-
     from keepout.cdm import Cdm
     from keepout.events import ConjunctionEvent
     from keepout.sources.catalog import CatalogReference
@@ -32,7 +29,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "STORE_HINT",
-    "STORE_MODULES",
     "STORE_VARIABLE",
     "Before",
     "EventStore",
@@ -41,24 +37,21 @@ __all__ = [
     "StorePath",
     "Yes",
     "add_and_show",
-    "ingest_and_assess",
     "ingest_screened",
     "open_cli_store",
-    "read_cdm_inputs",
     "store_add",
     "store_json",
     "store_lines",
     "store_purge",
     "store_rebuild",
     "store_upgrade",
-    "stored_events",
 ]
 
 STORE_HINT: Final = "--store needs the store extra: pip install 'keepout[store]'"
 """What a command given a store prints (exit status 1) when the extra is
 missing."""
 
-STORE_MODULES: Final = frozenset({"sqlalchemy", "alembic"})
+_STORE_MODULES: Final = frozenset({"sqlalchemy", "alembic"})
 """The top-level packages of the ``store`` extra."""
 
 STORE_VARIABLE: Final = "KEEPOUT_STORE"
@@ -79,7 +72,7 @@ def _without_extra(exc: ModuleNotFoundError) -> NoReturn:
     ModuleNotFoundError
         Otherwise: ``exc`` again.
     """
-    if (exc.name or "").partition(".")[0] not in STORE_MODULES:
+    if (exc.name or "").partition(".")[0] not in _STORE_MODULES:
         raise exc
     fail(STORE_HINT)
 
@@ -218,40 +211,7 @@ def _settings(path: Path | None) -> Settings:
     return Settings() if path is None else load_settings(path)
 
 
-def read_cdm_inputs(files: Sequence[Path]) -> list[CdmInput]:
-    """The CDMs of ``files``, with their text, to ingest; one that cannot be
-    read ends the command, named.
-
-    Raises
-    ------
-    typer.Exit
-        If a file cannot be read as a CDM: ``Error: <file>: <reason>``, status 1.
-    """
-    from keepout.store import CdmInput
-
-    messages = []
-    for path in files:
-        try:
-            messages.append(CdmInput.read(path))
-        except KeepoutError as exc:
-            fail(f"{path}: {exc}")
-    return messages
-
-
-def stored_events(store: Store, report: IngestReport) -> list[ConjunctionEvent]:
-    """The stored events an ingest touched, in the store's order (by first
-    TCA, then by id), each with every CDM the store holds of it; other
-    stored events are not read.
-
-    Raises
-    ------
-    StoreError
-        If the database cannot be used.
-    """
-    return store.events(include_archived=True, event_ids=report.events)
-
-
-def ingest_and_assess(
+def _ingest_and_assess(
     store: Store, messages: Sequence[CdmInput], settings: Settings
 ) -> tuple[IngestReport, list[AssessedEvent]]:
     """Ingest CDMs, cache their Pc and assess each event they belong to.
@@ -285,7 +245,7 @@ def ingest_and_assess(
                 thresholds=settings.thresholds,
             ),
         )
-        for event in stored_events(store, report)
+        for event in store.events(include_archived=True, event_ids=report.events)
     ]
     return report, assessed
 
@@ -301,7 +261,7 @@ def ingest_screened(
     -------
     tuple[IngestReport, list[ConjunctionEvent]]
         What the ingest did, and the stored events it touched, in the
-        store's order (:func:`stored_events`).
+        store's order (by first TCA), each with every CDM stored of it.
 
     Raises
     ------
@@ -314,8 +274,10 @@ def ingest_screened(
     report = store.ingest(
         [CdmInput.of(cdm, origin="screen") for cdm in cdms], catalog=catalog
     )
-    store.refresh(_settings(None), event_ids=report.events)
-    return report, stored_events(store, report)
+    from keepout.store.config import Settings
+
+    store.refresh(Settings(), event_ids=report.events)
+    return report, store.events(include_archived=True, event_ids=report.events)
 
 
 def store_json(
@@ -353,7 +315,7 @@ def store_lines(
 def add_and_show(
     path: Path,
     files: Sequence[Path],
-    settings: Callable[[], Settings],
+    settings: Settings,
     *,
     as_json: bool,
 ) -> None:
@@ -367,8 +329,7 @@ def add_and_show(
     files
         The CDM files.
     settings
-        The settings to compute Pc with and assess, called once the store
-        is open (the ``store`` extra is there then).
+        The settings to compute Pc with and assess.
     as_json
         Whether ``--json`` was given.
 
@@ -378,10 +339,11 @@ def add_and_show(
         Without the ``store`` extra (status 1); with status 3 if an event
         needs a manoeuvre.
     """
+    from keepout.store import CdmInput
+
     with open_cli_store(path) as store:
-        chosen = settings()
-        messages = read_cdm_inputs(files)
-        report, assessed = ingest_and_assess(store, messages, chosen)
+        messages = read_cdm_files(files, CdmInput.read)
+        report, assessed = _ingest_and_assess(store, messages, settings)
     ids = [item.event.event_id for item in assessed]
     show_assessed(
         assessed,
@@ -408,7 +370,7 @@ def store_add(
     assessed as keepout assess does, with the store's event ids. Exits with
     status 3 if at least one event's action is to manoeuvre.
     """
-    add_and_show(store, files, lambda: _settings(settings), as_json=as_json)
+    add_and_show(store, files, _settings(settings), as_json=as_json)
 
 
 def store_upgrade(*, store: StorePath, as_json: JsonFlag = False) -> None:
@@ -460,21 +422,6 @@ def store_rebuild(
     )
 
 
-def _before_time(before: str) -> Time:
-    """The time ``--before`` gives.
-
-    Raises
-    ------
-    typer.BadParameter
-        If :func:`~keepout.cli.options.parse_time` cannot read it: a usage
-        error.
-    """
-    try:
-        return parse_time(before)
-    except ValueError as exc:
-        raise typer.BadParameter(str(exc), param_hint="'--before'") from exc
-
-
 def store_purge(
     *,
     before: Before,
@@ -487,7 +434,7 @@ def store_purge(
 
     Asks first, unless --yes is given.
     """
-    when = _before_time(before)
+    when = time_option(before, "--before")
     # A time years ahead is "dubious" to ERFA wherever it is formatted.
     with dubious_years_ignored():
         shown = f"TCA before {utc(when)} UTC"

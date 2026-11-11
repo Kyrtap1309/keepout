@@ -7,7 +7,7 @@ migrations in ``keepout/store/migrations`` build the same tables: a test
 compares the two.
 """
 
-from typing import Any, Final, Literal
+from typing import Any, Final, get_args
 
 from sqlalchemy import (
     JSON,
@@ -23,13 +23,14 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+from keepout.cdm import CdmFormat
+
 __all__ = [
     "NAMING_CONVENTION",
     "Base",
     "Catalog",
     "CatalogFile",
     "Cdm",
-    "CdmFormat",
     "Event",
     "Result",
 ]
@@ -43,9 +44,6 @@ NAMING_CONVENTION: Final = {
 }
 """Names of indexes and constraints: SQLite alters a table by copying it
 (Alembic's batch mode), which needs every constraint named."""
-
-CdmFormat = Literal["kvn", "xml"]
-"""The format a CDM was read in."""
 
 
 class Base(DeclarativeBase):
@@ -79,7 +77,10 @@ class Cdm(Base):
     __tablename__ = "cdms"
     __table_args__ = (
         Index(None, "event_id", "creation_date"),
-        CheckConstraint("format IN ('kvn', 'xml')", name="format"),
+        CheckConstraint(
+            f"format IN ({', '.join(repr(f) for f in get_args(CdmFormat))})",
+            name="format",
+        ),
     )
 
     message_id: Mapped[str] = mapped_column(String, primary_key=True)

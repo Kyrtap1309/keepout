@@ -5,11 +5,11 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from sqlalchemy import TextClause, create_engine, text
+from sqlalchemy import TextClause, text
 
 from keepout.errors import StoreError
 from keepout.store import Store, db, open_store, upgrade
-from keepout.store.db import HEAD, check_revision
+from keepout.store.db import HEAD
 
 
 def _revision(path: Path) -> str | None:
@@ -243,27 +243,6 @@ def test_a_path_that_cannot_be_checked_is_a_store_error(
     expected = f"cannot use the store {re.escape(str(path))}: .*denied"
     with pytest.raises(StoreError, match=expected):
         call(path)
-
-
-def test_check_revision_accepts_only_a_store_at_head(tmp_path: Path) -> None:
-    path = _created(tmp_path / "keepout.db")
-    engine = create_engine(f"sqlite:///{path}")
-    try:
-        check_revision(engine)
-        _set_revision(path, None)
-        with pytest.raises(StoreError, match="older keepout"):
-            check_revision(engine)
-        _set_revision(path, "ffffffffffff")
-        with pytest.raises(StoreError, match="newer keepout"):
-            check_revision(engine)
-    finally:
-        engine.dispose()
-    empty = create_engine(f"sqlite:///{tmp_path / 'empty.db'}")
-    try:
-        with pytest.raises(StoreError, match="no store at"):
-            check_revision(empty)
-    finally:
-        empty.dispose()
 
 
 def test_a_store_made_meanwhile_by_a_newer_keepout_is_refused(

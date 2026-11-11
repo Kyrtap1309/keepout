@@ -19,7 +19,7 @@ from alembic import command
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
-from sqlalchemy import URL, create_engine, event
+from sqlalchemy import URL, create_engine, event, inspect
 from sqlalchemy.exc import DatabaseError
 
 from keepout.errors import StoreError
@@ -35,7 +35,6 @@ if TYPE_CHECKING:
 __all__ = [
     "BUSY_TIMEOUT_MS",
     "HEAD",
-    "check_revision",
     "engine_for",
     "open_store",
     "upgrade",
@@ -108,7 +107,7 @@ def engine_for(path: Path) -> Engine:
     instead of one failing to upgrade its read lock.
 
     Switching to write-ahead logging changes the file: :func:`open_store`
-    makes this engine only once the file passed :func:`check_revision`.
+    makes this engine only once it has checked the file's revision.
 
     Parameters
     ----------
@@ -170,11 +169,7 @@ def _schema(connection: Connection, path: str | Path | None) -> _Schema:
         If it has tables but no Alembic revision table: another
         application's database.
     """
-    tables = set(
-        connection.exec_driver_sql(
-            "SELECT name FROM sqlite_master WHERE type = 'table'"
-        ).scalars()
-    )
+    tables = set(inspect(connection).get_table_names())
     if not tables:
         return _Schema(empty=True, revision=None)
     if "alembic_version" not in tables:
@@ -183,53 +178,33 @@ def _schema(connection: Connection, path: str | Path | None) -> _Schema:
     return _Schema(empty=False, revision=revision)
 
 
-def _newer(path: str | Path | None, schema: _Schema) -> StoreError | None:
-    """The error of a database at a revision this keepout does not know."""
-    if schema.revision is None or schema.revision in _KNOWN:
-        return None
-    return StoreError(
-        f"{path} was made by a newer keepout (revision {schema.revision})"
-    )
-
-
-def _refusal(path: str | Path | None, schema: _Schema) -> StoreError | None:
-    """The error of a keepout database this keepout cannot open as it is."""
-    if schema.revision == HEAD:
-        return None
-    newer = _newer(path, schema)
-    if newer is not None:
-        return newer
-    return StoreError(f"{path} was made by an older keepout: run keepout store upgrade")
-
-
-def check_revision(engine: Engine) -> None:
-    """Check that a database is a store at the schema revision of this keepout.
-
-    It only reads, and leaves a database it refuses as it is, as long as
-    the engine does not change the file on connection: use one without
-    write-ahead logging, not :func:`engine_for`.
-
-    Parameters
-    ----------
-    engine
-        An engine on the database.
+def _require_known(path: str | Path | None, schema: _Schema) -> None:
+    """Check that this keepout knows the database's revision.
 
     Raises
     ------
     StoreError
-        If the database is empty, cannot be read, is not a SQLite database
-        or is another application's, or its revision is older than this
-        keepout's (``keepout store upgrade`` upgrades it) or unknown to it
-        (made by a newer keepout).
+        If it does not: a newer keepout made the database.
     """
-    path = engine.url.database
-    with _connected(engine, write=False) as connection:
-        schema = _schema(connection, path)
-    if schema.empty:
-        raise StoreError(f"no store at {path}")
-    refusal = _refusal(path, schema)
-    if refusal is not None:
-        raise refusal
+    if schema.revision is not None and schema.revision not in _KNOWN:
+        raise StoreError(
+            f"{path} was made by a newer keepout (revision {schema.revision})"
+        )
+
+
+def _require_head(path: str | Path | None, schema: _Schema) -> None:
+    """Check that the database is at :data:`HEAD`, the revision this keepout
+    opens.
+
+    Raises
+    ------
+    StoreError
+        If it is at a newer or an older revision.
+    """
+    if schema.revision == HEAD:
+        return
+    _require_known(path, schema)
+    raise StoreError(f"{path} was made by an older keepout: run keepout store upgrade")
 
 
 @contextmanager
@@ -310,10 +285,8 @@ def _create(path: Path) -> None:
         schema = _schema(connection, path)
         if schema.empty:
             _to_head(connection)
-            return
-        refusal = _refusal(path, schema)
-        if refusal is not None:
-            raise refusal
+        else:
+            _require_head(path, schema)
 
 
 def _exists(path: Path) -> bool:
@@ -358,18 +331,13 @@ def open_store(path: str | Path, *, create: bool = True) -> Store:
         refused file is not changed.
     """
     path = Path(path)
-    exists = _exists(path)
-    if not exists and not create:
-        raise StoreError(f"no store at {path}")
-    schema = _read_schema(path) if exists else _Schema(empty=True, revision=None)
+    schema = _read_schema(path) if _exists(path) else _Schema(empty=True, revision=None)
     if schema.empty:
         if not create:
             raise StoreError(f"no store at {path}")
         _create(path)
     else:
-        refusal = _refusal(path, schema)
-        if refusal is not None:
-            raise refusal
+        _require_head(path, schema)
     return Store(path, engine_for(path))
 
 
@@ -400,16 +368,12 @@ def upgrade(path: str | Path) -> tuple[str | None, str]:
     if not _exists(path):
         raise StoreError(f"no store at {path}")
     schema = _read_schema(path)
-    newer = _newer(path, schema)
-    if newer is not None:
-        raise newer
+    _require_known(path, schema)
     if schema.revision == HEAD:
         return HEAD, HEAD
     with _migrating(path) as connection:
         # Again under the write lock: another process may have upgraded it.
         schema = _schema(connection, path)
-        newer = _newer(path, schema)
-        if newer is not None:
-            raise newer
+        _require_known(path, schema)
         _to_head(connection)
     return schema.revision, HEAD

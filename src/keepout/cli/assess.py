@@ -28,8 +28,6 @@ __all__ = [
 if TYPE_CHECKING:
     from typing_extensions import TypeIs
 
-    from keepout.store.config import Settings
-
     class PcMethod(enum.StrEnum):
         """``--method``: the Pc methods of :func:`keepout.pc.compute_pc`."""
 
@@ -94,12 +92,10 @@ def assess_command(
 
     compute = computation(method_choice(method.value))
     if store is not None:
+        # --store has checked that the store extra is there.
+        from keepout.store.config import Settings
 
-        def settings() -> Settings:
-            from keepout.store.config import Settings
-
-            return Settings(compute=compute, combined_hard_body_radius=hbr)
-
+        settings = Settings(compute=compute, combined_hard_body_radius=hbr)
         add_and_show(store, files, settings, as_json=as_json)
         return
 

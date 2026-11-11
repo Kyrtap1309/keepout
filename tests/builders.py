@@ -1,5 +1,6 @@
 """Builders, constants and Hypothesis strategies shared by the test packages."""
 
+import sqlite3
 from pathlib import Path
 from typing import TypedDict, Unpack
 
@@ -302,3 +303,15 @@ class DifferenceWidened(ManeuveredPropagator):
         self, first: float, last: float, lowest: float
     ) -> tuple[float, float] | None:
         return None
+
+
+def base_revision_store(path: Path) -> None:
+    """Make ``path`` a store at Alembic's base revision, as a keepout before
+    the first migration left it: Alembic's table, empty, and nothing else."""
+    connection = sqlite3.connect(path)
+    with connection:
+        connection.execute(
+            "CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL,"
+            " CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num))"
+        )
+    connection.close()

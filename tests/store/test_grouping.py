@@ -5,6 +5,7 @@ import itertools
 import tempfile
 from pathlib import Path
 
+import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from store_builders import cdm
@@ -62,6 +63,7 @@ def _partition(events: list[list[str]]) -> set[frozenset[str]]:
     return {frozenset(event) for event in events}
 
 
+@pytest.mark.slow
 @settings(max_examples=200, deadline=None)
 @given(st.data())
 def test_grouping_equals_group_events_in_any_order_and_batching(

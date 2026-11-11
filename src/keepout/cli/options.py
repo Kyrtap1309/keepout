@@ -27,6 +27,7 @@ __all__ = [
     "dubious_years_ignored",
     "parse_time",
     "positive",
+    "time_option",
 ]
 
 
@@ -62,6 +63,20 @@ def parse_time(text: str) -> Time:
             return Time(text, scale="utc")
     except ValueError as exc:
         raise ValueError(f"not an ISO 8601 UTC time: {text!r}") from exc
+
+
+def time_option(text: str, option: str) -> Time:
+    """The time a command-line option gives (:func:`parse_time`).
+
+    Raises
+    ------
+    typer.BadParameter
+        If it is not such a time: a usage error naming ``option``.
+    """
+    try:
+        return parse_time(text)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc), param_hint=f"'{option}'") from exc
 
 
 JsonFlag: TypeAlias = Annotated[

@@ -21,7 +21,12 @@ from astropy.time import Time
 from keepout._defaults import DECISION_POINT, MIN_BURN_LEAD, TARGET_PC
 from keepout._text import before_tca, plural
 from keepout._types import FloatArray, read_only
-from keepout._validation import require_at_least, require_non_negative, require_positive
+from keepout._validation import (
+    require_at_least,
+    require_non_negative,
+    require_open_probability,
+    require_positive,
+)
 from keepout.cdm import Cdm, CdmObject, Maneuverable
 from keepout.conjunction import Conjunction
 from keepout.covariance import Policy
@@ -738,8 +743,7 @@ def _prepare(
         As :func:`prepare_maneuver`, or if the CDM comes after the window of
         ``grid`` has closed.
     """
-    if not 0.0 < target_pc < 1.0:
-        raise ValueError(f"target_pc must be in (0, 1), got {target_pc}")
+    require_open_probability(target_pc, "target_pc")
     cdm = event.latest
     if cdm.object1.maneuverable == Maneuverable.NO:
         raise ManeuverError(

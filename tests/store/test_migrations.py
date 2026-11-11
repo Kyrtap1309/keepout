@@ -5,6 +5,7 @@ import pytest
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
+from builders import base_revision_store
 from sqlalchemy import (
     URL,
     Column,
@@ -113,20 +114,9 @@ def test_the_schema_holds_its_rules(tmp_path: Path) -> None:
     assert {"ix_cdms_catalog_id", "ix_catalog_files_catalog_id"} <= indexes
 
 
-def _alembic_version_only(path: Path) -> None:
-    """A file at the base revision: Alembic's table, empty, and nothing else."""
-    connection = sqlite3.connect(path)
-    with connection:
-        connection.execute(
-            "CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL,"
-            " CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num))"
-        )
-    connection.close()
-
-
 def test_upgrade_reports_the_revisions(tmp_path: Path) -> None:
     path = tmp_path / "keepout.db"
-    _alembic_version_only(path)
+    base_revision_store(path)
     with pytest.raises(StoreError, match="keepout store upgrade"):
         open_store(path)
     assert upgrade(path) == (None, HEAD)

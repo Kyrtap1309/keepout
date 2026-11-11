@@ -5,10 +5,7 @@ conjunction store keeps the CDMs of each event, the Pc keepout computed
 from them and the catalog a screening used, in one SQLite file, so that
 the next CDM adds to the event's history instead of starting it again.
 The command line uses it with `--store FILE` (see
-[`keepout store`](cli.md#store)); the library with `keepout.store`. The
-`keepout store` commands and `keepout maneuver --event` also take the file
-from `$KEEPOUT_STORE`; `assess` and `screen` use a store only when given
-`--store`.
+[`keepout store`](cli.md#store)); the library with `keepout.store`.
 
 ```bash
 pip install "keepout[store] @ git+https://github.com/Kyrtap1309/keepout"
@@ -39,10 +36,7 @@ given `--store` prints `--store needs the store extra: pip install
   differ only in risk thresholds or target share them, because the risk
   level, trend and action are decided again on every read, from the
   thresholds of the moment. keepout's version is part of the way too, so
-  a new release computes the Pc again. The version changes only at
-  releases, though: a development install can serve Pc cached by older
-  code. `keepout store rebuild` with other settings, or a fresh store,
-  avoids it.
+  a new release computes the Pc again.
 - **Catalogs.** A CDM that `keepout screen --store` issued keeps a
   reference to the catalog it was screened against: each file's name,
   URL, retrieval time and SHA-256.
@@ -52,7 +46,9 @@ given `--store` prints `--store needs the store extra: pip install
 An event gets an id when its first CDM is stored: eight random
 lowercase hexadecimal characters, such as `81a87dfa`. It keeps that id
 however many CDMs follow, and the command line shows it in place of the
-`<object>/<object>/<TCA>` id that `assess` gives without a store.
+`<object>/<object>/<TCA>` id that `assess` gives without a store. To see
+the ids again, run `keepout store add` on the same files: it stores
+nothing new and prints the ids row by row.
 
 ### The catalog copies
 
@@ -109,8 +105,7 @@ keepout). A keepout opens only a store at its own schema revision:
 
 - a store made by an older keepout is refused with `... was made by an
   older keepout: run keepout store upgrade`. `keepout store upgrade
-  --store FILE` migrates it in one transaction and prints the revisions,
-  e.g. `Upgraded keepout.db: base -> 0001.`;
+  --store FILE` migrates it in one transaction;
 - a store made by a newer keepout is refused, and the file is left as it
   is: no downgrade.
 

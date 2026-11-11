@@ -305,7 +305,7 @@ def test_screen_with_store_records_the_catalog_digest(tmp_path: Path) -> None:
             assert reference is not None
             (file,) = reference.files
             assert file.sha256 == digest
-            assert file.path.parent == store.catalogs
+            assert file.path.parent == store.catalog_dir
             assert file.path.read_bytes() == FIXTURE_CSV.read_bytes()
     assert payload["store"] == {
         "path": str(db),

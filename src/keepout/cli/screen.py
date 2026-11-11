@@ -21,6 +21,7 @@ from keepout.cli.options import (
     Workers,
     parse_time,
     positive,
+    time_option,
 )
 from keepout.cli.output import ASSUMED_COVARIANCES, JsonOut, isot, plural, show, utc
 from keepout.cli.store import (
@@ -109,7 +110,7 @@ def screen_command(
     new download; --catalog reads a file instead. With --store the CDMs are
     added to the store, with a copy of the catalog.
     """
-    window_start = None if start is None else _start_time(start)
+    window_start = None if start is None else time_option(start, "--start")
     require_one_catalog(catalog, source)
     with ExitStack() as stack:
         opened = None if store is None else stack.enter_context(open_cli_store(store))
@@ -175,20 +176,6 @@ class _Stored(NamedTuple):
         """What the store did, as JSON values."""
         ids = [event.event_id for event in self.events]
         return store_json(self.path, self.report, ids)
-
-
-def _start_time(start: str) -> Time:
-    """The time ``--start`` gives.
-
-    Raises
-    ------
-    typer.BadParameter
-        If :func:`parse_time` cannot read it: a usage error.
-    """
-    try:
-        return parse_time(start)
-    except ValueError as exc:
-        raise typer.BadParameter(str(exc), param_hint="'--start'") from exc
 
 
 def _now() -> Time:

@@ -1,38 +1,29 @@
 """An operator's settings: how Pc is computed, risk thresholds and the
-manoeuvre target, read from a TOML file.
+manoeuvre target, read from a TOML file (the tables and keys of
+:data:`SETTINGS_KEYS`; an example is in the store's documentation, under
+Settings).
 
-Every key is optional; a missing one takes the library's default. For
-example::
-
-    [pc]
-    method = "foster"     # a Pc method, or "auto"
-    policy = "repair"     # what to do with an invalid covariance
-    hbr_m = 20.0          # combined hard-body radius [m]; else the CDMs'
-
-    [risk]
-    green_below = 1e-7
-    red_from = 1e-4
-
-    [maneuver]
-    target_pc = 1e-5
-
-No other key is allowed, so a typo is an error, not a silent default.
+Every key is optional; a missing one takes the library's default. No other
+key is allowed, so a typo is an error, not a silent default.
 :func:`load_settings` raises :class:`~keepout.errors.StoreError` naming the
 file and the key at fault.
 """
 
 from __future__ import annotations
 
-import math
 import tomllib
-from collections.abc import Mapping
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Final, TypeVar
 
 from keepout._defaults import TARGET_PC
 from keepout._methods import METHOD_CHOICES
-from keepout._validation import positive_float, require_choice
+from keepout._validation import (
+    positive_float,
+    require_choice,
+    require_open_probability,
+)
 from keepout.covariance import POLICIES, Policy
 from keepout.errors import StoreError
 from keepout.pc import AUTO, PcComputation
@@ -92,8 +83,7 @@ class Settings:
                     self.combined_hard_body_radius, "combined_hard_body_radius"
                 ),
             )
-        if not 0.0 < self.target_pc < 1.0:
-            raise ValueError(f"target_pc must be in (0, 1), got {self.target_pc}")
+        require_open_probability(self.target_pc, "target_pc")
 
     @property
     def result_key(self) -> str:
@@ -157,8 +147,24 @@ def _choice(
         raise StoreError(f"{name}.{key}: {exc}") from exc
 
 
+def _checked(key: str, make: Callable[[], _C]) -> _C:
+    """``make()``, whose :class:`ValueError` becomes a :class:`StoreError`
+    naming the settings key.
+
+    Raises
+    ------
+    StoreError
+        If ``make`` raises :class:`ValueError`.
+    """
+    try:
+        return make()
+    except ValueError as exc:
+        raise StoreError(f"{key}: {exc}") from exc
+
+
 def _settings(data: Mapping[str, object]) -> Settings:
-    """The settings of a settings file's TOML.
+    """The settings of a settings file's TOML; a missing key keeps the
+    default of :class:`Settings`, which checks the ranges.
 
     Raises
     ------
@@ -172,42 +178,35 @@ def _settings(data: Mapping[str, object]) -> Settings:
             f"{', '.join(f'[{name}]' for name in SETTINGS_KEYS)}"
         )
     pc, risk, maneuver = (_table(data, name) for name in SETTINGS_KEYS)
-    default = Settings()
-    compute = default.compute
-    policy: Policy = default.policy
-    radius = default.combined_hard_body_radius
+    settings = Settings()
     if "method" in pc:
         compute = PcComputation(_choice(pc, "pc", "method", METHOD_CHOICES))
+        settings = replace(settings, compute=compute)
     if "policy" in pc:
-        policy = _choice(pc, "pc", "policy", POLICIES)
+        settings = replace(settings, policy=_choice(pc, "pc", "policy", POLICIES))
     if "hbr_m" in pc:
         radius = _number(pc, "pc", "hbr_m")
-        if not 0.0 < radius < math.inf:
-            raise StoreError(f"pc.hbr_m must be positive, got {radius}")
-    try:
-        thresholds = Thresholds(
-            green_below=_number(risk, "risk", "green_below")
-            if "green_below" in risk
-            else default.thresholds.green_below,
-            red_from=_number(risk, "risk", "red_from")
-            if "red_from" in risk
-            else default.thresholds.red_from,
-            basis=default.thresholds.basis,
+        settings = _checked(
+            "pc.hbr_m", lambda: replace(settings, combined_hard_body_radius=radius)
         )
-    except ValueError as exc:
-        raise StoreError(f"risk: {exc}") from exc
-    target_pc = default.target_pc
+    if risk:
+        green = _number(risk, "risk", "green_below") if "green_below" in risk else None
+        red = _number(risk, "risk", "red_from") if "red_from" in risk else None
+        thresholds = _checked(
+            "risk",
+            lambda: replace(
+                settings.thresholds,
+                green_below=settings.thresholds.green_below if green is None else green,
+                red_from=settings.thresholds.red_from if red is None else red,
+            ),
+        )
+        settings = replace(settings, thresholds=thresholds)
     if "target_pc" in maneuver:
         target_pc = _number(maneuver, "maneuver", "target_pc")
-        if not 0.0 < target_pc < 1.0:
-            raise StoreError(f"maneuver.target_pc must be in (0, 1), got {target_pc}")
-    return Settings(
-        compute=compute,
-        policy=policy,
-        combined_hard_body_radius=radius,
-        thresholds=thresholds,
-        target_pc=target_pc,
-    )
+        settings = _checked(
+            "maneuver.target_pc", lambda: replace(settings, target_pc=target_pc)
+        )
+    return settings
 
 
 def load_settings(path: Path) -> Settings:

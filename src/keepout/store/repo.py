@@ -20,7 +20,6 @@ import re
 import secrets
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, Self
 
@@ -32,7 +31,6 @@ from sqlalchemy.exc import DatabaseError, IntegrityError
 from sqlalchemy.orm import Session
 
 import keepout.cdm
-from keepout.ccsds.files import strip_bom
 from keepout.errors import HardBodyRadiusError, StoreError
 from keepout.events import (
     DEFAULT_TCA_TOLERANCE,
@@ -50,19 +48,15 @@ if TYPE_CHECKING:
 
     from sqlalchemy import ColumnElement, Engine
 
-    from keepout.cdm import Cdm
+    from keepout.cdm import Cdm, CdmFormat
     from keepout.risk import PcObservation
     from keepout.store.config import Settings
-    from keepout.store.models import CdmFormat
 
 __all__ = ["WRITE", "CdmInput", "IngestReport", "RefreshReport", "Store"]
 
 WRITE: Final = "keepout_write"
 """Execution option of a write transaction: it starts with ``BEGIN IMMEDIATE``
 (see :func:`keepout.store.db.engine_for`)."""
-
-_TIME_FORMAT: Final = "%Y-%m-%dT%H:%M:%S.%f"
-"""A time in the database: UTC ISO-8601 with microseconds."""
 
 _COPY_NAME: Final = re.compile(r"([0-9a-f]{64})(?:\.|$)")
 """The name of a catalog copy: its SHA-256, then the original's suffixes."""
@@ -84,7 +78,7 @@ def _time(text: str) -> Time:
 
 def _now() -> str:
     """The current time as the database writes it."""
-    return datetime.now(UTC).strftime(_TIME_FORMAT)
+    return _iso(Time.now())
 
 
 def _digest(cdm: Cdm) -> str:
@@ -131,8 +125,9 @@ class CdmInput:
             If it cannot be read.
         """
         text = keepout.cdm.read_text(path)
-        form: CdmFormat = "xml" if strip_bom(text).lstrip().startswith("<") else "kvn"
-        return cls(keepout.cdm.loads(text), text, form, str(path))
+        return cls(
+            keepout.cdm.loads(text), text, keepout.cdm.format_of(text), str(path)
+        )
 
     @classmethod
     def of(cls, cdm: Cdm, origin: str) -> CdmInput:
@@ -330,7 +325,8 @@ class Store:
     Use it as a context manager, or call :meth:`close` when done. Every
     method raises :class:`~keepout.errors.StoreError` naming the file if the
     database cannot be used: e.g. a write lock another process held past the
-    30 s busy timeout, a file that cannot be read or written.
+    busy timeout (:data:`~keepout.store.db.BUSY_TIMEOUT_MS`), a file that
+    cannot be read or written.
 
     Parameters
     ----------
@@ -346,7 +342,7 @@ class Store:
         self._writer = engine.execution_options(**{WRITE: True})
 
     @property
-    def catalogs(self) -> Path:
+    def catalog_dir(self) -> Path:
         """The directory of the store's copies of the catalogs its CDMs were
         made from: ``<store file name>.catalogs`` beside the store file."""
         return self.path.with_name(f"{self.path.name}.catalogs")
@@ -400,7 +396,8 @@ class Store:
 
         The transaction starts on entry with ``BEGIN IMMEDIATE``, which takes
         the write lock at once: a second writer waits for the first to finish
-        (up to the 30 s busy timeout) instead of failing on a lock upgrade
+        (up to :data:`~keepout.store.db.BUSY_TIMEOUT_MS`) instead of failing
+        on a lock upgrade
         halfway through. Keep it short, e.g. compute Pc before it.
 
         Yields
@@ -445,11 +442,8 @@ class Store:
         catalog
             The catalog a screening made them from, kept with the messages
             stored (not with those already stored). Its files are copied
-            into :attr:`catalogs` (under the write lock, so that a purge
-            never deletes a copy meanwhile), named by their digest, and the store
-            refers to the copies, which later downloads do not replace. A
-            failed ingest may leave a copy no CDM refers to; the next ingest
-            of the same file uses it.
+            into :attr:`catalog_dir`, named by their SHA-256, so later
+            downloads do not replace them.
 
         Returns
         -------
@@ -522,7 +516,7 @@ class Store:
         )
 
     def _snapshot(self, catalog: CatalogReference) -> CatalogReference:
-        """The catalog copied into :attr:`catalogs`.
+        """The catalog copied into :attr:`catalog_dir`.
 
         Raises
         ------
@@ -534,10 +528,10 @@ class Store:
             If a file changed since the reference was made.
         """
         try:
-            return catalog.snapshot(self.catalogs)
+            return catalog.snapshot(self.catalog_dir)
         except OSError as exc:
             raise StoreError(
-                f"cannot copy the catalog into {self.catalogs}: {exc}"
+                f"cannot copy the catalog into {self.catalog_dir}: {exc}"
             ) from exc
 
     def refresh(
@@ -766,7 +760,7 @@ class Store:
         Returns
         -------
         CatalogReference or None
-            The catalog's files, at their copies in :attr:`catalogs` (the
+            The catalog's files, at their copies in :attr:`catalog_dir` (the
             store keeps their paths relative to its directory, so the
             directory can move); ``None`` if the latest CDM was not made by
             a screening with a catalog.
@@ -828,10 +822,8 @@ class Store:
     def purge(self, before: Time) -> int:
         """Delete the events whose latest TCA is before a time, with their
         CDMs and cached results, and the catalogs no CDM is left made from,
-        and every copy in :attr:`catalogs` no catalog refers to by digest
-        (also those a failed ingest left). The copies are deleted after the
-        rest is committed, under the write lock again, so a copy shared or
-        ingested meanwhile stays.
+        and every copy in :attr:`catalog_dir` no catalog refers to (also
+        those a failed ingest left).
 
         Parameters
         ----------
@@ -859,7 +851,7 @@ class Store:
         return count
 
     def _delete_copies(self) -> None:
-        """Delete the copies in :attr:`catalogs` whose digest no catalog
+        """Delete the copies in :attr:`catalog_dir` whose digest no catalog
         refers to: those of deleted catalogs, and those a failed ingest left.
 
         This runs in a write transaction of its own: an ingest writes or
@@ -873,11 +865,11 @@ class Store:
         StoreError
             If a copy cannot be deleted, or the database cannot be used.
         """
-        if not self.catalogs.is_dir():
+        if not self.catalog_dir.is_dir():
             return
         with self.write() as session:
             used = set(session.scalars(select(models.CatalogFile.sha256)))
-            for path in sorted(self.catalogs.iterdir()):
+            for path in sorted(self.catalog_dir.iterdir()):
                 named = _COPY_NAME.match(path.name)
                 if named is None or named[1] in used:
                     continue

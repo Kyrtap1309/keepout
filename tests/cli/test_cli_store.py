@@ -1,13 +1,13 @@
 import json
 import os
 import re
-import sqlite3
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 import typer
+from builders import base_revision_store
 from cli_builders import (
     FIXTURE_CSV,
     block_store_extra,
@@ -203,9 +203,12 @@ def test_store_without_the_extra_prints_the_install_hint(
     result = keepout(*args, "--store", str(tmp_path / "keepout.db"))
     assert result.exit_code == ExitCode.ERROR
     assert result.stderr == f"Error: {STORE_HINT}\n"
-    assert STORE_HINT == "--store needs the store extra: pip install 'keepout[store]'"
     assert result.stdout == ""
     assert not (tmp_path / "keepout.db").exists()
+
+
+def test_the_hint_names_the_extra() -> None:
+    assert STORE_HINT == "--store needs the store extra: pip install 'keepout[store]'"
 
 
 @pytest.mark.parametrize("module", ["sqlalchemy", "alembic"])
@@ -249,21 +252,9 @@ def test_a_missing_module_outside_the_extra_is_not_hidden(
         keepout("store", "upgrade", "--store", str(tmp_path / "keepout.db"))
 
 
-def _make_old(path: Path) -> None:
-    """A store as a keepout before the first migration left it: Alembic's
-    table, at no revision."""
-    connection = sqlite3.connect(path)
-    with connection:
-        connection.execute(
-            "CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL,"
-            " CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num))"
-        )
-    connection.close()
-
-
 def test_store_on_an_old_database_says_upgrade(tmp_path: Path) -> None:
     db = tmp_path / "keepout.db"
-    _make_old(db)
+    base_revision_store(db)
     files = cdm_files(tmp_path)
     result = keepout("store", "add", *files, "--store", str(db))
     assert result.exit_code == ExitCode.ERROR
@@ -422,18 +413,6 @@ def test_store_help_names_the_file_as_the_docs_do(command: str) -> None:
     assert "--store FILE" in " ".join(assess.stdout.split())
 
 
-def test_the_tests_never_use_a_store_from_the_environment(tmp_path: Path) -> None:
-    # A store exported in the shell running the tests is not written to.
-    exported = tmp_path / "exported.db"
-    test = "tests/cli/test_cli_assess.py::test_assess_prints_each_event_and_why"
-    done = subprocess.run(  # noqa: S603 (this interpreter, fixed arguments)
-        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", test],
-        capture_output=True,
-        text=True,
-        check=False,
-        cwd=Path(__file__).parents[2],
-        env={**os.environ, "KEEPOUT_STORE": str(exported)},
-    )
-    assert done.returncode == 0, done.stdout
-    assert "1 passed" in done.stdout
-    assert not exported.exists()
+def test_the_tests_never_use_a_store_from_the_environment() -> None:
+    # conftest.py unsets it: a store exported in the shell is not written to.
+    assert "KEEPOUT_STORE" not in os.environ

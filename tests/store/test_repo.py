@@ -667,7 +667,7 @@ def test_purge_removes_a_copy_a_failed_ingest_left(
 def test_a_catalog_that_cannot_be_copied_is_a_store_error(
     tmp_store: Store, tmp_path: Path
 ) -> None:
-    tmp_store.catalogs.write_text("in the way\n")
+    tmp_store.catalog_dir.write_text("in the way\n")
     with pytest.raises(StoreError, match="cannot copy the catalog into"):
         tmp_store.ingest([message("A")], catalog=_reference(tmp_path, "a.csv"))
     assert _count(tmp_store, models.Cdm) == 0
