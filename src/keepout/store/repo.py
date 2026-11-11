@@ -25,10 +25,10 @@ from typing import TYPE_CHECKING, Final, Self
 
 import astropy.units as u
 from astropy.time import Time
-from sqlalchemy import and_, exists, false, func, or_, select
+from sqlalchemy import and_, exists, func, select
 from sqlalchemy import delete as delete_rows
 from sqlalchemy.exc import DatabaseError, IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 import keepout.cdm
 from keepout.errors import HardBodyRadiusError, StoreError
@@ -46,6 +46,7 @@ from keepout.store.codec import (
     observation_to_json,
     result_key,
 )
+from keepout.store.models import EventId, MessageId
 from keepout.units import elapsed_seconds
 
 if TYPE_CHECKING:
@@ -72,19 +73,9 @@ _WINDOW: Final = (DEFAULT_TCA_TOLERANCE + 1.0) * u.s
 tolerance and a second of slack; the exact test follows."""
 
 
-def _iso(time: Time) -> str:
-    """A time as the database writes it: UTC ISO-8601 with microseconds."""
-    return str(Time(time.utc, precision=6).isot)
-
-
-def _time(text: str) -> Time:
-    """The time the database wrote as ``text``."""
-    return Time(text, format="isot", scale="utc")
-
-
-def _now() -> str:
-    """The current time as the database writes it."""
-    return _iso(Time.now())
+def _now() -> Time:
+    """The current time, for the rows' ``created_at`` and ``ingested_at``."""
+    return Time.now()
 
 
 def _digest(cdm: Cdm) -> str:
@@ -166,10 +157,10 @@ class IngestReport:
         The id of each of those events that the ingest created.
     """
 
-    added: tuple[str, ...]
-    already_stored: tuple[str, ...]
-    events: tuple[str, ...]
-    new_events: tuple[str, ...]
+    added: tuple[MessageId, ...]
+    already_stored: tuple[MessageId, ...]
+    events: tuple[EventId, ...]
+    new_events: tuple[EventId, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -187,53 +178,40 @@ class RefreshReport:
     """
 
     computed: int
-    skipped: tuple[str, ...] = ()
+    skipped: tuple[MessageId, ...] = ()
 
 
-def _unique(items: Sequence[str]) -> tuple[str, ...]:
+def _unique(items: Sequence[EventId]) -> tuple[EventId, ...]:
     """``items`` without repeats, in the order they first come."""
     return tuple(dict.fromkeys(items))
 
 
-def _bounds(event: models.Event, session: Session) -> EventBounds:
-    """The :class:`~keepout.events.EventBounds` of a stored event, its TCAs
-    at full precision.
-
-    The database's TCAs are rounded to the microsecond: they find the
-    event's earliest and latest CDMs, whose own TCAs are then read.
-    """
-    extremes = session.scalars(
-        select(models.Cdm.content).where(
-            models.Cdm.event_id == event.id,
-            or_(
-                models.Cdm.tca == event.tca_min,
-                models.Cdm.tca == event.tca_max,
-            ),
-        )
-    )
-    found = [keepout.cdm.loads(text).tca for text in extremes]
-    tcas = sorted(found, key=lambda tca: elapsed_seconds(found[0], tca))
+def _bounds(event: models.Event) -> EventBounds:
+    """The :class:`~keepout.events.EventBounds` of a stored event."""
     return EventBounds(
-        (event.object1, event.object2), tcas[0], tcas[-1], event.conjunction_id
+        (event.object1, event.object2),
+        event.tca_min,
+        event.tca_max,
+        event.conjunction_id,
     )
 
 
-def _new_event_id(session: Session, message_id: str) -> str:
+def _new_event_id(session: Session, message_id: str) -> EventId:
     """The id of a new event whose first CDM has this ``MESSAGE_ID``: its
     :func:`~keepout.events.stable_event_id`, or, if another event has that,
     the stable id of ``"<MESSAGE_ID>#<n>"`` for the first free ``n``."""
-    candidate = stable_event_id(message_id)
+    candidate = EventId(stable_event_id(message_id))
     attempt = 0
     while session.get(models.Event, candidate) is not None:
         attempt += 1
-        candidate = stable_event_id(f"{message_id}#{attempt}")
+        candidate = EventId(stable_event_id(f"{message_id}#{attempt}"))
     return candidate
 
 
-def _event_of(session: Session, cdm: Cdm, tca: str) -> tuple[models.Event, bool]:
+def _event_of(session: Session, cdm: Cdm) -> tuple[models.Event, bool]:
     """The event that ``cdm`` joins, by the rule of
     :class:`~keepout.events.EventBounds`, updated for it, and whether it is
-    new; ``tca`` is the CDM's TCA as the database writes it.
+    new.
 
     Raises
     ------
@@ -244,57 +222,48 @@ def _event_of(session: Session, cdm: Cdm, tca: str) -> tuple[models.Event, bool]
     query = select(models.Event).where(
         models.Event.object1 == cdm.object1.object_id,
         models.Event.object2 == cdm.object2.object_id,
-        models.Event.tca_max >= _iso(cdm.tca - _WINDOW),
-        models.Event.tca_min <= _iso(cdm.tca + _WINDOW),
+        models.Event.tca_max >= cdm.tca - _WINDOW,
+        models.Event.tca_min <= cdm.tca + _WINDOW,
     )
-    fitting = [
-        event for event in session.scalars(query) if _bounds(event, session).admits(cdm)
-    ]
+    fitting = [event for event in session.scalars(query) if _bounds(event).admits(cdm)]
     if len(fitting) > 1:
         ids = ", ".join(sorted(event.id for event in fitting))
         raise StoreError(f"CDM {cdm.message_id} fits more than one event: {ids}")
     if fitting:
         (event,) = fitting
-        event.tca_min = min(event.tca_min, tca)
-        event.tca_max = max(event.tca_max, tca)
-        if event.conjunction_id is None:
-            event.conjunction_id = cdm.conjunction_id
+        bounds = _bounds(event).including(cdm)
+        event.tca_min, event.tca_max = bounds.first_tca, bounds.last_tca
+        event.conjunction_id = bounds.conjunction_id
         return event, False
     event = models.Event(
         id=_new_event_id(session, cdm.message_id),
         object1=cdm.object1.object_id,
         object2=cdm.object2.object_id,
         conjunction_id=cdm.conjunction_id,
-        tca_min=tca,
-        tca_max=tca,
-        archived=False,
+        tca_min=cdm.tca,
+        tca_max=cdm.tca,
         created_at=_now(),
     )
     session.add(event)
-    # Before its CDM: without relationships, the session does not order the
-    # inserts by foreign key.
-    session.flush()
     return event, True
 
 
-def _add_catalog(session: Session, reference: CatalogReference, base: Path) -> int:
-    """Store a catalog reference, its files' paths relative to ``base`` (the
-    store's directory); its row's id."""
-    catalog = models.Catalog(label=reference.label)
-    session.add(catalog)
-    session.flush()
-    session.add_all(
-        models.CatalogFile(
-            catalog_id=catalog.id,
-            name=file.name,
-            path=file.path.relative_to(base).as_posix(),
-            url=file.url,
-            retrieved=None if file.retrieved is None else _iso(file.retrieved),
-            sha256=file.sha256,
-        )
-        for file in reference.files
+def _catalog_row(reference: CatalogReference, base: Path) -> models.Catalog:
+    """The row of a catalog reference, its files' paths relative to ``base``
+    (the store's directory)."""
+    return models.Catalog(
+        label=reference.label,
+        files=[
+            models.CatalogFile(
+                name=file.name,
+                path=file.path.relative_to(base).as_posix(),
+                url=file.url,
+                retrieved=file.retrieved,
+                sha256=file.sha256,
+            )
+            for file in reference.files
+        ],
     )
-    return catalog.id
 
 
 def _require_events(session: Session, event_ids: Collection[str]) -> None:
@@ -315,7 +284,7 @@ def _require_events(session: Session, event_ids: Collection[str]) -> None:
 
 def _before(before: Time) -> ColumnElement[bool]:
     """The events whose latest TCA is before ``before``."""
-    return models.Event.tca_max < _iso(before)
+    return models.Event.tca_max < before
 
 
 def _count_before(session: Session, before: Time) -> int:
@@ -430,7 +399,9 @@ class Store:
     ) -> IngestReport:
         """Store CDMs, each in its event; all of them or, on an error, none.
 
-        The messages are taken in TCA order, in one write transaction. A
+        The messages are taken in ``CREATION_DATE`` order (then by
+        ``MESSAGE_ID``), as :func:`~keepout.events.group_events` takes them,
+        in one write transaction. A
         message whose ``MESSAGE_ID`` is stored with the same content (the
         same KVN, whatever the format read) is reported as already stored.
         Any other joins the stored event (or one made earlier in the ingest)
@@ -467,24 +438,26 @@ class Store:
         ChecksumMismatch
             If a catalog file changed since ``catalog`` was made.
         """
-        tcas = [_iso(given.cdm.tca) for given in messages]
+        if not messages:
+            return IngestReport((), (), (), ())
         # In the order of group_events, so that the first CDM of a new event
         # names it as it does.
+        reference = messages[0].cdm.creation_date
         order = sorted(
             range(len(messages)),
             key=lambda i: (
-                _iso(messages[i].cdm.creation_date),
+                elapsed_seconds(reference, messages[i].cdm.creation_date),
                 messages[i].cdm.message_id,
             ),
         )
         added: dict[int, bool] = {}
-        events: dict[int, str] = {}
-        created: set[str] = set()
+        events: dict[int, EventId] = {}
+        created: set[EventId] = set()
         with self.write() as session:
-            catalog_id: int | None = None
+            catalog_row: models.Catalog | None = None
             for i in order:
                 given = messages[i]
-                message_id = given.cdm.message_id
+                message_id = MessageId(given.cdm.message_id)
                 digest = _digest(given.cdm)
                 stored = session.get(models.Cdm, message_id)
                 if stored is not None:
@@ -494,36 +467,34 @@ class Store:
                         )
                     added[i], events[i] = False, stored.event_id
                     continue
-                event, new = _event_of(session, given.cdm, tcas[i])
+                event, new = _event_of(session, given.cdm)
                 if new:
                     created.add(event.id)
-                if catalog is not None and catalog_id is None:
-                    catalog_id = _add_catalog(
-                        session, self._snapshot(catalog), self.path.parent
+                if catalog is not None and catalog_row is None:
+                    catalog_row = _catalog_row(
+                        self._snapshot(catalog), self.path.parent
                     )
                 session.add(
                     models.Cdm(
                         message_id=message_id,
-                        event_id=event.id,
-                        creation_date=_iso(given.cdm.creation_date),
-                        tca=tcas[i],
+                        event=event,
+                        creation_date=given.cdm.creation_date,
+                        tca=given.cdm.tca,
                         digest=digest,
                         content=given.text,
                         format=given.format,
                         origin=given.origin,
-                        catalog_id=catalog_id,
+                        catalog=catalog_row,
                         ingested_at=_now(),
                     )
                 )
-                session.flush()
                 added[i], events[i] = True, event.id
         given_order = range(len(messages))
         touched = _unique([events[i] for i in given_order])
+        ids = [MessageId(given.cdm.message_id) for given in messages]
         return IngestReport(
-            added=tuple(messages[i].cdm.message_id for i in given_order if added[i]),
-            already_stored=tuple(
-                messages[i].cdm.message_id for i in given_order if not added[i]
-            ),
+            added=tuple(ids[i] for i in given_order if added[i]),
+            already_stored=tuple(ids[i] for i in given_order if not added[i]),
             events=touched,
             new_events=tuple(event for event in touched if event in created),
         )
@@ -569,7 +540,7 @@ class Store:
         settings
             How Pc is computed.
         event_ids
-            The events to refresh; all events (archived too) if ``None``.
+            The events to refresh; all events if ``None``.
 
         Returns
         -------
@@ -608,9 +579,11 @@ class Store:
                 (event_id, keepout.cdm.loads(content))
                 for event_id, content in session.execute(query)
             ]
-        skipped: tuple[str, ...] = ()
+        skipped: tuple[MessageId, ...] = ()
         if settings.combined_hard_body_radius is None:
-            skipped = without_hard_body_radius(cdm for _, cdm in missing)
+            skipped = tuple(
+                map(MessageId, without_hard_body_radius(cdm for _, cdm in missing))
+            )
             if skipped and event_ids is not None:
                 raise HardBodyRadiusError(
                     f"no HBR for both objects in {', '.join(skipped)}: give the "
@@ -627,11 +600,12 @@ class Store:
                 combined_hard_body_radius=settings.combined_hard_body_radius,
             )
             with self.write() as session:
-                if session.get(models.Cdm, cdm.message_id) is None:
+                message_id = MessageId(cdm.message_id)
+                if session.get(models.Cdm, message_id) is None:
                     continue
                 done = session.scalar(
                     select(models.Result.id).where(
-                        models.Result.message_id == cdm.message_id,
+                        models.Result.message_id == message_id,
                         models.Result.key == key,
                     )
                 )
@@ -639,7 +613,7 @@ class Store:
                     continue
                 session.add(
                     models.Result(
-                        message_id=cdm.message_id,
+                        message_id=message_id,
                         key=key,
                         payload=observation_to_json(observation),
                         created_at=_now(),
@@ -675,17 +649,12 @@ class Store:
         )
 
     def events(
-        self,
-        *,
-        include_archived: bool = False,
-        event_ids: Collection[str] | None = None,
+        self, *, event_ids: Collection[str] | None = None
     ) -> list[ConjunctionEvent]:
         """The stored events, by their first TCA (then by id).
 
         Parameters
         ----------
-        include_archived
-            Whether archived events are listed too.
         event_ids
             The events to list (only their CDMs are read); all if ``None``.
 
@@ -702,8 +671,6 @@ class Store:
             (likewise).
         """
         listed = select(models.Event.id)
-        if not include_archived:
-            listed = listed.where(models.Event.archived == false())
         if event_ids is not None:
             listed = listed.where(models.Event.id.in_(event_ids))
         with self.read() as session:
@@ -793,31 +760,28 @@ class Store:
             )
             if catalog_id is None:
                 return None
-            label = session.execute(
-                select(models.Catalog.label).where(models.Catalog.id == catalog_id)
-            ).scalar_one()
-            files = session.scalars(
-                select(models.CatalogFile)
-                .where(models.CatalogFile.catalog_id == catalog_id)
-                .order_by(models.CatalogFile.id)
-            ).all()
+            catalog = session.get_one(
+                models.Catalog,
+                catalog_id,
+                options=[selectinload(models.Catalog.files)],
+            )
         return CatalogReference(
-            label,
+            catalog.label,
             tuple(
                 CatalogFileRef(
                     file.name,
                     self.path.parent / file.path,
                     file.sha256,
                     url=file.url,
-                    retrieved=None if file.retrieved is None else _time(file.retrieved),
+                    retrieved=file.retrieved,
                 )
-                for file in files
+                for file in catalog.files
             ),
         )
 
     def count_before(self, before: Time) -> int:
-        """The number of events (archived too) whose latest TCA is before a
-        time: those :meth:`purge` would delete now.
+        """The number of events whose latest TCA is before a time: those
+        :meth:`purge` would delete now.
 
         Parameters
         ----------

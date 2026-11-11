@@ -26,7 +26,6 @@ def upgrade() -> None:
         sa.Column("conjunction_id", sa.String(), nullable=True),
         sa.Column("tca_min", sa.String(), nullable=False),
         sa.Column("tca_max", sa.String(), nullable=False),
-        sa.Column("archived", sa.Boolean(), server_default=sa.false(), nullable=False),
         sa.Column("created_at", sa.String(), nullable=False),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_events")),
     )

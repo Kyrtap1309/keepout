@@ -221,7 +221,7 @@ def _ingest_and_assess(
                 thresholds=settings.thresholds,
             ),
         )
-        for event in store.events(include_archived=True, event_ids=report.events)
+        for event in store.events(event_ids=report.events)
     ]
     return report, assessed
 
@@ -251,7 +251,7 @@ def ingest_screened(
         [CdmInput.of(cdm, origin="screen") for cdm in cdms], catalog=catalog
     )
     store.refresh(settings, event_ids=report.events)
-    return report, store.events(include_archived=True, event_ids=report.events)
+    return report, store.events(event_ids=report.events)
 
 
 def store_json(

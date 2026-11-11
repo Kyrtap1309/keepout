@@ -109,7 +109,6 @@ def test_the_schema_holds_its_rules(tmp_path: Path) -> None:
         ("results", ("message_id",)): "CASCADE",
     }
     assert schema["cdms"]["checks"] == [("ck_cdms_format", "format IN ('kvn', 'xml')")]
-    assert ("archived", "BOOLEAN", False, "0") in schema["events"]["columns"]  # type: ignore[operator]
     indexes = {i[0] for rules in schema.values() for i in rules["indexes"]}  # type: ignore[attr-defined]
     assert {"ix_cdms_catalog_id", "ix_catalog_files_catalog_id"} <= indexes
 
@@ -176,8 +175,6 @@ def test_deleting_an_event_deletes_its_messages_and_results(tmp_path: Path) -> N
                     " VALUES ('m', 'k', '{}', 't')"
                 )
             )
-        with store.read() as session:
-            assert session.scalar(text("SELECT archived FROM events")) == 0
         with store.write() as session:
             session.execute(text("DELETE FROM events"))
         with store.read() as session:

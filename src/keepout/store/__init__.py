@@ -8,11 +8,14 @@ their Pc (:class:`RefreshReport`).
 """
 
 from keepout.store.db import open_store, upgrade
+from keepout.store.models import EventId, MessageId
 from keepout.store.repo import CdmInput, IngestReport, RefreshReport, Store
 
 __all__ = [
     "CdmInput",
+    "EventId",
     "IngestReport",
+    "MessageId",
     "RefreshReport",
     "Store",
     "open_store",
