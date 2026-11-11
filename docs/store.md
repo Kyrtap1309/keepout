@@ -28,7 +28,8 @@ given `--store` prints `--store needs the store extra: pip install
   `OBJECT2` whose TCAs, with its own, spread over no more than 10 minutes
   (and whose `CONJUNCTION_ID`, if both give one, is the same), or starts a
   new event. This is the rule of `keepout assess` and
-  [`group_events`](reference/events.md), applied one CDM at a time. A CDM
+  [`group_events`](reference/events.md), applied one CDM at a time as
+  they arrive (`group_events` takes them in TCA order). A CDM
   that fits two stored events is an error naming both, never a silent
   merge.
 - **Pc observations**, one per CDM and per way of computing Pc: the

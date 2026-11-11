@@ -3,10 +3,11 @@
 CDMs are only added (:meth:`Store.ingest`): a message is stored once, by its
 ``MESSAGE_ID``, and given again it is reported as already stored. Each CDM
 joins the stored event of its encounter, by the rule of
-:func:`keepout.events.group_events`: same objects (``OBJECT1``, ``OBJECT2``
-by designator), TCAs within :data:`~keepout.events.DEFAULT_TCA_TOLERANCE`, no
-other ``CONJUNCTION_ID``. An event keeps the id it was given when its first
-CDM came, eight hexadecimal characters, however many CDMs follow.
+:func:`keepout.events.group_events` (:class:`~keepout.events.EventBounds`):
+same objects (``OBJECT1``, ``OBJECT2`` by designator), TCAs within
+:data:`~keepout.events.DEFAULT_TCA_TOLERANCE`, no other ``CONJUNCTION_ID``.
+An event keeps the id it was given when its first CDM came, eight
+hexadecimal characters, however many CDMs follow.
 
 Each CDM's Pc observation is cached (:meth:`Store.refresh`) under the key of
 the settings it was computed with
@@ -35,6 +36,7 @@ from keepout.errors import HardBodyRadiusError, StoreError
 from keepout.events import (
     DEFAULT_TCA_TOLERANCE,
     ConjunctionEvent,
+    EventBounds,
     without_hard_body_radius,
 )
 from keepout.sources.catalog import CatalogFileRef, CatalogReference
@@ -193,12 +195,12 @@ def _unique(items: Sequence[str]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(items))
 
 
-def _spread(event: models.Event, session: Session, cdm: Cdm) -> float:
-    """The spread [s] of the TCAs of the event's CDMs and ``cdm``, at full
-    precision, as :class:`~keepout.events.ConjunctionEvent` measures it.
+def _bounds(event: models.Event, session: Session) -> EventBounds:
+    """The :class:`~keepout.events.EventBounds` of a stored event, its TCAs
+    at full precision.
 
     The database's TCAs are rounded to the microsecond: they find the
-    event's earliest and latest CDMs, whose own TCAs are then compared.
+    event's earliest and latest CDMs, whose own TCAs are then read.
     """
     extremes = session.scalars(
         select(models.Cdm.content).where(
@@ -209,9 +211,11 @@ def _spread(event: models.Event, session: Session, cdm: Cdm) -> float:
             ),
         )
     )
-    tcas = [cdm.tca, *(keepout.cdm.loads(text).tca for text in extremes)]
-    offsets = [elapsed_seconds(tcas[0], tca) for tca in tcas]
-    return max(offsets) - min(offsets)
+    found = [keepout.cdm.loads(text).tca for text in extremes]
+    tcas = sorted(found, key=lambda tca: elapsed_seconds(found[0], tca))
+    return EventBounds(
+        (event.object1, event.object2), tcas[0], tcas[-1], event.conjunction_id
+    )
 
 
 def _new_event_id(session: Session) -> str:
@@ -223,31 +227,24 @@ def _new_event_id(session: Session) -> str:
 
 
 def _event_of(session: Session, cdm: Cdm, tca: str) -> tuple[models.Event, bool]:
-    """The event that ``cdm`` joins, updated for it, and whether it is new;
-    ``tca`` is the CDM's TCA as the database writes it.
+    """The event that ``cdm`` joins, by the rule of
+    :class:`~keepout.events.EventBounds`, updated for it, and whether it is
+    new; ``tca`` is the CDM's TCA as the database writes it.
 
     Raises
     ------
     StoreError
         If it fits more than one stored event.
     """
+    # The candidates: the same objects, a TCA near enough.
     query = select(models.Event).where(
         models.Event.object1 == cdm.object1.object_id,
         models.Event.object2 == cdm.object2.object_id,
         models.Event.tca_max >= _iso(cdm.tca - _WINDOW),
         models.Event.tca_min <= _iso(cdm.tca + _WINDOW),
     )
-    if cdm.conjunction_id is not None:
-        query = query.where(
-            or_(
-                models.Event.conjunction_id.is_(None),
-                models.Event.conjunction_id == cdm.conjunction_id,
-            )
-        )
     fitting = [
-        event
-        for event in session.scalars(query)
-        if _spread(event, session, cdm) <= DEFAULT_TCA_TOLERANCE
+        event for event in session.scalars(query) if _bounds(event, session).admits(cdm)
     ]
     if len(fitting) > 1:
         ids = ", ".join(sorted(event.id for event in fitting))

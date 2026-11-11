@@ -10,6 +10,7 @@ from keepout import EventError, PcConvergenceError, compute_pc
 from keepout.cdm import Cdm
 from keepout.events import (
     ConjunctionEvent,
+    EventBounds,
     group_events,
     time_to_tca,
     without_hard_body_radius,
@@ -274,10 +275,39 @@ def test_group_events_keeps_tcas_exactly_the_tolerance_apart_together() -> None:
     assert [len(e.cdms) for e in group_events(cdms, tca_tolerance=600.0)] == [2]
 
 
-def test_group_events_refuses_different_conjunction_ids_in_one_group() -> None:
-    cdms = [b1_cdm("A", conjunction_id="C1"), b1_cdm("B", conjunction_id="C2")]
-    with pytest.raises(ValueError, match="different CONJUNCTION_ID values: C1, C2"):
+def test_group_events_keeps_different_conjunction_ids_apart() -> None:
+    cdms = [
+        b1_cdm("A", conjunction_id="C1"),
+        b1_cdm("B", conjunction_id="C2"),
+        b1_cdm("C", tca="2010-03-13T22:38:00.000", conjunction_id="C1"),
+    ]
+    events = group_events(cdms)
+    assert {e.event_id: [c.message_id for c in e.cdms] for e in events} == {
+        "C1": ["A", "C"],
+        "C2": ["B"],
+    }
+
+
+def test_a_cdm_without_conjunction_id_between_two_events_is_refused() -> None:
+    cdms = [
+        b1_cdm("A", conjunction_id="C1"),
+        b1_cdm("B", conjunction_id="C2"),
+        b1_cdm("C", tca="2010-03-13T22:38:00.000"),
+    ]
+    with pytest.raises(EventError, match="CDM C fits more than one event"):
         group_events(cdms)
+
+
+def test_bounds_admit_a_cdm_by_objects_tca_and_conjunction_id() -> None:
+    bounds = EventBounds.of(b1_cdm("A", conjunction_id="C1"))
+    assert bounds.admits(b1_cdm("B", tca="2010-03-13T22:40:00.000"))
+    assert not bounds.admits(b1_cdm("B", tca="2010-03-13T22:50:00.000"))
+    assert not bounds.admits(b1_cdm("B", conjunction_id="C2"))
+    assert not bounds.admits(b1_cdm("B", secondary="40000"))
+    wider = bounds.including(b1_cdm("B", tca="2010-03-13T22:30:00.000"))
+    assert wider.conjunction_id == "C1"
+    assert wider.spread == pytest.approx(472.618, abs=1e-3)
+    assert not wider.admits(b1_cdm("C", tca="2010-03-13T22:42:00.000"))
 
 
 def test_group_events_of_nothing_is_empty() -> None:

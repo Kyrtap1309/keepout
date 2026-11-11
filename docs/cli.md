@@ -189,7 +189,7 @@ event.
 
 `keepout assess` reads CDM files: KVN or XML, CDM 1.0 or 2.0, gzipped or
 not (the shell expands `*.kvn`). It groups them into events, each the same
-two objects with TCAs within 10 minutes. It computes keepout's Pc of every
+two objects with TCAs within 10 minutes and one `CONJUNCTION_ID`, if any. It computes keepout's Pc of every
 CDM and assesses each event as in [Risk assessment](risk.md). The result is
 the risk level of the latest Pc, the trend over the event's CDMs and the
 action, decided as of the latest CDM's creation date.
