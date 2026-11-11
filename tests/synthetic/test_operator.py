@@ -15,6 +15,7 @@ from screening_data import FIXTURE_START, fixture_by_number, load_fixture
 from keepout.ccsds.message import UNKNOWN
 from keepout.cdm import kvn, make_message_id, xml
 from keepout.errors import FleetError
+from keepout.events import stable_event_id
 from keepout.pc import computation
 from keepout.risk import Action, DecisionConfig, RiskLevel, Thresholds
 from keepout.screening import ScreeningVolume
@@ -156,7 +157,7 @@ def test_each_event_is_assessed_from_its_cdm() -> None:
     assert crossing.assessment.level is RiskLevel.GREEN
     assert crossing.action is Action.IGNORE
     drifting = only(result, 44476, 55841)
-    assert drifting.event.event_id == (f"44476/55841/{drifting.cdm.tca.utc.isot}")
+    assert drifting.event.event_id == stable_event_id(drifting.cdm.message_id)
     observation = drifting.observation
     assert observation.message_id == drifting.cdm.message_id
     assert observation.time_to_tca == pytest.approx(2.50 * DAY, abs=0.01 * DAY)

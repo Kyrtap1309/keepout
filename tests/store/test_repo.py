@@ -21,7 +21,12 @@ from store_builders import TCA, cdm, cdm_text, message, written
 
 import keepout.cdm
 from keepout.errors import ChecksumMismatch, HardBodyRadiusError, StoreError
-from keepout.events import DEFAULT_TCA_TOLERANCE, ConjunctionEvent, group_events
+from keepout.events import (
+    DEFAULT_TCA_TOLERANCE,
+    ConjunctionEvent,
+    group_events,
+    stable_event_id,
+)
 from keepout.pc import computation
 from keepout.settings import Settings
 from keepout.sources.catalog import CatalogFileRef, CatalogReference, load_reference
@@ -85,9 +90,10 @@ def test_ingest_stores_text_and_groups(tmp_store: Store, tmp_path: Path) -> None
     assert report.already_stored == ()
     assert len(report.events) == 2
     assert report.new_events == report.events
-    assert all(len(i) == 8 and int(i, 16) >= 0 for i in report.events)
+    # A, created a day before TCA, is the first CDM of its event (B an hour).
+    assert report.events == (stable_event_id("A"), stable_event_id("C"))
     events = tmp_store.events()
-    assert [e.event_id for e in events] == sorted(report.events)
+    assert [e.event_id for e in events] == list(report.events)
     assert _partition(tmp_store) == {frozenset("AB"), frozenset("C")}
     with tmp_store.read() as session:
         row = session.get(models.Cdm, "A")
@@ -254,13 +260,19 @@ def test_event_ids_never_change_after_more_cdms(tmp_store: Store) -> None:
     assert len(tmp_store.event(event_id).cdms) == 4
 
 
-def test_an_event_id_already_taken_is_drawn_again(
-    tmp_store: Store, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    draws = iter(["0000abcd", "0000abcd", "0000beef"])
-    monkeypatch.setattr("secrets.token_hex", lambda _: next(draws))
-    assert tmp_store.ingest([message("A")]).events == ("0000abcd",)
-    assert tmp_store.ingest([message("B", secondary="40000")]).events == ("0000beef",)
+def test_an_event_id_already_taken_gives_the_next(tmp_store: Store) -> None:
+    # Another event took the id A's would have: A's event takes the next.
+    other = message("B", secondary="40000")
+    with tmp_store.write() as session:
+        session.execute(
+            text(
+                "INSERT INTO events (id, object1, object2, tca_min, tca_max,"
+                " created_at) VALUES (:id, '1', '2', 't', 't', 't')"
+            ),
+            {"id": stable_event_id("A")},
+        )
+    assert tmp_store.ingest([message("A")]).events == (stable_event_id("A#1"),)
+    assert tmp_store.ingest([other]).events == (stable_event_id("B"),)
 
 
 def test_an_unknown_event_is_an_error(tmp_store: Store) -> None:

@@ -70,8 +70,8 @@ TCA (UTC)         Objects        Miss (m)  CDMs        Pc  Level   Action
 2026-10-11 10:56  38771 / 30131      2019     1  2.67e-10  green   ignore
 2026-10-12 11:28  38771 / 35196       212     1  4.86e-06  yellow  monitor
 28 element sets left out (stale, future epochs, SGP4 failures; --json lists them).
-44476/55841/2026-10-08T12:03:02.771792: monitor (latest Pc 7.38e-06 is yellow, 2.50 d before TCA; trend undetermined; diagnostic: 2-D Pc assumptions questionable: the encounter lasts about 2.51e+03 s, 2.9% of the primary's orbital period (limit 1%); a 3-D Pc may differ; diagnostic: the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used)
-38771/35196/2026-10-12T11:28:28.709977: monitor (latest Pc 4.86e-06 is yellow, 6.48 d before TCA; trend undetermined)
+3befe6f1305d: monitor (latest Pc 7.38e-06 is yellow, 2.50 d before TCA; trend undetermined; diagnostic: 2-D Pc assumptions questionable: the encounter lasts about 2.51e+03 s, 2.9% of the primary's orbital period (limit 1%); a 3-D Pc may differ; diagnostic: the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used)
+b815c689dc80: monitor (latest Pc 4.86e-06 is yellow, 6.48 d before TCA; trend undetermined)
 Covariances are assumed (keepout's model of GP element set errors), not orbit determination.
 12 CDMs written to cdms
 ```
@@ -235,7 +235,7 @@ keepout maneuver cdms/44476_55841_*.kvn --target-pc 1e-7 \
 ```
 
 ```text
-Event 44476/55841/2026-10-08T12:03:02.771792: 44476 / 55841, TCA 2026-10-08 12:03 UTC, target Pc 1.00e-07.
+Event 3befe6f1305d: 44476 / 55841, TCA 2026-10-08 12:03 UTC, target Pc 1.00e-07.
 Burns of the primary
 Option      Before TCA (h)  Δv (m/s)        Pc  Range (m)  Method  Target
 ─────────────────────────────────────────────────────────────────────────
@@ -322,7 +322,7 @@ An event whose latest CDM came from `assess --store` or `store add` was
 screened by no one, and is not re-screened without a catalog. After the
 `store add` below, for instance, this plans the Luch-5X event from the
 store, not re-screened:
-`keepout maneuver --event 81a87dfa --store keepout.db --target-pc 1e-7`.
+`keepout maneuver --event 3befe6f1305d --store keepout.db --target-pc 1e-7`.
 An id the store does not hold is an error (status 1).
 
 Planning takes tens of seconds on the default grid. Each candidate burn
@@ -381,15 +381,15 @@ TCA (UTC)         Objects        Miss (m)  CDMs        Pc  Level   Action
 12 events in the store for the 12 CDMs read: 2 monitor, 10 ignore.
 12 of 12 events rest on assumed covariances (COVARIANCE_METHOD = DEFAULT), not orbit determination.
 12 CDMs added to keepout.db (0 already stored), 12 new events.
-Event ids, row by row: 82b2bc7f, d051de7d, ebd423ba, 5d3234fc, 6356c251, 0e8e52d7, c562953a, 81a87dfa, 23b64c85, 35205006, 461d0688, 96aa11c4.
-81a87dfa: monitor (latest Pc 7.38e-06 is yellow, 2.50 d before TCA; trend undetermined; diagnostic: 2-D Pc assumptions questionable: the encounter lasts about 2.51e+03 s, 2.9% of the primary's orbital period (limit 1%); a 3-D Pc may differ; diagnostic: the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used)
-96aa11c4: monitor (latest Pc 4.86e-06 is yellow, 6.48 d before TCA; trend undetermined)
+Event ids, row by row: 026443d77699, ea4c6a976e3a, a351b16057ec, fd13fbdb9831, 6d45833fc2cc, 3f4c98d01163, 2aa19608e416, 3befe6f1305d, 527a3e2689d5, d604685adedc, 26151ac6b42f, b815c689dc80.
+3befe6f1305d: monitor (latest Pc 7.38e-06 is yellow, 2.50 d before TCA; trend undetermined; diagnostic: 2-D Pc assumptions questionable: the encounter lasts about 2.51e+03 s, 2.9% of the primary's orbital period (limit 1%); a 3-D Pc may differ; diagnostic: the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used)
+b815c689dc80: monitor (latest Pc 4.86e-06 is yellow, 6.48 d before TCA; trend undetermined)
 ```
 
 The output is that of `assess`, with the store's event ids. The counts
 line says the events are the store's, since a stored event may hold
 CDMs from earlier runs as well as those read. The
-[ids](store.md#event-ids) are random: yours differ. Adding the same
+[ids](store.md#event-ids) are those `screen` showed. Adding the same
 files again stores nothing: the line under the counts then says
 `0 CDMs added to keepout.db (12 already stored), 0 new events.` A CDM
 from a later run joins its stored event, whose row then counts its CDMs

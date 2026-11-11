@@ -9,9 +9,11 @@ import keepout.cdm
 from keepout import EventError, PcConvergenceError, compute_pc
 from keepout.cdm import Cdm
 from keepout.events import (
+    EVENT_ID_LENGTH,
     ConjunctionEvent,
     EventBounds,
     group_events,
+    stable_event_id,
     time_to_tca,
     without_hard_body_radius,
 )
@@ -44,16 +46,19 @@ def test_time_to_tca_runs_from_creation_to_tca() -> None:
     assert time_to_tca(after) == pytest.approx(-3600.0, abs=1e-6)
 
 
-def test_event_id_defaults_to_the_objects_and_the_first_tca() -> None:
-    event = ConjunctionEvent.from_cdms([b1_cdm()])
-    assert event.event_id == "12345/30337/2010-03-13T22:37:52.618"
+def test_event_id_defaults_to_the_stable_id_of_the_first_cdm() -> None:
+    # The first by CREATION_DATE, then MESSAGE_ID; a CONJUNCTION_ID changes
+    # nothing.
+    first = b1_cdm("B", created="2010-03-12T00:00:00.000")
+    cdms = [b1_cdm("A", conjunction_id="EVT-9"), first, b1_cdm("C")]
+    assert ConjunctionEvent.from_cdms(cdms).event_id == stable_event_id("B")
+    tied = [b1_cdm("D"), b1_cdm("C")]
+    assert ConjunctionEvent.from_cdms(tied).event_id == stable_event_id("C")
 
 
-def test_event_id_defaults_to_the_conjunction_id() -> None:
-    event = ConjunctionEvent.from_cdms(
-        [b1_cdm("A", conjunction_id="EVT-9"), b1_cdm("B")]
-    )
-    assert event.event_id == "EVT-9"
+def test_a_stable_event_id_is_twelve_hex_characters_of_the_sha256() -> None:
+    assert stable_event_id("abc") == "ba7816bf8f01"
+    assert len(stable_event_id("B1-1")) == EVENT_ID_LENGTH == 12
 
 
 def test_an_explicit_event_id_wins() -> None:
@@ -234,9 +239,9 @@ def test_group_events_splits_by_objects_and_encounter() -> None:
         ["A3"],
     ]
     assert [e.event_id for e in events] == [
-        "12345/30337/2010-03-13T22:37:52.618",
-        "12345/40000/2010-03-13T22:37:52.618",
-        "12345/30337/2010-03-14T00:10:00.000",
+        stable_event_id("A1"),
+        stable_event_id("B1"),
+        stable_event_id("A3"),
     ]
 
 
@@ -282,10 +287,7 @@ def test_group_events_keeps_different_conjunction_ids_apart() -> None:
         b1_cdm("C", tca="2010-03-13T22:38:00.000", conjunction_id="C1"),
     ]
     events = group_events(cdms)
-    assert {e.event_id: [c.message_id for c in e.cdms] for e in events} == {
-        "C1": ["A", "C"],
-        "C2": ["B"],
-    }
+    assert [[c.message_id for c in e.cdms] for e in events] == [["A", "C"], ["B"]]
 
 
 def test_a_cdm_without_conjunction_id_between_two_events_is_refused() -> None:

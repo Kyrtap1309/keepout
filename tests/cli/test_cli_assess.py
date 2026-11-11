@@ -45,7 +45,7 @@ TCA (UTC)         Objects        Miss (m)  CDMs        Pc  Level   Action \n\
 2026-10-08 12:03  44476 / 55841      3647     1  7.38e-06  yellow  monitor
 2 events from 2 CDMs: 1 monitor, 1 ignore.
 2 of 2 events rest on assumed covariances (COVARIANCE_METHOD = DEFAULT), not orbit determination.
-44476/55841/2026-10-08T12:03:02.771792: monitor (latest Pc 7.38e-06 is yellow, 2.50 d before TCA; trend undetermined; diagnostic: 2-D Pc assumptions questionable: the encounter lasts about 2.51e+03 s, 2.9% of the primary's orbital period (limit 1%); a 3-D Pc may differ; diagnostic: the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used)
+3befe6f1305d: monitor (latest Pc 7.38e-06 is yellow, 2.50 d before TCA; trend undetermined; diagnostic: 2-D Pc assumptions questionable: the encounter lasts about 2.51e+03 s, 2.9% of the primary's orbital period (limit 1%); a 3-D Pc may differ; diagnostic: the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used)
 """)
 
 
@@ -63,8 +63,8 @@ TCA (UTC)         Objects        Miss (m)  CDMs        Pc  Level  Action        
                                                                   maneuver      \n\
 2 events from 2 CDMs: 1 maneuver, 1 prepare maneuver.
 2 of 2 events rest on assumed covariances (COVARIANCE_METHOD = DEFAULT), not orbit determination.
-52939/47826/2026-10-06T19:36:42.717332: maneuver (latest Pc 4.25e-02 is red, 0.82 d before TCA; trend undetermined; within the decision point (2.00 d before TCA))
-44476/55841/2026-10-08T12:03:02.771792: prepare maneuver (latest Pc 1.73e-02 is red, 2.50 d before TCA; trend undetermined; before the decision point (2.00 d before TCA): prepare a manoeuvre; diagnostic: 2-D Pc assumptions questionable: the encounter lasts about 3.5e+03 s, 4.1% of the primary's orbital period (limit 1%); a 3-D Pc may differ; diagnostic: the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used)
+2a85ed50c4e6: maneuver (latest Pc 4.25e-02 is red, 0.82 d before TCA; trend undetermined; within the decision point (2.00 d before TCA))
+3befe6f1305d: prepare maneuver (latest Pc 1.73e-02 is red, 2.50 d before TCA; trend undetermined; before the decision point (2.00 d before TCA): prepare a manoeuvre; diagnostic: 2-D Pc assumptions questionable: the encounter lasts about 3.5e+03 s, 4.1% of the primary's orbital period (limit 1%); a 3-D Pc may differ; diagnostic: the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used)
 At least one event needs a manoeuvre (exit status 3).
 """)
     assert result.stderr == ""
@@ -202,8 +202,8 @@ TCA (UTC)         Objects        Miss (m)  CDMs      Pc  Level  Action \n\
 2026-10-08 12:03  44476 / 55841      3647     1       -  -      monitor
 2 events from 2 CDMs: 2 monitor.
 2 of 2 events rest on assumed covariances (COVARIANCE_METHOD = DEFAULT), not orbit determination.
-52939/47826/2026-10-06T19:36:42.717332: monitor (latest observation has no Pc: GeometryError: relative velocity is zero: the encounter plane is undefined)
-44476/55841/2026-10-08T12:03:02.771792: monitor (no observation before TCA: nothing to decide on)
+2a85ed50c4e6: monitor (latest observation has no Pc: GeometryError: relative velocity is zero: the encounter plane is undefined)
+3befe6f1305d: monitor (no observation before TCA: nothing to decide on)
 """)
     payload = json.loads(keepout("assess", late, "--json").stdout)
     (event,) = payload["events"]
@@ -251,7 +251,7 @@ def test_assess_with_store_shows_the_same_ids_as_store_add(tmp_path: Path) -> No
     assert stored.exit_code == ExitCode.OK
     payload = json.loads(stored.stdout)
     ids = [event["event_id"] for event in payload["events"]]
-    assert all(re.fullmatch(r"[0-9a-f]{8}", event_id) for event_id in ids)
+    assert all(re.fullmatch(r"[0-9a-f]{12}", event_id) for event_id in ids)
     assert payload["store"]["new_events"] == ids
     # The same Pc, risk and action as without the store.
     for key in ("pc", "level", "action", "cdms", "trend"):

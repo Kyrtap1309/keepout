@@ -44,12 +44,16 @@ given `--store` prints `--store needs the store extra: pip install
 
 ### Event ids
 
-An event gets an id when its first CDM is stored: eight random
-lowercase hexadecimal characters, such as `81a87dfa`. It keeps that id
-however many CDMs follow, and the command line shows it in place of the
-`<object>/<object>/<TCA>` id that `assess` gives without a store. To see
-the ids again, run `keepout store add` on the same files: it stores
-nothing new and prints the ids row by row.
+An event's id is the first 12 lowercase hexadecimal characters of the
+SHA-256 of its first CDM's `MESSAGE_ID` (the oldest by `CREATION_DATE`),
+such as `3befe6f1305d`: the same CDMs give the same id with a store or
+without, on any machine. A stored event keeps its id however many CDMs
+follow. So a CDM created before the event's first one, stored later, does
+not change it, while `assess` on the files alone then names the event
+after that older CDM. In the rare case that another stored event already
+has the id, the new event takes the next free one. To see the ids again,
+run `keepout store add` on the same files: it stores nothing new and
+prints the ids row by row.
 
 ### The catalog copies
 

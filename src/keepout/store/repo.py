@@ -6,8 +6,8 @@ joins the stored event of its encounter, by the rule of
 :func:`keepout.events.group_events` (:class:`~keepout.events.EventBounds`):
 same objects (``OBJECT1``, ``OBJECT2`` by designator), TCAs within
 :data:`~keepout.events.DEFAULT_TCA_TOLERANCE`, no other ``CONJUNCTION_ID``.
-An event keeps the id it was given when its first CDM came, eight
-hexadecimal characters, however many CDMs follow.
+An event keeps the id its first CDM gave it
+(:func:`~keepout.events.stable_event_id`), however many CDMs follow.
 
 Each CDM's Pc observation is cached (:meth:`Store.refresh`) under the key of
 the settings it was computed with
@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import hashlib
 import re
-import secrets
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -37,6 +36,7 @@ from keepout.events import (
     DEFAULT_TCA_TOLERANCE,
     ConjunctionEvent,
     EventBounds,
+    stable_event_id,
     without_hard_body_radius,
 )
 from keepout.sources.catalog import CatalogFileRef, CatalogReference
@@ -218,12 +218,16 @@ def _bounds(event: models.Event, session: Session) -> EventBounds:
     )
 
 
-def _new_event_id(session: Session) -> str:
-    """A random event id that no stored event has."""
-    while True:
-        candidate = secrets.token_hex(4)
-        if session.get(models.Event, candidate) is None:
-            return candidate
+def _new_event_id(session: Session, message_id: str) -> str:
+    """The id of a new event whose first CDM has this ``MESSAGE_ID``: its
+    :func:`~keepout.events.stable_event_id`, or, if another event has that,
+    the stable id of ``"<MESSAGE_ID>#<n>"`` for the first free ``n``."""
+    candidate = stable_event_id(message_id)
+    attempt = 0
+    while session.get(models.Event, candidate) is not None:
+        attempt += 1
+        candidate = stable_event_id(f"{message_id}#{attempt}")
+    return candidate
 
 
 def _event_of(session: Session, cdm: Cdm, tca: str) -> tuple[models.Event, bool]:
@@ -257,7 +261,7 @@ def _event_of(session: Session, cdm: Cdm, tca: str) -> tuple[models.Event, bool]
             event.conjunction_id = cdm.conjunction_id
         return event, False
     event = models.Event(
-        id=_new_event_id(session),
+        id=_new_event_id(session, cdm.message_id),
         object1=cdm.object1.object_id,
         object2=cdm.object2.object_id,
         conjunction_id=cdm.conjunction_id,
@@ -464,7 +468,15 @@ class Store:
             If a catalog file changed since ``catalog`` was made.
         """
         tcas = [_iso(given.cdm.tca) for given in messages]
-        order = sorted(range(len(messages)), key=lambda i: (tcas[i], i))
+        # In the order of group_events, so that the first CDM of a new event
+        # names it as it does.
+        order = sorted(
+            range(len(messages)),
+            key=lambda i: (
+                _iso(messages[i].cdm.creation_date),
+                messages[i].cdm.message_id,
+            ),
+        )
         added: dict[int, bool] = {}
         events: dict[int, str] = {}
         created: set[str] = set()

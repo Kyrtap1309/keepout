@@ -58,7 +58,7 @@ class Event(Base):
     __tablename__ = "events"
     __table_args__ = (Index(None, "object1", "object2", "tca_min"),)
 
-    id: Mapped[str] = mapped_column(String(8), primary_key=True)
+    id: Mapped[str] = mapped_column(String(12), primary_key=True)
     """Eight lowercase hexadecimal characters."""
     object1: Mapped[str] = mapped_column(String)
     object2: Mapped[str] = mapped_column(String)
@@ -85,7 +85,7 @@ class Cdm(Base):
 
     message_id: Mapped[str] = mapped_column(String, primary_key=True)
     event_id: Mapped[str] = mapped_column(
-        String(8), ForeignKey("events.id", ondelete="CASCADE")
+        String(12), ForeignKey("events.id", ondelete="CASCADE")
     )
     creation_date: Mapped[str] = mapped_column(String)
     tca: Mapped[str] = mapped_column(String)

@@ -155,7 +155,7 @@ def test_plan_prints_options_and_exits_zero(tmp_path: Path) -> None:
     assert result.exit_code == ExitCode.OK
     assert result.stderr == ""
     assert result.stdout == snapshot("""\
-Event 52939/47826/2026-10-06T19:36:42.717332: 52939 / 47826, TCA 2026-10-06 19:36 UTC, target Pc 1.00e-05.
+Event 2a85ed50c4e6: 52939 / 47826, TCA 2026-10-06 19:36 UTC, target Pc 1.00e-05.
 Burns of the primary
 Option      Before TCA (h)  Δv (m/s)        Pc  Range (m)  Method  Target
 ─────────────────────────────────────────────────────────────────────────
@@ -186,7 +186,7 @@ def test_json_has_the_documented_keys(tmp_path: Path) -> None:
         "notes",
         "refusal",
     ]
-    assert payload["event"] == "52939/47826/2026-10-06T19:36:42.717332"
+    assert payload["event"] == "2a85ed50c4e6"
     assert payload["primary"] == str(PRIMARY)
     assert payload["secondary"] == str(SECONDARY)
     assert payload["target_pc"] == 1e-5
@@ -272,7 +272,7 @@ def test_no_option_exits_four(tmp_path: Path) -> None:
     result = keepout("maneuver", *args)
     assert result.exit_code == ExitCode.NO_SAFE_BURN
     assert result.stdout == snapshot("""\
-Event 52939/47826/2026-10-06T19:36:42.717332: 52939 / 47826, TCA 2026-10-06 19:36 UTC, target Pc 1.00e-05.
+Event 2a85ed50c4e6: 52939 / 47826, TCA 2026-10-06 19:36 UTC, target Pc 1.00e-05.
 Burns of the primary
 Option   Before TCA (h)  Δv (m/s)        Pc  Range (m)  Method  Target
 ──────────────────────────────────────────────────────────────────────
@@ -313,7 +313,7 @@ def test_conflict_exits_four(tmp_path: Path) -> None:
     result = keepout("maneuver", *args, "--catalog", catalog)
     assert result.exit_code == ExitCode.NO_SAFE_BURN
     assert result.stdout.replace(catalog, "<catalog>") == snapshot("""\
-Event 52939/47826/2026-10-06T19:36:42.717332: 52939 / 47826, TCA 2026-10-06 19:36 UTC, target Pc 1.00e-05.
+Event 2a85ed50c4e6: 52939 / 47826, TCA 2026-10-06 19:36 UTC, target Pc 1.00e-05.
 Burns of the primary
 Option    Before TCA (h)  Δv (m/s)        Pc  Range (m)  Method  Target
 ───────────────────────────────────────────────────────────────────────
@@ -351,7 +351,7 @@ def test_one_clean_option_and_one_conflict_exit_zero_and_show_both(
     assert result.exit_code == ExitCode.OK
     shown = result.stdout.replace(str(FIXTURE_CSV), "<catalog>")
     assert shown == snapshot("""\
-Event 52939/47826/2026-10-06T19:36:42.717332: 52939 / 47826, TCA 2026-10-06 19:36 UTC, target Pc 1.00e-05.
+Event 2a85ed50c4e6: 52939 / 47826, TCA 2026-10-06 19:36 UTC, target Pc 1.00e-05.
 Burns of the primary
 Option      Before TCA (h)  Δv (m/s)        Pc  Range (m)  Method  Target
 ─────────────────────────────────────────────────────────────────────────
@@ -523,7 +523,7 @@ def test_explicit_burn_replaces_the_minimum_options(tmp_path: Path) -> None:
     result = keepout("maneuver", *args)
     assert result.exit_code == ExitCode.OK
     assert result.stdout == snapshot("""\
-Event 52939/47826/2026-10-06T19:36:42.717332: 52939 / 47826, TCA 2026-10-06 19:36 UTC, target Pc 1.00e-05.
+Event 2a85ed50c4e6: 52939 / 47826, TCA 2026-10-06 19:36 UTC, target Pc 1.00e-05.
 Burns of the primary
 Option      Before TCA (h)  Δv (m/s)        Pc  Range (m)  Method  Target
 ─────────────────────────────────────────────────────────────────────────

@@ -166,16 +166,14 @@ class _Stored(NamedTuple):
     events: Sequence[ConjunctionEvent]
 
     def rows(self, approaches: Sequence[OperatorEvent]) -> list[OperatorEvent]:
-        """The approaches, each under the id of its stored event, in the
-        store's order of the events (an event's approaches in screening
-        order)."""
+        """The approaches, each under the id of its stored event: its own
+        id, unless its CDM joined an event stored before."""
         event_of = {
             cdm.message_id: event.event_id
             for event in self.events
             for cdm in event.cdms
         }
-        order = {event.event_id: index for index, event in enumerate(self.events)}
-        renamed = [
+        return [
             dataclasses.replace(
                 approach,
                 event=dataclasses.replace(
@@ -184,7 +182,6 @@ class _Stored(NamedTuple):
             )
             for approach in approaches
         ]
-        return sorted(renamed, key=lambda approach: order[approach.event.event_id])
 
     def json(self) -> dict[str, JsonOut]:
         """What the store did, as JSON values."""

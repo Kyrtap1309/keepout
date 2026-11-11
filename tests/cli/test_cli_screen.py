@@ -61,7 +61,7 @@ TCA (UTC)         Objects        Miss (m)  CDMs        Pc  Level   Action \n\
 2026-10-06 19:36  52939 / 47826      1029     1  4.37e-08  green   ignore \n\
 2026-10-08 12:03  44476 / 55841      3647     1  7.38e-06  yellow  monitor
 5 element sets left out (stale, future epochs, SGP4 failures; --json lists them).
-44476/55841/2026-10-08T12:03:02.771792: monitor (latest Pc 7.38e-06 is yellow, 2.50 d before TCA; trend undetermined; diagnostic: 2-D Pc assumptions questionable: the encounter lasts about 2.51e+03 s, 2.9% of the primary's orbital period (limit 1%); a 3-D Pc may differ; diagnostic: the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used)
+3befe6f1305d: monitor (latest Pc 7.38e-06 is yellow, 2.50 d before TCA; trend undetermined; diagnostic: 2-D Pc assumptions questionable: the encounter lasts about 2.51e+03 s, 2.9% of the primary's orbital period (limit 1%); a 3-D Pc may differ; diagnostic: the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used)
 Covariances are assumed (keepout's model of GP element set errors), not orbit determination.
 2 CDMs written to <tmp>/cdms
 """)
@@ -88,7 +88,7 @@ def test_screen_prints_json(tmp_path: Path) -> None:
     assert len(payload["skipped"]) == 5
     assert set(payload["skipped"][0]) == {"catalog_number", "role", "reason", "detail"}
     first, second = payload["events"]
-    assert first["event_id"] == "52939/47826/2026-10-06T19:36:42.717332"
+    assert first["event_id"] == "2a85ed50c4e6"
     assert first["object1"] == {"object_id": "52939", "name": "FLEET ONE"}
     assert first["object2"]["object_id"] == "47826"
     assert first["miss_distance_m"] == pytest.approx(1028.74, abs=0.01)
@@ -337,7 +337,7 @@ def test_screen_with_store_shows_the_store_s_event_ids(tmp_path: Path) -> None:
     with open_store(db, create=False) as store:
         stored = store.events()
     ids = [event.event_id for event in stored]
-    assert all(re.fullmatch(r"[0-9a-f]{8}", event_id) for event_id in ids)
+    assert all(re.fullmatch(r"[0-9a-f]{12}", event_id) for event_id in ids)
     assert [event["event_id"] for event in payload["events"]] == ids
     assert [event["cdms"] for event in payload["events"]] == [
         [cdm.message_id for cdm in event.cdms] for event in stored

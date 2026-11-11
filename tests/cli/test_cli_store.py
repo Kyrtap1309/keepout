@@ -25,7 +25,7 @@ from keepout.cli.store import STORE_HINT, open_cli_store, store_upgrade
 from keepout.store import open_store
 from keepout.store.db import HEAD
 
-EVENT_ID = re.compile(r"[0-9a-f]{8}")
+EVENT_ID = re.compile(r"[0-9a-f]{12}")
 
 
 def cdm_files(folder: Path) -> list[str]:

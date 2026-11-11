@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -21,9 +22,11 @@ if TYPE_CHECKING:
 
 __all__ = [
     "DEFAULT_TCA_TOLERANCE",
+    "EVENT_ID_LENGTH",
     "ConjunctionEvent",
     "EventBounds",
     "group_events",
+    "stable_event_id",
     "time_to_tca",
     "without_hard_body_radius",
 ]
@@ -54,6 +57,21 @@ def without_hard_body_radius(cdms: Iterable[Cdm]) -> tuple[str, ...]:
         for cdm in cdms
         if cdm.object1.hard_body_radius is None or cdm.object2.hard_body_radius is None
     )
+
+
+EVENT_ID_LENGTH: Final = 12
+"""Hexadecimal characters of an event id: at 100,000 events, two share one
+with a chance of about one in six million."""
+
+
+def stable_event_id(message_id: str) -> str:
+    """The id of the event whose first CDM has this ``MESSAGE_ID``: the
+    first :data:`EVENT_ID_LENGTH` hexadecimal characters of its SHA-256.
+
+    The same CDMs give the same id, with a store or without, on any machine.
+    """
+    digest = hashlib.sha256(message_id.encode("utf-8")).hexdigest()
+    return digest[:EVENT_ID_LENGTH]
 
 
 def _pair(cdm: Cdm) -> tuple[str, str]:
@@ -153,8 +171,8 @@ class ConjunctionEvent:
         cdms
             The CDMs, in any order.
         event_id
-            Identifier; if ``None``, the CDMs' ``CONJUNCTION_ID`` (CDM 2.0),
-            else ``"<OBJECT1>/<OBJECT2>/<TCA of the oldest CDM, UTC ISO>"``.
+            Identifier; if ``None``, the :func:`stable_event_id` of the first
+            CDM by ``CREATION_DATE`` (then ``MESSAGE_ID``).
         tca_tolerance
             Largest spread [s] of the CDMs' TCAs.
 
@@ -165,18 +183,15 @@ class ConjunctionEvent:
         """
         messages = tuple(cdms)
         if event_id is None and messages:
-            given = sorted({i for m in messages if (i := m.conjunction_id) is not None})
-            if given:
-                event_id = given[0]
-            else:
-                oldest = min(
-                    messages,
-                    key=lambda m: elapsed_seconds(
-                        messages[0].creation_date, m.creation_date
-                    ),
-                )
-                primary, secondary = _pair(oldest)
-                event_id = f"{primary}/{secondary}/{oldest.tca.utc.isot}"
+            reference = messages[0].creation_date
+            first = min(
+                messages,
+                key=lambda m: (
+                    elapsed_seconds(reference, m.creation_date),
+                    m.message_id,
+                ),
+            )
+            event_id = stable_event_id(first.message_id)
         return cls(event_id or "", messages, tca_tolerance)
 
     @property
@@ -356,9 +371,10 @@ def group_events(
 ) -> list[ConjunctionEvent]:
     """CDMs grouped into events by the rule of :class:`EventBounds`.
 
-    The CDMs are taken in TCA order (then by ``MESSAGE_ID``), each joining
-    the event that admits it, or starting a new one: a CDM whose TCA is
-    more than ``tca_tolerance`` after an event's first TCA, or whose
+    The CDMs are taken in ``CREATION_DATE`` order (then by ``MESSAGE_ID``),
+    as an operator receives them and a conjunction store ingests them, each
+    joining the event that admits it, or starting a new one: a CDM whose TCA
+    would spread the event's over more than ``tca_tolerance``, or whose
     ``CONJUNCTION_ID`` differs from the event's, starts another event.
     Events are named as in :meth:`ConjunctionEvent.from_cdms`.
 
@@ -388,11 +404,13 @@ def group_events(
     if not messages:
         return []
     reference = messages[0].tca
+    created = messages[0].creation_date
     bounds: list[EventBounds] = []
     members: list[list[Cdm]] = []
     by_pair: dict[tuple[str, str], list[int]] = {}
     for cdm in sorted(
-        messages, key=lambda m: (elapsed_seconds(reference, m.tca), m.message_id)
+        messages,
+        key=lambda m: (elapsed_seconds(created, m.creation_date), m.message_id),
     ):
         indices = by_pair.setdefault(_pair(cdm), [])
         fitting = [
