@@ -24,6 +24,7 @@ from keepout.cli import screen
 from keepout.cli.output import ExitCode
 from keepout.omm import load
 from keepout.omm.celestrak import dumps_csv
+from keepout.settings import load_settings
 from keepout.store import open_store
 
 
@@ -60,7 +61,7 @@ TCA (UTC)         Objects        Miss (m)  CDMs        Pc  Level   Action \n\
 2026-10-06 19:36  52939 / 47826      1029     1  4.37e-08  green   ignore \n\
 2026-10-08 12:03  44476 / 55841      3647     1  7.38e-06  yellow  monitor
 5 element sets left out (stale, future epochs, SGP4 failures; --json lists them).
-44476/55841/2026-10-08T12:03:02.771792: monitor (latest Pc 7.38e-06 is yellow, 2.50 d before TCA; trend undetermined; diagnostic: 2-D Pc assumptions questionable: the encounter lasts about 2.51e+03 s, 2.9% of the primary's orbital period (limit 1%); a 3-D Pc may differ; diagnostic: the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used)
+3befe6f1305d: monitor (latest Pc 7.38e-06 is yellow, 2.50 d before TCA; trend undetermined; diagnostic: 2-D Pc assumptions questionable: the encounter lasts about 2.51e+03 s, 2.9% of the primary's orbital period (limit 1%); a 3-D Pc may differ; diagnostic: the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used)
 Covariances are assumed (keepout's model of GP element set errors), not orbit determination.
 2 CDMs written to <tmp>/cdms
 """)
@@ -87,7 +88,7 @@ def test_screen_prints_json(tmp_path: Path) -> None:
     assert len(payload["skipped"]) == 5
     assert set(payload["skipped"][0]) == {"catalog_number", "role", "reason", "detail"}
     first, second = payload["events"]
-    assert first["event_id"] == "52939/47826/2026-10-06T19:36:42.717332"
+    assert first["event_id"] == "2a85ed50c4e6"
     assert first["object1"] == {"object_id": "52939", "name": "FLEET ONE"}
     assert first["object2"]["object_id"] == "47826"
     assert first["miss_distance_m"] == pytest.approx(1028.74, abs=0.01)
@@ -305,7 +306,7 @@ def test_screen_with_store_records_the_catalog_digest(tmp_path: Path) -> None:
             assert reference is not None
             (file,) = reference.files
             assert file.sha256 == digest
-            assert file.path.parent == store.catalogs
+            assert file.path.parent == store.catalog_dir
             assert file.path.read_bytes() == FIXTURE_CSV.read_bytes()
     assert payload["store"] == {
         "path": str(db),
@@ -336,7 +337,7 @@ def test_screen_with_store_shows_the_store_s_event_ids(tmp_path: Path) -> None:
     with open_store(db, create=False) as store:
         stored = store.events()
     ids = [event.event_id for event in stored]
-    assert all(re.fullmatch(r"[0-9a-f]{8}", event_id) for event_id in ids)
+    assert all(re.fullmatch(r"[0-9a-f]{12}", event_id) for event_id in ids)
     assert [event["event_id"] for event in payload["events"]] == ids
     assert [event["cdms"] for event in payload["events"]] == [
         [cdm.message_id for cdm in event.cdms] for event in stored
@@ -396,3 +397,38 @@ def test_a_screen_row_stays_the_approach_screened_on_day_two(tmp_path: Path) -> 
         assert event["event_id"] == first["event_id"]
         assert sorted(event["cdms"]) == sorted(both)
         assert len(event["observations"]) == 2
+
+
+def test_screen_computes_and_stores_with_the_settings(tmp_path: Path) -> None:
+    settings = tmp_path / "settings.toml"
+    settings.write_text("[pc]\nhbr_m = 1000.0\n[risk]\nred_from = 0.9\n")
+    db = tmp_path / "keepout.db"
+    args = ("--settings", str(settings), "--store", str(db), "--json")
+    result = keepout(*screen_fixture(tmp_path, *args))
+    assert result.exit_code == ExitCode.OK
+    first = json.loads(result.stdout)["events"][0]
+    assert first["pc"] == pytest.approx(4.25e-2, rel=1e-2)
+    assert first["level"] == "yellow"
+    with open_store(db, create=False) as store:
+        (stored, _) = store.events()
+        (observation,) = store.observations(stored.event_id, load_settings(settings))
+    assert observation.pc == first["pc"]
+
+
+def test_screen_with_store_computes_each_pc_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from keepout.pc import api
+
+    runs: list[str] = []
+    real = api._compute
+
+    def counted(*args: Any) -> Any:
+        runs.append(args[1])
+        return real(*args)
+
+    monkeypatch.setattr(api, "_compute", counted)
+    db = tmp_path / "keepout.db"
+    result = keepout(*screen_fixture(tmp_path, "--store", str(db), "--json"))
+    assert result.exit_code == ExitCode.OK
+    assert len(runs) == len(json.loads(result.stdout)["events"]) == 2

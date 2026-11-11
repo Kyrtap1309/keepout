@@ -43,7 +43,7 @@ The plan of the 5642 cells took 9.9 to 11.0 s (CPU time 162.8 to 181.9 s, numeri
 
 The [example synthetic operator](synthetic-operator.md) screened its fleet (`examples/synthetic-operator/fleet.toml`) against the public catalog frozen on 2026-10-06, 7 days from 2026-10-06 00:00 UTC with the 5 km sphere (as in CelesTrak's SOCRATES). Its highest-Pc yellow event is planned here, with the target set to the green threshold (1e-07), and each option is re-screened against the same catalog for 7 days from the burn.
 
-Event 44476/55841/2026-10-08T12:03:02.771792: Pc 7.38e-06, yellow, action monitor.
+Event 3befe6f1305d: Pc 7.38e-06, yellow, action monitor.
 
 |  |  |
 |---|---|

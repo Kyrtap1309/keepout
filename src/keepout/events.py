@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Final
+from typing import TYPE_CHECKING, Final, NamedTuple
 
 from keepout._defaults import TCA_TOLERANCE
 from keepout._validation import is_probability, require_non_negative
@@ -13,13 +14,21 @@ from keepout.cdm.model import Cdm
 from keepout.covariance import Policy
 from keepout.errors import EventError, HardBodyRadiusError, KeepoutError
 from keepout.pc import AUTO, PcComputation
+from keepout.risk.decision import Assessment
 from keepout.risk.observation import PcObservation
 from keepout.units import elapsed_seconds
 
+if TYPE_CHECKING:
+    from astropy.time import Time
+
 __all__ = [
     "DEFAULT_TCA_TOLERANCE",
+    "EVENT_ID_LENGTH",
+    "AssessedEvent",
     "ConjunctionEvent",
+    "EventBounds",
     "group_events",
+    "stable_event_id",
     "time_to_tca",
     "without_hard_body_radius",
 ]
@@ -50,6 +59,21 @@ def without_hard_body_radius(cdms: Iterable[Cdm]) -> tuple[str, ...]:
         for cdm in cdms
         if cdm.object1.hard_body_radius is None or cdm.object2.hard_body_radius is None
     )
+
+
+EVENT_ID_LENGTH: Final = 12
+"""Hexadecimal characters of an event id: at 100,000 events, two share one
+with a chance of about one in six million."""
+
+
+def stable_event_id(message_id: str) -> str:
+    """The id of the event whose first CDM has this ``MESSAGE_ID``: the
+    first :data:`EVENT_ID_LENGTH` hexadecimal characters of its SHA-256.
+
+    The same CDMs give the same id, with a store or without, on any machine.
+    """
+    digest = hashlib.sha256(message_id.encode("utf-8")).hexdigest()
+    return digest[:EVENT_ID_LENGTH]
 
 
 def _pair(cdm: Cdm) -> tuple[str, str]:
@@ -149,8 +173,8 @@ class ConjunctionEvent:
         cdms
             The CDMs, in any order.
         event_id
-            Identifier; if ``None``, the CDMs' ``CONJUNCTION_ID`` (CDM 2.0),
-            else ``"<OBJECT1>/<OBJECT2>/<TCA of the oldest CDM, UTC ISO>"``.
+            Identifier; if ``None``, the :func:`stable_event_id` of the first
+            CDM by ``CREATION_DATE`` (then ``MESSAGE_ID``).
         tca_tolerance
             Largest spread [s] of the CDMs' TCAs.
 
@@ -161,18 +185,15 @@ class ConjunctionEvent:
         """
         messages = tuple(cdms)
         if event_id is None and messages:
-            given = sorted({i for m in messages if (i := m.conjunction_id) is not None})
-            if given:
-                event_id = given[0]
-            else:
-                oldest = min(
-                    messages,
-                    key=lambda m: elapsed_seconds(
-                        messages[0].creation_date, m.creation_date
-                    ),
-                )
-                primary, secondary = _pair(oldest)
-                event_id = f"{primary}/{secondary}/{oldest.tca.utc.isot}"
+            reference = messages[0].creation_date
+            first = min(
+                messages,
+                key=lambda m: (
+                    elapsed_seconds(reference, m.creation_date),
+                    m.message_id,
+                ),
+            )
+            event_id = stable_event_id(first.message_id)
         return cls(event_id or "", messages, tca_tolerance)
 
     @property
@@ -289,15 +310,83 @@ def _observe(
     )
 
 
+class AssessedEvent(NamedTuple):
+    """A conjunction event and its risk assessment
+    (:func:`keepout.risk.assess` of its observations)."""
+
+    event: ConjunctionEvent
+    assessment: Assessment
+
+
+@dataclass(frozen=True, slots=True)
+class EventBounds:
+    """What decides whether a CDM joins an event: the event's objects, the
+    earliest and latest TCA of its CDMs and its ``CONJUNCTION_ID``.
+
+    A CDM joins an event (:meth:`admits`) when it is about the same objects
+    (``OBJECT1``, ``OBJECT2`` by designator), the TCAs with its own spread
+    over no more than the tolerance, and neither gives a ``CONJUNCTION_ID``
+    the other contradicts. :func:`group_events` and the conjunction store
+    both group by this rule, one CDM at a time.
+
+    Parameters
+    ----------
+    pair
+        ``OBJECT_DESIGNATOR`` of ``OBJECT1`` and ``OBJECT2``.
+    first_tca, last_tca
+        The earliest and latest TCA of the event's CDMs.
+    conjunction_id
+        The ``CONJUNCTION_ID`` its CDMs give (CDM 2.0); ``None`` if none does.
+    """
+
+    pair: tuple[str, str]
+    first_tca: Time
+    last_tca: Time
+    conjunction_id: str | None = None
+
+    @classmethod
+    def of(cls, cdm: Cdm) -> EventBounds:
+        """The bounds of the event of ``cdm`` alone."""
+        return cls(_pair(cdm), cdm.tca, cdm.tca, cdm.conjunction_id)
+
+    @property
+    def spread(self) -> float:
+        """The spread [s] of the TCAs of the event's CDMs."""
+        return elapsed_seconds(self.first_tca, self.last_tca)
+
+    def including(self, cdm: Cdm) -> EventBounds:
+        """The bounds of the event with ``cdm`` added, whether it fits or not."""
+        first, last = self.first_tca, self.last_tca
+        if elapsed_seconds(first, cdm.tca) < 0.0:
+            first = cdm.tca
+        if elapsed_seconds(last, cdm.tca) > 0.0:
+            last = cdm.tca
+        return EventBounds(
+            self.pair, first, last, self.conjunction_id or cdm.conjunction_id
+        )
+
+    def admits(self, cdm: Cdm, *, tca_tolerance: float = DEFAULT_TCA_TOLERANCE) -> bool:
+        """Whether ``cdm`` joins the event: same objects, the TCAs with its
+        own within ``tca_tolerance`` [s], no other ``CONJUNCTION_ID``."""
+        given = (self.conjunction_id, cdm.conjunction_id)
+        return (
+            _pair(cdm) == self.pair
+            and (None in given or given[0] == given[1])
+            and self.including(cdm).spread <= tca_tolerance
+        )
+
+
 def group_events(
     cdms: Iterable[Cdm], *, tca_tolerance: float = DEFAULT_TCA_TOLERANCE
 ) -> list[ConjunctionEvent]:
-    """CDMs grouped into events: same objects, TCAs within ``tca_tolerance``.
+    """CDMs grouped into events by the rule of :class:`EventBounds`.
 
-    CDMs of one pair of objects are taken in TCA order; a CDM whose TCA is
-    more than ``tca_tolerance`` after the first TCA of the current event
-    starts a new event. Events are named as in
-    :meth:`ConjunctionEvent.from_cdms`.
+    The CDMs are taken in ``CREATION_DATE`` order (then by ``MESSAGE_ID``),
+    as an operator receives them and a conjunction store ingests them, each
+    joining the event that admits it, or starting a new one: a CDM whose TCA
+    would spread the event's over more than ``tca_tolerance``, or whose
+    ``CONJUNCTION_ID`` differs from the event's, starts another event.
+    Events are named as in :meth:`ConjunctionEvent.from_cdms`.
 
     Parameters
     ----------
@@ -316,33 +405,42 @@ def group_events(
     ValueError
         If ``tca_tolerance`` is invalid.
     EventError
-        If a group is not a valid event (e.g. a repeated ``MESSAGE_ID``, or
-        different ``CONJUNCTION_ID`` values within ``tca_tolerance``).
+        If a CDM fits more than one event (it gives no ``CONJUNCTION_ID``,
+        and two events of different ones are within ``tca_tolerance``), or
+        a ``MESSAGE_ID`` is repeated within an event.
     """
     require_non_negative(tca_tolerance, "tca_tolerance")
     messages = list(cdms)
     if not messages:
         return []
     reference = messages[0].tca
-    by_pair: dict[tuple[str, str], list[Cdm]] = {}
-    for cdm in messages:
-        by_pair.setdefault(_pair(cdm), []).append(cdm)
-    groups: list[tuple[float, tuple[str, str], list[Cdm]]] = []
-    for pair, members in by_pair.items():
-        timed = sorted(
-            ((elapsed_seconds(reference, cdm.tca), cdm) for cdm in members),
-            key=lambda item: item[0],
-        )
-        start = timed[0][0]
-        current: list[Cdm] = []
-        for offset, cdm in timed:
-            if current and offset - start > tca_tolerance:
-                groups.append((start, pair, current))
-                current, start = [], offset
-            current.append(cdm)
-        groups.append((start, pair, current))
-    groups.sort(key=lambda group: (group[0], group[1]))
+    created = messages[0].creation_date
+    bounds: list[EventBounds] = []
+    members: list[list[Cdm]] = []
+    by_pair: dict[tuple[str, str], list[int]] = {}
+    for cdm in sorted(
+        messages,
+        key=lambda m: (elapsed_seconds(created, m.creation_date), m.message_id),
+    ):
+        indices = by_pair.setdefault(_pair(cdm), [])
+        fitting = [
+            i for i in indices if bounds[i].admits(cdm, tca_tolerance=tca_tolerance)
+        ]
+        if len(fitting) > 1:
+            raise EventError(f"CDM {cdm.message_id} fits more than one event")
+        if fitting:
+            (index,) = fitting
+            bounds[index] = bounds[index].including(cdm)
+            members[index].append(cdm)
+        else:
+            indices.append(len(bounds))
+            bounds.append(EventBounds.of(cdm))
+            members.append([cdm])
+    order = sorted(
+        range(len(bounds)),
+        key=lambda i: (elapsed_seconds(reference, bounds[i].first_tca), bounds[i].pair),
+    )
     return [
-        ConjunctionEvent.from_cdms(members, tca_tolerance=tca_tolerance)
-        for _, _, members in groups
+        ConjunctionEvent.from_cdms(members[i], tca_tolerance=tca_tolerance)
+        for i in order
     ]

@@ -1,17 +1,23 @@
 """Tables of the conjunction store.
 
-Times are UTC ISO-8601 text with microseconds (``YYYY-MM-DDTHH:MM:SS.ffffff``),
-so text order is time order. A foreign key deletes with its parent
-(``ON DELETE CASCADE``), but for the catalog of a CDM (``RESTRICT``). The
-migrations in ``keepout/store/migrations`` build the same tables: a test
-compares the two.
+Times are UTC ISO-8601 text with nanoseconds
+(``YYYY-MM-DDTHH:MM:SS.fffffffff``, :class:`UtcTime`), so text order is time
+order and a TCA reads back as the CDM gave it. A foreign key deletes with its
+parent (``ON DELETE CASCADE``), but for the catalog of a CDM (``RESTRICT``).
+Relationships never load on access (``lazy="raise"``): a query says what it
+loads. The migrations in ``keepout/store/migrations`` build the same tables: a
+test compares the two.
 """
 
-from typing import Any, Final, Literal
+from __future__ import annotations
 
+from typing import Any, Final, NewType, get_args
+
+from astropy.time import Time
 from sqlalchemy import (
     JSON,
     CheckConstraint,
+    Dialect,
     ForeignKey,
     Index,
     Integer,
@@ -19,9 +25,13 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
-    false,
 )
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.types import TypeDecorator, TypeEngine
+
+from keepout._types import override
+from keepout.cdm import CdmFormat
+from keepout.units import elapsed_seconds
 
 __all__ = [
     "NAMING_CONVENTION",
@@ -29,10 +39,18 @@ __all__ = [
     "Catalog",
     "CatalogFile",
     "Cdm",
-    "CdmFormat",
     "Event",
+    "EventId",
+    "MessageId",
     "Result",
+    "UtcTime",
 ]
+
+EventId = NewType("EventId", str)
+"""A stored event's id (:func:`keepout.events.stable_event_id`)."""
+
+MessageId = NewType("MessageId", str)
+"""A stored CDM's ``MESSAGE_ID``."""
 
 NAMING_CONVENTION: Final = {
     "ix": "ix_%(table_name)s_%(column_0_N_name)s",
@@ -44,8 +62,41 @@ NAMING_CONVENTION: Final = {
 """Names of indexes and constraints: SQLite alters a table by copying it
 (Alembic's batch mode), which needs every constraint named."""
 
-CdmFormat = Literal["kvn", "xml"]
-"""The format a CDM was read in."""
+
+class UtcTime(TypeDecorator[Time]):
+    """An :class:`~astropy.time.Time` as UTC ISO-8601 text with nanoseconds."""
+
+    impl: TypeEngine[Any] | type[TypeEngine[Any]] = String
+    cache_ok: bool | None = True
+
+    @override
+    def process_bind_param(
+        self,
+        value: Time | None,
+        dialect: Dialect,  # noqa: ARG002 (SQLite only)
+    ) -> str | None:
+        """The text of a time, rounded to the nanosecond."""
+        if value is None:
+            return None
+        return str(Time(value.utc, precision=9).isot)
+
+    @override
+    def process_result_value(
+        self,
+        value: str | None,
+        dialect: Dialect,  # noqa: ARG002 (SQLite only)
+    ) -> Time | None:
+        """The time of a text."""
+        if value is None:
+            return None
+        return Time(value, format="isot", scale="utc")
+
+    @override
+    def compare_values(self, x: Time | None, y: Time | None) -> bool:
+        """Whether two times are the same instant (a changed one is written)."""
+        if x is None or y is None:
+            return x is y
+        return elapsed_seconds(x, y) == 0.0
 
 
 class Base(DeclarativeBase):
@@ -60,17 +111,19 @@ class Event(Base):
     __tablename__ = "events"
     __table_args__ = (Index(None, "object1", "object2", "tca_min"),)
 
-    id: Mapped[str] = mapped_column(String(8), primary_key=True)
-    """Eight lowercase hexadecimal characters."""
+    id: Mapped[EventId] = mapped_column(String(12), primary_key=True)
     object1: Mapped[str] = mapped_column(String)
     object2: Mapped[str] = mapped_column(String)
     conjunction_id: Mapped[str | None] = mapped_column(String)
-    tca_min: Mapped[str] = mapped_column(String)
+    tca_min: Mapped[Time] = mapped_column(UtcTime)
     """Earliest TCA of the event's CDMs."""
-    tca_max: Mapped[str] = mapped_column(String)
+    tca_max: Mapped[Time] = mapped_column(UtcTime)
     """Latest TCA of the event's CDMs."""
-    archived: Mapped[bool] = mapped_column(default=False, server_default=false())
-    created_at: Mapped[str] = mapped_column(String)
+    created_at: Mapped[Time] = mapped_column(UtcTime)
+
+    cdms: Mapped[list[Cdm]] = relationship(
+        back_populates="event", lazy="raise", passive_deletes=True
+    )
 
 
 class Cdm(Base):
@@ -79,15 +132,18 @@ class Cdm(Base):
     __tablename__ = "cdms"
     __table_args__ = (
         Index(None, "event_id", "creation_date"),
-        CheckConstraint("format IN ('kvn', 'xml')", name="format"),
+        CheckConstraint(
+            f"format IN ({', '.join(repr(f) for f in get_args(CdmFormat))})",
+            name="format",
+        ),
     )
 
-    message_id: Mapped[str] = mapped_column(String, primary_key=True)
-    event_id: Mapped[str] = mapped_column(
-        String(8), ForeignKey("events.id", ondelete="CASCADE")
+    message_id: Mapped[MessageId] = mapped_column(String, primary_key=True)
+    event_id: Mapped[EventId] = mapped_column(
+        String(12), ForeignKey("events.id", ondelete="CASCADE")
     )
-    creation_date: Mapped[str] = mapped_column(String)
-    tca: Mapped[str] = mapped_column(String)
+    creation_date: Mapped[Time] = mapped_column(UtcTime)
+    tca: Mapped[Time] = mapped_column(UtcTime)
     digest: Mapped[str] = mapped_column(String(64))
     """SHA-256 of the message written as KVN, in hexadecimal."""
     content: Mapped[str] = mapped_column(Text)
@@ -101,7 +157,13 @@ class Cdm(Base):
     """The catalog a screening made the message from. A catalog of stored
     messages cannot be deleted (``ON DELETE RESTRICT``): its provenance
     never deletes them."""
-    ingested_at: Mapped[str] = mapped_column(String)
+    ingested_at: Mapped[Time] = mapped_column(UtcTime)
+
+    event: Mapped[Event] = relationship(back_populates="cdms", lazy="raise")
+    catalog: Mapped[Catalog | None] = relationship(lazy="raise")
+    results: Mapped[list[Result]] = relationship(
+        back_populates="cdm", lazy="raise", passive_deletes=True
+    )
 
 
 class Catalog(Base):
@@ -111,6 +173,10 @@ class Catalog(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     label: Mapped[str] = mapped_column(String)
+
+    files: Mapped[list[CatalogFile]] = relationship(
+        lazy="raise", passive_deletes=True, order_by="CatalogFile.id"
+    )
 
 
 class CatalogFile(Base):
@@ -125,7 +191,7 @@ class CatalogFile(Base):
     name: Mapped[str] = mapped_column(String)
     path: Mapped[str] = mapped_column(String)
     url: Mapped[str | None] = mapped_column(String)
-    retrieved: Mapped[str | None] = mapped_column(String)
+    retrieved: Mapped[Time | None] = mapped_column(UtcTime)
     sha256: Mapped[str] = mapped_column(String(64))
 
 
@@ -136,10 +202,12 @@ class Result(Base):
     __table_args__ = (UniqueConstraint("message_id", "key"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    message_id: Mapped[str] = mapped_column(
+    message_id: Mapped[MessageId] = mapped_column(
         String, ForeignKey("cdms.message_id", ondelete="CASCADE")
     )
     key: Mapped[str] = mapped_column(String(64))
     """What was computed, and with which options."""
     payload: Mapped[dict[str, Any]] = mapped_column(JSON)
-    created_at: Mapped[str] = mapped_column(String)
+    created_at: Mapped[Time] = mapped_column(UtcTime)
+
+    cdm: Mapped[Cdm] = relationship(back_populates="results", lazy="raise")

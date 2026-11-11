@@ -21,6 +21,7 @@ __all__ = [
     "PcConvergenceError",
     "PropagationError",
     "RateLimited",
+    "SettingsError",
     "SourceFormatError",
     "SourceUnavailable",
     "StoreError",
@@ -224,3 +225,8 @@ class StoreError(KeepoutError):
     """A conjunction store (``keepout[store]``) cannot be opened or does not
     hold what was asked: no file, a file of another keepout version, or
     stored data that contradicts itself."""
+
+
+class SettingsError(KeepoutError):
+    """An operator's settings file is not valid: not UTF-8 TOML, an unknown
+    key, or a value of the wrong type or out of range."""

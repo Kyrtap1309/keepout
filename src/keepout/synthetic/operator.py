@@ -58,6 +58,7 @@ from keepout.cdm import (
     ObjectType,
     make_cdm,
 )
+from keepout.covariance import Policy
 from keepout.errors import FleetError
 from keepout.events import ConjunctionEvent
 from keepout.omm import Omm, deduplicate
@@ -177,6 +178,8 @@ class _RunContext:
     created: Time
     originator: str
     compute: PcComputation
+    policy: Policy
+    combined_hard_body_radius: float | None
     thresholds: Thresholds
     decision_config: DecisionConfig
 
@@ -193,6 +196,8 @@ def run(
     created: Time | None = None,
     originator: str = ORIGINATOR,
     compute: PcComputation = AUTO,
+    policy: Policy = "repair",
+    combined_hard_body_radius: float | None = None,
     thresholds: Thresholds = DEFAULT_THRESHOLDS,
     decision_config: DecisionConfig = DEFAULT_DECISION_CONFIG,
 ) -> OperatorResult:
@@ -225,6 +230,10 @@ def run(
         Pc method and options, as for
         :meth:`keepout.events.ConjunctionEvent.observations`; ``"auto"``
         keeps the 2-D Pc for the model's position-only covariances.
+    policy, combined_hard_body_radius
+        Covariance policy and combined radius [m], as for
+        :meth:`keepout.events.ConjunctionEvent.observations`; ``None``: the
+        sum of the CDM's radii, from the fleet.
     thresholds, decision_config
         Risk thresholds and decision point, as for
         :func:`keepout.risk.assess`.
@@ -263,6 +272,8 @@ def run(
         created=created,
         originator=originator,
         compute=compute,
+        policy=policy,
+        combined_hard_body_radius=combined_hard_body_radius,
         thresholds=thresholds,
         decision_config=decision_config,
     )
@@ -323,7 +334,11 @@ def _event(approach: CloseApproach, context: _RunContext) -> OperatorEvent:
         comments=HEADER_COMMENTS,
     )
     event = ConjunctionEvent.from_cdms([cdm])
-    (observation,) = event.observations(compute=context.compute)
+    (observation,) = event.observations(
+        compute=context.compute,
+        policy=context.policy,
+        combined_hard_body_radius=context.combined_hard_body_radius,
+    )
     assessment = assess(
         [observation],
         thresholds=context.thresholds,

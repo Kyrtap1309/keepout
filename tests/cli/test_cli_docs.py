@@ -2,9 +2,7 @@
 is the block that follows it on the page."""
 
 import functools
-import random
 import re
-import secrets
 import shlex
 from pathlib import Path
 from typing import Final
@@ -63,9 +61,6 @@ def test_the_walk_through_prints_what_the_page_shows(
     assert f"{summary}5 ignore." in assessed
     maneuver, planned = documented("maneuver")
     assert run(maneuver) == (ExitCode.OK, planned)
-    # Event ids are random: the page shows those of a seeded generator.
-    ids = random.Random(1309)  # noqa: S311 (not secret: ids the page can show)
-    monkeypatch.setattr(secrets, "token_hex", lambda n: ids.randbytes(n).hex())
     add, added = documented("store add")
     assert run(add) == (ExitCode.OK, added)
     # The stored event the page plans, on a small grid: the plan is checked above.
@@ -75,7 +70,7 @@ def test_the_walk_through_prints_what_the_page_shows(
     stored = re.search(r"`(keepout maneuver --event [^`]*)`", page)
     assert stored is not None
     _, planned = run(shlex.split(stored[1])[1:])
-    assert planned.startswith("Event 81a87dfa: 44476 / 55841, TCA 2026-10-08 12:03")
+    assert planned.startswith("Event 3befe6f1305d: 44476 / 55841, TCA 2026-10-08 12:03")
     assert "\nNot re-screened: nothing is known" in planned
     purge, purged = documented("store purge")
     assert run(purge) == (ExitCode.OK, purged)

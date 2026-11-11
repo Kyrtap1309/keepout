@@ -21,6 +21,7 @@ __all__ = [
     "require_at_least",
     "require_choice",
     "require_non_negative",
+    "require_open_probability",
     "require_positive",
     "require_probability",
     "require_single_time",
@@ -68,6 +69,18 @@ def require_probability(value: float, name: str) -> None:
     """
     if not is_probability(value):
         raise ValueError(f"{name} must be in [0, 1], got {value}")
+
+
+def require_open_probability(value: float, name: str) -> None:
+    """A check that ``value`` is in (0, 1), a target Pc (``ValueError`` if not).
+
+    Raises
+    ------
+    ValueError
+        If ``value`` is not strictly between 0 and 1.
+    """
+    if not 0.0 < value < 1.0:
+        raise ValueError(f"{name} must be in (0, 1), got {value}")
 
 
 def require_at_least(value: int, minimum: int, name: str) -> None:

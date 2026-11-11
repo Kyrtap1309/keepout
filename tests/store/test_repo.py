@@ -6,8 +6,9 @@ import re
 import shutil
 import sqlite3
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from pathlib import Path
+from typing import Any
 
 import astropy.units as u
 import pytest
@@ -21,19 +22,26 @@ from store_builders import TCA, cdm, cdm_text, message, written
 
 import keepout.cdm
 from keepout.errors import ChecksumMismatch, HardBodyRadiusError, StoreError
-from keepout.events import DEFAULT_TCA_TOLERANCE, ConjunctionEvent, group_events
+from keepout.events import (
+    DEFAULT_TCA_TOLERANCE,
+    ConjunctionEvent,
+    group_events,
+    stable_event_id,
+)
 from keepout.pc import computation
+from keepout.risk import PcObservation, RiskLevel, Thresholds
+from keepout.settings import Settings
 from keepout.sources.catalog import CatalogFileRef, CatalogReference, load_reference
 from keepout.store import (
     CdmInput,
     IngestReport,
+    MessageId,
     RefreshReport,
     Store,
     models,
     open_store,
 )
 from keepout.store.codec import observation_to_json
-from keepout.store.config import Settings
 
 TOLERANCE = DEFAULT_TCA_TOLERANCE
 SAMPLE_CSV = Path(__file__).parents[1] / "omm" / "data" / "celestrak_sample.csv"
@@ -47,10 +55,7 @@ def tmp_store(tmp_path: Path) -> Iterator[Store]:
 
 
 def _partition(store: Store) -> set[frozenset[str]]:
-    return {
-        frozenset(c.message_id for c in event.cdms)
-        for event in store.events(include_archived=True)
-    }
+    return {frozenset(c.message_id for c in event.cdms) for event in store.events()}
 
 
 def _count(store: Store, table: type[models.Base]) -> int:
@@ -85,24 +90,29 @@ def test_ingest_stores_text_and_groups(tmp_store: Store, tmp_path: Path) -> None
     assert report.already_stored == ()
     assert len(report.events) == 2
     assert report.new_events == report.events
-    assert all(len(i) == 8 and int(i, 16) >= 0 for i in report.events)
+    # A, created a day before TCA, is the first CDM of its event (B an hour).
+    assert report.events == (stable_event_id("A"), stable_event_id("C"))
     events = tmp_store.events()
-    assert [e.event_id for e in events] == sorted(report.events)
+    assert [e.event_id for e in events] == list(report.events)
     assert _partition(tmp_store) == {frozenset("AB"), frozenset("C")}
     with tmp_store.read() as session:
         row = session.get(models.Cdm, "A")
         assert row is not None
         assert row.content == first.text
         assert (row.format, row.origin) == ("kvn", str(tmp_path / "a.kvn"))
-        assert row.tca == "2010-03-13T22:37:52.618000"
-        assert row.creation_date == "2010-03-12T22:37:52.618000"
+        assert row.tca.isot == "2010-03-13T22:37:52.618"
+        assert row.creation_date.isot == "2010-03-12T22:37:52.618"
         stored = session.scalars(select(models.Event).order_by(models.Event.id)).all()
         pair = next(e for e in stored if e.object2 == "30337")
-        assert (pair.object1, pair.tca_min, pair.tca_max) == (
+        assert (pair.object1, pair.tca_min.isot, pair.tca_max.isot) == (
             "12345",
-            "2010-03-13T22:37:52.618000",
-            "2010-03-13T22:37:53.118000",
+            "2010-03-13T22:37:52.618",
+            "2010-03-13T22:37:53.118",
         )
+        # Nanoseconds, fixed width: text order is time order.
+        assert session.scalar(
+            text("SELECT tca_max FROM events WHERE id = :id"), {"id": pair.id}
+        ) == ("2010-03-13T22:37:53.118000000")
     event = tmp_store.event(pair.id)
     assert isinstance(event, ConjunctionEvent)
     assert event.event_id == pair.id
@@ -126,7 +136,10 @@ def test_reingest_is_reported_and_changes_nothing(tmp_store: Store) -> None:
         before = session.execute(text("SELECT * FROM cdms ORDER BY message_id")).all()
     again = tmp_store.ingest(batch)
     assert again == IngestReport(
-        added=(), already_stored=("A", "B"), events=first.events, new_events=()
+        added=(),
+        already_stored=(MessageId("A"), MessageId("B")),
+        events=first.events,
+        new_events=(),
     )
     with tmp_store.read() as session:
         after = session.execute(text("SELECT * FROM cdms ORDER BY message_id")).all()
@@ -254,13 +267,19 @@ def test_event_ids_never_change_after_more_cdms(tmp_store: Store) -> None:
     assert len(tmp_store.event(event_id).cdms) == 4
 
 
-def test_an_event_id_already_taken_is_drawn_again(
-    tmp_store: Store, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    draws = iter(["0000abcd", "0000abcd", "0000beef"])
-    monkeypatch.setattr("secrets.token_hex", lambda _: next(draws))
-    assert tmp_store.ingest([message("A")]).events == ("0000abcd",)
-    assert tmp_store.ingest([message("B", secondary="40000")]).events == ("0000beef",)
+def test_an_event_id_already_taken_gives_the_next(tmp_store: Store) -> None:
+    # Another event took the id A's would have: A's event takes the next.
+    other = message("B", secondary="40000")
+    with tmp_store.write() as session:
+        session.execute(
+            text(
+                "INSERT INTO events (id, object1, object2, tca_min, tca_max,"
+                " created_at) VALUES (:id, '1', '2', :t, :t, :t)"
+            ),
+            {"id": stable_event_id("A"), "t": "2010-03-13T22:37:52.618000000"},
+        )
+    assert tmp_store.ingest([message("A")]).events == (stable_event_id("A#1"),)
+    assert tmp_store.ingest([other]).events == (stable_event_id("B"),)
 
 
 def test_an_unknown_event_is_an_error(tmp_store: Store) -> None:
@@ -273,21 +292,11 @@ def test_an_unknown_event_is_an_error(tmp_store: Store) -> None:
         tmp_store.refresh(FOSTER, event_ids=["12345678"])
 
 
-def test_events_are_listed_by_first_tca_without_archived_ones(
-    tmp_store: Store,
-) -> None:
+def test_events_are_listed_by_first_tca(tmp_store: Store) -> None:
     late = tmp_store.ingest([message("A", tca=3 * TOLERANCE)]).events[0]
     early = tmp_store.ingest([message("B")]).events[0]
-    gone = tmp_store.ingest([message("C", secondary="40000")]).events[0]
-    with tmp_store.write() as session:
-        archived = session.get(models.Event, gone)
-        assert archived is not None
-        archived.archived = True
-    assert [e.event_id for e in tmp_store.events()] == [early, late]
-    listed = [e.event_id for e in tmp_store.events(include_archived=True)]
-    assert listed[-1] == late
-    assert set(listed) == {early, late, gone}
-    assert tmp_store.event(gone).event_id == gone
+    other = tmp_store.ingest([message("C", secondary="40000", tca=1.0)]).events[0]
+    assert [e.event_id for e in tmp_store.events()] == [early, other, late]
 
 
 def test_events_of_given_ids_parse_only_theirs(
@@ -297,9 +306,6 @@ def test_events_of_given_ids_parse_only_theirs(
     early = tmp_store.ingest([message("B")]).events[0]
     other = tmp_store.ingest([message("C", secondary="40000")]).events[0]
     with tmp_store.write() as session:
-        archived = session.get(models.Event, late)
-        assert archived is not None
-        archived.archived = True
         broken = session.get(models.Cdm, "C")
         assert broken is not None
         broken.content = "not a CDM"
@@ -312,10 +318,9 @@ def test_events_of_given_ids_parse_only_theirs(
         return made
 
     monkeypatch.setattr(keepout.cdm, "loads", counted)
-    listed = tmp_store.events(event_ids=[late, early], include_archived=True)
+    listed = tmp_store.events(event_ids=[late, early])
     assert [e.event_id for e in listed] == [early, late]
     assert sorted(parsed) == ["A", "B"]
-    assert [e.event_id for e in tmp_store.events(event_ids=[late, early])] == [early]
     assert tmp_store.events(event_ids=[]) == []
     with pytest.raises(StoreError, match="no event 12345678 in the store"):
         tmp_store.events(event_ids=["12345678", early])
@@ -496,8 +501,9 @@ def test_a_refresh_of_every_event_skips_cdms_without_hbr(tmp_store: Store) -> No
         [CdmInput.of(crossing, "test"), CdmInput.of(bare, "test")]
     )
     no_radius = Settings(compute=computation("foster"))
-    assert tmp_store.refresh(no_radius) == RefreshReport(1, (bare.message_id,))
-    assert tmp_store.refresh(no_radius) == RefreshReport(0, (bare.message_id,))
+    skipped = (MessageId(bare.message_id),)
+    assert tmp_store.refresh(no_radius) == RefreshReport(1, skipped)
+    assert tmp_store.refresh(no_radius) == RefreshReport(0, skipped)
     # Events named: their CDMs are all needed, so a missing HBR is an error.
     with pytest.raises(HardBodyRadiusError, match=bare.message_id):
         tmp_store.refresh(no_radius, event_ids=report.events)
@@ -667,7 +673,7 @@ def test_purge_removes_a_copy_a_failed_ingest_left(
 def test_a_catalog_that_cannot_be_copied_is_a_store_error(
     tmp_store: Store, tmp_path: Path
 ) -> None:
-    tmp_store.catalogs.write_text("in the way\n")
+    tmp_store.catalog_dir.write_text("in the way\n")
     with pytest.raises(StoreError, match="cannot copy the catalog into"):
         tmp_store.ingest([message("A")], catalog=_reference(tmp_path, "a.csv"))
     assert _count(tmp_store, models.Cdm) == 0
@@ -765,3 +771,105 @@ def test_a_cdm_comes_back_from_the_store_as_it_went_in(cdm: keepout.cdm.Cdm) -> 
         (event_id,) = store.ingest([CdmInput.of(cdm, "test")]).events
         (stored,) = store.event(event_id).cdms
     assert keepout.cdm.kvn.dumps(stored) == keepout.cdm.kvn.dumps(cdm)
+
+
+def test_cache_keeps_observations_computed_elsewhere(tmp_store: Store) -> None:
+    stored, other = message("A"), message("B", secondary="40000")
+    event_id = tmp_store.ingest([stored]).events[0]
+    computed = [
+        observation
+        for given in (stored, other)
+        for observation in ConjunctionEvent("x", (given.cdm,)).observations(
+            compute=FOSTER.compute,
+            combined_hard_body_radius=FOSTER.combined_hard_body_radius,
+        )
+    ]
+    # B is not stored: only A's is cached, once.
+    assert tmp_store.cache(FOSTER, computed) == 1
+    assert tmp_store.cache(FOSTER, computed) == 0
+    assert tmp_store.refresh(FOSTER).computed == 0
+    (seen,) = tmp_store.observations(event_id, FOSTER)
+    assert observation_to_json(seen) == observation_to_json(computed[0])
+
+
+def test_assess_computes_what_is_missing_and_judges_by_the_thresholds(
+    tmp_store: Store,
+) -> None:
+    late = tmp_store.ingest([message("A", tca=3 * TOLERANCE)]).events[0]
+    early = tmp_store.ingest([message("B"), message("C", tca=1.0)]).events[0]
+    strict = dataclasses.replace(FOSTER, thresholds=Thresholds(1e-12, 1e-11))
+    assessed = tmp_store.assess([late, early], strict)
+    assert [item.event.event_id for item in assessed] == [early, late]
+    assert [len(item.event.cdms) for item in assessed] == [2, 1]
+    assert {item.assessment.level for item in assessed} == {RiskLevel.RED}
+    assert tmp_store.refresh(FOSTER).computed == 0
+    assert tmp_store.assess([], FOSTER) == []
+
+
+def _five_cdms(store: Store) -> None:
+    store.ingest([message(f"M{n}", tca=float(n), created=-60.0 * n) for n in range(5)])
+
+
+def test_refresh_writes_in_batches(
+    tmp_store: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _five_cdms(tmp_store)
+    writes: list[int] = []
+    real = Store._write
+
+    def counted(store: Store, key: str, observations: Sequence[PcObservation]) -> int:
+        writes.append(len(observations))
+        return real(store, key, observations)
+
+    monkeypatch.setattr(Store, "_write", counted)
+    monkeypatch.setattr("keepout.store.repo._BATCH_SIZE", 2)
+    assert tmp_store.refresh(FOSTER).computed == 5
+    assert writes == [2, 2, 1]
+    # A batch is also written once a second of computing has passed.
+    writes.clear()
+    monkeypatch.setattr("keepout.store.repo._BATCH_SECONDS", 0.0)
+    assert tmp_store.refresh(dataclasses.replace(FOSTER, policy="raise")).computed == 5
+    assert writes == [1, 1, 1, 1, 1, 0]
+
+
+def test_an_interrupted_refresh_keeps_the_batches_written(
+    tmp_store: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _five_cdms(tmp_store)
+    monkeypatch.setattr("keepout.store.repo._BATCH_SIZE", 2)
+    real = ConjunctionEvent.observations
+    done: list[str] = []
+
+    def interrupted(event: ConjunctionEvent, **options: Any) -> Any:
+        if len(done) == 3:
+            raise KeyboardInterrupt
+        done.append(event.cdms[0].message_id)
+        return real(event, **options)
+
+    monkeypatch.setattr(ConjunctionEvent, "observations", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        tmp_store.refresh(FOSTER)
+    monkeypatch.undo()
+    assert tmp_store.refresh(FOSTER).computed == 3
+
+
+def test_refresh_parses_each_cdm_just_before_its_pc(
+    tmp_store: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _five_cdms(tmp_store)
+    steps: list[str] = []
+    loads = keepout.cdm.loads
+    observations = ConjunctionEvent.observations
+
+    def parsed(text: str) -> keepout.cdm.Cdm:
+        steps.append("parse")
+        return loads(text)
+
+    def computed(event: ConjunctionEvent, **options: Any) -> Any:
+        steps.append("compute")
+        return observations(event, **options)
+
+    monkeypatch.setattr(keepout.cdm, "loads", parsed)
+    monkeypatch.setattr(ConjunctionEvent, "observations", computed)
+    tmp_store.refresh(FOSTER)
+    assert steps == ["parse", "compute"] * 5

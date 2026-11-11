@@ -4,11 +4,10 @@ from pathlib import Path
 import pytest
 
 from keepout._defaults import TARGET_PC
-from keepout.errors import StoreError
-from keepout.pc import AUTO, computation
+from keepout.errors import SettingsError
+from keepout.pc import AUTO
 from keepout.risk import DEFAULT_THRESHOLDS, Thresholds
-from keepout.store.codec import result_key
-from keepout.store.config import Settings, load_settings
+from keepout.settings import Settings, load_settings
 
 
 def _write(tmp_path: Path, text: str) -> Path:
@@ -24,20 +23,6 @@ def test_default_settings() -> None:
     assert settings.combined_hard_body_radius is None
     assert settings.thresholds == DEFAULT_THRESHOLDS
     assert settings.target_pc == TARGET_PC
-
-
-def test_the_result_key_of_settings() -> None:
-    settings = Settings(
-        compute=computation("foster"), policy="raise", combined_hard_body_radius=5.0
-    )
-    assert settings.result_key == result_key(
-        compute=computation("foster"), policy="raise", combined_hard_body_radius=5.0
-    )
-    # The thresholds and the target are applied on read: same cache.
-    assert (
-        Settings(thresholds=Thresholds(1e-6, 1e-3), target_pc=1e-6).result_key
-        == Settings().result_key
-    )
 
 
 @pytest.mark.parametrize(
@@ -77,14 +62,6 @@ target_pc = 1e-6
     assert (settings.policy, settings.combined_hard_body_radius) == ("raise", 20.0)
     assert settings.thresholds == Thresholds(1e-6, 1e-3)
     assert settings.target_pc == 1e-6
-    assert (
-        settings.result_key
-        == Settings(
-            compute=computation("foster"),
-            policy="raise",
-            combined_hard_body_radius=20.0,
-        ).result_key
-    )
 
 
 def test_missing_keys_take_the_defaults(tmp_path: Path) -> None:
@@ -107,7 +84,7 @@ def test_missing_keys_take_the_defaults(tmp_path: Path) -> None:
 def test_unknown_settings_key_is_named(tmp_path: Path, text: str, key: str) -> None:
     path = _write(tmp_path, text)
     with pytest.raises(
-        StoreError, match=rf"{re.escape(str(path))}: unknown key\(s\) {key}"
+        SettingsError, match=rf"{re.escape(str(path))}: unknown key\(s\) {key}"
     ):
         load_settings(path)
 
@@ -129,14 +106,14 @@ def test_unknown_settings_key_is_named(tmp_path: Path, text: str, key: str) -> N
 )
 def test_a_bad_settings_value_is_named(tmp_path: Path, text: str, key: str) -> None:
     path = _write(tmp_path, text)
-    with pytest.raises(StoreError, match=rf"{re.escape(str(path))}: {key}"):
+    with pytest.raises(SettingsError, match=rf"{re.escape(str(path))}: {key}"):
         load_settings(path)
 
 
 def test_settings_that_are_not_toml(tmp_path: Path) -> None:
     path = _write(tmp_path, "[pc\n")
-    with pytest.raises(StoreError, match=rf"{re.escape(str(path))}: not TOML"):
+    with pytest.raises(SettingsError, match=rf"{re.escape(str(path))}: not TOML"):
         load_settings(path)
     path.write_bytes(b"\xff")
-    with pytest.raises(StoreError, match=rf"{re.escape(str(path))}: not UTF-8"):
+    with pytest.raises(SettingsError, match=rf"{re.escape(str(path))}: not UTF-8"):
         load_settings(path)

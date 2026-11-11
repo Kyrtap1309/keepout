@@ -16,6 +16,7 @@ from keepout._defaults import (
     TARGET_PC,
     TCA_TOLERANCE,
 )
+from keepout._validation import require_open_probability
 from keepout.cli.catalog_input import (
     CatalogFile,
     CatalogInput,
@@ -27,8 +28,10 @@ from keepout.cli.options import (
     CacheDir,
     HardBodyRadius,
     JsonFlag,
+    SettingsFile,
     SourceOption,
     Workers,
+    operator_settings,
     positive,
 )
 from keepout.cli.output import (
@@ -72,16 +75,19 @@ _SHOWN_APPROACHES: Final = 5
 """Most approaches of one kind the text lists, the highest Pc first."""
 
 
-def _probability(value: float) -> float:
-    """``--target-pc``, checked to be in (0, 1).
+def _probability(value: float | None) -> float | None:
+    """``--target-pc``, checked to be in (0, 1) (``None`` passes).
 
     Raises
     ------
     typer.BadParameter
         If it is not: a usage error.
     """
-    if not 0.0 < value < 1.0:
-        raise typer.BadParameter(f"must be in (0, 1), got {value}")
+    if value is not None:
+        try:
+            require_open_probability(value, "value")
+        except ValueError as exc:
+            raise typer.BadParameter(f"must be in (0, 1), got {value}") from exc
     return value
 
 
@@ -128,14 +134,17 @@ EventId: TypeAlias = Annotated[
 """``--event``: a stored event to plan instead of CDM files."""
 
 TargetPc: TypeAlias = Annotated[
-    float,
+    float | None,
     typer.Option(
         "--target-pc",
         callback=_probability,
-        help="The Pc a burn must stay below.",
+        help=(
+            "The Pc a burn must stay below (default: the settings' target_pc, "
+            f"else {TARGET_PC:g})."
+        ),
     ),
 ]
-"""``--target-pc``: the target of the plan."""
+"""``--target-pc``: the target of the plan; ``None``: the settings'."""
 
 BurnBefore: TypeAlias = Annotated[
     float | None,
@@ -180,10 +189,11 @@ def maneuver_command(
     *,
     event_id: EventId = None,
     store: EventStore = None,
-    target_pc: TargetPc = TARGET_PC,
+    target_pc: TargetPc = None,
     burn_before: BurnBefore = None,
     dv: DeltaV = None,
     hbr: HardBodyRadius = None,
+    settings: SettingsFile = None,
     catalog: CatalogFile = None,
     source: SourceOption = None,
     workers: Workers = None,
@@ -202,7 +212,9 @@ def maneuver_command(
     keepout screen found is re-screened against the catalog it was screened
     with unless one is given. Exits with status 4 if there is no burn, the
     burn given misses the target, or every burn brings a red approach or the
-    event's pair back above the target.
+    event's pair back above the target. --settings gives the target, the
+    Pc method, covariance policy, hard-body radius and risk thresholds;
+    --target-pc and --hbr win over it.
     """
     if (burn_before is None) != (dv is None):
         raise typer.BadParameter(
@@ -210,6 +222,9 @@ def maneuver_command(
         )
     _require_one_event(cdms, event_id, store)
     require_one_catalog(catalog, source)
+    chosen = operator_settings(
+        settings, combined_hard_body_radius=hbr, target_pc=target_pc
+    )
     from keepout.maneuver import (
         evaluate_burn,
         judge,
@@ -223,11 +238,23 @@ def maneuver_command(
     )
     plan: ManeuverContext
     if burn_before is None or dv is None:
-        plan = plan_maneuver(event, target_pc=target_pc, combined_hard_body_radius=hbr)
+        plan = plan_maneuver(
+            event,
+            target_pc=chosen.target_pc,
+            compute=chosen.compute,
+            policy=chosen.policy,
+            combined_hard_body_radius=chosen.combined_hard_body_radius,
+            thresholds=chosen.thresholds,
+        )
         options = plan.options
     else:
         plan = prepare_maneuver(
-            event, target_pc=target_pc, combined_hard_body_radius=hbr
+            event,
+            target_pc=chosen.target_pc,
+            compute=chosen.compute,
+            policy=chosen.policy,
+            combined_hard_body_radius=chosen.combined_hard_body_radius,
+            thresholds=chosen.thresholds,
         )
         burn_lead = burn_before * HOUR
         options = (evaluate_burn(plan, burn_lead=burn_lead, delta_v=dv),)

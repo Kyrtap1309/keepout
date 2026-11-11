@@ -5,10 +5,7 @@ conjunction store keeps the CDMs of each event, the Pc keepout computed
 from them and the catalog a screening used, in one SQLite file, so that
 the next CDM adds to the event's history instead of starting it again.
 The command line uses it with `--store FILE` (see
-[`keepout store`](cli.md#store)); the library with `keepout.store`. The
-`keepout store` commands and `keepout maneuver --event` also take the file
-from `$KEEPOUT_STORE`; `assess` and `screen` use a store only when given
-`--store`.
+[`keepout store`](cli.md#store)); the library with `keepout.store`.
 
 ```bash
 pip install "keepout[store] @ git+https://github.com/Kyrtap1309/keepout"
@@ -31,7 +28,8 @@ given `--store` prints `--store needs the store extra: pip install
   `OBJECT2` whose TCAs, with its own, spread over no more than 10 minutes
   (and whose `CONJUNCTION_ID`, if both give one, is the same), or starts a
   new event. This is the rule of `keepout assess` and
-  [`group_events`](reference/events.md), applied one CDM at a time. A CDM
+  [`group_events`](reference/events.md), applied one CDM at a time as
+  they arrive (`group_events` takes them in TCA order). A CDM
   that fits two stored events is an error naming both, never a silent
   merge.
 - **Pc observations**, one per CDM and per way of computing Pc: the
@@ -39,20 +37,23 @@ given `--store` prints `--store needs the store extra: pip install
   differ only in risk thresholds or target share them, because the risk
   level, trend and action are decided again on every read, from the
   thresholds of the moment. keepout's version is part of the way too, so
-  a new release computes the Pc again. The version changes only at
-  releases, though: a development install can serve Pc cached by older
-  code. `keepout store rebuild` with other settings, or a fresh store,
-  avoids it.
+  a new release computes the Pc again.
 - **Catalogs.** A CDM that `keepout screen --store` issued keeps a
   reference to the catalog it was screened against: each file's name,
   URL, retrieval time and SHA-256.
 
 ### Event ids
 
-An event gets an id when its first CDM is stored: eight random
-lowercase hexadecimal characters, such as `81a87dfa`. It keeps that id
-however many CDMs follow, and the command line shows it in place of the
-`<object>/<object>/<TCA>` id that `assess` gives without a store.
+An event's id is the first 12 lowercase hexadecimal characters of the
+SHA-256 of its first CDM's `MESSAGE_ID` (the oldest by `CREATION_DATE`),
+such as `3befe6f1305d`: the same CDMs give the same id with a store or
+without, on any machine. A stored event keeps its id however many CDMs
+follow. So a CDM created before the event's first one, stored later, does
+not change it, while `assess` on the files alone then names the event
+after that older CDM. In the rare case that another stored event already
+has the id, the new event takes the next free one. To see the ids again,
+run `keepout store add` on the same files: it stores nothing new and
+prints the ids row by row.
 
 ### The catalog copies
 
@@ -69,32 +70,10 @@ adds a copy of a few MB, and only `keepout store purge` removes them.
 
 ## Settings
 
-`keepout store add` and `keepout store rebuild` take the operator's
-settings from a TOML file, `--settings FILE`. Every key is optional and
-takes the library's default when missing; an unknown key is an error, so
-that a typo does not pass for a default:
-
-```toml
-[pc]
-method = "foster"     # a Pc method, or "auto" (the default)
-policy = "repair"     # what to do with an invalid covariance
-hbr_m = 20.0          # combined hard-body radius [m]; else the CDMs' HBR
-
-[risk]
-green_below = 1e-7
-red_from = 1e-4
-
-[maneuver]
-target_pc = 1e-5
-```
-
-The command line does not read `[maneuver] target_pc` yet: `keepout
-maneuver` takes `--target-pc`. The library reads it as
-`Settings.target_pc`.
-
-`keepout assess --store` computes with its own `--method` and `--hbr`
-instead, and the default thresholds; `keepout screen --store` with the
-defaults.
+`keepout store add` and `keepout store rebuild` compute Pc with the
+[operator settings](cli.md#settings) of `--settings FILE`; `assess
+--store` and `screen --store` cache it with the settings they compute
+with.
 
 The CDMs are stored before their Pc is computed. If the Pc fails, e.g.
 `assess --store` on a CDM without `HBR`, the CDMs stay stored, and the
@@ -109,8 +88,7 @@ keepout). A keepout opens only a store at its own schema revision:
 
 - a store made by an older keepout is refused with `... was made by an
   older keepout: run keepout store upgrade`. `keepout store upgrade
-  --store FILE` migrates it in one transaction and prints the revisions,
-  e.g. `Upgraded keepout.db: base -> 0001.`;
+  --store FILE` migrates it in one transaction;
 - a store made by a newer keepout is refused, and the file is left as it
   is: no downgrade.
 
@@ -129,7 +107,8 @@ from the store.
 The store uses SQLite's write-ahead log (WAL): readers do not wait for
 the writer, and two writers queue, each waiting up to 30 s for the other.
 A long Pc computation runs outside any transaction, so it does not hold
-the others up. While the store is in use, the file `keepout.db` comes
+the others up; the Pc computed is written every 100 CDMs or every second,
+so an interrupted `store rebuild` keeps nearly all it computed. While the store is in use, the file `keepout.db` comes
 with `keepout.db-wal` and `keepout.db-shm` beside it, and the latest
 writes may be in the `-wal` file only.
 
@@ -150,20 +129,16 @@ harm, while a missing one makes its events fail to re-screen.
 ```python
 from pathlib import Path
 
-from keepout.risk import assess
+from keepout.settings import Settings
 from keepout.store import CdmInput, open_store
-from keepout.store.config import Settings
 
-settings = Settings()
 with open_store("keepout.db") as store:
     report = store.ingest([CdmInput.read(path) for path in Path("cdms").glob("*.kvn")])
-    store.refresh(settings, event_ids=report.events)
-    for event_id in report.events:
-        observations = store.observations(event_id, settings)
-        decision = assess(observations, thresholds=settings.thresholds).decision
-        print(event_id, decision.action.label)
+    for item in store.assess(report.events, Settings()):
+        print(item.event.event_id, item.assessment.decision.action.label)
 ```
 
-`refresh` computes the Pc the store lacks for the settings and
-`observations` reads it back; the [reference](reference/store.md) has the
-rest.
+`assess` computes and caches the Pc the store lacks for the settings
+(`refresh`), then judges each event from all its stored CDMs. `cache`
+keeps Pc computed elsewhere, as `screen --store` does with the Pc of its
+screening; the [reference](reference/store.md) has the rest.

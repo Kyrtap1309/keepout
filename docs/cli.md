@@ -70,8 +70,8 @@ TCA (UTC)         Objects        Miss (m)  CDMs        Pc  Level   Action
 2026-10-11 10:56  38771 / 30131      2019     1  2.67e-10  green   ignore
 2026-10-12 11:28  38771 / 35196       212     1  4.86e-06  yellow  monitor
 28 element sets left out (stale, future epochs, SGP4 failures; --json lists them).
-44476/55841/2026-10-08T12:03:02.771792: monitor (latest Pc 7.38e-06 is yellow, 2.50 d before TCA; trend undetermined; diagnostic: 2-D Pc assumptions questionable: the encounter lasts about 2.51e+03 s, 2.9% of the primary's orbital period (limit 1%); a 3-D Pc may differ; diagnostic: the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used)
-38771/35196/2026-10-12T11:28:28.709977: monitor (latest Pc 4.86e-06 is yellow, 6.48 d before TCA; trend undetermined)
+3befe6f1305d: monitor (latest Pc 7.38e-06 is yellow, 2.50 d before TCA; trend undetermined; diagnostic: 2-D Pc assumptions questionable: the encounter lasts about 2.51e+03 s, 2.9% of the primary's orbital period (limit 1%); a 3-D Pc may differ; diagnostic: the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used)
+b815c689dc80: monitor (latest Pc 4.86e-06 is yellow, 6.48 d before TCA; trend undetermined)
 Covariances are assumed (keepout's model of GP element set errors), not orbit determination.
 12 CDMs written to cdms
 ```
@@ -169,11 +169,13 @@ event.
   event.
 - **Workers.** `--workers N` processes (default: one per CPU, at most 4).
   Each runs its numerical libraries on one thread.
+- **Settings.** `--settings FILE` gives the [operator settings](#settings)
+  the Pc is computed and the risk assessed with.
 - **Store.** `--store FILE` adds the CDMs to a
   [conjunction store](#store), with a copy of the catalog file screened
   against, so that `maneuver` can re-screen a stored event against the
-  same catalog later. It also caches their Pc with the default settings,
-  as `keepout store add` computes them. The rows are then in the store's
+  same catalog later. It also caches their Pc with the settings, as
+  `keepout store add` computes them. The rows are then in the store's
   order, the reasons and `--json` name each approach by the id of its
   stored event, and a line under the table gives those ids row by row.
   Each row stays the approach as screened: its one CDM and its Pc. A
@@ -187,7 +189,7 @@ event.
 
 `keepout assess` reads CDM files: KVN or XML, CDM 1.0 or 2.0, gzipped or
 not (the shell expands `*.kvn`). It groups them into events, each the same
-two objects with TCAs within 10 minutes. It computes keepout's Pc of every
+two objects with TCAs within 10 minutes and one `CONJUNCTION_ID`, if any. It computes keepout's Pc of every
 CDM and assesses each event as in [Risk assessment](risk.md). The result is
 the risk level of the latest Pc, the trend over the event's CDMs and the
 action, decided as of the latest CDM's creation date.
@@ -198,8 +200,11 @@ action, decided as of the latest CDM's creation date.
 - `--hbr METRES` sets the combined hard-body radius. By default it is the
   sum of both objects' `HBR` (CDM 2.0), and a CDM without them is an error.
   keepout never falls back to a default radius.
+- `--settings FILE` gives the [operator settings](#settings): Pc method,
+  covariance policy, hard-body radius and risk thresholds. `--method` and
+  `--hbr` win over the file.
 - `--store FILE` adds the CDMs to a [conjunction store](#store) first, as
-  `keepout store add` does with the same method and radius. Each event is
+  `keepout store add` does with the same settings. Each event is
   then the stored one: its id is the store's, and it has every CDM the
   store holds of it, from earlier runs too.
 
@@ -230,7 +235,7 @@ keepout maneuver cdms/44476_55841_*.kvn --target-pc 1e-7 \
 ```
 
 ```text
-Event 44476/55841/2026-10-08T12:03:02.771792: 44476 / 55841, TCA 2026-10-08 12:03 UTC, target Pc 1.00e-07.
+Event 3befe6f1305d: 44476 / 55841, TCA 2026-10-08 12:03 UTC, target Pc 1.00e-07.
 Burns of the primary
 Option      Before TCA (h)  Δv (m/s)        Pc  Range (m)  Method  Target
 ─────────────────────────────────────────────────────────────────────────
@@ -282,13 +287,14 @@ looks for the new TCA only within a twentieth of an orbit, so only the
 re-screen sees it, and that option is not clean. The retrograde burn is
 clean, so the command exits with status 0 and shows both.
 
-- **Target.** `--target-pc P` (default 1e-5), compared on the
-  conservative basis as in `assess`.
+- **Target.** `--target-pc P` (default: the settings' `target_pc`, else
+  1e-5), compared on the conservative basis as in `assess`.
 - **One burn.** `--burn-before HOURS` and `--dv M/S`, given together,
   report that burn with the event's method instead of the smallest burn
   each way. The burn may be off the grid. The whole grid is still computed
   first, so this takes as long as a plan.
-- **Radius.** `--hbr METRES` as for `assess`.
+- **Radius and settings.** `--hbr METRES` and `--settings FILE` as for
+  `assess`; the settings also give the target.
 - **Re-screen.** `--catalog FILE` or `--source celestrak|spacetrack`
   screens each burn against the catalog for 7 days from the burn. Both
   work as for `screen`, with `--cache-dir` and `--workers`. The primary
@@ -316,7 +322,7 @@ An event whose latest CDM came from `assess --store` or `store add` was
 screened by no one, and is not re-screened without a catalog. After the
 `store add` below, for instance, this plans the Luch-5X event from the
 store, not re-screened:
-`keepout maneuver --event 81a87dfa --store keepout.db --target-pc 1e-7`.
+`keepout maneuver --event 3befe6f1305d --store keepout.db --target-pc 1e-7`.
 An id the store does not hold is an error (status 1).
 
 Planning takes tens of seconds on the default grid. Each candidate burn
@@ -375,16 +381,15 @@ TCA (UTC)         Objects        Miss (m)  CDMs        Pc  Level   Action
 12 events in the store for the 12 CDMs read: 2 monitor, 10 ignore.
 12 of 12 events rest on assumed covariances (COVARIANCE_METHOD = DEFAULT), not orbit determination.
 12 CDMs added to keepout.db (0 already stored), 12 new events.
-Event ids, row by row: 82b2bc7f, d051de7d, ebd423ba, 5d3234fc, 6356c251, 0e8e52d7, c562953a, 81a87dfa, 23b64c85, 35205006, 461d0688, 96aa11c4.
-81a87dfa: monitor (latest Pc 7.38e-06 is yellow, 2.50 d before TCA; trend undetermined; diagnostic: 2-D Pc assumptions questionable: the encounter lasts about 2.51e+03 s, 2.9% of the primary's orbital period (limit 1%); a 3-D Pc may differ; diagnostic: the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used)
-96aa11c4: monitor (latest Pc 4.86e-06 is yellow, 6.48 d before TCA; trend undetermined)
+Event ids, row by row: 026443d77699, ea4c6a976e3a, a351b16057ec, fd13fbdb9831, 6d45833fc2cc, 3f4c98d01163, 2aa19608e416, 3befe6f1305d, 527a3e2689d5, d604685adedc, 26151ac6b42f, b815c689dc80.
+3befe6f1305d: monitor (latest Pc 7.38e-06 is yellow, 2.50 d before TCA; trend undetermined; diagnostic: 2-D Pc assumptions questionable: the encounter lasts about 2.51e+03 s, 2.9% of the primary's orbital period (limit 1%); a 3-D Pc may differ; diagnostic: the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used)
+b815c689dc80: monitor (latest Pc 4.86e-06 is yellow, 6.48 d before TCA; trend undetermined)
 ```
 
 The output is that of `assess`, with the store's event ids. The counts
 line says the events are the store's, since a stored event may hold
-CDMs from earlier runs as well as those read. The ids are eight
-random hexadecimal characters each, given when an event's first CDM is
-stored and kept however many CDMs follow (yours differ). Adding the same
+CDMs from earlier runs as well as those read. The
+[ids](store.md#event-ids) are those `screen` showed. Adding the same
 files again stores nothing: the line under the counts then says
 `0 CDMs added to keepout.db (12 already stored), 0 new events.` A CDM
 from a later run joins its stored event, whose row then counts its CDMs
@@ -392,16 +397,14 @@ and whose trend runs over all of them. The exit status is that of
 `assess`: 3 when an event needs a manoeuvre.
 
 - **`store add CDM...`** adds CDM files, KVN or XML, as they are. Each
-  joins the stored event of the same two objects whose TCAs it keeps
-  within 10 minutes, or starts a new event. The Pc of every CDM of those
+  joins its stored event or starts a new one, by the rule in
+  [What it keeps](store.md#what-it-keeps). The Pc of every CDM of those
   events is computed, unless the store has it already. `--settings FILE`
-  gives the [operator settings](store.md#settings): Pc method, covariance
-  policy, hard-body radius and risk thresholds.
+  gives the [operator settings](#settings).
 - **`store upgrade`** brings a store made by an older keepout to this
   keepout's schema, and prints the revisions, e.g.
   `Upgraded keepout.db: base -> 0001.` Any other command refuses such a
-  store and says to run it. A store made by a newer keepout is refused and
-  left as it is.
+  store and says to run it ([Upgrading](store.md#upgrading)).
 - **`store rebuild`** computes the Pc of every stored CDM that the store
   lacks for the settings (`--settings FILE`), and prints how many. Without
   `hbr_m` in the settings, it skips the CDMs without `HBR` and says how
@@ -433,6 +436,32 @@ per suite and method, as in the table at the top of the
 It downloads CARA's files at the pinned commit on first use. The published
 report itself is generated in the repository by
 `tools/validation_report.py`.
+
+## Settings
+
+`assess`, `screen`, `maneuver`, `store add` and `store rebuild` take the
+operator's settings from a TOML file, `--settings FILE`. Every key is
+optional and takes the library's default when missing; an unknown key is
+an error, so that a typo does not pass for a default:
+
+```toml
+[pc]
+method = "foster"     # a Pc method, or "auto" (the default)
+policy = "repair"     # what to do with an invalid covariance
+hbr_m = 20.0          # combined hard-body radius [m]; else the CDMs' HBR
+
+[risk]
+green_below = 1e-7
+red_from = 1e-4
+
+[maneuver]
+target_pc = 1e-5
+```
+
+An option given on the command line wins over the file: `--method`,
+`--hbr` and `--target-pc`. A bad file ends the command with status 1,
+naming the file and the key. From Python, `keepout.settings.load_settings`
+reads such a file into [`Settings`](reference/settings.md).
 
 ## Exit status
 

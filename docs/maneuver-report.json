@@ -18,7 +18,7 @@
     "basis": "conservative"
   },
   "event": {
-    "event": "000038771/000030802/2020-12-16T18:21:31.413",
+    "event": "8e047e6ff53f",
     "primary": "000038771",
     "primary_name": "METOP-B",
     "secondary": "000030802",
@@ -72,7 +72,7 @@
     "level": "yellow",
     "action": "monitor",
     "plan": {
-      "event": "44476/55841/2026-10-08T12:03:02.771792",
+      "event": "3befe6f1305d",
       "primary": "44476",
       "primary_name": "INTELSAT 39 (IS-39)",
       "secondary": "55841",

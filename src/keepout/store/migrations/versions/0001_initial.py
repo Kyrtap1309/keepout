@@ -20,13 +20,12 @@ def upgrade() -> None:
     """Upgrade the schema."""
     op.create_table(
         "events",
-        sa.Column("id", sa.String(8), nullable=False),
+        sa.Column("id", sa.String(12), nullable=False),
         sa.Column("object1", sa.String(), nullable=False),
         sa.Column("object2", sa.String(), nullable=False),
         sa.Column("conjunction_id", sa.String(), nullable=True),
         sa.Column("tca_min", sa.String(), nullable=False),
         sa.Column("tca_max", sa.String(), nullable=False),
-        sa.Column("archived", sa.Boolean(), server_default=sa.false(), nullable=False),
         sa.Column("created_at", sa.String(), nullable=False),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_events")),
     )
@@ -64,7 +63,7 @@ def upgrade() -> None:
     op.create_table(
         "cdms",
         sa.Column("message_id", sa.String(), nullable=False),
-        sa.Column("event_id", sa.String(8), nullable=False),
+        sa.Column("event_id", sa.String(12), nullable=False),
         sa.Column("creation_date", sa.String(), nullable=False),
         sa.Column("tca", sa.String(), nullable=False),
         sa.Column("digest", sa.String(64), nullable=False),

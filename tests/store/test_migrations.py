@@ -2,9 +2,9 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
+from builders import base_revision_store
 from sqlalchemy import (
     URL,
     Column,
@@ -76,17 +76,12 @@ def _schema(engine: Engine) -> dict[str, dict[str, object]]:
 
 def test_models_match_the_migrations(tmp_path: Path) -> None:
     # open_store builds a new file by running the migrations, not from the
-    # models: any difference between the two shows here. compare_metadata
-    # misses CHECK constraints and ON DELETE actions, so the reflected
-    # schema is also compared with a file the models build.
+    # models. test_alembic compares the two as Alembic's autogenerate does,
+    # which misses CHECK constraints and ON DELETE actions: the reflected
+    # schema is compared here with a file the models build.
     from_models = create_engine(URL.create("sqlite", database=str(tmp_path / "m.db")))
     Base.metadata.create_all(from_models)
     with open_store(tmp_path / "keepout.db") as store:
-        with store.engine.connect() as conn:
-            context = MigrationContext.configure(
-                conn, opts={"compare_type": True, "compare_server_default": True}
-            )
-            assert compare_metadata(context, Base.metadata) == []
         assert _schema(store.engine) == _schema(from_models)
     from_models.dispose()
 
@@ -108,25 +103,13 @@ def test_the_schema_holds_its_rules(tmp_path: Path) -> None:
         ("results", ("message_id",)): "CASCADE",
     }
     assert schema["cdms"]["checks"] == [("ck_cdms_format", "format IN ('kvn', 'xml')")]
-    assert ("archived", "BOOLEAN", False, "0") in schema["events"]["columns"]  # type: ignore[operator]
     indexes = {i[0] for rules in schema.values() for i in rules["indexes"]}  # type: ignore[attr-defined]
     assert {"ix_cdms_catalog_id", "ix_catalog_files_catalog_id"} <= indexes
 
 
-def _alembic_version_only(path: Path) -> None:
-    """A file at the base revision: Alembic's table, empty, and nothing else."""
-    connection = sqlite3.connect(path)
-    with connection:
-        connection.execute(
-            "CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL,"
-            " CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num))"
-        )
-    connection.close()
-
-
 def test_upgrade_reports_the_revisions(tmp_path: Path) -> None:
     path = tmp_path / "keepout.db"
-    _alembic_version_only(path)
+    base_revision_store(path)
     with pytest.raises(StoreError, match="keepout store upgrade"):
         open_store(path)
     assert upgrade(path) == (None, HEAD)
@@ -186,8 +169,6 @@ def test_deleting_an_event_deletes_its_messages_and_results(tmp_path: Path) -> N
                     " VALUES ('m', 'k', '{}', 't')"
                 )
             )
-        with store.read() as session:
-            assert session.scalar(text("SELECT archived FROM events")) == 0
         with store.write() as session:
             session.execute(text("DELETE FROM events"))
         with store.read() as session:

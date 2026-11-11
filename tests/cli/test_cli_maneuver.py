@@ -19,7 +19,7 @@ import subprocess
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 import astropy.units as u
 import pytest
@@ -155,7 +155,7 @@ def test_plan_prints_options_and_exits_zero(tmp_path: Path) -> None:
     assert result.exit_code == ExitCode.OK
     assert result.stderr == ""
     assert result.stdout == snapshot("""\
-Event 52939/47826/2026-10-06T19:36:42.717332: 52939 / 47826, TCA 2026-10-06 19:36 UTC, target Pc 1.00e-05.
+Event 2a85ed50c4e6: 52939 / 47826, TCA 2026-10-06 19:36 UTC, target Pc 1.00e-05.
 Burns of the primary
 Option      Before TCA (h)  Δv (m/s)        Pc  Range (m)  Method  Target
 ─────────────────────────────────────────────────────────────────────────
@@ -186,7 +186,7 @@ def test_json_has_the_documented_keys(tmp_path: Path) -> None:
         "notes",
         "refusal",
     ]
-    assert payload["event"] == "52939/47826/2026-10-06T19:36:42.717332"
+    assert payload["event"] == "2a85ed50c4e6"
     assert payload["primary"] == str(PRIMARY)
     assert payload["secondary"] == str(SECONDARY)
     assert payload["target_pc"] == 1e-5
@@ -272,7 +272,7 @@ def test_no_option_exits_four(tmp_path: Path) -> None:
     result = keepout("maneuver", *args)
     assert result.exit_code == ExitCode.NO_SAFE_BURN
     assert result.stdout == snapshot("""\
-Event 52939/47826/2026-10-06T19:36:42.717332: 52939 / 47826, TCA 2026-10-06 19:36 UTC, target Pc 1.00e-05.
+Event 2a85ed50c4e6: 52939 / 47826, TCA 2026-10-06 19:36 UTC, target Pc 1.00e-05.
 Burns of the primary
 Option   Before TCA (h)  Δv (m/s)        Pc  Range (m)  Method  Target
 ──────────────────────────────────────────────────────────────────────
@@ -313,7 +313,7 @@ def test_conflict_exits_four(tmp_path: Path) -> None:
     result = keepout("maneuver", *args, "--catalog", catalog)
     assert result.exit_code == ExitCode.NO_SAFE_BURN
     assert result.stdout.replace(catalog, "<catalog>") == snapshot("""\
-Event 52939/47826/2026-10-06T19:36:42.717332: 52939 / 47826, TCA 2026-10-06 19:36 UTC, target Pc 1.00e-05.
+Event 2a85ed50c4e6: 52939 / 47826, TCA 2026-10-06 19:36 UTC, target Pc 1.00e-05.
 Burns of the primary
 Option    Before TCA (h)  Δv (m/s)        Pc  Range (m)  Method  Target
 ───────────────────────────────────────────────────────────────────────
@@ -351,7 +351,7 @@ def test_one_clean_option_and_one_conflict_exit_zero_and_show_both(
     assert result.exit_code == ExitCode.OK
     shown = result.stdout.replace(str(FIXTURE_CSV), "<catalog>")
     assert shown == snapshot("""\
-Event 52939/47826/2026-10-06T19:36:42.717332: 52939 / 47826, TCA 2026-10-06 19:36 UTC, target Pc 1.00e-05.
+Event 2a85ed50c4e6: 52939 / 47826, TCA 2026-10-06 19:36 UTC, target Pc 1.00e-05.
 Burns of the primary
 Option      Before TCA (h)  Δv (m/s)        Pc  Range (m)  Method  Target
 ─────────────────────────────────────────────────────────────────────────
@@ -523,7 +523,7 @@ def test_explicit_burn_replaces_the_minimum_options(tmp_path: Path) -> None:
     result = keepout("maneuver", *args)
     assert result.exit_code == ExitCode.OK
     assert result.stdout == snapshot("""\
-Event 52939/47826/2026-10-06T19:36:42.717332: 52939 / 47826, TCA 2026-10-06 19:36 UTC, target Pc 1.00e-05.
+Event 2a85ed50c4e6: 52939 / 47826, TCA 2026-10-06 19:36 UTC, target Pc 1.00e-05.
 Burns of the primary
 Option      Before TCA (h)  Δv (m/s)        Pc  Range (m)  Method  Target
 ─────────────────────────────────────────────────────────────────────────
@@ -752,18 +752,8 @@ def test_a_primary_missing_from_the_catalog_exits_one(tmp_path: Path) -> None:
 def test_a_direction_without_an_option_is_said(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def one_way(
-        event: ConjunctionEvent,
-        *,
-        target_pc: float,
-        combined_hard_body_radius: float | None,
-    ) -> ManeuverPlan:
-        plan = FULL_PLAN(
-            event,
-            grid=SMALL,
-            target_pc=target_pc,
-            combined_hard_body_radius=combined_hard_body_radius,
-        )
+    def one_way(event: ConjunctionEvent, **settings: Any) -> ManeuverPlan:
+        plan = FULL_PLAN(event, grid=SMALL, **settings)
         return dataclasses.replace(plan, retrograde=None)
 
     monkeypatch.setattr(maneuver, "plan_maneuver", one_way)
@@ -1080,3 +1070,19 @@ def test_the_store_extra_is_needed_only_with_event(
     assert event.exit_code == ExitCode.ERROR
     assert event.stderr == f"Error: {STORE_HINT}\n"
     assert not db.exists()
+
+
+def test_settings_give_the_target_and_target_pc_wins(tmp_path: Path) -> None:
+    settings = write(
+        tmp_path,
+        "settings.toml",
+        "[pc]\nhbr_m = 1000.0\n[maneuver]\ntarget_pc = 1e-3\n",
+    )
+    burn = (crossing(tmp_path), "--burn-before", "7", "--dv", "0.251", "--json")
+
+    def target(*options: str) -> object:
+        result = keepout("maneuver", *burn, "--settings", settings, *options)
+        return json.loads(result.stdout)["target_pc"]
+
+    assert target() == 1e-3
+    assert target("--target-pc", "1e-4") == 1e-4

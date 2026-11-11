@@ -8,9 +8,10 @@ from hypothesis import strategies as st
 
 import keepout
 from keepout.errors import StoreError
-from keepout.pc import AUTO, PcResult, computation
-from keepout.risk import PcObservation
+from keepout.pc import PcResult, computation
+from keepout.risk import PcObservation, Thresholds
 from keepout.risk.observation import PC_KINDS
+from keepout.settings import Settings
 from keepout.store.codec import observation_from_json, observation_to_json, result_key
 from keepout.units import DAY
 
@@ -101,13 +102,7 @@ def test_result_key_changes_with_each_parameter_and_the_version(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def key(**changes: Any) -> str:
-        parameters: dict[str, Any] = {
-            "compute": AUTO,
-            "policy": "repair",
-            "combined_hard_body_radius": None,
-        }
-        parameters.update(changes)
-        return result_key(**parameters)
+        return result_key(Settings(**changes))
 
     base = key()
     assert len(base) == 64
@@ -121,13 +116,14 @@ def test_result_key_changes_with_each_parameter_and_the_version(
         key(combined_hard_body_radius=20.0),
     ]
     assert len({base, *others}) == len(others) + 1
+    # The thresholds and the target are applied on read: same cache.
+    assert key(thresholds=Thresholds(1e-6, 1e-3), target_pc=1e-6) == base
     monkeypatch.setattr(keepout, "__version__", "0.0.0-other", raising=False)
     assert key() != base
 
 
 def test_a_radius_keys_the_same_as_an_integer_or_a_float() -> None:
     keys = {
-        result_key(compute=AUTO, policy="repair", combined_hard_body_radius=radius)
-        for radius in (20, 20.0)
+        result_key(Settings(combined_hard_body_radius=radius)) for radius in (20, 20.0)
     }
     assert len(keys) == 1

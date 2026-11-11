@@ -6,6 +6,7 @@ and :mod:`keepout.cdm.xml` read and write a specific one.
 """
 
 from pathlib import Path
+from typing import Literal, TypeAlias
 
 from keepout.ccsds.files import read_file, strip_bom
 from keepout.cdm import kvn, xml
@@ -23,6 +24,7 @@ from keepout.cdm.model import Cdm, CdmObject, CovarianceMethod, Field, Section
 __all__ = [
     "ORIGINATOR",
     "Cdm",
+    "CdmFormat",
     "CdmObject",
     "CovarianceMethod",
     "Field",
@@ -30,6 +32,7 @@ __all__ = [
     "ObjectMetadata",
     "ObjectType",
     "Section",
+    "format_of",
     "kvn",
     "load",
     "loads",
@@ -38,6 +41,16 @@ __all__ = [
     "read_text",
     "xml",
 ]
+
+
+CdmFormat: TypeAlias = Literal["kvn", "xml"]
+"""The two encodings of a CDM."""
+
+
+def format_of(text: str) -> CdmFormat:
+    """The format of a CDM's ``text``: XML if its first non-blank character
+    is ``<``, else KVN."""
+    return "xml" if strip_bom(text).lstrip().startswith("<") else "kvn"
 
 
 def loads(text: str) -> Cdm:
@@ -52,8 +65,7 @@ def loads(text: str) -> Cdm:
         The message.
     """
     body = strip_bom(text)
-    start = body.lstrip()
-    return xml.loads(start) if start.startswith("<") else kvn.loads(body)
+    return xml.loads(body.lstrip()) if format_of(body) == "xml" else kvn.loads(body)
 
 
 def load(path: str | Path) -> Cdm:

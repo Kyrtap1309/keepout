@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, NamedTuple, Protocol
+from typing import TYPE_CHECKING, Protocol
 
 import typer
 from rich.table import Table
@@ -29,7 +29,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "Assessed",
-    "AssessedEvent",
     "event_json",
     "events_table",
     "reasons",
@@ -38,8 +37,9 @@ __all__ = [
 
 
 class Assessed(Protocol):
-    """Anything with a conjunction event and its risk assessment: an
-    :class:`AssessedEvent` or a :class:`~keepout.synthetic.OperatorEvent`."""
+    """Anything with a conjunction event and its risk assessment: a
+    :class:`~keepout.events.AssessedEvent` or a
+    :class:`~keepout.synthetic.OperatorEvent`."""
 
     @property
     def event(self) -> ConjunctionEvent:
@@ -50,13 +50,6 @@ class Assessed(Protocol):
     def assessment(self) -> Assessment:
         """Its risk assessment."""
         ...
-
-
-class AssessedEvent(NamedTuple):
-    """A conjunction event and its risk assessment."""
-
-    event: ConjunctionEvent
-    assessment: Assessment
 
 
 def _pc(observation: PcObservation | None) -> str:

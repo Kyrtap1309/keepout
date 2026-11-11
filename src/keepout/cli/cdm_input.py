@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, TypeAlias
+from typing import TYPE_CHECKING, Annotated, TypeAlias, TypeVar
 
 import typer
 
@@ -16,7 +16,9 @@ from keepout.errors import KeepoutError
 if TYPE_CHECKING:
     from keepout.cdm import Cdm
 
-__all__ = ["CdmFiles", "load_cdms"]
+__all__ = ["CdmFiles", "load_cdms", "read_cdm_files"]
+
+_T = TypeVar("_T")
 
 CdmFiles: TypeAlias = Annotated[
     list[Path],
@@ -29,6 +31,25 @@ CdmFiles: TypeAlias = Annotated[
 """The CDM files a command reads."""
 
 
+def read_cdm_files(files: Sequence[Path], read: Callable[[Path], _T]) -> list[_T]:
+    """``read`` of each of ``files``; one that cannot be read ends the
+    command, named.
+
+    Raises
+    ------
+    typer.Exit
+        If ``read`` raises a :class:`~keepout.errors.KeepoutError`:
+        ``Error: <file>: <reason>``, status 1.
+    """
+    messages = []
+    for path in files:
+        try:
+            messages.append(read(path))
+        except KeepoutError as exc:
+            fail(f"{path}: {exc}")
+    return messages
+
+
 def load_cdms(files: Sequence[Path]) -> list[Cdm]:
     """The CDMs of ``files``; one that cannot be read ends the command, named.
 
@@ -39,10 +60,4 @@ def load_cdms(files: Sequence[Path]) -> list[Cdm]:
     """
     from keepout import cdm
 
-    messages = []
-    for path in files:
-        try:
-            messages.append(cdm.load(path))
-        except KeepoutError as exc:
-            fail(f"{path}: {exc}")
-    return messages
+    return read_cdm_files(files, cdm.load)

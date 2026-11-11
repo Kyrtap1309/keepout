@@ -24,8 +24,7 @@ from keepout.risk.observation import PC_KINDS, PcObservation
 
 if TYPE_CHECKING:
     from keepout._types import JsonValue
-    from keepout.covariance import Policy
-    from keepout.pc import PcComputation
+    from keepout.settings import Settings
 
 __all__ = [
     "OBSERVATION_KEYS",
@@ -173,37 +172,23 @@ def observation_from_json(data: Mapping[str, object]) -> PcObservation:
         raise StoreError(f"{_WHERE}{exc}") from exc
 
 
-def result_key(
-    *,
-    compute: PcComputation,
-    policy: Policy,
-    combined_hard_body_radius: float | None,
-) -> str:
-    """The key of the observations computed with these parameters: the
-    SHA-256 (hex) of their JSON and keepout's version.
+def result_key(settings: Settings) -> str:
+    """The key of the observations ``settings`` compute: the SHA-256 (hex)
+    of the JSON of keepout's version and what in ``settings`` changes a Pc.
 
     A new keepout version, method, option, policy or radius gives a new key,
-    so a store never serves a Pc computed otherwise. A radius keys the same
-    as an integer or a float (``20`` and ``20.0``).
-
-    Parameters
-    ----------
-    compute
-        The Pc method and its options.
-    policy
-        What is done with an invalid covariance.
-    combined_hard_body_radius
-        The combined hard-body radius [m], or ``None`` for the CDMs'.
+    so a store never serves a Pc computed otherwise; the thresholds and the
+    manoeuvre target do not change it. A radius keys the same as an integer
+    or a float (``20`` and ``20.0``).
     """
+    compute, radius = settings.compute, settings.combined_hard_body_radius
     text = json.dumps(
         {
             "keepout": keepout.__version__,
             "method": compute.method,
             "options": sorted(compute.options.items()),
-            "policy": policy,
-            "hbr": None
-            if combined_hard_body_radius is None
-            else float(combined_hard_body_radius),
+            "policy": settings.policy,
+            "hbr": None if radius is None else float(radius),
         },
         sort_keys=True,
         default=repr,

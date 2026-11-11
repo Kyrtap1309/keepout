@@ -17,10 +17,13 @@ from keepout.cli.events import event_json, events_table, reasons
 from keepout.cli.options import (
     CacheDir,
     JsonFlag,
+    SettingsFile,
     SourceOption,
     Workers,
+    operator_settings,
     parse_time,
     positive,
+    time_option,
 )
 from keepout.cli.output import ASSUMED_COVARIANCES, JsonOut, isot, plural, show, utc
 from keepout.cli.store import (
@@ -94,6 +97,7 @@ def screen_command(
     source: SourceOption = None,
     cdm_dir: CdmDir = None,
     store: StoreOption = None,
+    settings: SettingsFile = None,
     workers: Workers = None,
     cache_dir: CacheDir = None,
     as_json: JsonFlag = False,
@@ -107,10 +111,12 @@ def screen_command(
     start of the window, which is also the CDMs' creation date. The catalog
     is the cached copy of keepout fetch catalog while it is current, else a
     new download; --catalog reads a file instead. With --store the CDMs are
-    added to the store, with a copy of the catalog.
+    added to the store, with a copy of the catalog. --settings gives the Pc
+    method, covariance policy, hard-body radius and risk thresholds.
     """
-    window_start = None if start is None else _start_time(start)
+    window_start = None if start is None else time_option(start, "--start")
     require_one_catalog(catalog, source)
+    chosen = operator_settings(settings)
     with ExitStack() as stack:
         opened = None if store is None else stack.enter_context(open_cli_store(store))
         from keepout.synthetic import load_fleet, run
@@ -120,14 +126,23 @@ def screen_command(
         if window_start is None:
             window_start = _now()
         result = run(
-            satellites, screened.omms, window_start, days * DAY, workers=workers
+            satellites,
+            screened.omms,
+            window_start,
+            days * DAY,
+            workers=workers,
+            compute=chosen.compute,
+            policy=chosen.policy,
+            combined_hard_body_radius=chosen.combined_hard_body_radius,
+            thresholds=chosen.thresholds,
         )
         files = {} if cdm_dir is None else _write_cdms(result, cdm_dir)
         stored = (
             None
             if store is None or opened is None
             else _Stored(
-                store, *ingest_screened(opened, result.cdms, screened.reference)
+                store,
+                *ingest_screened(opened, result.events, screened.reference, chosen),
             )
         )
     events = list(result.events) if stored is None else stored.rows(result.events)
@@ -151,16 +166,14 @@ class _Stored(NamedTuple):
     events: Sequence[ConjunctionEvent]
 
     def rows(self, approaches: Sequence[OperatorEvent]) -> list[OperatorEvent]:
-        """The approaches, each under the id of its stored event, in the
-        store's order of the events (an event's approaches in screening
-        order)."""
+        """The approaches, each under the id of its stored event: its own
+        id, unless its CDM joined an event stored before."""
         event_of = {
             cdm.message_id: event.event_id
             for event in self.events
             for cdm in event.cdms
         }
-        order = {event.event_id: index for index, event in enumerate(self.events)}
-        renamed = [
+        return [
             dataclasses.replace(
                 approach,
                 event=dataclasses.replace(
@@ -169,26 +182,11 @@ class _Stored(NamedTuple):
             )
             for approach in approaches
         ]
-        return sorted(renamed, key=lambda approach: order[approach.event.event_id])
 
     def json(self) -> dict[str, JsonOut]:
         """What the store did, as JSON values."""
         ids = [event.event_id for event in self.events]
         return store_json(self.path, self.report, ids)
-
-
-def _start_time(start: str) -> Time:
-    """The time ``--start`` gives.
-
-    Raises
-    ------
-    typer.BadParameter
-        If :func:`parse_time` cannot read it: a usage error.
-    """
-    try:
-        return parse_time(start)
-    except ValueError as exc:
-        raise typer.BadParameter(str(exc), param_hint="'--start'") from exc
 
 
 def _now() -> Time:

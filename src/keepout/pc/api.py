@@ -22,6 +22,7 @@ from keepout._methods import MethodChoice
 from keepout._pickling import reduce_with_mappings
 from keepout._types import override
 from keepout.conjunction import Conjunction
+from keepout.errors import PcConvergenceError
 from keepout.pc._auto import (
     AUTO_MC_SAMPLES,
     AUTO_MC_SEED,
@@ -378,6 +379,10 @@ class PcComputation:
     options
         The method's options, as :func:`compute_pc` takes them; stored as a
         read-only copy.
+    fallback
+        What computes the Pc where this method does not converge, with a
+        note saying so; ``None`` (the default): the error is raised.
+        :meth:`resolved` sets it as ``"auto"`` falls back from Hall's method.
 
     Raises
     ------
@@ -389,6 +394,7 @@ class PcComputation:
 
     method: MethodChoice = "auto"
     options: Mapping[str, object] = field(default_factory=dict)
+    fallback: PcComputation | None = None
 
     def __post_init__(self) -> None:
         require_options(self.method, self.options)
@@ -410,14 +416,28 @@ class PcComputation:
         return f"keepout ({self.method})"
 
     def __call__(self, conjunction: Conjunction) -> PcResult:
-        """The Pc of ``conjunction`` (see :func:`compute_pc`)."""
-        return _compute(conjunction, self.method, self.options)
+        """The Pc of ``conjunction`` (see :func:`compute_pc`), by the
+        fallback where this method does not converge.
+
+        Raises
+        ------
+        PcConvergenceError
+            If the method does not converge and there is no fallback.
+        """
+        try:
+            return _compute(conjunction, self.method, self.options)
+        except PcConvergenceError as exc:
+            if self.fallback is None:
+                raise
+            result = self.fallback(conjunction)
+            note = f"{self.method} failed ({exc}); {result.method} used instead"
+            return dataclasses.replace(result, diagnostics=(*result.diagnostics, note))
 
     def resolved(self, result: PcResult) -> PcComputation:
         """The computation of the method that gave ``result``, one of this
-        computation's: itself if it names that method, else that method with
-        the options ``"auto"`` runs it with (its Monte Carlo fallback's seed and
-        sample budget).
+        computation's: itself if it names that method, else that method as
+        ``"auto"`` runs it: Monte Carlo with its seed and sample budget, Hall's
+        method with that Monte Carlo as its fallback.
 
         Raises
         ------
@@ -428,6 +448,9 @@ class PcComputation:
             return self
         if self.method != "auto":
             raise ValueError(f"a {result.method} result is not one of {self.method}'s")
+        if result.method == "hall3d":
+            monte_carlo = PcComputation("montecarlo", auto_options("montecarlo"))
+            return PcComputation("hall3d", fallback=monte_carlo)
         return PcComputation(result.method, auto_options(result.method))
 
 

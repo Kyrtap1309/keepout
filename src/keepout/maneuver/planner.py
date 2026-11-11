@@ -21,14 +21,18 @@ from astropy.time import Time
 from keepout._defaults import DECISION_POINT, MIN_BURN_LEAD, TARGET_PC
 from keepout._text import before_tca, plural
 from keepout._types import FloatArray, read_only
-from keepout._validation import require_at_least, require_non_negative, require_positive
+from keepout._validation import (
+    require_at_least,
+    require_non_negative,
+    require_open_probability,
+    require_positive,
+)
 from keepout.cdm import Cdm, CdmObject, Maneuverable
 from keepout.conjunction import Conjunction
 from keepout.covariance import Policy
 from keepout.errors import (
     KeepoutError,
     ManeuverError,
-    PcConvergenceError,
     PropagationError,
 )
 from keepout.events import ConjunctionEvent, time_to_tca
@@ -40,7 +44,6 @@ from keepout.maneuver._differential import (
 from keepout.objects import ObjectState
 from keepout.orbits import orbital_period, perigee_radius
 from keepout.pc import AUTO, Method, PcComputation, PcResult, computation
-from keepout.pc._auto import auto_options
 from keepout.propagation.forces import EARTH_RADIUS, ForceModel, earth_pole
 from keepout.risk import DEFAULT_THRESHOLDS, Thresholds
 from keepout.state import StateVector
@@ -240,14 +243,10 @@ class ManeuverContext:
         The event without a burn: the Pc of ``conjunction``, ``delta_v`` 0.
     confirmation
         The computation of ``baseline.method`` that confirms a burn, with the
-        options that keep it reproducible.
+        options that keep it reproducible (see
+        :meth:`~keepout.pc.PcComputation.resolved`).
     notes
         What a reader must know.
-    fallback
-        What confirms a burn where ``confirmation`` does not converge: Monte
-        Carlo with ``"auto"``'s seed and sample budget when ``"auto"`` chose
-        Hall's method for the baseline; ``None`` (the default) otherwise,
-        and such a burn fails.
     """
 
     event: ConjunctionEvent
@@ -257,7 +256,6 @@ class ManeuverContext:
     baseline: ManeuverOption
     confirmation: PcComputation
     notes: tuple[str, ...]
-    fallback: PcComputation | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "notes", tuple(self.notes))
@@ -543,34 +541,9 @@ def _option(
     )
 
 
-def _confirm(
-    computation: PcComputation, fallback: PcComputation | None, conjunction: Conjunction
-) -> tuple[PcResult, tuple[str, ...]]:
-    """The Pc of a burn's conjunction by ``computation``, or by ``fallback``
-    where it does not converge, and the note that says so.
-
-    Raises
-    ------
-    PcConvergenceError
-        If ``computation`` does not converge and there is no ``fallback``.
-    KeepoutError
-        If either fails otherwise.
-    """
-    try:
-        return computation(conjunction), ()
-    except PcConvergenceError as exc:
-        if fallback is None:
-            raise
-        note = f"hall3d failed ({exc}); Monte Carlo used instead"
-        return fallback(conjunction), (note,)
-
-
-def _own_notes(
-    result: PcResult, retry: tuple[str, ...], baseline: tuple[str, ...]
-) -> tuple[str, ...]:
-    """The notes of a burn: its result's diagnostics not in ``baseline``,
-    then the note of a retry."""
-    return (*(note for note in result.diagnostics if note not in baseline), *retry)
+def _own_notes(result: PcResult, baseline: tuple[str, ...]) -> tuple[str, ...]:
+    """The notes of a burn: its result's diagnostics not in ``baseline``."""
+    return tuple(note for note in result.diagnostics if note not in baseline)
 
 
 @dataclass(frozen=True, eq=False, slots=True)
@@ -584,7 +557,6 @@ class _Search:
     pc: FloatArray
     target_pc: float
     confirmation: PcComputation
-    fallback: PcComputation | None
     thresholds: Thresholds
     baseline_notes: tuple[str, ...]
 
@@ -596,17 +568,15 @@ class _Search:
         return [(int(rows[i]), int(columns[i])) for i in order]
 
     def confirm(self, index: tuple[int, int]) -> ManeuverOption:
-        """The option of one cell, by the event's method or its fallback.
+        """The option of one cell, by the event's confirmation.
 
         Raises
         ------
         KeepoutError
-            If the method fails there, and its fallback too if it has one.
+            If the confirmation fails there.
         """
-        result, retry = _confirm(
-            self.confirmation,
-            self.fallback,
-            _cell_conjunction(self.conjunction, self.cells, index),
+        result = self.confirmation(
+            _cell_conjunction(self.conjunction, self.cells, index)
         )
         return _option(
             result,
@@ -615,7 +585,7 @@ class _Search:
             range_at_tca=float(self.cells.ranges[index]),
             target_pc=self.target_pc,
             thresholds=self.thresholds,
-            notes=_own_notes(result, retry, self.baseline_notes),
+            notes=_own_notes(result, self.baseline_notes),
         )
 
     def option(
@@ -738,8 +708,7 @@ def _prepare(
         As :func:`prepare_maneuver`, or if the CDM comes after the window of
         ``grid`` has closed.
     """
-    if not 0.0 < target_pc < 1.0:
-        raise ValueError(f"target_pc must be in (0, 1), got {target_pc}")
+    require_open_probability(target_pc, "target_pc")
     cdm = event.latest
     if cdm.object1.maneuverable == Maneuverable.NO:
         raise ManeuverError(
@@ -781,11 +750,6 @@ def _prepare(
         ),
         confirmation=compute.resolved(result),
         notes=_notes(result, cdm, conjunction),
-        fallback=(
-            PcComputation("montecarlo", auto_options("montecarlo"))
-            if compute.method == "auto" and result.method == "hall3d"
-            else None
-        ),
     )
     return context, result
 
@@ -930,7 +894,6 @@ def plan_maneuver(
         pc=pc,
         target_pc=target_pc,
         confirmation=context.confirmation,
-        fallback=context.fallback,
         thresholds=thresholds,
         baseline_notes=result.diagnostics,
     )
@@ -962,7 +925,6 @@ def plan_maneuver(
             *prograde_notes,
             *retrograde_notes,
         ),
-        fallback=context.fallback,
     )
 
 
@@ -973,7 +935,7 @@ def evaluate_burn(
     delta_v: float,
 ) -> ManeuverOption:
     """One burn of an event, on or off a plan's grid, by the confirmation of
-    ``plan`` (its fallback where that does not converge) and on the basis of
+    ``plan`` and on the basis of
     its thresholds.
 
     Parameters
@@ -989,8 +951,7 @@ def evaluate_burn(
     -------
     ManeuverOption
         The burn, whether it meets the target of ``plan`` or not; its notes
-        are its Pc's diagnostics that ``plan`` does not already give, and
-        the fallback's if it stood in.
+        are its Pc's diagnostics that ``plan`` does not already give.
 
     Raises
     ------
@@ -1000,7 +961,7 @@ def evaluate_burn(
         If the burn comes before the latest CDM, falls below the Earth's
         surface or fails to integrate, or has no closest approach to trust.
     KeepoutError
-        If the method fails on the burn, and its fallback too if it has one.
+        If the confirmation fails on the burn.
     """
     event, conjunction = plan.event, plan.conjunction
     cdm = event.latest
@@ -1030,11 +991,7 @@ def evaluate_burn(
             f"event {event.event_id}: a burn of {delta_v:g} m/s "
             f"{before_tca(burn_lead)} has no closest approach to trust"
         )
-    result, retry = _confirm(
-        plan.confirmation,
-        plan.fallback,
-        _cell_conjunction(conjunction, cells, (0, 0)),
-    )
+    result = plan.confirmation(_cell_conjunction(conjunction, cells, (0, 0)))
     return _option(
         result,
         burn_lead=burn_lead,
@@ -1042,5 +999,5 @@ def evaluate_burn(
         range_at_tca=float(cells.ranges[0, 0]),
         target_pc=plan.target_pc,
         thresholds=plan.thresholds,
-        notes=_own_notes(result, retry, plan.notes),
+        notes=_own_notes(result, plan.notes),
     )

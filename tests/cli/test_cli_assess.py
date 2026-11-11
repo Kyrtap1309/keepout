@@ -1,7 +1,7 @@
 import json
 import re
 from pathlib import Path
-from typing import get_args
+from typing import Any, get_args
 
 import pytest
 from cli_builders import (
@@ -15,7 +15,7 @@ from cli_builders import (
 from inline_snapshot import snapshot
 
 from keepout.cdm import xml
-from keepout.cli.assess import AUTO_METHOD, PcMethod, method_choice
+from keepout.cli.assess import PcMethod, method_choice
 from keepout.cli.output import ExitCode
 from keepout.pc import METHODS, Method
 
@@ -45,7 +45,7 @@ TCA (UTC)         Objects        Miss (m)  CDMs        Pc  Level   Action \n\
 2026-10-08 12:03  44476 / 55841      3647     1  7.38e-06  yellow  monitor
 2 events from 2 CDMs: 1 monitor, 1 ignore.
 2 of 2 events rest on assumed covariances (COVARIANCE_METHOD = DEFAULT), not orbit determination.
-44476/55841/2026-10-08T12:03:02.771792: monitor (latest Pc 7.38e-06 is yellow, 2.50 d before TCA; trend undetermined; diagnostic: 2-D Pc assumptions questionable: the encounter lasts about 2.51e+03 s, 2.9% of the primary's orbital period (limit 1%); a 3-D Pc may differ; diagnostic: the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used)
+3befe6f1305d: monitor (latest Pc 7.38e-06 is yellow, 2.50 d before TCA; trend undetermined; diagnostic: 2-D Pc assumptions questionable: the encounter lasts about 2.51e+03 s, 2.9% of the primary's orbital period (limit 1%); a 3-D Pc may differ; diagnostic: the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used)
 """)
 
 
@@ -63,8 +63,8 @@ TCA (UTC)         Objects        Miss (m)  CDMs        Pc  Level  Action        
                                                                   maneuver      \n\
 2 events from 2 CDMs: 1 maneuver, 1 prepare maneuver.
 2 of 2 events rest on assumed covariances (COVARIANCE_METHOD = DEFAULT), not orbit determination.
-52939/47826/2026-10-06T19:36:42.717332: maneuver (latest Pc 4.25e-02 is red, 0.82 d before TCA; trend undetermined; within the decision point (2.00 d before TCA))
-44476/55841/2026-10-08T12:03:02.771792: prepare maneuver (latest Pc 1.73e-02 is red, 2.50 d before TCA; trend undetermined; before the decision point (2.00 d before TCA): prepare a manoeuvre; diagnostic: 2-D Pc assumptions questionable: the encounter lasts about 3.5e+03 s, 4.1% of the primary's orbital period (limit 1%); a 3-D Pc may differ; diagnostic: the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used)
+2a85ed50c4e6: maneuver (latest Pc 4.25e-02 is red, 0.82 d before TCA; trend undetermined; within the decision point (2.00 d before TCA))
+3befe6f1305d: prepare maneuver (latest Pc 1.73e-02 is red, 2.50 d before TCA; trend undetermined; before the decision point (2.00 d before TCA): prepare a manoeuvre; diagnostic: 2-D Pc assumptions questionable: the encounter lasts about 3.5e+03 s, 4.1% of the primary's orbital period (limit 1%); a 3-D Pc may differ; diagnostic: the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used)
 At least one event needs a manoeuvre (exit status 3).
 """)
     assert result.stderr == ""
@@ -167,7 +167,6 @@ def test_the_method_option_offers_every_pc_method() -> None:
     assert [m.value for m in PcMethod] == ["auto", *get_args(Method)]
     assert set(get_args(Method)) == set(METHODS)
     assert [method_choice(m.value) for m in PcMethod] == list(PcMethod)
-    assert AUTO_METHOD is PcMethod("auto")
 
 
 def test_a_name_that_is_no_pc_method_is_refused() -> None:
@@ -203,8 +202,8 @@ TCA (UTC)         Objects        Miss (m)  CDMs      Pc  Level  Action \n\
 2026-10-08 12:03  44476 / 55841      3647     1       -  -      monitor
 2 events from 2 CDMs: 2 monitor.
 2 of 2 events rest on assumed covariances (COVARIANCE_METHOD = DEFAULT), not orbit determination.
-52939/47826/2026-10-06T19:36:42.717332: monitor (latest observation has no Pc: GeometryError: relative velocity is zero: the encounter plane is undefined)
-44476/55841/2026-10-08T12:03:02.771792: monitor (no observation before TCA: nothing to decide on)
+2a85ed50c4e6: monitor (latest observation has no Pc: GeometryError: relative velocity is zero: the encounter plane is undefined)
+3befe6f1305d: monitor (no observation before TCA: nothing to decide on)
 """)
     payload = json.loads(keepout("assess", late, "--json").stdout)
     (event,) = payload["events"]
@@ -252,7 +251,7 @@ def test_assess_with_store_shows_the_same_ids_as_store_add(tmp_path: Path) -> No
     assert stored.exit_code == ExitCode.OK
     payload = json.loads(stored.stdout)
     ids = [event["event_id"] for event in payload["events"]]
-    assert all(re.fullmatch(r"[0-9a-f]{8}", event_id) for event_id in ids)
+    assert all(re.fullmatch(r"[0-9a-f]{12}", event_id) for event_id in ids)
     assert payload["store"]["new_events"] == ids
     # The same Pc, risk and action as without the store.
     for key in ("pc", "level", "action", "cdms", "trend"):
@@ -281,3 +280,28 @@ def test_assess_with_store_computes_with_the_method_and_hbr_given(
     (event,) = json.loads(result.stdout)["events"]
     assert event["observations"][0]["method"] == "elrod"
     assert event["action"] == "maneuver"
+
+
+def test_settings_set_the_pc_and_risk_and_options_win_over_them(
+    tmp_path: Path,
+) -> None:
+    files = [write(tmp_path, "green.kvn", green())]
+    settings = write(
+        tmp_path,
+        "settings.toml",
+        "[pc]\nmethod = 'alfano'\nhbr_m = 1000.0\n[risk]\nred_from = 0.9\n",
+    )
+
+    def observation(*options: str) -> dict[str, Any]:
+        result = keepout("assess", *files, "--settings", settings, *options, "--json")
+        (event,) = json.loads(result.stdout)["events"]
+        (seen,) = event["observations"]
+        return {**seen, "level": event["level"]}
+
+    from_file = observation()
+    assert (from_file["method"], from_file["level"]) == ("alfano", "yellow")
+    overridden = observation("--method", "foster", "--hbr", "1000")
+    assert overridden["method"] == "foster"
+    assert overridden["pc"] == pytest.approx(4.25e-2, rel=1e-2)
+    assert overridden["level"] == "yellow"
+    assert observation("--method", "foster", "--hbr", "1")["pc"] < 1e-4

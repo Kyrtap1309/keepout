@@ -40,7 +40,6 @@ from keepout.maneuver import (
     TARGET_PC,
     BurnDirection,
     BurnGrid,
-    ManeuverContext,
     ManeuverOption,
     ManeuverPlan,
     burn_effects,
@@ -278,20 +277,6 @@ def test_a_context_is_the_plan_without_its_grid(plan: ManeuverPlan) -> None:
     assert evaluated == evaluate_burn(
         plan, burn_lead=option.burn_lead, delta_v=option.delta_v
     )
-
-
-def test_a_context_made_without_a_fallback_has_none() -> None:
-    made = prepare_maneuver(leo_event())
-    given = {
-        item.name: getattr(made, item.name)
-        for item in dataclasses.fields(ManeuverContext)
-        if item.name != "fallback"
-    }
-    assert ManeuverContext(**given).fallback is None
-    assert [item.name for item in dataclasses.fields(ManeuverContext)][-2:] == [
-        "notes",
-        "fallback",
-    ]
 
 
 def test_a_context_accepts_a_cdm_inside_the_burn_window() -> None:
@@ -597,13 +582,14 @@ def test_a_hall3d_failure_on_a_candidate_falls_back_to_monte_carlo(
     event = event_of(as_cdm(slow_conjunction()))
     plan = plan_maneuver(event, target_pc=1e-3, grid=SMALL)
     assert plan.baseline.method == "hall3d"
-    assert plan.fallback is not None
-    assert plan.fallback.method == "montecarlo"
-    assert plan.fallback.options == {"max_samples": cap, "seed": AUTO_MC_SEED}
+    fallback = plan.confirmation.fallback
+    assert fallback is not None
+    assert fallback.method == "montecarlo"
+    assert fallback.options == {"max_samples": cap, "seed": AUTO_MC_SEED}
     option = plan.option(BurnDirection.PROGRADE)
     assert option is not None
     assert option.method == "montecarlo"
-    expected = "hall3d failed (Nc is not finite); Monte Carlo used instead"
+    expected = "hall3d failed (Nc is not finite); montecarlo used instead"
     assert expected in option.notes
     assert f"prograde: {expected}" in plan.notes
     assert not any("failed on" in note for note in plan.notes)
@@ -620,11 +606,11 @@ def test_an_explicit_hall3d_gets_no_fallback(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(api, "_compute", spy)
     event = event_of(as_cdm(slow_conjunction()))
     plan = plan_maneuver(event, grid=SMALL, compute=computation("hall3d"))
-    assert plan.fallback is None
+    assert plan.confirmation.fallback is None
     assert "montecarlo" not in spy.runs
     assert plan.prograde is not None
     assert plan.prograde.method == "hall3d"
-    assert not any("Monte Carlo used instead" in note for note in plan.notes)
+    assert not any("used instead" in note for note in plan.notes)
     assert any(
         note.startswith("prograde: ") and "failed on 1" in note for note in plan.notes
     )
@@ -638,7 +624,7 @@ def test_an_explicit_hall3d_gets_no_fallback(monkeypatch: pytest.MonkeyPatch) ->
 
 def test_a_foster_baseline_gets_no_fallback(plan: ManeuverPlan) -> None:
     assert plan.baseline.method == "foster"
-    assert plan.fallback is None
+    assert plan.confirmation.fallback is None
 
 
 def test_evaluate_burn_returns_the_burns_own_diagnostics() -> None:

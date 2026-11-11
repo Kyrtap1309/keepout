@@ -25,7 +25,10 @@ A `ConjunctionEvent` holds the CDMs of one encounter: the same two objects
 (`OBJECT1` and `OBJECT2` by `OBJECT_DESIGNATOR`) and TCAs within `tca_tolerance`
 (600 s by default). It refuses CDMs that do not belong together: other
 objects, a repeated `MESSAGE_ID`, TCAs further apart or different
-`CONJUNCTION_ID` values. `group_events` sorts a pile of CDMs into events.
+`CONJUNCTION_ID` values. `group_events` sorts a pile of CDMs into events,
+in TCA order: a CDM joins the event that admits it (`EventBounds.admits`)
+or starts a new one, so CDMs of different `CONJUNCTION_ID` make different
+events. A CDM without one that fits two events is an error.
 
 `event.observations()` computes keepout's own Pc for every CDM with
 `compute_pc`. The method is `"auto"` by default. `compute=computation("elrod")`
