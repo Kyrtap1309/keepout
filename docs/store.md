@@ -107,7 +107,8 @@ from the store.
 The store uses SQLite's write-ahead log (WAL): readers do not wait for
 the writer, and two writers queue, each waiting up to 30 s for the other.
 A long Pc computation runs outside any transaction, so it does not hold
-the others up. While the store is in use, the file `keepout.db` comes
+the others up; the Pc computed is written every 100 CDMs or every second,
+so an interrupted `store rebuild` keeps nearly all it computed. While the store is in use, the file `keepout.db` comes
 with `keepout.db-wal` and `keepout.db-shm` beside it, and the latest
 writes may be in the `-wal` file only.
 

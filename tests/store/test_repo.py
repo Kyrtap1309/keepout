@@ -6,8 +6,9 @@ import re
 import shutil
 import sqlite3
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from pathlib import Path
+from typing import Any
 
 import astropy.units as u
 import pytest
@@ -28,7 +29,7 @@ from keepout.events import (
     stable_event_id,
 )
 from keepout.pc import computation
-from keepout.risk import RiskLevel, Thresholds
+from keepout.risk import PcObservation, RiskLevel, Thresholds
 from keepout.settings import Settings
 from keepout.sources.catalog import CatalogFileRef, CatalogReference, load_reference
 from keepout.store import (
@@ -803,3 +804,72 @@ def test_assess_computes_what_is_missing_and_judges_by_the_thresholds(
     assert {item.assessment.level for item in assessed} == {RiskLevel.RED}
     assert tmp_store.refresh(FOSTER).computed == 0
     assert tmp_store.assess([], FOSTER) == []
+
+
+def _five_cdms(store: Store) -> None:
+    store.ingest([message(f"M{n}", tca=float(n), created=-60.0 * n) for n in range(5)])
+
+
+def test_refresh_writes_in_batches(
+    tmp_store: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _five_cdms(tmp_store)
+    writes: list[int] = []
+    real = Store._write
+
+    def counted(store: Store, key: str, observations: Sequence[PcObservation]) -> int:
+        writes.append(len(observations))
+        return real(store, key, observations)
+
+    monkeypatch.setattr(Store, "_write", counted)
+    monkeypatch.setattr("keepout.store.repo._BATCH_SIZE", 2)
+    assert tmp_store.refresh(FOSTER).computed == 5
+    assert writes == [2, 2, 1]
+    # A batch is also written once a second of computing has passed.
+    writes.clear()
+    monkeypatch.setattr("keepout.store.repo._BATCH_SECONDS", 0.0)
+    assert tmp_store.refresh(dataclasses.replace(FOSTER, policy="raise")).computed == 5
+    assert writes == [1, 1, 1, 1, 1, 0]
+
+
+def test_an_interrupted_refresh_keeps_the_batches_written(
+    tmp_store: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _five_cdms(tmp_store)
+    monkeypatch.setattr("keepout.store.repo._BATCH_SIZE", 2)
+    real = ConjunctionEvent.observations
+    done: list[str] = []
+
+    def interrupted(event: ConjunctionEvent, **options: Any) -> Any:
+        if len(done) == 3:
+            raise KeyboardInterrupt
+        done.append(event.cdms[0].message_id)
+        return real(event, **options)
+
+    monkeypatch.setattr(ConjunctionEvent, "observations", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        tmp_store.refresh(FOSTER)
+    monkeypatch.undo()
+    assert tmp_store.refresh(FOSTER).computed == 3
+
+
+def test_refresh_parses_each_cdm_just_before_its_pc(
+    tmp_store: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _five_cdms(tmp_store)
+    steps: list[str] = []
+    loads = keepout.cdm.loads
+    observations = ConjunctionEvent.observations
+
+    def parsed(text: str) -> keepout.cdm.Cdm:
+        steps.append("parse")
+        return loads(text)
+
+    def computed(event: ConjunctionEvent, **options: Any) -> Any:
+        steps.append("compute")
+        return observations(event, **options)
+
+    monkeypatch.setattr(keepout.cdm, "loads", parsed)
+    monkeypatch.setattr(ConjunctionEvent, "observations", computed)
+    tmp_store.refresh(FOSTER)
+    assert steps == ["parse", "compute"] * 5

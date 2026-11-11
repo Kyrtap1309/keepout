@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,6 +28,7 @@ import astropy.units as u
 from astropy.time import Time
 from sqlalchemy import and_, exists, func, select
 from sqlalchemy import delete as delete_rows
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import DatabaseError, IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
@@ -52,7 +54,13 @@ from keepout.store.models import EventId, MessageId
 from keepout.units import elapsed_seconds
 
 if TYPE_CHECKING:
-    from collections.abc import Collection, Generator, Iterable, Sequence
+    from collections.abc import (
+        Collection,
+        Generator,
+        Iterable,
+        Iterator,
+        Sequence,
+    )
     from types import TracebackType
 
     from sqlalchemy import ColumnElement, Engine
@@ -69,6 +77,13 @@ WRITE: Final = "keepout_write"
 
 _COPY_NAME: Final = re.compile(r"([0-9a-f]{64})(?:\.|$)")
 """The name of a catalog copy: its SHA-256, then the original's suffixes."""
+
+_BATCH_SIZE: Final = 100
+"""Most observations :meth:`Store.refresh` writes in one transaction, and
+most CDM texts it reads in one."""
+
+_BATCH_SECONDS: Final = 1.0
+"""Longest :meth:`Store.refresh` computes before writing what it computed."""
 
 _WINDOW: Final = (DEFAULT_TCA_TOLERANCE + 1.0) * u.s
 """How far from a TCA the database searches for the events it may join: the
@@ -268,28 +283,33 @@ def _catalog_row(reference: CatalogReference, base: Path) -> models.Catalog:
     )
 
 
-def _write_result(session: Session, key: str, observation: PcObservation) -> int:
-    """Write an observation under ``key``; 1 if written, 0 if its CDM is not
-    stored (e.g. purged meanwhile) or it is already cached."""
-    message_id = observation.message_id
-    if message_id is None or session.get(models.Cdm, message_id) is None:
-        return 0
-    done = session.scalar(
-        select(models.Result.id).where(
-            models.Result.message_id == message_id, models.Result.key == key
+def _write_results(
+    session: Session, key: str, observations: Sequence[PcObservation]
+) -> int:
+    """Write observations under ``key``, but those of CDMs not stored (e.g.
+    purged meanwhile) and those already cached; how many it wrote."""
+    given = {o.message_id for o in observations if o.message_id is not None}
+    stored = set(
+        session.scalars(
+            select(models.Cdm.message_id).where(models.Cdm.message_id.in_(given))
         )
     )
-    if done is not None:
+    rows = [
+        {
+            "message_id": observation.message_id,
+            "key": key,
+            "payload": observation_to_json(observation),
+            "created_at": _now(),
+        }
+        for observation in observations
+        if observation.message_id in stored
+    ]
+    if not rows:
         return 0
-    session.add(
-        models.Result(
-            message_id=MessageId(message_id),
-            key=key,
-            payload=observation_to_json(observation),
-            created_at=_now(),
-        )
+    insert = sqlite_insert(models.Result).on_conflict_do_nothing(
+        index_elements=[models.Result.message_id, models.Result.key]
     )
-    return 1
+    return session.connection().execute(insert, rows).rowcount
 
 
 def _require_events(session: Session, event_ids: Collection[str]) -> None:
@@ -550,12 +570,14 @@ class Store:
         """Compute and cache the Pc observations missing for ``settings``.
 
         Settings with the same :func:`~keepout.store.codec.result_key` share
-        their observations. Each observation is computed outside any
-        transaction (in ``"auto"`` mode it can take up to a minute) and
-        written in a short one of its own, so that an interrupted refresh
-        keeps what it computed and other processes are not held up. One
-        that another process cached meanwhile, or of a CDM purged meanwhile,
-        is not written.
+        their observations. Each CDM is parsed just before its Pc is computed,
+        outside any transaction (in ``"auto"`` mode it can take up to a
+        minute). The observations are written in short transactions of
+        :data:`_BATCH_SIZE` observations or :data:`_BATCH_SECONDS` of
+        computing, whichever comes first, so that an interrupted refresh
+        keeps most of what it computed and other processes are not held up.
+        One that another process cached meanwhile, or of a CDM purged
+        meanwhile, is not written.
 
         If the settings give no hard-body radius, a CDM without ``HBR`` for
         an object has no Pc: refreshing every event skips it (and reports
@@ -591,7 +613,7 @@ class Store:
             models.Result.key == key,
         )
         query = (
-            select(models.Cdm.event_id, models.Cdm.content)
+            select(models.Cdm.event_id, models.Cdm.message_id)
             .where(~cached)
             .order_by(
                 models.Cdm.event_id, models.Cdm.creation_date, models.Cdm.message_id
@@ -601,33 +623,71 @@ class Store:
             if event_ids is not None:
                 _require_events(session, event_ids)
                 query = query.where(models.Cdm.event_id.in_(event_ids))
-            missing = [
-                (event_id, keepout.cdm.loads(content))
-                for event_id, content in session.execute(query)
-            ]
+            missing = [(event_id, m) for event_id, m in session.execute(query)]
         skipped: tuple[MessageId, ...] = ()
         if settings.combined_hard_body_radius is None:
-            skipped = tuple(
-                map(MessageId, without_hard_body_radius(cdm for _, cdm in missing))
-            )
+            parsed = (cdm for _, cdm in self._parsed(missing))
+            skipped = tuple(map(MessageId, without_hard_body_radius(parsed)))
             if skipped and event_ids is not None:
                 raise HardBodyRadiusError(
                     f"no HBR for both objects in {', '.join(skipped)}: give the "
                     "combined hard-body radius in the settings"
                 )
         unknown = set(skipped)
+        todo = [(event_id, m) for event_id, m in missing if m not in unknown]
         written = 0
-        for event_id, cdm in missing:
-            if cdm.message_id in unknown:
-                continue
+        pending: list[PcObservation] = []
+        since = time.monotonic()
+        for event_id, cdm in self._parsed(todo):
             (observation,) = ConjunctionEvent(event_id, (cdm,)).observations(
                 compute=settings.compute,
                 policy=settings.policy,
                 combined_hard_body_radius=settings.combined_hard_body_radius,
             )
-            with self.write() as session:
-                written += _write_result(session, key, observation)
+            pending.append(observation)
+            if (
+                len(pending) >= _BATCH_SIZE
+                or time.monotonic() - since >= _BATCH_SECONDS
+            ):
+                written += self._write(key, pending)
+                pending, since = [], time.monotonic()
+        written += self._write(key, pending)
         return RefreshReport(written, skipped)
+
+    def _parsed(
+        self, rows: Sequence[tuple[EventId, MessageId]]
+    ) -> Iterator[tuple[EventId, Cdm]]:
+        """The stored CDMs of ``rows``, each parsed only when asked for: their
+        texts are read :data:`_BATCH_SIZE` at a time, in short read
+        transactions. A CDM purged meanwhile is left out.
+
+        Raises
+        ------
+        StoreError
+            If the database cannot be used.
+        CdmParseError
+            If a stored CDM no longer parses (a store edited by hand).
+        """
+        for start in range(0, len(rows), _BATCH_SIZE):
+            chunk = rows[start : start + _BATCH_SIZE]
+            with self.read() as session:
+                found = session.execute(
+                    select(models.Cdm.message_id, models.Cdm.content).where(
+                        models.Cdm.message_id.in_([m for _, m in chunk])
+                    )
+                )
+                texts = dict(found.all())
+            for event_id, message_id in chunk:
+                if message_id in texts:
+                    yield event_id, keepout.cdm.loads(texts.pop(message_id))
+
+    def _write(self, key: str, observations: Sequence[PcObservation]) -> int:
+        """Write observations under ``key`` in one write transaction (none if
+        there are none); how many it wrote (see :func:`_write_results`)."""
+        if not observations:
+            return 0
+        with self.write() as session:
+            return _write_results(session, key, observations)
 
     def cache(self, settings: Settings, observations: Iterable[PcObservation]) -> int:
         """Cache Pc observations computed with ``settings`` elsewhere, e.g. by
@@ -657,11 +717,7 @@ class Store:
         StoreError
             If the database cannot be used.
         """
-        key = result_key(settings)
-        with self.write() as session:
-            return sum(
-                _write_result(session, key, observation) for observation in observations
-            )
+        return self._write(result_key(settings), list(observations))
 
     def assess(
         self, event_ids: Collection[str], settings: Settings
