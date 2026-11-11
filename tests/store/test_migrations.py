@@ -2,7 +2,6 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from builders import base_revision_store
@@ -77,17 +76,12 @@ def _schema(engine: Engine) -> dict[str, dict[str, object]]:
 
 def test_models_match_the_migrations(tmp_path: Path) -> None:
     # open_store builds a new file by running the migrations, not from the
-    # models: any difference between the two shows here. compare_metadata
-    # misses CHECK constraints and ON DELETE actions, so the reflected
-    # schema is also compared with a file the models build.
+    # models. test_alembic compares the two as Alembic's autogenerate does,
+    # which misses CHECK constraints and ON DELETE actions: the reflected
+    # schema is compared here with a file the models build.
     from_models = create_engine(URL.create("sqlite", database=str(tmp_path / "m.db")))
     Base.metadata.create_all(from_models)
     with open_store(tmp_path / "keepout.db") as store:
-        with store.engine.connect() as conn:
-            context = MigrationContext.configure(
-                conn, opts={"compare_type": True, "compare_server_default": True}
-            )
-            assert compare_metadata(context, Base.metadata) == []
         assert _schema(store.engine) == _schema(from_models)
     from_models.dispose()
 

@@ -168,6 +168,7 @@ dev = [
     "mypy>=2.4.0",
     "pre-commit>=4.7.0",
     "pytest>=9.1.1",
+    "pytest-alembic>=0.13.2",
     "pytest-cov>=7.1.0",
     "pytest-randomly>=5.0.0",
     "pytest-socket>=0.8.1",
