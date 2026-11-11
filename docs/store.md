@@ -128,20 +128,16 @@ harm, while a missing one makes its events fail to re-screen.
 ```python
 from pathlib import Path
 
-from keepout.risk import assess
-from keepout.store import CdmInput, open_store
 from keepout.settings import Settings
+from keepout.store import CdmInput, open_store
 
-settings = Settings()
 with open_store("keepout.db") as store:
     report = store.ingest([CdmInput.read(path) for path in Path("cdms").glob("*.kvn")])
-    store.refresh(settings, event_ids=report.events)
-    for event_id in report.events:
-        observations = store.observations(event_id, settings)
-        decision = assess(observations, thresholds=settings.thresholds).decision
-        print(event_id, decision.action.label)
+    for item in store.assess(report.events, Settings()):
+        print(item.event.event_id, item.assessment.decision.action.label)
 ```
 
-`refresh` computes the Pc the store lacks for the settings and
-`observations` reads it back; the [reference](reference/store.md) has the
-rest.
+`assess` computes and caches the Pc the store lacks for the settings
+(`refresh`), then judges each event from all its stored CDMs. `cache`
+keeps Pc computed elsewhere, as `screen --store` does with the Pc of its
+screening; the [reference](reference/store.md) has the rest.

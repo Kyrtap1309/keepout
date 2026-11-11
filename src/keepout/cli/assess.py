@@ -10,7 +10,7 @@ import typer
 from keepout._defaults import DECISION_POINT, TCA_TOLERANCE
 from keepout._methods import METHOD_CHOICES, MethodChoice
 from keepout.cli.cdm_input import CdmFiles, load_cdms
-from keepout.cli.events import AssessedEvent, show_assessed
+from keepout.cli.events import show_assessed
 from keepout.cli.options import (
     HardBodyRadius,
     JsonFlag,
@@ -107,7 +107,7 @@ def assess_command(
         add_and_show(store, files, chosen, as_json=as_json)
         return
 
-    from keepout.events import group_events
+    from keepout.events import AssessedEvent, group_events
     from keepout.risk import assess
 
     messages = load_cdms(files)

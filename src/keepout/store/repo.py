@@ -34,11 +34,13 @@ import keepout.cdm
 from keepout.errors import HardBodyRadiusError, StoreError
 from keepout.events import (
     DEFAULT_TCA_TOLERANCE,
+    AssessedEvent,
     ConjunctionEvent,
     EventBounds,
     stable_event_id,
     without_hard_body_radius,
 )
+from keepout.risk import assess
 from keepout.sources.catalog import CatalogFileRef, CatalogReference
 from keepout.store import models
 from keepout.store.codec import (
@@ -50,7 +52,7 @@ from keepout.store.models import EventId, MessageId
 from keepout.units import elapsed_seconds
 
 if TYPE_CHECKING:
-    from collections.abc import Collection, Generator, Sequence
+    from collections.abc import Collection, Generator, Iterable, Sequence
     from types import TracebackType
 
     from sqlalchemy import ColumnElement, Engine
@@ -264,6 +266,30 @@ def _catalog_row(reference: CatalogReference, base: Path) -> models.Catalog:
             for file in reference.files
         ],
     )
+
+
+def _write_result(session: Session, key: str, observation: PcObservation) -> int:
+    """Write an observation under ``key``; 1 if written, 0 if its CDM is not
+    stored (e.g. purged meanwhile) or it is already cached."""
+    message_id = observation.message_id
+    if message_id is None or session.get(models.Cdm, message_id) is None:
+        return 0
+    done = session.scalar(
+        select(models.Result.id).where(
+            models.Result.message_id == message_id, models.Result.key == key
+        )
+    )
+    if done is not None:
+        return 0
+    session.add(
+        models.Result(
+            message_id=MessageId(message_id),
+            key=key,
+            payload=observation_to_json(observation),
+            created_at=_now(),
+        )
+    )
+    return 1
 
 
 def _require_events(session: Session, event_ids: Collection[str]) -> None:
@@ -600,27 +626,81 @@ class Store:
                 combined_hard_body_radius=settings.combined_hard_body_radius,
             )
             with self.write() as session:
-                message_id = MessageId(cdm.message_id)
-                if session.get(models.Cdm, message_id) is None:
-                    continue
-                done = session.scalar(
-                    select(models.Result.id).where(
-                        models.Result.message_id == message_id,
-                        models.Result.key == key,
-                    )
-                )
-                if done is not None:
-                    continue
-                session.add(
-                    models.Result(
-                        message_id=message_id,
-                        key=key,
-                        payload=observation_to_json(observation),
-                        created_at=_now(),
-                    )
-                )
-            written += 1
+                written += _write_result(session, key, observation)
         return RefreshReport(written, skipped)
+
+    def cache(self, settings: Settings, observations: Iterable[PcObservation]) -> int:
+        """Cache Pc observations computed with ``settings`` elsewhere, e.g. by
+        the screening that issued the CDMs, so that :meth:`refresh` does not
+        compute them again.
+
+        Each observation is cached under its
+        :attr:`~keepout.risk.PcObservation.message_id`, in one write
+        transaction. One of a CDM not stored, or already cached for
+        ``settings``, is not written.
+
+        Parameters
+        ----------
+        settings
+            The settings the observations were computed with.
+        observations
+            The observations, each of one stored CDM, as
+            :meth:`keepout.events.ConjunctionEvent.observations` computes them.
+
+        Returns
+        -------
+        int
+            How many it cached.
+
+        Raises
+        ------
+        StoreError
+            If the database cannot be used.
+        """
+        key = result_key(settings)
+        with self.write() as session:
+            return sum(
+                _write_result(session, key, observation) for observation in observations
+            )
+
+    def assess(
+        self, event_ids: Collection[str], settings: Settings
+    ) -> list[AssessedEvent]:
+        """Stored events, each assessed from its Pc observations for
+        ``settings`` and their thresholds; the Pc the store lacks is computed
+        and cached first (:meth:`refresh`).
+
+        Parameters
+        ----------
+        event_ids
+            The events.
+        settings
+            How Pc is computed and the risk judged.
+
+        Returns
+        -------
+        list[AssessedEvent]
+            The events, with every CDM stored of them, by their first TCA
+            (then by id).
+
+        Raises
+        ------
+        StoreError
+            As :meth:`refresh` and :meth:`events`.
+        HardBodyRadiusError
+            If the settings give no hard-body radius and a CDM lacks ``HBR``.
+        """
+        self.refresh(settings, event_ids=event_ids)
+        return [
+            AssessedEvent(
+                event,
+                assess(
+                    self.observations(event.event_id, settings),
+                    thresholds=settings.thresholds,
+                ),
+            )
+            for event in self.events(event_ids=event_ids)
+        ]
 
     def event(self, event_id: str) -> ConjunctionEvent:
         """A stored event, its CDMs read from their stored text.

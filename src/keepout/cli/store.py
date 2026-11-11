@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Annotated, Final, NoReturn, TypeAlias
 import typer
 
 from keepout.cli.cdm_input import CdmFiles, read_cdm_files
-from keepout.cli.events import Assessed, AssessedEvent, show_assessed
+from keepout.cli.events import Assessed, show_assessed
 from keepout.cli.options import (
     JsonFlag,
     SettingsFile,
@@ -27,11 +27,11 @@ from keepout.cli.options import (
 from keepout.cli.output import JsonOut, fail, isot, plural, show, utc
 
 if TYPE_CHECKING:
-    from keepout.cdm import Cdm
     from keepout.events import ConjunctionEvent
     from keepout.settings import Settings
     from keepout.sources.catalog import CatalogReference
-    from keepout.store import CdmInput, IngestReport, Store
+    from keepout.store import IngestReport, Store
+    from keepout.synthetic import OperatorEvent
 
 __all__ = [
     "STORE_HINT",
@@ -187,51 +187,15 @@ def open_cli_store(path: Path, *, create: bool = True) -> Store:
     return open_store(path, create=create)
 
 
-def _ingest_and_assess(
-    store: Store, messages: Sequence[CdmInput], settings: Settings
-) -> tuple[IngestReport, list[AssessedEvent]]:
-    """Ingest CDMs, cache their Pc and assess each event they belong to.
-
-    Each event is the stored one, with every CDM the store holds of it, and
-    its id; its Pc observations are the store's for ``settings``, computed
-    if missing.
-
-    Returns
-    -------
-    tuple[IngestReport, list[AssessedEvent]]
-        What the ingest did, and the events in the store's order.
-
-    Raises
-    ------
-    StoreError
-        As :meth:`~keepout.store.Store.ingest` and
-        :meth:`~keepout.store.Store.refresh`.
-    HardBodyRadiusError
-        If the settings give no hard-body radius and a CDM lacks ``HBR``.
-    """
-    from keepout.risk import assess
-
-    report = store.ingest(messages)
-    store.refresh(settings, event_ids=report.events)
-    assessed = [
-        AssessedEvent(
-            event,
-            assess(
-                store.observations(event.event_id, settings),
-                thresholds=settings.thresholds,
-            ),
-        )
-        for event in store.events(event_ids=report.events)
-    ]
-    return report, assessed
-
-
 def ingest_screened(
-    store: Store, cdms: Sequence[Cdm], catalog: CatalogReference, settings: Settings
+    store: Store,
+    approaches: Sequence[OperatorEvent],
+    catalog: CatalogReference,
+    settings: Settings,
 ) -> tuple[IngestReport, list[ConjunctionEvent]]:
     """Ingest the CDMs a screening issued, with the catalog it screened
-    against (copied beside the store), and cache their Pc with
-    ``settings``.
+    against (copied beside the store), and cache the Pc it computed of them
+    with ``settings``.
 
     Returns
     -------
@@ -243,14 +207,15 @@ def ingest_screened(
     ------
     StoreError
         As :meth:`~keepout.store.Store.ingest` and
-        :meth:`~keepout.store.Store.refresh`.
+        :meth:`~keepout.store.Store.cache`.
     """
     from keepout.store import CdmInput
 
     report = store.ingest(
-        [CdmInput.of(cdm, origin="screen") for cdm in cdms], catalog=catalog
+        [CdmInput.of(item.cdm, origin="screen") for item in approaches],
+        catalog=catalog,
     )
-    store.refresh(settings, event_ids=report.events)
+    store.cache(settings, (item.observation for item in approaches))
     return report, store.events(event_ids=report.events)
 
 
@@ -317,7 +282,8 @@ def add_and_show(
 
     with open_cli_store(path) as store:
         messages = read_cdm_files(files, CdmInput.read)
-        report, assessed = _ingest_and_assess(store, messages, settings)
+        report = store.ingest(messages)
+        assessed = store.assess(report.events, settings)
     ids = [item.event.event_id for item in assessed]
     show_assessed(
         assessed,

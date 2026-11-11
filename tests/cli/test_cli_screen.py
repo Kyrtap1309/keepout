@@ -413,3 +413,22 @@ def test_screen_computes_and_stores_with_the_settings(tmp_path: Path) -> None:
         (stored, _) = store.events()
         (observation,) = store.observations(stored.event_id, load_settings(settings))
     assert observation.pc == first["pc"]
+
+
+def test_screen_with_store_computes_each_pc_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from keepout.pc import api
+
+    runs: list[str] = []
+    real = api._compute
+
+    def counted(*args: Any) -> Any:
+        runs.append(args[1])
+        return real(*args)
+
+    monkeypatch.setattr(api, "_compute", counted)
+    db = tmp_path / "keepout.db"
+    result = keepout(*screen_fixture(tmp_path, "--store", str(db), "--json"))
+    assert result.exit_code == ExitCode.OK
+    assert len(runs) == len(json.loads(result.stdout)["events"]) == 2

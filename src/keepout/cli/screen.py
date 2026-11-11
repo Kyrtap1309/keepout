@@ -142,7 +142,7 @@ def screen_command(
             if store is None or opened is None
             else _Stored(
                 store,
-                *ingest_screened(opened, result.cdms, screened.reference, chosen),
+                *ingest_screened(opened, result.events, screened.reference, chosen),
             )
         )
     events = list(result.events) if stored is None else stored.rows(result.events)

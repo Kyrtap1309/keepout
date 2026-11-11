@@ -28,6 +28,7 @@ from keepout.events import (
     stable_event_id,
 )
 from keepout.pc import computation
+from keepout.risk import RiskLevel, Thresholds
 from keepout.settings import Settings
 from keepout.sources.catalog import CatalogFileRef, CatalogReference, load_reference
 from keepout.store import (
@@ -769,3 +770,36 @@ def test_a_cdm_comes_back_from_the_store_as_it_went_in(cdm: keepout.cdm.Cdm) -> 
         (event_id,) = store.ingest([CdmInput.of(cdm, "test")]).events
         (stored,) = store.event(event_id).cdms
     assert keepout.cdm.kvn.dumps(stored) == keepout.cdm.kvn.dumps(cdm)
+
+
+def test_cache_keeps_observations_computed_elsewhere(tmp_store: Store) -> None:
+    stored, other = message("A"), message("B", secondary="40000")
+    event_id = tmp_store.ingest([stored]).events[0]
+    computed = [
+        observation
+        for given in (stored, other)
+        for observation in ConjunctionEvent("x", (given.cdm,)).observations(
+            compute=FOSTER.compute,
+            combined_hard_body_radius=FOSTER.combined_hard_body_radius,
+        )
+    ]
+    # B is not stored: only A's is cached, once.
+    assert tmp_store.cache(FOSTER, computed) == 1
+    assert tmp_store.cache(FOSTER, computed) == 0
+    assert tmp_store.refresh(FOSTER).computed == 0
+    (seen,) = tmp_store.observations(event_id, FOSTER)
+    assert observation_to_json(seen) == observation_to_json(computed[0])
+
+
+def test_assess_computes_what_is_missing_and_judges_by_the_thresholds(
+    tmp_store: Store,
+) -> None:
+    late = tmp_store.ingest([message("A", tca=3 * TOLERANCE)]).events[0]
+    early = tmp_store.ingest([message("B"), message("C", tca=1.0)]).events[0]
+    strict = dataclasses.replace(FOSTER, thresholds=Thresholds(1e-12, 1e-11))
+    assessed = tmp_store.assess([late, early], strict)
+    assert [item.event.event_id for item in assessed] == [early, late]
+    assert [len(item.event.cdms) for item in assessed] == [2, 1]
+    assert {item.assessment.level for item in assessed} == {RiskLevel.RED}
+    assert tmp_store.refresh(FOSTER).computed == 0
+    assert tmp_store.assess([], FOSTER) == []
