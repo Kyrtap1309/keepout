@@ -17,8 +17,10 @@ from keepout.cli.events import event_json, events_table, reasons
 from keepout.cli.options import (
     CacheDir,
     JsonFlag,
+    SettingsFile,
     SourceOption,
     Workers,
+    operator_settings,
     parse_time,
     positive,
     time_option,
@@ -95,6 +97,7 @@ def screen_command(
     source: SourceOption = None,
     cdm_dir: CdmDir = None,
     store: StoreOption = None,
+    settings: SettingsFile = None,
     workers: Workers = None,
     cache_dir: CacheDir = None,
     as_json: JsonFlag = False,
@@ -108,10 +111,12 @@ def screen_command(
     start of the window, which is also the CDMs' creation date. The catalog
     is the cached copy of keepout fetch catalog while it is current, else a
     new download; --catalog reads a file instead. With --store the CDMs are
-    added to the store, with a copy of the catalog.
+    added to the store, with a copy of the catalog. --settings gives the Pc
+    method, covariance policy, hard-body radius and risk thresholds.
     """
     window_start = None if start is None else time_option(start, "--start")
     require_one_catalog(catalog, source)
+    chosen = operator_settings(settings)
     with ExitStack() as stack:
         opened = None if store is None else stack.enter_context(open_cli_store(store))
         from keepout.synthetic import load_fleet, run
@@ -121,14 +126,23 @@ def screen_command(
         if window_start is None:
             window_start = _now()
         result = run(
-            satellites, screened.omms, window_start, days * DAY, workers=workers
+            satellites,
+            screened.omms,
+            window_start,
+            days * DAY,
+            workers=workers,
+            compute=chosen.compute,
+            policy=chosen.policy,
+            combined_hard_body_radius=chosen.combined_hard_body_radius,
+            thresholds=chosen.thresholds,
         )
         files = {} if cdm_dir is None else _write_cdms(result, cdm_dir)
         stored = (
             None
             if store is None or opened is None
             else _Stored(
-                store, *ingest_screened(opened, result.cdms, screened.reference)
+                store,
+                *ingest_screened(opened, result.cdms, screened.reference, chosen),
             )
         )
     events = list(result.events) if stored is None else stored.rows(result.events)

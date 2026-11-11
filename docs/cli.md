@@ -169,11 +169,13 @@ event.
   event.
 - **Workers.** `--workers N` processes (default: one per CPU, at most 4).
   Each runs its numerical libraries on one thread.
+- **Settings.** `--settings FILE` gives the [operator settings](#settings)
+  the Pc is computed and the risk assessed with.
 - **Store.** `--store FILE` adds the CDMs to a
   [conjunction store](#store), with a copy of the catalog file screened
   against, so that `maneuver` can re-screen a stored event against the
-  same catalog later. It also caches their Pc with the default settings,
-  as `keepout store add` computes them. The rows are then in the store's
+  same catalog later. It also caches their Pc with the settings, as
+  `keepout store add` computes them. The rows are then in the store's
   order, the reasons and `--json` name each approach by the id of its
   stored event, and a line under the table gives those ids row by row.
   Each row stays the approach as screened: its one CDM and its Pc. A
@@ -198,8 +200,11 @@ action, decided as of the latest CDM's creation date.
 - `--hbr METRES` sets the combined hard-body radius. By default it is the
   sum of both objects' `HBR` (CDM 2.0), and a CDM without them is an error.
   keepout never falls back to a default radius.
+- `--settings FILE` gives the [operator settings](#settings): Pc method,
+  covariance policy, hard-body radius and risk thresholds. `--method` and
+  `--hbr` win over the file.
 - `--store FILE` adds the CDMs to a [conjunction store](#store) first, as
-  `keepout store add` does with the same method and radius. Each event is
+  `keepout store add` does with the same settings. Each event is
   then the stored one: its id is the store's, and it has every CDM the
   store holds of it, from earlier runs too.
 
@@ -282,13 +287,14 @@ looks for the new TCA only within a twentieth of an orbit, so only the
 re-screen sees it, and that option is not clean. The retrograde burn is
 clean, so the command exits with status 0 and shows both.
 
-- **Target.** `--target-pc P` (default 1e-5), compared on the
-  conservative basis as in `assess`.
+- **Target.** `--target-pc P` (default: the settings' `target_pc`, else
+  1e-5), compared on the conservative basis as in `assess`.
 - **One burn.** `--burn-before HOURS` and `--dv M/S`, given together,
   report that burn with the event's method instead of the smallest burn
   each way. The burn may be off the grid. The whole grid is still computed
   first, so this takes as long as a plan.
-- **Radius.** `--hbr METRES` as for `assess`.
+- **Radius and settings.** `--hbr METRES` and `--settings FILE` as for
+  `assess`; the settings also give the target.
 - **Re-screen.** `--catalog FILE` or `--source celestrak|spacetrack`
   screens each burn against the catalog for 7 days from the burn. Both
   work as for `screen`, with `--cache-dir` and `--workers`. The primary
@@ -394,8 +400,7 @@ and whose trend runs over all of them. The exit status is that of
   joins its stored event or starts a new one, by the rule in
   [What it keeps](store.md#what-it-keeps). The Pc of every CDM of those
   events is computed, unless the store has it already. `--settings FILE`
-  gives the [operator settings](store.md#settings): Pc method, covariance
-  policy, hard-body radius and risk thresholds.
+  gives the [operator settings](#settings).
 - **`store upgrade`** brings a store made by an older keepout to this
   keepout's schema, and prints the revisions, e.g.
   `Upgraded keepout.db: base -> 0001.` Any other command refuses such a
@@ -431,6 +436,32 @@ per suite and method, as in the table at the top of the
 It downloads CARA's files at the pinned commit on first use. The published
 report itself is generated in the repository by
 `tools/validation_report.py`.
+
+## Settings
+
+`assess`, `screen`, `maneuver`, `store add` and `store rebuild` take the
+operator's settings from a TOML file, `--settings FILE`. Every key is
+optional and takes the library's default when missing; an unknown key is
+an error, so that a typo does not pass for a default:
+
+```toml
+[pc]
+method = "foster"     # a Pc method, or "auto" (the default)
+policy = "repair"     # what to do with an invalid covariance
+hbr_m = 20.0          # combined hard-body radius [m]; else the CDMs' HBR
+
+[risk]
+green_below = 1e-7
+red_from = 1e-4
+
+[maneuver]
+target_pc = 1e-5
+```
+
+An option given on the command line wins over the file: `--method`,
+`--hbr` and `--target-pc`. A bad file ends the command with status 1,
+naming the file and the key. From Python, `keepout.settings.load_settings`
+reads such a file into [`Settings`](reference/settings.md).
 
 ## Exit status
 

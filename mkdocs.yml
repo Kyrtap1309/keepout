@@ -85,6 +85,7 @@ nav:
           - Conjunction events: reference/events.md
           - Risk: reference/risk.md
           - Manoeuvres: reference/maneuver.md
+          - Operator settings: reference/settings.md
       - Screening and operator:
           - Screening: reference/screening.md
           - Synthetic operator: reference/synthetic.md

@@ -65,32 +65,10 @@ adds a copy of a few MB, and only `keepout store purge` removes them.
 
 ## Settings
 
-`keepout store add` and `keepout store rebuild` take the operator's
-settings from a TOML file, `--settings FILE`. Every key is optional and
-takes the library's default when missing; an unknown key is an error, so
-that a typo does not pass for a default:
-
-```toml
-[pc]
-method = "foster"     # a Pc method, or "auto" (the default)
-policy = "repair"     # what to do with an invalid covariance
-hbr_m = 20.0          # combined hard-body radius [m]; else the CDMs' HBR
-
-[risk]
-green_below = 1e-7
-red_from = 1e-4
-
-[maneuver]
-target_pc = 1e-5
-```
-
-The command line does not read `[maneuver] target_pc` yet: `keepout
-maneuver` takes `--target-pc`. The library reads it as
-`Settings.target_pc`.
-
-`keepout assess --store` computes with its own `--method` and `--hbr`
-instead, and the default thresholds; `keepout screen --store` with the
-defaults.
+`keepout store add` and `keepout store rebuild` compute Pc with the
+[operator settings](cli.md#settings) of `--settings FILE`; `assess
+--store` and `screen --store` cache it with the settings they compute
+with.
 
 The CDMs are stored before their Pc is computed. If the Pc fails, e.g.
 `assess --store` on a CDM without `HBR`, the CDMs stay stored, and the
@@ -147,7 +125,7 @@ from pathlib import Path
 
 from keepout.risk import assess
 from keepout.store import CdmInput, open_store
-from keepout.store.config import Settings
+from keepout.settings import Settings
 
 settings = Settings()
 with open_store("keepout.db") as store:

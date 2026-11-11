@@ -1,12 +1,12 @@
 """An operator's settings: how Pc is computed, risk thresholds and the
 manoeuvre target, read from a TOML file (the tables and keys of
-:data:`SETTINGS_KEYS`; an example is in the store's documentation, under
-Settings).
+:data:`SETTINGS_KEYS`; an example is in the command line's documentation,
+under Settings).
 
 Every key is optional; a missing one takes the library's default. No other
 key is allowed, so a typo is an error, not a silent default.
-:func:`load_settings` raises :class:`~keepout.errors.StoreError` naming the
-file and the key at fault.
+:func:`load_settings` raises :class:`~keepout.errors.SettingsError` naming
+the file and the key at fault.
 """
 
 from __future__ import annotations
@@ -25,10 +25,9 @@ from keepout._validation import (
     require_open_probability,
 )
 from keepout.covariance import POLICIES, Policy
-from keepout.errors import StoreError
+from keepout.errors import SettingsError
 from keepout.pc import AUTO, PcComputation
 from keepout.risk import DEFAULT_THRESHOLDS, Thresholds
-from keepout.store.codec import result_key
 
 __all__ = ["SETTINGS_KEYS", "Settings", "load_settings"]
 
@@ -44,7 +43,8 @@ _C = TypeVar("_C")
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Settings:
-    """An operator's settings for assessing the events of a store.
+    """An operator's settings: how Pc is computed, risk is judged and a
+    manoeuvre is planned.
 
     Parameters
     ----------
@@ -85,32 +85,21 @@ class Settings:
             )
         require_open_probability(self.target_pc, "target_pc")
 
-    @property
-    def result_key(self) -> str:
-        """The key of the observations these settings compute (see
-        :func:`keepout.store.codec.result_key`); thresholds and target do not
-        change it."""
-        return result_key(
-            compute=self.compute,
-            policy=self.policy,
-            combined_hard_body_radius=self.combined_hard_body_radius,
-        )
-
 
 def _table(data: Mapping[str, object], name: str) -> Mapping[str, object]:
     """The table ``name`` of a settings file, empty if it is not there.
 
     Raises
     ------
-    StoreError
+    SettingsError
         If it is not a table or has an unknown key.
     """
     table = data.get(name, {})
     if not isinstance(table, dict):
-        raise StoreError(f"{name} must be a table ([{name}]), got {table!r}")
+        raise SettingsError(f"{name} must be a table ([{name}]), got {table!r}")
     unknown = sorted(set(table) - SETTINGS_KEYS[name])
     if unknown:
-        raise StoreError(
+        raise SettingsError(
             f"unknown key(s) {', '.join(f'{name}.{key}' for key in unknown)}; "
             f"expected {', '.join(sorted(SETTINGS_KEYS[name]))}"
         )
@@ -122,12 +111,12 @@ def _number(table: Mapping[str, object], name: str, key: str) -> float:
 
     Raises
     ------
-    StoreError
+    SettingsError
         If it is not one (a bool is not a number).
     """
     value = table[key]
     if isinstance(value, bool) or not isinstance(value, int | float):
-        raise StoreError(f"{name}.{key} must be a number, got {value!r}")
+        raise SettingsError(f"{name}.{key} must be a number, got {value!r}")
     return float(value)
 
 
@@ -138,28 +127,28 @@ def _choice(
 
     Raises
     ------
-    StoreError
+    SettingsError
         If it is none of them.
     """
     try:
         return require_choice(table[key], choices, key)
     except ValueError as exc:
-        raise StoreError(f"{name}.{key}: {exc}") from exc
+        raise SettingsError(f"{name}.{key}: {exc}") from exc
 
 
 def _checked(key: str, make: Callable[[], _C]) -> _C:
-    """``make()``, whose :class:`ValueError` becomes a :class:`StoreError`
+    """``make()``, whose :class:`ValueError` becomes a :class:`SettingsError`
     naming the settings key.
 
     Raises
     ------
-    StoreError
+    SettingsError
         If ``make`` raises :class:`ValueError`.
     """
     try:
         return make()
     except ValueError as exc:
-        raise StoreError(f"{key}: {exc}") from exc
+        raise SettingsError(f"{key}: {exc}") from exc
 
 
 def _settings(data: Mapping[str, object]) -> Settings:
@@ -168,12 +157,12 @@ def _settings(data: Mapping[str, object]) -> Settings:
 
     Raises
     ------
-    StoreError
+    SettingsError
         If a key is unknown or a value is wrong; the message names the key.
     """
     unknown = sorted(set(data) - set(SETTINGS_KEYS))
     if unknown:
-        raise StoreError(
+        raise SettingsError(
             f"unknown key(s) {', '.join(unknown)}; expected the tables "
             f"{', '.join(f'[{name}]' for name in SETTINGS_KEYS)}"
         )
@@ -220,7 +209,7 @@ def load_settings(path: Path) -> Settings:
 
     Raises
     ------
-    StoreError
+    SettingsError
         If the file is not UTF-8 TOML, a key is unknown, or a value has the
         wrong type or is out of range; the message starts with the file's
         path and names the key.
@@ -231,10 +220,10 @@ def load_settings(path: Path) -> Settings:
     try:
         data = tomllib.loads(raw.decode("utf-8"))
     except UnicodeDecodeError as exc:
-        raise StoreError(f"{path}: not UTF-8 text: {exc}") from exc
+        raise SettingsError(f"{path}: not UTF-8 text: {exc}") from exc
     except tomllib.TOMLDecodeError as exc:
-        raise StoreError(f"{path}: not TOML: {exc}") from exc
+        raise SettingsError(f"{path}: not TOML: {exc}") from exc
     try:
         return _settings(data)
-    except StoreError as exc:
-        raise StoreError(f"{path}: {exc}") from exc
+    except SettingsError as exc:
+        raise SettingsError(f"{path}: {exc}") from exc

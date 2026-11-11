@@ -10,7 +10,7 @@ CDM came, eight hexadecimal characters, however many CDMs follow.
 
 Each CDM's Pc observation is cached (:meth:`Store.refresh`) under the key of
 the settings it was computed with
-(:attr:`~keepout.store.config.Settings.result_key`).
+(:func:`~keepout.store.codec.result_key`).
 """
 
 from __future__ import annotations
@@ -39,7 +39,11 @@ from keepout.events import (
 )
 from keepout.sources.catalog import CatalogFileRef, CatalogReference
 from keepout.store import models
-from keepout.store.codec import observation_from_json, observation_to_json
+from keepout.store.codec import (
+    observation_from_json,
+    observation_to_json,
+    result_key,
+)
 from keepout.units import elapsed_seconds
 
 if TYPE_CHECKING:
@@ -50,7 +54,7 @@ if TYPE_CHECKING:
 
     from keepout.cdm import Cdm, CdmFormat
     from keepout.risk import PcObservation
-    from keepout.store.config import Settings
+    from keepout.settings import Settings
 
 __all__ = ["WRITE", "CdmInput", "IngestReport", "RefreshReport", "Store"]
 
@@ -539,8 +543,8 @@ class Store:
     ) -> RefreshReport:
         """Compute and cache the Pc observations missing for ``settings``.
 
-        Settings with the same :attr:`~keepout.store.config.Settings.result_key`
-        share their observations. Each observation is computed outside any
+        Settings with the same :func:`~keepout.store.codec.result_key` share
+        their observations. Each observation is computed outside any
         transaction (in ``"auto"`` mode it can take up to a minute) and
         written in a short one of its own, so that an interrupted refresh
         keeps what it computed and other processes are not held up. One
@@ -575,7 +579,7 @@ class Store:
         CdmParseError
             If a stored CDM no longer parses (a store edited by hand).
         """
-        key = settings.result_key
+        key = result_key(settings)
         cached = exists().where(
             models.Result.message_id == models.Cdm.message_id,
             models.Result.key == key,
@@ -720,7 +724,7 @@ class Store:
             The store's id of the event.
         settings
             The settings they were computed with (by their
-            :attr:`~keepout.store.config.Settings.result_key`).
+            :func:`~keepout.store.codec.result_key`).
 
         Raises
         ------
@@ -731,7 +735,7 @@ class Store:
         """
         joined = and_(
             models.Result.message_id == models.Cdm.message_id,
-            models.Result.key == settings.result_key,
+            models.Result.key == result_key(settings),
         )
         with self.read() as session:
             _require_events(session, [event_id])

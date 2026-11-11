@@ -17,22 +17,27 @@ import typer
 
 from keepout.cli.cdm_input import CdmFiles, read_cdm_files
 from keepout.cli.events import Assessed, AssessedEvent, show_assessed
-from keepout.cli.options import JsonFlag, dubious_years_ignored, time_option
+from keepout.cli.options import (
+    JsonFlag,
+    SettingsFile,
+    dubious_years_ignored,
+    operator_settings,
+    time_option,
+)
 from keepout.cli.output import JsonOut, fail, isot, plural, show, utc
 
 if TYPE_CHECKING:
     from keepout.cdm import Cdm
     from keepout.events import ConjunctionEvent
+    from keepout.settings import Settings
     from keepout.sources.catalog import CatalogReference
     from keepout.store import CdmInput, IngestReport, Store
-    from keepout.store.config import Settings
 
 __all__ = [
     "STORE_HINT",
     "STORE_VARIABLE",
     "Before",
     "EventStore",
-    "SettingsFile",
     "StoreOption",
     "StorePath",
     "Yes",
@@ -139,22 +144,6 @@ read from ``$KEEPOUT_STORE``; ``None``: no store. The ``store`` extra is
 checked only when ``--event`` opens it (:func:`open_cli_store`), so CDM
 files plan without it whatever the variable says."""
 
-SettingsFile: TypeAlias = Annotated[
-    Path | None,
-    typer.Option(
-        "--settings",
-        exists=True,
-        dir_okay=False,
-        metavar="FILE",
-        help=(
-            "Operator settings, TOML: [pc] method, policy, hbr_m; [risk] "
-            "green_below, red_from (default: the library's)."
-        ),
-    ),
-]
-"""``--settings``: the operator's settings file
-(:func:`keepout.store.config.load_settings`)."""
-
 Before: TypeAlias = Annotated[
     str,
     typer.Option(
@@ -198,19 +187,6 @@ def open_cli_store(path: Path, *, create: bool = True) -> Store:
     return open_store(path, create=create)
 
 
-def _settings(path: Path | None) -> Settings:
-    """The settings of ``--settings``, or the library's defaults.
-
-    Raises
-    ------
-    StoreError
-        If the file is not a settings file; the message names the key.
-    """
-    from keepout.store.config import Settings, load_settings
-
-    return Settings() if path is None else load_settings(path)
-
-
 def _ingest_and_assess(
     store: Store, messages: Sequence[CdmInput], settings: Settings
 ) -> tuple[IngestReport, list[AssessedEvent]]:
@@ -251,11 +227,11 @@ def _ingest_and_assess(
 
 
 def ingest_screened(
-    store: Store, cdms: Sequence[Cdm], catalog: CatalogReference
+    store: Store, cdms: Sequence[Cdm], catalog: CatalogReference, settings: Settings
 ) -> tuple[IngestReport, list[ConjunctionEvent]]:
     """Ingest the CDMs a screening issued, with the catalog it screened
-    against (copied beside the store), and cache their Pc with the default
-    settings, as ``keepout store add`` computes them.
+    against (copied beside the store), and cache their Pc with
+    ``settings``.
 
     Returns
     -------
@@ -274,9 +250,7 @@ def ingest_screened(
     report = store.ingest(
         [CdmInput.of(cdm, origin="screen") for cdm in cdms], catalog=catalog
     )
-    from keepout.store.config import Settings
-
-    store.refresh(Settings(), event_ids=report.events)
+    store.refresh(settings, event_ids=report.events)
     return report, store.events(include_archived=True, event_ids=report.events)
 
 
@@ -370,7 +344,7 @@ def store_add(
     assessed as keepout assess does, with the store's event ids. Exits with
     status 3 if at least one event's action is to manoeuvre.
     """
-    add_and_show(store, files, _settings(settings), as_json=as_json)
+    add_and_show(store, files, operator_settings(settings), as_json=as_json)
 
 
 def store_upgrade(*, store: StorePath, as_json: JsonFlag = False) -> None:
@@ -403,8 +377,9 @@ def store_rebuild(
     change them. Without hbr_m in the settings, a CDM without HBR is
     skipped, and the count of those skipped is printed.
     """
+    chosen = operator_settings(settings)
     with open_cli_store(store, create=False) as opened:
-        refreshed = opened.refresh(_settings(settings))
+        refreshed = opened.refresh(chosen)
     text = f"Computed {plural(refreshed.computed, 'Pc observation')} in {store}."
     if refreshed.skipped:
         text += (

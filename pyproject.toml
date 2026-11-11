@@ -210,7 +210,7 @@ type = "layers"
 layers = [
     "keepout.cli",
     "keepout.store",
-    "keepout.validation",
+    "keepout.validation | keepout.settings",
     "keepout.maneuver",
     "keepout.sources | keepout.synthetic",
     "keepout.events",

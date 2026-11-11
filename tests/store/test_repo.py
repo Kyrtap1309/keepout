@@ -23,6 +23,7 @@ import keepout.cdm
 from keepout.errors import ChecksumMismatch, HardBodyRadiusError, StoreError
 from keepout.events import DEFAULT_TCA_TOLERANCE, ConjunctionEvent, group_events
 from keepout.pc import computation
+from keepout.settings import Settings
 from keepout.sources.catalog import CatalogFileRef, CatalogReference, load_reference
 from keepout.store import (
     CdmInput,
@@ -33,7 +34,6 @@ from keepout.store import (
     open_store,
 )
 from keepout.store.codec import observation_to_json
-from keepout.store.config import Settings
 
 TOLERANCE = DEFAULT_TCA_TOLERANCE
 SAMPLE_CSV = Path(__file__).parents[1] / "omm" / "data" / "celestrak_sample.csv"

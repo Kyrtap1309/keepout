@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import enum
-from typing import TYPE_CHECKING, Annotated, Final, TypeAlias
+from typing import TYPE_CHECKING, Annotated, TypeAlias
 
 import typer
 
@@ -11,7 +11,12 @@ from keepout._defaults import DECISION_POINT, TCA_TOLERANCE
 from keepout._methods import METHOD_CHOICES, MethodChoice
 from keepout.cli.cdm_input import CdmFiles, load_cdms
 from keepout.cli.events import AssessedEvent, show_assessed
-from keepout.cli.options import HardBodyRadius, JsonFlag
+from keepout.cli.options import (
+    HardBodyRadius,
+    JsonFlag,
+    SettingsFile,
+    operator_settings,
+)
 from keepout.cli.output import duration_words
 from keepout.cli.store import StoreOption, add_and_show
 
@@ -19,7 +24,6 @@ from keepout.cli.store import StoreOption, add_and_show
 # numerical libraries (keepout._methods loads none).
 
 __all__ = [
-    "AUTO_METHOD",
     "PcMethod",
     "assess_command",
     "method_choice",
@@ -38,9 +42,6 @@ else:
         "PcMethod", {name.upper(): name for name in METHOD_CHOICES}, module=__name__
     )
     PcMethod.__doc__ = "``--method``: the Pc methods of :func:`keepout.pc.compute_pc`."
-
-AUTO_METHOD: Final = PcMethod("auto")
-"""``--method``'s default."""
 
 
 def _is_method(name: str) -> TypeIs[MethodChoice]:
@@ -61,20 +62,25 @@ def method_choice(name: str) -> MethodChoice:
 
 
 MethodOption: TypeAlias = Annotated[
-    PcMethod,
+    PcMethod | None,
     typer.Option(
         "--method",
-        help="Pc method; auto picks one per CDM (a 3-D Pc can take a minute).",
+        show_default=False,
+        help=(
+            "Pc method; auto picks one per CDM (a 3-D Pc can take a minute) "
+            "[default: the settings' method, else auto]."
+        ),
     ),
 ]
-"""``--method``: the Pc method."""
+"""``--method``: the Pc method; ``None``: the settings'."""
 
 
 def assess_command(
     files: CdmFiles,
     *,
-    method: MethodOption = AUTO_METHOD,
+    method: MethodOption = None,
     hbr: HardBodyRadius = None,
+    settings: SettingsFile = None,
     store: StoreOption = None,
     as_json: JsonFlag = False,
 ) -> None:
@@ -86,17 +92,19 @@ def assess_command(
     of the latest CDM's creation date (a manoeuvre needs a red Pc within
     {decision_point} of TCA). With --store the CDMs are added to the store
     and each event is the stored one, with its id and every CDM stored of
-    it. Exits with status 3 if at least one event's action is to manoeuvre.
+    it. --settings gives the Pc method, covariance policy, hard-body radius
+    and risk thresholds; --method and --hbr win over it. Exits with status 3
+    if at least one event's action is to manoeuvre.
     """
     from keepout.pc import computation
 
-    compute = computation(method_choice(method.value))
+    chosen = operator_settings(
+        settings,
+        compute=None if method is None else computation(method_choice(method.value)),
+        combined_hard_body_radius=hbr,
+    )
     if store is not None:
-        # --store has checked that the store extra is there.
-        from keepout.store.config import Settings
-
-        settings = Settings(compute=compute, combined_hard_body_radius=hbr)
-        add_and_show(store, files, settings, as_json=as_json)
+        add_and_show(store, files, chosen, as_json=as_json)
         return
 
     from keepout.events import group_events
@@ -106,7 +114,14 @@ def assess_command(
     assessed = [
         AssessedEvent(
             event,
-            assess(event.observations(compute=compute, combined_hard_body_radius=hbr)),
+            assess(
+                event.observations(
+                    compute=chosen.compute,
+                    policy=chosen.policy,
+                    combined_hard_body_radius=chosen.combined_hard_body_radius,
+                ),
+                thresholds=chosen.thresholds,
+            ),
         )
         for event in group_events(messages)
     ]

@@ -1,7 +1,7 @@
 import json
 import re
 from pathlib import Path
-from typing import get_args
+from typing import Any, get_args
 
 import pytest
 from cli_builders import (
@@ -15,7 +15,7 @@ from cli_builders import (
 from inline_snapshot import snapshot
 
 from keepout.cdm import xml
-from keepout.cli.assess import AUTO_METHOD, PcMethod, method_choice
+from keepout.cli.assess import PcMethod, method_choice
 from keepout.cli.output import ExitCode
 from keepout.pc import METHODS, Method
 
@@ -167,7 +167,6 @@ def test_the_method_option_offers_every_pc_method() -> None:
     assert [m.value for m in PcMethod] == ["auto", *get_args(Method)]
     assert set(get_args(Method)) == set(METHODS)
     assert [method_choice(m.value) for m in PcMethod] == list(PcMethod)
-    assert AUTO_METHOD is PcMethod("auto")
 
 
 def test_a_name_that_is_no_pc_method_is_refused() -> None:
@@ -281,3 +280,28 @@ def test_assess_with_store_computes_with_the_method_and_hbr_given(
     (event,) = json.loads(result.stdout)["events"]
     assert event["observations"][0]["method"] == "elrod"
     assert event["action"] == "maneuver"
+
+
+def test_settings_set_the_pc_and_risk_and_options_win_over_them(
+    tmp_path: Path,
+) -> None:
+    files = [write(tmp_path, "green.kvn", green())]
+    settings = write(
+        tmp_path,
+        "settings.toml",
+        "[pc]\nmethod = 'alfano'\nhbr_m = 1000.0\n[risk]\nred_from = 0.9\n",
+    )
+
+    def observation(*options: str) -> dict[str, Any]:
+        result = keepout("assess", *files, "--settings", settings, *options, "--json")
+        (event,) = json.loads(result.stdout)["events"]
+        (seen,) = event["observations"]
+        return {**seen, "level": event["level"]}
+
+    from_file = observation()
+    assert (from_file["method"], from_file["level"]) == ("alfano", "yellow")
+    overridden = observation("--method", "foster", "--hbr", "1000")
+    assert overridden["method"] == "foster"
+    assert overridden["pc"] == pytest.approx(4.25e-2, rel=1e-2)
+    assert overridden["level"] == "yellow"
+    assert observation("--method", "foster", "--hbr", "1")["pc"] < 1e-4

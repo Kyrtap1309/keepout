@@ -24,6 +24,7 @@ from keepout.cli import screen
 from keepout.cli.output import ExitCode
 from keepout.omm import load
 from keepout.omm.celestrak import dumps_csv
+from keepout.settings import load_settings
 from keepout.store import open_store
 
 
@@ -396,3 +397,19 @@ def test_a_screen_row_stays_the_approach_screened_on_day_two(tmp_path: Path) -> 
         assert event["event_id"] == first["event_id"]
         assert sorted(event["cdms"]) == sorted(both)
         assert len(event["observations"]) == 2
+
+
+def test_screen_computes_and_stores_with_the_settings(tmp_path: Path) -> None:
+    settings = tmp_path / "settings.toml"
+    settings.write_text("[pc]\nhbr_m = 1000.0\n[risk]\nred_from = 0.9\n")
+    db = tmp_path / "keepout.db"
+    args = ("--settings", str(settings), "--store", str(db), "--json")
+    result = keepout(*screen_fixture(tmp_path, *args))
+    assert result.exit_code == ExitCode.OK
+    first = json.loads(result.stdout)["events"][0]
+    assert first["pc"] == pytest.approx(4.25e-2, rel=1e-2)
+    assert first["level"] == "yellow"
+    with open_store(db, create=False) as store:
+        (stored, _) = store.events()
+        (observation,) = store.observations(stored.event_id, load_settings(settings))
+    assert observation.pc == first["pc"]

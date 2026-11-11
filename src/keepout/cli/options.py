@@ -18,13 +18,18 @@ from keepout.sources.catalog import CATALOG_SOURCES, DEFAULT_SOURCE, CatalogSour
 if TYPE_CHECKING:
     from astropy.time import Time
 
+    from keepout.pc import PcComputation
+    from keepout.settings import Settings
+
 __all__ = [
     "CacheDir",
     "HardBodyRadius",
     "JsonFlag",
+    "SettingsFile",
     "SourceOption",
     "Workers",
     "dubious_years_ignored",
+    "operator_settings",
     "parse_time",
     "positive",
     "time_option",
@@ -151,7 +156,59 @@ HardBodyRadius: TypeAlias = Annotated[
         "--hbr",
         callback=positive,
         metavar="METRES",
-        help="Combined hard-body radius [m] (default: the sum of the CDMs' HBR).",
+        help=(
+            "Combined hard-body radius [m] (default: the settings' hbr_m, else "
+            "the sum of the CDMs' HBR)."
+        ),
     ),
 ]
 """``--hbr``: the combined hard-body radius instead of the CDMs'."""
+
+
+SettingsFile: TypeAlias = Annotated[
+    Path | None,
+    typer.Option(
+        "--settings",
+        exists=True,
+        dir_okay=False,
+        metavar="FILE",
+        help=(
+            "Operator settings, TOML: [pc] method, policy, hbr_m; [risk] "
+            "green_below, red_from; [maneuver] target_pc (default: the "
+            "library's). An option given here wins over the file."
+        ),
+    ),
+]
+"""``--settings``: the operator's settings file
+(:func:`keepout.settings.load_settings`)."""
+
+
+def operator_settings(
+    path: Path | None,
+    *,
+    compute: PcComputation | None = None,
+    combined_hard_body_radius: float | None = None,
+    target_pc: float | None = None,
+) -> Settings:
+    """The settings of ``--settings``, or the library's defaults, with the
+    command line's own options over them (``None``: not given).
+
+    Raises
+    ------
+    SettingsError
+        If the file is not a settings file; the message names the key.
+    """
+    from dataclasses import replace
+
+    from keepout.settings import Settings, load_settings
+
+    settings = Settings() if path is None else load_settings(path)
+    if compute is not None:
+        settings = replace(settings, compute=compute)
+    if combined_hard_body_radius is not None:
+        settings = replace(
+            settings, combined_hard_body_radius=combined_hard_body_radius
+        )
+    if target_pc is not None:
+        settings = replace(settings, target_pc=target_pc)
+    return settings
