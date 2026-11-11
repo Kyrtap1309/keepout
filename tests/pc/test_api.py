@@ -1,9 +1,10 @@
+import dataclasses
 import inspect
 import math
 import pickle
 import re
 import typing
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 
 import numpy as np
 import pytest
@@ -36,6 +37,7 @@ from keepout.orbits import orbital_period
 from keepout.pc import (
     AUTO,
     METHODS,
+    PcComputation,
     PcResult,
     alfano,
     api,
@@ -567,6 +569,42 @@ def test_the_resolved_fallback_reproduces_autos_result(
     resolved = AUTO.resolved(result)
     assert resolved.method == "montecarlo"
     assert resolved(SLOW_ALONG_TRACK).value == result.value
+
+
+def test_auto_resolves_hall3d_with_its_monte_carlo_fallback() -> None:
+    resolved = AUTO.resolved(
+        dataclasses.replace(AUTO(TYPICAL_HEAD_ON), method="hall3d")
+    )
+    assert (resolved.method, dict(resolved.options)) == ("hall3d", {})
+    assert resolved.fallback is not None
+    assert (resolved.fallback.method, dict(resolved.fallback.options)) == (
+        "montecarlo",
+        {"max_samples": AUTO_MC_SAMPLES, "seed": AUTO_MC_SEED},
+    )
+
+
+def test_a_fallback_stands_in_where_the_method_does_not_converge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real = api._compute
+
+    def hall_fails(
+        conjunction: Conjunction, method: str, options: Mapping[str, object]
+    ) -> PcResult:
+        if method == "hall3d":
+            raise PcConvergenceError("Nc is not finite")
+        return real(conjunction, method, options)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(api, "_compute", hall_fails)
+    run = PcComputation("hall3d", fallback=computation("foster"))
+    result = run(TYPICAL_HEAD_ON)
+    assert result.method == "foster"
+    assert (
+        result.diagnostics[-1]
+        == "hall3d failed (Nc is not finite); foster used instead"
+    )
+    with pytest.raises(PcConvergenceError, match="Nc is not finite"):
+        computation("hall3d")(TYPICAL_HEAD_ON)
 
 
 def test_auto_resolves_to_the_method_it_chose_with_its_defaults() -> None:
