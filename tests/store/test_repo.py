@@ -28,6 +28,7 @@ from keepout.events import (
     group_events,
     stable_event_id,
 )
+from keepout.maneuver import ManeuverOption, ManeuverOutcome
 from keepout.pc import computation
 from keepout.risk import PcObservation, RiskLevel, Thresholds
 from keepout.settings import Settings
@@ -42,6 +43,8 @@ from keepout.store import (
     open_store,
 )
 from keepout.store.codec import observation_to_json
+from keepout.store.maneuver_codec import maneuver_key, outcome_to_json
+from keepout.store.repo import save_maneuver_in
 
 TOLERANCE = DEFAULT_TCA_TOLERANCE
 SAMPLE_CSV = Path(__file__).parents[1] / "omm" / "data" / "celestrak_sample.csv"
@@ -873,3 +876,147 @@ def test_refresh_parses_each_cdm_just_before_its_pc(
     monkeypatch.setattr(ConjunctionEvent, "observations", computed)
     tmp_store.refresh(FOSTER)
     assert steps == ["parse", "compute"] * 5
+
+
+def _three_cdms(store: Store) -> str:
+    """One event of three CDMs, A, B and C, created in that order; its id."""
+    (event_id,) = store.ingest(
+        [
+            message("A"),
+            message("B", tca=1.0, created=-60.0),
+            message("C", tca=2.0, created=-30.0),
+        ]
+    ).events
+    return event_id
+
+
+def test_event_until_pins_the_cdm(tmp_store: Store, tmp_path: Path) -> None:
+    first = _reference(tmp_path, "first.csv")
+    second = _reference(tmp_path, "second.csv")
+    (event_id,) = tmp_store.ingest([message("A")], catalog=first).events
+    tmp_store.ingest([message("B", tca=1.0, created=-60.0)], catalog=second)
+    tmp_store.ingest([message("C", tca=2.0, created=-30.0)])
+    event = tmp_store.event(event_id, until="B")
+    assert len(event.cdms) == 2
+    assert event.latest.message_id == "B"
+    assert tmp_store.event(event_id, until="A").latest.message_id == "A"
+    assert len(tmp_store.event(event_id).cdms) == 3
+    assert tmp_store.latest_message_id(event_id) == "C"
+    assert tmp_store.catalog(event_id) is None
+    assert tmp_store.catalog(event_id, until="B") == _as_stored(tmp_store, second)
+    assert tmp_store.catalog(event_id, until="A") == _as_stored(tmp_store, first)
+
+
+def test_until_of_another_event_is_refused(tmp_store: Store) -> None:
+    event_id = _three_cdms(tmp_store)
+    tmp_store.ingest([message("X", secondary="40000")])
+    for call in (tmp_store.event, tmp_store.catalog):
+        for until in ("X", "nothing"):
+            with pytest.raises(StoreError, match=f"no CDM {until} in event"):
+                call(event_id, until=until)
+    with pytest.raises(StoreError, match="no event 12345678 in the store"):
+        tmp_store.latest_message_id("12345678")
+
+
+def _outcome(event: ConjunctionEvent) -> ManeuverOutcome:
+    """An outcome of ``event`` without burns: enough for the cache."""
+    baseline = ManeuverOption(
+        burn_lead=0.0,
+        delta_v=0.0,
+        pc=1e-3,
+        range_at_tca=150.0,
+        method="foster",
+        meets_target=False,
+    )
+    return ManeuverOutcome(
+        event=event,
+        target_pc=1e-4,
+        baseline=baseline,
+        notes=("a note",),
+        burns=(),
+        grid=None,
+        catalog_label=None,
+    )
+
+
+def test_maneuver_cache_round_trip(tmp_store: Store) -> None:
+    event_id = _three_cdms(tmp_store)
+    assert tmp_store.maneuver(event_id, FOSTER) is None
+    payload = outcome_to_json(_outcome(tmp_store.event(event_id)))
+    key = maneuver_key(FOSTER, tmp_store.catalog(event_id))
+    assert tmp_store.save_maneuver("C", key, payload)
+    assert not tmp_store.save_maneuver("C", key, {"other": 1})
+    assert not tmp_store.save_maneuver("gone", key, payload)
+    cached = tmp_store.maneuver(event_id, FOSTER)
+    assert cached is not None
+    assert outcome_to_json(cached) == payload
+    assert cached.event.latest.message_id == "C"
+    assert len(cached.event.cdms) == 3
+    # Cached on the latest CDM only, and under the operator's settings.
+    tmp_store.purge(TCA + 1.0 * u.day)
+    event_id = _three_cdms(tmp_store)
+    assert tmp_store.save_maneuver("B", key, payload)
+    assert tmp_store.maneuver(event_id, FOSTER) is None
+    assert tmp_store.save_maneuver("C", key, payload)
+    assert tmp_store.maneuver(event_id, FOSTER) is not None
+    other = dataclasses.replace(FOSTER, thresholds=Thresholds(red_from=1e-3))
+    assert tmp_store.maneuver(event_id, other) is None
+    with pytest.raises(StoreError, match="no event 12345678 in the store"):
+        tmp_store.maneuver("12345678", FOSTER)
+
+
+def test_save_maneuver_in_joins_the_caller_s_transaction(tmp_store: Store) -> None:
+    event_id = _three_cdms(tmp_store)
+    key = maneuver_key(FOSTER, None)
+    payload = outcome_to_json(_outcome(tmp_store.event(event_id)))
+
+    def failing() -> None:
+        with tmp_store.write() as session:
+            assert save_maneuver_in(session, "C", key, payload)
+            raise RuntimeError
+
+    with pytest.raises(RuntimeError):
+        failing()
+    assert tmp_store.maneuver(event_id, FOSTER) is None
+    with tmp_store.write() as session:
+        assert save_maneuver_in(session, "C", key, payload)
+    assert tmp_store.maneuver(event_id, FOSTER) is not None
+
+
+def test_maneuver_cache_misses_after_a_new_cdm(tmp_store: Store) -> None:
+    event_id = _three_cdms(tmp_store)
+    payload = outcome_to_json(_outcome(tmp_store.event(event_id)))
+    tmp_store.save_maneuver("C", maneuver_key(FOSTER, None), payload)
+    assert tmp_store.maneuver(event_id, FOSTER) is not None
+    tmp_store.ingest([message("D", tca=3.0, created=-10.0)])
+    assert tmp_store.latest_message_id(event_id) == "D"
+    assert tmp_store.maneuver(event_id, FOSTER) is None
+
+
+def test_purge_drops_jobs_and_results(tmp_store: Store) -> None:
+    event_id = _three_cdms(tmp_store)
+    tmp_store.refresh(FOSTER)
+    payload = outcome_to_json(_outcome(tmp_store.event(event_id)))
+    key = maneuver_key(FOSTER, None)
+    tmp_store.save_maneuver("C", key, payload)
+    with tmp_store.write() as session:
+        session.add(
+            models.Job(
+                kind="maneuver",
+                event_id=event_id,
+                message_id="C",
+                key=key,
+                params={"settings": {}},
+                status="queued",
+                created_at=Time.now(),
+            )
+        )
+    assert _count(tmp_store, models.Job) == 1
+    with tmp_store.read() as session:
+        job = session.scalars(select(models.Job)).one()
+        assert job.attempt == 0
+        assert job.worker is None
+        assert job.lease_until is None
+    assert tmp_store.purge(TCA + 1.0 * u.day) == 1
+    assert _count(tmp_store, models.Job) == 0
+    assert _count(tmp_store, models.Result) == 0

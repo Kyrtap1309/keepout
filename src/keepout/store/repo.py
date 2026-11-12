@@ -11,7 +11,10 @@ An event keeps the id its first CDM gave it
 
 Each CDM's Pc observation is cached (:meth:`Store.refresh`) under the key of
 the settings it was computed with
-(:func:`~keepout.store.codec.result_key`).
+(:func:`~keepout.store.codec.result_key`); an event's manoeuvre outcome
+(:meth:`Store.maneuver`) is cached on its latest CDM under the key of the
+operator's settings and the catalog
+(:func:`~keepout.store.maneuver_codec.maneuver_key`).
 """
 
 from __future__ import annotations
@@ -26,7 +29,7 @@ from typing import TYPE_CHECKING, Final, Self
 
 import astropy.units as u
 from astropy.time import Time
-from sqlalchemy import and_, exists, func, select
+from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy import delete as delete_rows
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import DatabaseError, IntegrityError
@@ -50,6 +53,7 @@ from keepout.store.codec import (
     observation_to_json,
     result_key,
 )
+from keepout.store.maneuver_codec import maneuver_key, outcome_from_json
 from keepout.store.models import EventId, MessageId
 from keepout.units import elapsed_seconds
 
@@ -59,13 +63,16 @@ if TYPE_CHECKING:
         Generator,
         Iterable,
         Iterator,
+        Mapping,
         Sequence,
     )
     from types import TracebackType
 
     from sqlalchemy import ColumnElement, Engine
 
+    from keepout._types import JsonValue
     from keepout.cdm import Cdm, CdmFormat
+    from keepout.maneuver import ManeuverOutcome
     from keepout.risk import PcObservation
     from keepout.settings import Settings
 
@@ -283,12 +290,15 @@ def _catalog_row(reference: CatalogReference, base: Path) -> models.Catalog:
     )
 
 
-def _write_results(
-    session: Session, key: str, observations: Sequence[PcObservation]
+def _insert_results(
+    session: Session,
+    key: str,
+    payloads: Sequence[tuple[str, Mapping[str, JsonValue]]],
 ) -> int:
-    """Write observations under ``key``, but those of CDMs not stored (e.g.
-    purged meanwhile) and those already cached; how many it wrote."""
-    given = {o.message_id for o in observations if o.message_id is not None}
+    """Write results under ``key``, each a CDM's ``MESSAGE_ID`` and its
+    payload, but those of CDMs not stored (e.g. purged meanwhile) and those
+    already cached; how many it wrote."""
+    given = {message_id for message_id, _ in payloads}
     stored = set(
         session.scalars(
             select(models.Cdm.message_id).where(models.Cdm.message_id.in_(given))
@@ -296,13 +306,13 @@ def _write_results(
     )
     rows = [
         {
-            "message_id": observation.message_id,
+            "message_id": message_id,
             "key": key,
-            "payload": observation_to_json(observation),
+            "payload": dict(payload),
             "created_at": _now(),
         }
-        for observation in observations
-        if observation.message_id in stored
+        for message_id, payload in payloads
+        if message_id in stored
     ]
     if not rows:
         return 0
@@ -310,6 +320,51 @@ def _write_results(
         index_elements=[models.Result.message_id, models.Result.key]
     )
     return session.connection().execute(insert, rows).rowcount
+
+
+def _write_results(
+    session: Session, key: str, observations: Sequence[PcObservation]
+) -> int:
+    """Write observations under ``key``, but those of CDMs not stored (e.g.
+    purged meanwhile) and those already cached; how many it wrote."""
+    return _insert_results(
+        session,
+        key,
+        [
+            (observation.message_id, observation_to_json(observation))
+            for observation in observations
+            if observation.message_id is not None
+        ],
+    )
+
+
+def save_maneuver_in(
+    session: Session, message_id: str, key: str, payload: Mapping[str, JsonValue]
+) -> bool:
+    """Cache a manoeuvre outcome's JSON on a CDM, in the caller's write
+    transaction (:meth:`Store.save_maneuver` makes one of its own).
+
+    Internal to :mod:`keepout.store`: a job that plans a manoeuvre writes
+    its result and its own end in one transaction.
+
+    Parameters
+    ----------
+    session
+        A session of :meth:`Store.write`.
+    message_id
+        The ``MESSAGE_ID`` of the CDM the outcome was planned on.
+    key
+        Its :func:`~keepout.store.maneuver_codec.maneuver_key`.
+    payload
+        Its :func:`~keepout.store.maneuver_codec.outcome_to_json`.
+
+    Returns
+    -------
+    bool
+        Whether it was written: not if the CDM is not stored (e.g. purged
+        meanwhile) or an outcome is already cached on it under ``key``.
+    """
+    return _insert_results(session, key, [(message_id, payload)]) == 1
 
 
 def _require_events(session: Session, event_ids: Collection[str]) -> None:
@@ -326,6 +381,125 @@ def _require_events(session: Session, event_ids: Collection[str]) -> None:
     unknown = sorted(set(event_ids) - known)
     if unknown:
         raise StoreError(f"no event {unknown[0]} in the store")
+
+
+def _cdms_of(session: Session, event_id: str, until: str | None) -> ColumnElement[bool]:
+    """The CDMs of a stored event, up to ``until`` (its ``MESSAGE_ID``) in
+    (``CREATION_DATE``, ``MESSAGE_ID``) order if given.
+
+    Raises
+    ------
+    StoreError
+        If there is no such event, or ``until`` is not a CDM of it.
+    """
+    _require_events(session, [event_id])
+    of_event = models.Cdm.event_id == event_id
+    if until is None:
+        return of_event
+    pinned = session.execute(
+        select(models.Cdm.creation_date, models.Cdm.message_id).where(
+            of_event, models.Cdm.message_id == until
+        )
+    ).one_or_none()
+    if pinned is None:
+        raise StoreError(f"no CDM {until} in event {event_id}")
+    created, message_id = pinned
+    return and_(
+        of_event,
+        or_(
+            models.Cdm.creation_date < created,
+            and_(
+                models.Cdm.creation_date == created,
+                models.Cdm.message_id <= message_id,
+            ),
+        ),
+    )
+
+
+def _latest_message_id(session: Session, cdms: ColumnElement[bool]) -> MessageId:
+    """The ``MESSAGE_ID`` of the latest of ``cdms``, by ``CREATION_DATE``
+    (then by ``MESSAGE_ID``); every stored event has a CDM."""
+    return session.execute(
+        select(models.Cdm.message_id)
+        .where(cdms)
+        .order_by(models.Cdm.creation_date.desc(), models.Cdm.message_id.desc())
+        .limit(1)
+    ).scalar_one()
+
+
+def latest_in(session: Session, event_id: str) -> MessageId:
+    """The ``MESSAGE_ID`` of an event's latest CDM (as
+    :meth:`Store.latest_message_id`), in the caller's transaction.
+
+    Internal to :mod:`keepout.store`: a job is pinned to it in the
+    transaction that queues the job.
+
+    Raises
+    ------
+    StoreError
+        If there is no such event.
+    """
+    return _latest_message_id(session, _cdms_of(session, event_id, None))
+
+
+def catalog_in(
+    session: Session, base: Path, message_id: str
+) -> CatalogReference | None:
+    """The catalog a stored CDM was made from (as :meth:`Store.catalog`), in
+    the caller's transaction.
+
+    Internal to :mod:`keepout.store`: a job's key is that of the catalog of
+    its CDM, read in the transaction that queues the job.
+
+    Parameters
+    ----------
+    session
+        A session of the store.
+    base
+        The directory of the store file: the catalog's paths are relative
+        to it.
+    message_id
+        The ``MESSAGE_ID`` of the CDM.
+    """
+    catalog_id = session.scalar(
+        select(models.Cdm.catalog_id).where(models.Cdm.message_id == message_id)
+    )
+    if catalog_id is None:
+        return None
+    catalog = session.get_one(
+        models.Catalog, catalog_id, options=[selectinload(models.Catalog.files)]
+    )
+    return CatalogReference(
+        catalog.label,
+        tuple(
+            CatalogFileRef(
+                file.name,
+                base / file.path,
+                file.sha256,
+                url=file.url,
+                retrieved=file.retrieved,
+            )
+            for file in catalog.files
+        ),
+    )
+
+
+def _texts(session: Session, cdms: ColumnElement[bool]) -> Sequence[str]:
+    """The stored texts of ``cdms``."""
+    return session.scalars(select(models.Cdm.content).where(cdms)).all()
+
+
+def _parsed_event(event_id: str, texts: Iterable[str]) -> ConjunctionEvent:
+    """The event of stored CDM texts.
+
+    Raises
+    ------
+    CdmParseError
+        If a text no longer parses (a store edited by hand).
+    EventError
+        If the CDMs no longer make an event (likewise).
+    """
+    return ConjunctionEvent(event_id, tuple(keepout.cdm.loads(text) for text in texts))
 
 
 def _before(before: Time) -> ColumnElement[bool]:
@@ -758,31 +932,31 @@ class Store:
             for event in self.events(event_ids=event_ids)
         ]
 
-    def event(self, event_id: str) -> ConjunctionEvent:
+    def event(self, event_id: str, *, until: str | None = None) -> ConjunctionEvent:
         """A stored event, its CDMs read from their stored text.
 
         Parameters
         ----------
         event_id
             The store's id of the event.
+        until
+            The ``MESSAGE_ID`` of one of its CDMs: the event as it was when
+            that CDM was its latest, i.e. without the CDMs after it in
+            (``CREATION_DATE``, ``MESSAGE_ID``) order. ``None``: every CDM.
 
         Raises
         ------
         StoreError
-            If there is no such event, or if the database cannot be used.
+            If there is no such event, if ``until`` is not a CDM of it, or if
+            the database cannot be used.
         CdmParseError
             If a stored CDM no longer parses (a store edited by hand).
         EventError
             If the stored CDMs no longer make an event (likewise).
         """
         with self.read() as session:
-            _require_events(session, [event_id])
-            texts = session.scalars(
-                select(models.Cdm.content).where(models.Cdm.event_id == event_id)
-            ).all()
-        return ConjunctionEvent(
-            event_id, tuple(keepout.cdm.loads(text) for text in texts)
-        )
+            texts = _texts(session, _cdms_of(session, event_id, until))
+        return _parsed_event(event_id, texts)
 
     def events(
         self, *, event_ids: Collection[str] | None = None
@@ -865,13 +1039,18 @@ class Store:
             )
         return tuple(observation_from_json(payload) for _, payload in rows)
 
-    def catalog(self, event_id: str) -> CatalogReference | None:
+    def catalog(
+        self, event_id: str, *, until: str | None = None
+    ) -> CatalogReference | None:
         """The catalog the event's latest CDM was made from.
 
         Parameters
         ----------
         event_id
             The store's id of the event.
+        until
+            The ``MESSAGE_ID`` of one of its CDMs, latest as in
+            :meth:`event`; ``None``: the event's latest CDM.
 
         Returns
         -------
@@ -884,36 +1063,107 @@ class Store:
         Raises
         ------
         StoreError
+            If there is no such event, if ``until`` is not a CDM of it, or if
+            the database cannot be used.
+        """
+        with self.read() as session:
+            latest = _latest_message_id(session, _cdms_of(session, event_id, until))
+            return catalog_in(session, self.path.parent, latest)
+
+    def latest_message_id(self, event_id: str) -> str:
+        """The ``MESSAGE_ID`` of an event's latest CDM, by ``CREATION_DATE``
+        (then by ``MESSAGE_ID``).
+
+        Parameters
+        ----------
+        event_id
+            The store's id of the event.
+
+        Raises
+        ------
+        StoreError
             If there is no such event, or if the database cannot be used.
         """
         with self.read() as session:
-            _require_events(session, [event_id])
-            catalog_id = session.scalar(
-                select(models.Cdm.catalog_id)
-                .where(models.Cdm.event_id == event_id)
-                .order_by(models.Cdm.creation_date.desc(), models.Cdm.message_id.desc())
-                .limit(1)
-            )
-            if catalog_id is None:
-                return None
-            catalog = session.get_one(
-                models.Catalog,
-                catalog_id,
-                options=[selectinload(models.Catalog.files)],
-            )
-        return CatalogReference(
-            catalog.label,
-            tuple(
-                CatalogFileRef(
-                    file.name,
-                    self.path.parent / file.path,
-                    file.sha256,
-                    url=file.url,
-                    retrieved=file.retrieved,
+            return latest_in(session, event_id)
+
+    def maneuver(self, event_id: str, settings: Settings) -> ManeuverOutcome | None:
+        """The cached manoeuvre outcome of an event: the one planned on its
+        latest CDM with ``settings`` and the catalog of that CDM.
+
+        A CDM ingested since makes it miss: the outcome is of the event as
+        it was.
+
+        Parameters
+        ----------
+        event_id
+            The store's id of the event.
+        settings
+            The operator's settings of the plan (by their
+            :func:`~keepout.store.maneuver_codec.maneuver_key`).
+
+        Returns
+        -------
+        ManeuverOutcome or None
+            The outcome, its event every stored CDM of the event; ``None`` if
+            none is cached.
+
+        Raises
+        ------
+        StoreError
+            If there is no such event, if the cached outcome cannot be read,
+            or if the database cannot be used.
+        ValueError
+            If a settings file cannot hold ``settings``, as
+            :func:`~keepout.store.maneuver_codec.maneuver_key`.
+        CdmParseError
+            If a stored CDM no longer parses (a store edited by hand).
+        EventError
+            If the stored CDMs no longer make an event (likewise).
+        """
+        with self.read() as session:
+            cdms = _cdms_of(session, event_id, None)
+            latest = _latest_message_id(session, cdms)
+            key = maneuver_key(settings, catalog_in(session, self.path.parent, latest))
+            payload = session.scalar(
+                select(models.Result.payload).where(
+                    models.Result.message_id == latest, models.Result.key == key
                 )
-                for file in catalog.files
-            ),
-        )
+            )
+            if payload is None:
+                return None
+            texts = _texts(session, cdms)
+        return outcome_from_json(payload, _parsed_event(event_id, texts))
+
+    def save_maneuver(
+        self, message_id: str, key: str, payload: Mapping[str, JsonValue]
+    ) -> bool:
+        """Cache a manoeuvre outcome's JSON on a CDM, in one write
+        transaction.
+
+        Parameters
+        ----------
+        message_id
+            The ``MESSAGE_ID`` of the CDM the outcome was planned on: the
+            event's latest then.
+        key
+            Its :func:`~keepout.store.maneuver_codec.maneuver_key`.
+        payload
+            Its :func:`~keepout.store.maneuver_codec.outcome_to_json`.
+
+        Returns
+        -------
+        bool
+            Whether it was written: not if the CDM is not stored (e.g. purged
+            meanwhile) or an outcome is already cached on it under ``key``.
+
+        Raises
+        ------
+        StoreError
+            If the database cannot be used.
+        """
+        with self.write() as session:
+            return save_maneuver_in(session, message_id, key, payload)
 
     def count_before(self, before: Time) -> int:
         """The number of events whose latest TCA is before a time: those
@@ -934,7 +1184,7 @@ class Store:
 
     def purge(self, before: Time) -> int:
         """Delete the events whose latest TCA is before a time, with their
-        CDMs and cached results, and the catalogs no CDM is left made from,
+        CDMs, cached results and jobs, and the catalogs no CDM is left made from,
         and every copy in :attr:`catalog_dir` no catalog refers to (also
         those a failed ingest left).
 

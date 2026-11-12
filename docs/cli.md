@@ -36,6 +36,8 @@ keywords do. The prose of these pages uses the British "manoeuvre".
 | `keepout validate` | Compare keepout's Pc with CARA's on every validation case |
 | `keepout store add CDM... --store FILE` | Keep CDMs in a [conjunction store](store.md), each in its event, and assess the events |
 | `keepout store upgrade\|rebuild\|purge --store FILE` | Upgrade a store's schema, compute its missing Pc, delete its old events |
+| `keepout jobs list\|cancel --store FILE` | List a store's [background jobs](store.md#background-jobs), cancel one |
+| `keepout worker --store FILE [--until-idle] [--workers N]` | Compute the manoeuvre plans queued with `maneuver --event ID --queue` |
 
 `keepout COMMAND --help` lists every option of a command.
 
@@ -316,14 +318,60 @@ or `--source`, against the catalog it was screened with: the store's copy
 of it, checked against its SHA-256. The output names it as `stored copy
 of` the file or source screened. If that copy was deleted or changed
 since, the command stops with an error naming the file (status 1),
-before planning; it never re-screens against another catalog.
+before planning, unless the plan is already cached: the cached plan is
+shown without reading the copy. It never re-screens against another
+catalog.
 `--catalog` or `--source` re-screens against the catalog given instead.
 An event whose latest CDM came from `assess --store` or `store add` was
-screened by no one, and is not re-screened without a catalog. After the
-`store add` below, for instance, this plans the Luch-5X event from the
-store, not re-screened:
-`keepout maneuver --event 3befe6f1305d --store keepout.db --target-pc 1e-7`.
+screened by no one, and is not re-screened without a catalog.
 An id the store does not hold is an error (status 1).
+
+The plan of a stored event against its stored catalog is cached in the
+store, on the event's latest CDM. The same command with the same settings
+shows it again at once, until a newer CDM of the event arrives.
+`--catalog`, `--source` and `--burn-before` plan without the cache. A
+plan the store cannot take (e.g. locked for longer than 30 s) is shown
+all the same, with `Warning: the plan was not cached:` and the reason on
+standard error.
+
+`--queue` leaves the plan to a [background job](store.md#background-jobs)
+instead of computing it in the command. After the `store add` below, for
+instance, this queues the plan of the Intelsat 39 event:
+
+```bash
+keepout maneuver --event 3befe6f1305d --store keepout.db --target-pc 1e-7 --queue
+```
+
+```text
+Job 1 queued for event 3befe6f1305d.
+```
+
+A worker computes the jobs queued, one at a time. With `--until-idle` it
+stops once the queue is empty, and says how many it ran (its log goes to
+standard error):
+
+```bash
+keepout worker --store keepout.db --until-idle
+```
+
+```text
+Ran 1 job.
+```
+
+The same command without `--queue` then shows the plan from the store,
+not re-screened, since `store add` stored no catalog:
+`keepout maneuver --event 3befe6f1305d --store keepout.db --target-pc 1e-7`.
+`keepout jobs list --store keepout.db` lists the jobs, the newest first,
+with their status and the error of a failed one; `keepout jobs cancel ID
+--store keepout.db` cancels one.
+
+`--queue` needs `--event` and takes the target, `--hbr` and
+`--settings`, but not `--catalog`, `--source`, `--burn-before`, `--dv` or
+`--workers` (otherwise a usage error, status 2): a job plans on the burn
+grid, against the event's stored catalog, with the processes of
+`keepout worker --workers`. A plan already cached queues nothing, and
+says so; a job already queued or running for the same CDM and settings
+is named instead of a second one.
 
 Planning takes tens of seconds on the default grid. Each candidate burn
 adds a run of the event's own method, up to a minute for a slow encounter
@@ -613,3 +661,23 @@ status 4.
 
 Each approach has `secondary`, `tca`, `range_at_tca_m`,
 `relative_speed_m_s`, `pc`, `level` and `assumed_covariance` (always true).
+
+### `maneuver --queue`, `jobs list` and `jobs cancel`
+
+`maneuver --queue` gives `event`, `job` (its id, `null` when the plan is
+cached), `status` (`null` likewise) and `cached`. `jobs cancel` gives
+`job`, `event` and `status`. `jobs list` gives `path` and `jobs`, the
+newest first, each with these keys:
+
+| Key | Type | Meaning |
+|---|---|---|
+| `job` | number | the job's id |
+| `event` | string | the event's id |
+| `cdm` | string | the `MESSAGE_ID` of the CDM it plans from |
+| `status` | string | `queued`, `running`, `succeeded`, `failed` or `cancelled` |
+| `attempt` | number | the attempts it cost |
+| `worker` | string or `null` | the worker running it, or the one that held it when it succeeded, failed or was cancelled; `null` while queued, for a job cancelled while queued, and for one failed because its workers stopped twice without an answer |
+| `created`, `started`, `finished` | string or `null` | its times (`created` is never `null`) |
+| `error` | string or `null` | why it failed |
+
+`keepout worker` has no `--json`: it prints how many jobs it ran.

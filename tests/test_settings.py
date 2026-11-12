@@ -1,13 +1,19 @@
 import re
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from keepout._defaults import TARGET_PC
 from keepout.errors import SettingsError
-from keepout.pc import AUTO
+from keepout.pc import AUTO, PcComputation
 from keepout.risk import DEFAULT_THRESHOLDS, Thresholds
-from keepout.settings import Settings, load_settings
+from keepout.settings import (
+    Settings,
+    load_settings,
+    settings_from_data,
+    settings_to_data,
+)
 
 
 def _write(tmp_path: Path, text: str) -> Path:
@@ -117,3 +123,71 @@ def test_settings_that_are_not_toml(tmp_path: Path) -> None:
     path.write_bytes(b"\xff")
     with pytest.raises(SettingsError, match=rf"{re.escape(str(path))}: not UTF-8"):
         load_settings(path)
+
+
+def _assert_same_settings(actual: Settings, expected: Settings) -> None:
+    """Settings equal, ``compute`` field by field: :class:`PcComputation`
+    compares by identity."""
+    assert (
+        actual.compute.method,
+        dict(actual.compute.options),
+        actual.compute.fallback,
+    ) == (
+        expected.compute.method,
+        dict(expected.compute.options),
+        expected.compute.fallback,
+    )
+    assert replace(actual, compute=expected.compute) == expected
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        Settings(),
+        Settings(
+            compute=PcComputation("foster"),
+            policy="raise",
+            combined_hard_body_radius=20.0,
+            thresholds=replace(DEFAULT_THRESHOLDS, green_below=1e-6, red_from=1e-4),
+            target_pc=1e-6,
+        ),
+    ],
+)
+def test_settings_round_trip(settings: Settings) -> None:
+    _assert_same_settings(settings_from_data(settings_to_data(settings)), settings)
+
+
+def test_settings_data_has_every_key() -> None:
+    data = settings_to_data(Settings(combined_hard_body_radius=20.0))
+    assert {name: set(table) for name, table in data.items()} == {
+        "pc": {"method", "policy", "hbr_m"},
+        "risk": {"green_below", "red_from"},
+        "maneuver": {"target_pc"},
+    }
+    assert "hbr_m" not in settings_to_data(Settings())["pc"]
+
+
+@pytest.mark.parametrize(
+    ("settings", "field"),
+    [
+        (
+            Settings(compute=PcComputation("montecarlo", options={"seed": 1})),
+            "compute.options",
+        ),
+        (
+            Settings(
+                compute=PcComputation("hall3d", fallback=PcComputation("montecarlo"))
+            ),
+            "compute.fallback",
+        ),
+        (
+            Settings(thresholds=replace(DEFAULT_THRESHOLDS, basis="estimate")),
+            "thresholds.basis",
+        ),
+    ],
+)
+def test_settings_a_file_cannot_hold_are_refused(
+    settings: Settings, field: str
+) -> None:
+    with pytest.raises(ValueError, match=re.escape(field)):
+        settings_to_data(settings)

@@ -54,8 +54,10 @@ def test_help_lists_the_commands() -> None:
         "assess",
         "maneuver",
         "validate",
+        "worker",
         "fetch",
         "store",
+        "jobs",
     ]
     fetch = keepout("fetch", "--help")
     assert fetch.exit_code == ExitCode.OK
@@ -63,6 +65,9 @@ def test_help_lists_the_commands() -> None:
     store = keepout("store", "--help")
     assert store.exit_code == ExitCode.OK
     assert commands(store.stdout) == ["add", "upgrade", "rebuild", "purge"]
+    jobs = keepout("jobs", "--help")
+    assert jobs.exit_code == ExitCode.OK
+    assert commands(jobs.stdout) == ["list", "cancel"]
 
 
 @pytest.mark.parametrize(
@@ -71,6 +76,7 @@ def test_help_lists_the_commands() -> None:
         (),
         ("fetch",),
         ("store",),
+        ("jobs",),
         ("nonsense",),
         ("fetch", "nonsense"),
         ("--nonsense",),

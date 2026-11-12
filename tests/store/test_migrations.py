@@ -101,10 +101,25 @@ def test_the_schema_holds_its_rules(tmp_path: Path) -> None:
         ("cdms", ("catalog_id",)): "RESTRICT",
         ("catalog_files", ("catalog_id",)): "CASCADE",
         ("results", ("message_id",)): "CASCADE",
+        ("jobs", ("event_id",)): "CASCADE",
+        ("jobs", ("message_id",)): "CASCADE",
     }
     assert schema["cdms"]["checks"] == [("ck_cdms_format", "format IN ('kvn', 'xml')")]
     indexes = {i[0] for rules in schema.values() for i in rules["indexes"]}  # type: ignore[attr-defined]
-    assert {"ix_cdms_catalog_id", "ix_catalog_files_catalog_id"} <= indexes
+    assert {
+        "ix_cdms_catalog_id",
+        "ix_catalog_files_catalog_id",
+        "ix_jobs_event_id",
+        "ix_jobs_message_id",
+        "ix_jobs_status_created_at",
+    } <= indexes
+    assert "ix_jobs_status" not in indexes
+    assert schema["jobs"]["checks"] == [
+        (
+            "ck_jobs_status",
+            "status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')",
+        )
+    ]
 
 
 def test_upgrade_reports_the_revisions(tmp_path: Path) -> None:
@@ -268,3 +283,36 @@ def test_a_migration_that_breaks_a_foreign_key_is_rolled_back(tmp_path: Path) ->
         ):
             connection.execute(text("DELETE FROM events"))
         assert _counts(store) == before
+
+
+def _job(status: str = "queued") -> TextClause:
+    return text(
+        "INSERT INTO jobs (kind, event_id, message_id, key, params, status,"
+        " attempt, claims, created_at)"
+        " VALUES ('maneuver', '0123abcd', 'm', 'k', '{}', :status, 0, 0, 't')"
+    ).bindparams(status=status)
+
+
+def test_a_job_id_is_never_reused(tmp_path: Path) -> None:
+    # A worker's late write to a deleted job must not reach a new one.
+    with open_store(tmp_path / "keepout.db") as store:
+        with store.write() as session:
+            session.execute(EVENT)
+            session.execute(CDM.bindparams(event="0123abcd", format="kvn"))
+            session.execute(_job())
+            first = session.scalar(text("SELECT max(id) FROM jobs"))
+            session.execute(text("DELETE FROM jobs"))
+            session.execute(_job())
+            second = session.scalar(text("SELECT max(id) FROM jobs"))
+        assert first is not None
+        assert second is not None
+        assert second > first
+
+
+def test_a_job_needs_a_known_status(tmp_path: Path) -> None:
+    with open_store(tmp_path / "keepout.db") as store:
+        with store.write() as session:
+            session.execute(EVENT)
+            session.execute(CDM.bindparams(event="0123abcd", format="kvn"))
+        with pytest.raises(IntegrityError, match="CHECK"):
+            _insert(store, _job(status="done"))

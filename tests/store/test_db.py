@@ -54,6 +54,19 @@ def test_a_new_file_is_created_at_head(tmp_path: Path) -> None:
     assert _revision(path) == HEAD
 
 
+def test_an_old_sqlite_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(sqlite3, "sqlite_version_info", (3, 34, 1))
+    monkeypatch.setattr(sqlite3, "sqlite_version", "3.34.1")
+    path = tmp_path / "keepout.db"
+    with pytest.raises(
+        StoreError, match=r"^the store needs SQLite 3\.35 or newer, found 3\.34\.1$"
+    ):
+        open_store(path)
+    assert not path.exists()
+
+
 def test_a_path_may_be_a_string(tmp_path: Path) -> None:
     with open_store(str(tmp_path / "keepout.db")) as store:
         assert store.path == tmp_path / "keepout.db"

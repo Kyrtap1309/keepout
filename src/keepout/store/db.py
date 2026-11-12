@@ -10,6 +10,7 @@ write-ahead logging.
 
 from __future__ import annotations
 
+import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -303,6 +304,25 @@ def _exists(path: Path) -> bool:
         raise StoreError(f"cannot use the store {path}: {error}") from error
 
 
+_SQLITE: Final = (3, 35)
+"""The oldest SQLite the store runs on: the first with ``UPDATE … RETURNING``."""
+
+
+def _require_sqlite() -> None:
+    """A check that Python's SQLite is :data:`_SQLITE` or newer.
+
+    Raises
+    ------
+    StoreError
+        If it is older; the message names its version.
+    """
+    if sqlite3.sqlite_version_info < _SQLITE:
+        oldest = ".".join(map(str, _SQLITE))
+        raise StoreError(
+            f"the store needs SQLite {oldest} or newer, found {sqlite3.sqlite_version}"
+        )
+
+
 def open_store(path: str | Path, *, create: bool = True) -> Store:
     """Open a conjunction store.
 
@@ -327,9 +347,10 @@ def open_store(path: str | Path, *, create: bool = True) -> Store:
         directory that cannot be searched, a lock held past the busy
         timeout); if it is not a SQLite database or
         is another application's database; or if it was made by an older
-        keepout (``keepout store upgrade`` upgrades it) or a newer one. A
-        refused file is not changed.
+        keepout (``keepout store upgrade`` upgrades it) or a newer one; or
+        if Python's SQLite is older than 3.35. A refused file is not changed.
     """
+    _require_sqlite()
     path = Path(path)
     schema = _read_schema(path) if _exists(path) else _Schema(empty=True, revision=None)
     if schema.empty:

@@ -11,6 +11,7 @@ test compares the two.
 
 from __future__ import annotations
 
+import enum
 from typing import Any, Final, NewType, get_args
 
 from astropy.time import Time
@@ -41,6 +42,8 @@ __all__ = [
     "Cdm",
     "Event",
     "EventId",
+    "Job",
+    "JobStatus",
     "MessageId",
     "Result",
     "UtcTime",
@@ -51,6 +54,17 @@ EventId = NewType("EventId", str)
 
 MessageId = NewType("MessageId", str)
 """A stored CDM's ``MESSAGE_ID``."""
+
+
+class JobStatus(enum.StrEnum):
+    """Where a job is: waiting, held by a worker, done, failed or cancelled."""
+
+    QUEUED = "queued"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
 
 NAMING_CONVENTION: Final = {
     "ix": "ix_%(table_name)s_%(column_0_N_name)s",
@@ -211,3 +225,51 @@ class Result(Base):
     created_at: Mapped[Time] = mapped_column(UtcTime)
 
     cdm: Mapped[Cdm] = relationship(back_populates="results", lazy="raise")
+
+
+class Job(Base):
+    """A computation queued on an event's CDM, e.g. a manoeuvre plan, and
+    how far it got."""
+
+    __tablename__ = "jobs"
+    __table_args__ = (
+        Index(None, "status", "created_at"),
+        CheckConstraint(
+            f"status IN ({', '.join(repr(s.value) for s in JobStatus)})",
+            name="status",
+        ),
+        {"sqlite_autoincrement": True},
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    """Never reused (SQLite ``AUTOINCREMENT``): a worker's stale write to a
+    deleted job cannot reach a new one."""
+    kind: Mapped[str] = mapped_column(String)
+    """What is computed, e.g. ``"maneuver"``."""
+    event_id: Mapped[EventId] = mapped_column(
+        String(12), ForeignKey("events.id", ondelete="CASCADE"), index=True
+    )
+    message_id: Mapped[MessageId] = mapped_column(
+        String, ForeignKey("cdms.message_id", ondelete="CASCADE"), index=True
+    )
+    """The CDM the computation is pinned to: the event's latest when queued."""
+    key: Mapped[str] = mapped_column(String(64))
+    """The key its result is cached under."""
+    params: Mapped[dict[str, Any]] = mapped_column(JSON)
+    """What the computation needs, e.g. the settings."""
+    status: Mapped[str] = mapped_column(String)
+    """A :class:`JobStatus`."""
+    attempt: Mapped[int] = mapped_column(Integer, default=0)
+    """How many times a worker took it."""
+    claims: Mapped[int] = mapped_column(Integer, default=0)
+    """How many times it was claimed, never lowered: a worker's writes name
+    the claim they belong to."""
+    worker: Mapped[str | None] = mapped_column(String)
+    """The worker that holds it."""
+    lease_until: Mapped[Time | None] = mapped_column(UtcTime)
+    """When the worker's hold on it lapses."""
+    created_at: Mapped[Time] = mapped_column(UtcTime)
+    started_at: Mapped[Time | None] = mapped_column(UtcTime)
+    finished_at: Mapped[Time | None] = mapped_column(UtcTime)
+    error: Mapped[str | None] = mapped_column(String)
+    """Why it failed."""
