@@ -71,6 +71,8 @@ ARCHIVE_URL: Final = (
 ARCHIVE_SHA256: Final = (
     "df1500146705305006ea506eeccc97f5c2e9593928d6650c503c4f5b5529d0bb"
 )
+"""The SHA-256 (hex) of :data:`ARCHIVE_URL`'s archive; a download with
+another digest raises :class:`~keepout.errors.ChecksumMismatch`."""
 
 RAW_MEMBER: Final = (
     "Collision Avoidance Challenge - Dataset/raw_data/raw_data_2015-2019.gz"
@@ -79,6 +81,8 @@ RAW_MEMBER: Final = (
 test sets, with ``event_id`` unique across both (gzipped CSV, 118 MB)."""
 
 RAW_SHA256: Final = "9c30d0bcc42a66818ee0958482694ca7fc1168682b02d3f1e26220198e89c06b"
+"""The SHA-256 (hex) of :data:`RAW_MEMBER` as extracted (still gzipped); the
+cached table is checked against it."""
 
 RISK_FLOOR: Final = -30.0
 """ESA's floor of ``risk`` (log10 Pc): a CDM at the floor says only that the
@@ -237,6 +241,11 @@ class KelvinsEvent:
 
     def column(self, name: str) -> FloatArray:
         """One feature of every CDM (read-only).
+
+        Parameters
+        ----------
+        name
+            A feature of :data:`FEATURES`, e.g. ``"risk"``.
 
         Raises
         ------

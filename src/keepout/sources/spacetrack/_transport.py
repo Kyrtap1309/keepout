@@ -81,6 +81,14 @@ class UrllibTransport:
         Seconds to wait for the server.
     handlers
         More :mod:`urllib.request` handlers, e.g. a proxy handler.
+
+    Attributes
+    ----------
+    timeout
+        Seconds to wait for the server, as given.
+    cookies
+        The cookie jar of every request sent: it keeps Space-Track's session
+        cookie from the login to the requests after it.
     """
 
     def __init__(

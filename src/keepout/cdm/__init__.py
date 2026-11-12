@@ -49,7 +49,13 @@ CdmFormat: TypeAlias = Literal["kvn", "xml"]
 
 def format_of(text: str) -> CdmFormat:
     """The format of a CDM's ``text``: XML if its first non-blank character
-    is ``<``, else KVN."""
+    is ``<``, else KVN.
+
+    Parameters
+    ----------
+    text
+        A CDM's text, as read from its file.
+    """
     return "xml" if strip_bom(text).lstrip().startswith("<") else "kvn"
 
 
@@ -62,7 +68,30 @@ def loads(text: str) -> Cdm:
     Parameters
     ----------
     text
-        The message.
+        The message: one CDM, KVN or XML.
+
+    Returns
+    -------
+    Cdm
+        The message, every field kept as read.
+
+    Raises
+    ------
+    CdmParseError
+        If the message is malformed; the error names the line and keyword
+        (KVN) or the element path (XML).
+
+    Examples
+    --------
+    ```python
+    from pathlib import Path
+
+    from keepout import cdm
+
+    message = cdm.loads(Path("tests/cdm/data/tracss_v2.kvn").read_text())
+    print(message.message_id, message.tca.isot, message.miss_distance)
+    # TRACSS-TEST-0001 2025-06-02T08:15:30.123456 412.5
+    ```
     """
     body = strip_bom(text)
     return xml.loads(body.lstrip()) if format_of(body) == "xml" else kvn.loads(body)
@@ -74,7 +103,32 @@ def load(path: str | Path) -> Cdm:
     Parameters
     ----------
     path
-        File to read (UTF-8, gzip-compressed or not).
+        File to read: UTF-8 text, or gzip-compressed UTF-8 text (recognised
+        by its content, whatever the file name).
+
+    Returns
+    -------
+    Cdm
+        The message, every field kept as read.
+
+    Raises
+    ------
+    CdmParseError
+        If the file is broken gzip data, not UTF-8 text, or not a valid CDM.
+    OSError
+        If the file cannot be read.
+
+    Examples
+    --------
+    ```python
+    from keepout import cdm
+
+    message = cdm.load("tests/cdm/data/tracss_v2.kvn")
+    print(message.object1.object_id, message.object2.object_id)
+    # 12345 30337
+    print(message.collision_probability)  # the originator's Pc
+    # 1.2e-05
+    ```
     """
     return loads(read_text(path))
 

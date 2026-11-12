@@ -1,5 +1,16 @@
 """Exception hierarchy for keepout."""
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    # typing.override from Python 3.12; keepout._types would load NumPy.
+    from typing_extensions import override as _override
+else:
+
+    def _override(method):
+        return method
+
+
 __all__ = [
     "AuthError",
     "CaraFormatError",
@@ -196,8 +207,31 @@ class HardBodyRadiusError(KeepoutError, ValueError):
     CDM) and none was given.
 
     It is also a :class:`ValueError`, as raised for any other invalid
-    argument.
+    argument. Its message is ``"<detail>: <hint>"``; the command line keeps
+    the detail and gives its own hint (``--hbr``, ``hbr_m``).
+
+    Parameters
+    ----------
+    detail
+        Which objects have no radius, e.g. ``"CDM X gives no HBR for
+        OBJECT2"``.
+    hint
+        How to give the radius; by default, the keyword argument
+        ``combined_hard_body_radius``.
     """
+
+    def __init__(
+        self,
+        detail: str,
+        hint: str = "pass combined_hard_body_radius= (in metres)",
+    ) -> None:
+        super().__init__(detail, hint)
+        self.detail = detail
+        self.hint = hint
+
+    @_override
+    def __str__(self) -> str:
+        return f"{self.detail}: {self.hint}"
 
 
 class GeometryError(KeepoutError):

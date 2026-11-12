@@ -84,6 +84,13 @@ class PcMethodInput:
 def load_alfano_inputs(cache: Path | None = None) -> list[AlfanoInput]:
     """Every Alfano (2009) case: CARA's results table and the ``.xls`` sheets.
 
+    Parameters
+    ----------
+    cache
+        The cache directory of the CARA files (see
+        :func:`keepout.sources.cara.commit_dir`); ``None`` for ``$KEEPOUT_CACHE_DIR``,
+        else the user cache directory. Missing files are downloaded.
+
     Raises
     ------
     CaraFormatError
@@ -108,7 +115,15 @@ def load_alfano_inputs(cache: Path | None = None) -> list[AlfanoInput]:
 
 def load_alfano_windows(cache: Path | None = None) -> dict[int, float]:
     """Half-width [s] of each Alfano case's window, by case number:
-    ``A09_FinalTime_s`` of CARA's supplementary table."""
+    ``A09_FinalTime_s`` of CARA's supplementary table.
+
+    Parameters
+    ----------
+    cache
+        The cache directory of the CARA files (see
+        :func:`keepout.sources.cara.commit_dir`); ``None`` for ``$KEEPOUT_CACHE_DIR``,
+        else the user cache directory. Missing files are downloaded.
+    """
     return {
         int(column_number(row, "CaseNumber")): column_number(row, "A09_FinalTime_s")
         for row in cara.load_xlsx(cara.fetch(cara.ALFANO_2009_SUPPLEMENT, cache=cache))
@@ -117,6 +132,13 @@ def load_alfano_windows(cache: Path | None = None) -> dict[int, float]:
 
 def load_pc_method_inputs(cache: Path | None = None) -> list[PcMethodInput]:
     """Every conjunction of the CARA Pc method test set: table row and CDM.
+
+    Parameters
+    ----------
+    cache
+        The cache directory of the CARA files (see
+        :func:`keepout.sources.cara.commit_dir`); ``None`` for ``$KEEPOUT_CACHE_DIR``,
+        else the user cache directory. Missing files are downloaded.
 
     Raises
     ------
@@ -143,6 +165,11 @@ def alfano_objects(rows: Sequence[Sequence[Cell]]) -> tuple[ObjectState, ObjectS
     secondary position 23, velocity 27, covariance 31-36. ECI, m, m/s.
     Covariances are repaired (symmetrised) if needed; see
     :attr:`~keepout.covariance.Covariance.repairs`.
+
+    Parameters
+    ----------
+    rows
+        The sheet's rows, as :func:`~keepout.sources.cara.load_xls_rows` reads them.
 
     Raises
     ------
@@ -184,6 +211,13 @@ def _gcrf_object(
 def column_value(row: Mapping[str, Cell], name: str) -> Cell:
     """The cell of column ``name`` of a CARA table row.
 
+    Parameters
+    ----------
+    row
+        A row of a CARA table, by column name.
+    name
+        The column's name in the header row.
+
     Raises
     ------
     CaraFormatError
@@ -197,6 +231,13 @@ def column_value(row: Mapping[str, Cell], name: str) -> Cell:
 
 def column_number(row: Mapping[str, Cell], name: str) -> float:
     """The number in column ``name`` of a CARA table row.
+
+    Parameters
+    ----------
+    row
+        A row of a CARA table, by column name.
+    name
+        The column; its cell is a number or the text of one.
 
     Raises
     ------

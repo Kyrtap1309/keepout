@@ -74,7 +74,7 @@ def observation_to_json(observation: PcObservation) -> dict[str, JsonValue]:
     Parameters
     ----------
     observation
-        The observation.
+        The observation, e.g. of :meth:`~keepout.events.ConjunctionEvent.observations`.
     """
     return {
         "time_to_tca": observation.time_to_tca,
@@ -202,6 +202,11 @@ def result_key(settings: Settings) -> str:
     so a store never serves a Pc computed otherwise; the thresholds and the
     manoeuvre target do not change it. A radius keys the same as an integer
     or a float (``20`` and ``20.0``).
+
+    Parameters
+    ----------
+    settings
+        The operator's settings.
     """
     compute, radius = settings.compute, settings.combined_hard_body_radius
     return _key(

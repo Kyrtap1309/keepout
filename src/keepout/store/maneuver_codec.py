@@ -145,7 +145,7 @@ def outcome_to_json(outcome: ManeuverOutcome) -> dict[str, JsonValue]:
     Parameters
     ----------
     outcome
-        The outcome.
+        The outcome, from :func:`~keepout.maneuver.plan_event`.
     """
     return {
         "target_pc": _number(outcome.target_pc),

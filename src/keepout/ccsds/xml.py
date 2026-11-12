@@ -69,7 +69,13 @@ def parse(text: str, family: Family) -> ElementTree.Element:
 
 
 def local(tag: str) -> str:
-    """An element's name without its namespace."""
+    """An element's name without its namespace.
+
+    Parameters
+    ----------
+    tag
+        An element's tag, e.g. ``{urn:ccsds:schema:ndmxml}cdm``.
+    """
     return tag.rsplit("}", 1)[-1]
 
 
@@ -262,6 +268,11 @@ def tostring(root: ElementTree.Element) -> str:
     """A document of ``root``: an XML declaration and the elements indented.
 
     ``root`` is indented in place.
+
+    Parameters
+    ----------
+    root
+        The document's root element.
     """
     ElementTree.indent(root)
     declaration = '<?xml version="1.0" encoding="UTF-8"?>\n'

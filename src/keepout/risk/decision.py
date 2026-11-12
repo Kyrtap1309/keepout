@@ -192,9 +192,15 @@ def decide(
     Parameters
     ----------
     trend
-        The event's trend.
+        The event's trend, from :func:`~keepout.risk.analyse_trend`.
     config
-        The decision point.
+        How long before TCA a red event is to be manoeuvred; by default two
+        days (see :class:`DecisionConfig`).
+
+    Returns
+    -------
+    Decision
+        The recommended action and the reasons for it.
     """
     latest = trend.latest_observation
     if latest is None:
@@ -281,11 +287,18 @@ def assess(
         The event's observations, e.g. from
         :meth:`~keepout.events.ConjunctionEvent.observations`.
     thresholds
-        Risk thresholds.
+        The Pc thresholds of the risk levels and which value of an
+        observation is compared with them; by default green below 1e-7, red
+        from 1e-4, on the conservative basis (see
+        :class:`~keepout.risk.Thresholds`).
     trend_config
-        How the trend's direction is decided.
+        How many of the latest observations the trend fits and the slope
+        still called steady; by default 3 observations and 0.5 decades of
+        Pc per day (see :class:`~keepout.risk.TrendConfig`).
     decision_config
-        The decision point.
+        How long before TCA a red event is to be manoeuvred rather than
+        monitored while a manoeuvre is prepared; by default two days (see
+        :class:`~keepout.risk.DecisionConfig`).
 
     Returns
     -------
@@ -298,6 +311,28 @@ def assess(
     ------
     ValueError
         If there are no observations.
+
+    Examples
+    --------
+    ```python
+    from keepout import PcObservation, assess
+    from keepout.units import DAY
+
+    observations = [  # seconds before TCA, who computed the Pc, the Pc
+        PcObservation(5 * DAY, "operator", pc=2e-6),
+        PcObservation(3 * DAY, "operator", pc=3e-5),
+        PcObservation(1.5 * DAY, "operator", pc=2e-4),
+    ]
+    assessment = assess(observations)
+    action = assessment.decision.action
+    print(assessment.level.key, assessment.trend.direction, action.label)
+    # red rising maneuver
+    for reason in assessment.decision.reasons:
+        print(reason)
+    # latest Pc 2.00e-04 is red, 1.50 d before TCA
+    # trend rising (+0.57 decades per day)
+    # within the decision point (2.00 d before TCA)
+    ```
     """
     trend = analyse_trend(observations, thresholds=thresholds, config=trend_config)
     return Assessment(trend, decide(trend, config=decision_config))

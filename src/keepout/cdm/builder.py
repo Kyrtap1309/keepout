@@ -389,7 +389,8 @@ def make_cdm(
         ``CREATION_DATE``, as given (no clock is read, so that a message
         can be built again identically).
     originator
-        ``ORIGINATOR``.
+        ``ORIGINATOR`` of the message: who issued it; :data:`ORIGINATOR` (``"KEEPOUT"``)
+        by default.
     message_id
         ``MESSAGE_ID``; by default :func:`make_message_id` of the objects'
         ids, the TCA and ``created``.
@@ -404,7 +405,7 @@ def make_cdm(
         ``RTN``, ``SCREEN_VOLUME_SHAPE`` ``ELLIPSOID`` and the comment
         :data:`SCREEN_VOLUME_COMMENT`.
     comments
-        Header comments.
+        Comments of the message's header, one ``COMMENT`` line each; none by default.
 
     Returns
     -------

@@ -31,8 +31,11 @@ class Direction(enum.StrEnum):
     """Where the Pc is heading: the sign of the fitted slope of log10 Pc."""
 
     RISING = "rising"
+    """The slope is above :attr:`TrendConfig.steady_within`."""
     FALLING = "falling"
+    """The slope is below minus :attr:`TrendConfig.steady_within`."""
     STEADY = "steady"
+    """The slope is within :attr:`TrendConfig.steady_within` of 0."""
     UNDETERMINED = "undetermined"
     """Fewer than two observations to fit, or all fitted observations at one
     time."""

@@ -1,5 +1,26 @@
 # 2-D probability of collision
 
+The probability of collision (Pc) is the chance that two objects come
+closer than the sum of their sizes, given the uncertainty of their orbits.
+It is what an operator decides on: a miss distance of 200 m means little
+without knowing whether the positions are uncertain by metres or by
+kilometres. [Concepts](concepts.md) puts it in context.
+
+For most conjunctions in low Earth orbit the objects pass each other within
+seconds, at kilometres per second. The 2-D methods on this page are
+then exact enough and take milliseconds. `compute_pc` uses them unless the
+encounter is slow or a covariance is missing
+([3-D, Monte Carlo and maximum Pc](pc-3d.md) covers those cases).
+
+```python
+import keepout.cdm
+from keepout import compute_pc
+
+cdm = keepout.cdm.load("tests/cdm/data/tracss_v2.kvn")
+conjunction = cdm.conjunction(combined_hard_body_radius=20.0)  # [m]
+print(compute_pc(conjunction, "foster").value)  # 0.04502836467786191
+```
+
 ## Model
 
 For a short-duration encounter the two objects move on straight lines near

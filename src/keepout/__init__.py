@@ -1,26 +1,64 @@
 """keepout — spacecraft conjunction assessment.
 
-The package itself exports the core types, the Pc entry point, the event
-assessment, screening (with its volume) and the exception hierarchy. The
-rest is in subpackages:
+keepout reads Conjunction Data Messages (CDMs: the warnings, in the format
+of the Consultative Committee for Space Data Systems, CCSDS, that two
+objects will pass close) and computes the probability of collision (Pc) of
+each at its time of closest approach (TCA), for the combined hard-body
+radius (HBR) of the two objects. It groups CDMs into events, follows the
+trend of their Pc and recommends an action, plans avoidance manoeuvres, and
+screens a fleet against a catalog of general perturbations (GP) element
+sets, read as Orbit Mean-Elements Messages (OMMs) and propagated with SGP4
+(Simplified General Perturbations 4). States are in SI units (metres,
+seconds); covariances are given in a satellite's RTN frame (radial,
+transverse, normal) or in the inertial GCRF (Geocentric Celestial Reference
+Frame), and SGP4 states are in TEME (True Equator, Mean Equinox).
+
+The package itself exports the core types, the Pc entry point
+(:func:`compute_pc`), the event assessment (:func:`assess`), screening
+(:func:`screen`, with its volume) and the exception hierarchy; ``__version__``
+is keepout's version, from its distribution's metadata. The rest is in
+subpackages:
 
 - :mod:`keepout.cdm`: CDM input and output.
 - :mod:`keepout.pc`: the individual Pc methods.
 - :mod:`keepout.events`: conjunction events, the CDMs of one encounter.
 - :mod:`keepout.risk`: risk levels, trends and decisions.
-- :mod:`keepout.omm`: element sets.
+- :mod:`keepout.omm`: element sets (OMM, CelesTrak CSV and JSON, TLE).
 - :mod:`keepout.screening`: the screening search, its parts and the reasons
   for skipped element sets.
-- :mod:`keepout.propagation`: propagators.
+- :mod:`keepout.propagation`: propagators (SGP4, numerical, with burns).
 - :mod:`keepout.synthetic`: the synthetic operator (covariance model, fleet,
   run).
 - :mod:`keepout.maneuver`: avoidance manoeuvre planning.
+- :mod:`keepout.settings`: an operator's settings, read from a TOML file.
 - :mod:`keepout.sources`: data sources (CelesTrak, Space-Track, CARA,
   Kelvins).
 - :mod:`keepout.store`: the conjunction store, a SQLite database (needs the
   ``store`` extra).
+- :mod:`keepout.validation`: the Pc methods checked against NASA CARA's
+  reference values.
+
+The modules beneath them hold the geometry: :mod:`keepout.state` (state
+vectors), :mod:`keepout.covariance`, :mod:`keepout.objects`,
+:mod:`keepout.conjunction`, :mod:`keepout.encounter` (the encounter plane),
+:mod:`keepout.frames`, :mod:`keepout.orbits`, :mod:`keepout.equinoctial`,
+:mod:`keepout.units`; :mod:`keepout.ccsds` holds what the CCSDS formats
+share and :mod:`keepout.errors` the exceptions.
 
 The ``keepout`` command (:mod:`keepout.cli`) needs the ``cli`` extra.
+
+Examples
+--------
+```python
+import keepout
+from keepout import cdm, compute_pc
+
+message = cdm.load("tests/cdm/data/tracss_v2.kvn")
+result = compute_pc(message.conjunction(combined_hard_body_radius=20.0))  # [m]
+print(result.method, f"{result.value:.3e}")
+# hall3d 4.504e-02
+print(keepout.__version__)  # e.g. 0.1.0.dev0
+```
 """
 
 from __future__ import annotations
@@ -73,7 +111,8 @@ if TYPE_CHECKING:
     from keepout.state import RefFrame, StateVector
 
     __version__: str
-    """keepout's version, from its distribution's metadata."""
+    """keepout's version, from its distribution's metadata (PEP 440, e.g.
+    ``"0.1.0"``); read on first use."""
 
 _LAZY: Final = {
     "Conjunction": "keepout.conjunction",

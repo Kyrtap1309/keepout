@@ -87,11 +87,19 @@ class BurnDirection(enum.StrEnum):
     """Which way a burn changes the velocity: along it or against it."""
 
     PROGRADE = "prograde"
+    """Along the velocity: a positive Δv, which raises the semi-major axis."""
     RETROGRADE = "retrograde"
+    """Against the velocity: a negative Δv, which lowers the semi-major
+    axis."""
 
     @classmethod
     def of(cls, delta_v: float) -> BurnDirection:
         """The direction of a signed Δv along the velocity.
+
+        Parameters
+        ----------
+        delta_v
+            Signed Δv along the velocity [m/s].
 
         Raises
         ------
@@ -276,6 +284,11 @@ class ManeuverPlan(ManeuverContext):
 
     A :class:`ManeuverContext` with the grid of :func:`plan_maneuver`. The
     arrays are read-only copies of those given.
+
+    It takes every parameter of :class:`ManeuverContext` too, as keywords:
+    ``event``, ``conjunction``, ``target_pc``, ``thresholds``, ``baseline``,
+    ``confirmation`` and ``notes``, which keep their meaning there. The
+    parameters below are its own.
 
     Parameters
     ----------
@@ -843,7 +856,9 @@ def plan_maneuver(
     target_pc
         The Pc a burn must stay below, in (0, 1).
     grid
-        The burns.
+        The burns tried: their times before TCA and their Δv each way. By
+        default :data:`DEFAULT_BURN_GRID`: 8 burn times per orbit from 2 days
+        to 6 hours before TCA, 31 Δv each way from 1 mm/s to 1 m/s.
     compute
         The Pc method of the baseline, as for :func:`prepare_maneuver`.
     policy
@@ -871,6 +886,26 @@ def plan_maneuver(
     KeepoutError
         If the CDM's conjunction or its Pc cannot be computed, e.g.
         :class:`~keepout.errors.HardBodyRadiusError` for a missing radius.
+
+    Examples
+    --------
+    ```python
+    from keepout import cdm
+    from keepout.events import ConjunctionEvent
+    from keepout.maneuver import plan_maneuver
+    from keepout.pc import computation
+
+    event = ConjunctionEvent.from_cdms([cdm.load("tests/cdm/data/tracss_v2.kvn")])
+    plan = plan_maneuver(  # Foster's Pc for every confirmation, for speed
+        event, combined_hard_body_radius=20.0, compute=computation("foster")
+    )
+    print(f"{plan.baseline.pc:.2e}", plan.pc.shape)  # no burn; (burn times, Δv)
+    # 4.50e-02 (72, 62)
+    for option in plan.options:
+        print(option.direction, f"{option.delta_v:+.4f} m/s", f"{option.pc:.1e}")
+    # prograde +0.0040 m/s 9.6e-06
+    # retrograde -0.0063 m/s 8.4e-06
+    ```
     """
     context, result = _prepare(
         event,

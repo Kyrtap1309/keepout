@@ -45,7 +45,7 @@ def plan_stored(
     Parameters
     ----------
     store
-        The store.
+        The open store that holds the event.
     event_id
         The store's id of the event.
     settings
@@ -109,7 +109,8 @@ def run_maneuver_job(
     path
         The store's database file.
     job
-        The job.
+        The job, claimed from the store's queue; its event, CDM and settings are
+        planned.
     workers
         Processes of each re-screen, as for
         :func:`~keepout.maneuver.plan_event`.

@@ -34,36 +34,48 @@ However they are chosen, by `auto` at zero relative velocity or by name,
 `hall3d` and `montecarlo` add a diagnostic when a covariance is known only
 in position. They take that object's velocity as exact.
 
-**Fallback to Monte Carlo.** `hall3d` can raise `PcConvergenceError` after
-its encounter scan. That happens when the peak-overlap iteration failed
-where the rate matters, the rate cannot be computed at a quadrature node,
-or `Nc` is not finite. `auto` then falls back to `montecarlo` with at most
+**Fallback to Monte Carlo.** When `auto` chose `hall3d` and Hall's
+integral fails, `auto` falls back to `montecarlo`. It uses at most
 `AUTO_MC_SAMPLES` (1 000 000) samples and the fixed seed `AUTO_MC_SEED`
 (0), so the same conjunction always gives the same result. The diagnostic
-says so. The fallback reuses Hall's encounter scan rather than repeating
-it, and searches the samples in the segments Hall found.
+says so.
 
-A failure of the scan itself is not covered. The scan fails when its
-encounters need more than 20 001 detection points, the rate is significant
-where the screen ruled it negligible, or it cannot be computed on the scan
-grid. Monte Carlo has no scan to reuse and would need the same one, so the
-`PcConvergenceError` propagates from `compute_pc` even in `auto` mode.
+The fallback covers a `PcConvergenceError` that `hall3d` raises after its
+encounter scan:
 
-**Applicability warnings.** A warning such as "states are ... m from
-closest approach along the relative velocity; 2-D Pc uses the
-straight-line closest approach" is attached whenever it fires and the
-encounter plane is defined (non-zero relative velocity). This holds in
-`auto` and with an explicit method alike. It also holds for the maximum-Pc
-methods with a covariance unknown, for two reasons:
+- the peak-overlap iteration failed where the rate matters;
+- the rate cannot be computed at a quadrature node;
+- `Nc` is not finite.
 
-- The distance from closest approach along the relative velocity does not
-  depend on the covariances.
-- A duration computed from the known covariance alone is a lower bound on
-  the true one. A duration warning is therefore still valid, and then says
-  "at least about".
+A failure of the scan itself is not covered, and the `PcConvergenceError`
+propagates from `compute_pc` even in `auto` mode. The scan fails when:
 
-`details["encounter_duration_s"]` is attached only when both covariances
-are known.
+- its encounters need more than 20 001 detection points;
+- the rate is significant where the screen ruled it negligible;
+- the rate cannot be computed on the scan grid.
+
+??? note "Implementation: why the scan is not covered"
+    The fallback reuses Hall's encounter scan rather than repeating it,
+    and searches the samples in the segments Hall found. When the scan
+    itself fails, Monte Carlo has no scan to reuse and would need the same
+    one, so it would fail the same way.
+
+**Applicability warnings.** A warning of the 2-D assumptions, such as
+"states are ... m from closest approach along the relative velocity; 2-D
+Pc uses the straight-line closest approach", is attached to the result
+whenever it fires, in `auto` and with an explicit method alike. The
+exceptions:
+
+- At zero relative velocity there is no encounter plane, and no such
+  warning.
+- With a covariance unknown (the maximum-Pc methods), the warnings still
+  apply. A duration warning then says "at least about", since a duration
+  from the known covariance alone is a lower bound on the true one.
+- `details["encounter_duration_s"]` is attached only when both
+  covariances are known.
+
+The distance from closest approach along the relative velocity does not
+depend on the covariances, so that warning needs none.
 
 **Cost.** The 2-D and maximum-Pc methods take milliseconds, `hall3d` about
 1-60 s and the Monte Carlo fallback up to about a minute. For a batch of

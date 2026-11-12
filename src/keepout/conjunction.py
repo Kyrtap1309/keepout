@@ -50,11 +50,13 @@ def combined_hard_body_radius(
     secondary_radius = secondary.hard_body_radius
     if primary_radius is None or secondary_radius is None:
         missing = [
-            o.object_id for o in (primary, secondary) if o.hard_body_radius is None
+            f"the {role} ({item.object_id})"
+            for role, item in (("primary", primary), ("secondary", secondary))
+            if item.hard_body_radius is None
         ]
         raise HardBodyRadiusError(
-            f"no hard-body radius for {', '.join(missing)}: pass "
-            "combined_hard_body_radius= (in metres) or give HBR for both objects"
+            f"no hard-body radius for {' and '.join(missing)}",
+            "pass combined_hard_body_radius= (in metres) or give both objects one",
         )
     return primary_radius + secondary_radius
 
@@ -154,11 +156,23 @@ class Conjunction:
         return self.relative_speed != 0.0
 
     def object_of(self, role: Role) -> ObjectState:
-        """The object with ``role``."""
+        """The object with ``role``.
+
+        Parameters
+        ----------
+        role
+            ``"primary"`` or ``"secondary"``.
+        """
         return self.primary if role == "primary" else self.secondary
 
     def label(self, role: Role) -> str:
-        """``"primary (12345)"``: the role and object id, for messages."""
+        """``"primary (12345)"``: the role and object id, for messages.
+
+        Parameters
+        ----------
+        role
+            ``"primary"`` or ``"secondary"``.
+        """
         return f"{role} ({self.object_of(role).object_id})"
 
     @property

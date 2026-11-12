@@ -80,6 +80,13 @@ class Family:
         """The message file ``path`` parsed by ``loads``; see
         :func:`keepout.ccsds.files.read_file`.
 
+        Parameters
+        ----------
+        path
+            The message file: UTF-8 text, gzip-compressed or not.
+        loads
+            The family's reader of a message's text.
+
         Raises
         ------
         CcsdsParseError
@@ -127,6 +134,13 @@ class KeywordValues:
 
     def add(self, keyword: str, value: Located) -> None:
         """Record ``value`` under ``keyword``; comments are not recorded.
+
+        Parameters
+        ----------
+        keyword
+            The keyword, e.g. ``TCA``.
+        value
+            Its value, with its line.
 
         Raises
         ------

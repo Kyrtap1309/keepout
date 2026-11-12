@@ -358,7 +358,9 @@ def test_object_and_covariance_comments_open_their_blocks() -> None:
 
 def test_without_radii_the_conjunction_needs_the_combined_radius() -> None:
     item, cdm = without_radii()
-    with pytest.raises(ValueError, match="no hard-body radius for 25544, 49863"):
+    with pytest.raises(
+        ValueError, match=r"for the primary \(25544\) and the secondary \(49863\)"
+    ):
         cdm.conjunction()
     assert_same_conjunction(cdm.conjunction(combined_hard_body_radius=7.5), item)
 

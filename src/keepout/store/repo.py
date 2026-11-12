@@ -42,6 +42,7 @@ from keepout.events import (
     AssessedEvent,
     ConjunctionEvent,
     EventBounds,
+    missing_hard_body_radius,
     stable_event_id,
     without_hard_body_radius,
 )
@@ -136,7 +137,7 @@ class CdmInput:
         Parameters
         ----------
         path
-            The file.
+            The CDM file, KVN or XML; its path is the origin.
 
         Raises
         ------
@@ -157,7 +158,7 @@ class CdmInput:
         Parameters
         ----------
         cdm
-            The message.
+            The message, e.g. from :func:`~keepout.cdm.make_cdm`.
         origin
             Where it came from, e.g. ``"screen"``.
         """
@@ -354,9 +355,10 @@ def save_maneuver_in(
     message_id
         The ``MESSAGE_ID`` of the CDM the outcome was planned on.
     key
-        Its :func:`~keepout.store.codec.maneuver_key`.
+        The outcome's :func:`~keepout.store.codec.maneuver_key`: the settings and
+        catalog it was planned with.
     payload
-        Its :func:`~keepout.store.maneuver_codec.outcome_to_json`.
+        The outcome's JSON, from :func:`~keepout.store.maneuver_codec.outcome_to_json`.
 
     Returns
     -------
@@ -531,6 +533,13 @@ def latest_in(session: Session, event_id: str) -> MessageId:
     """The ``MESSAGE_ID`` of an event's latest CDM, by ``CREATION_DATE``
     (then by ``MESSAGE_ID``), in the caller's transaction.
 
+    Parameters
+    ----------
+    session
+        A session of the store, in the caller's transaction.
+    event_id
+        The store's id of the event.
+
     Raises
     ------
     StoreError
@@ -625,6 +634,25 @@ class Store:
         The database file; :attr:`path` is its resolved (absolute) path.
     engine
         The SQLAlchemy engine on it, from :func:`keepout.store.db.engine_for`.
+
+    Examples
+    --------
+    ```python
+    from pathlib import Path
+
+    from keepout.settings import Settings
+    from keepout.store import CdmInput, open_store
+
+    with open_store("keepout.db") as store:  # a new store if missing
+        report = store.ingest([CdmInput.read(Path("tests/cdm/data/tracss_v2.kvn"))])
+        print(report.added, report.new_events)
+        # ('TRACSS-TEST-0001',) ('5ede3a14c345',)
+        settings = Settings(combined_hard_body_radius=20.0)  # [m]
+        for event, assessment in store.assess(report.events, settings):
+            action = assessment.decision.action
+            print(event.event_id, assessment.level.key, action.label)
+        # 5ede3a14c345 red maneuver
+    ```
     """
 
     def __init__(self, path: Path, engine: Engine) -> None:
@@ -898,11 +926,12 @@ class Store:
         skipped: tuple[MessageId, ...] = ()
         if settings.combined_hard_body_radius is None:
             parsed = (cdm for _, cdm in self._parsed(missing))
-            skipped = tuple(map(MessageId, without_hard_body_radius(parsed)))
+            lacking = [cdm for cdm in parsed if without_hard_body_radius((cdm,))]
+            skipped = tuple(MessageId(cdm.message_id) for cdm in lacking)
             if skipped and event_ids is not None:
                 raise HardBodyRadiusError(
-                    f"no HBR for both objects in {', '.join(skipped)}: give the "
-                    "combined hard-body radius in the settings"
+                    missing_hard_body_radius(lacking),
+                    "give the combined hard-body radius in the settings",
                 )
         unknown = set(skipped)
         todo = [(event_id, m) for event_id, m in missing if m not in unknown]
@@ -1000,7 +1029,7 @@ class Store:
         Parameters
         ----------
         event_ids
-            The events.
+            The store's ids of the events to assess.
         settings
             How Pc is computed and the risk judged.
 
@@ -1211,7 +1240,7 @@ class Store:
             The operator's settings of the plan; with the CDM's catalog they
             give its :func:`~keepout.store.codec.maneuver_key`.
         outcome
-            The outcome.
+            The outcome, from :func:`~keepout.maneuver.plan_event`.
 
         Returns
         -------

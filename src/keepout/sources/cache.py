@@ -78,11 +78,20 @@ class CachedCopy(NamedTuple):
     """A cached download and its metadata, as :func:`read_copy` finds them."""
 
     data: bytes
+    """The downloaded file's bytes, as received; their SHA-256 matches
+    ``meta.sha256``."""
     meta: CopyMeta
+    """Where and when the copy was downloaded, and its digest."""
 
 
 def meta_path(target: Path) -> Path:
-    """The ``.meta.json`` file of the cached download at ``target``."""
+    """The ``.meta.json`` file of the cached download at ``target``.
+
+    Parameters
+    ----------
+    target
+        The cached download's file.
+    """
     return target.with_name(f"{target.name}.meta.json")
 
 
@@ -91,6 +100,13 @@ def read_copy(target: Path, url: str) -> CachedCopy | None:
 
     ``None`` if either file is missing or unreadable, the metadata is not
     of this layout or names another URL, or the digest does not match.
+
+    Parameters
+    ----------
+    target
+        The cached download's file.
+    url
+        The URL the copy must come from.
     """
     try:
         record: JsonValue = json.loads(meta_path(target).read_bytes())
@@ -128,7 +144,7 @@ def save_copy(target: Path, url: str, data: bytes, now: float) -> CopyMeta:
     url
         Where ``data`` was downloaded from.
     data
-        The body.
+        The downloaded body, as received.
     now
         When it was received, Unix time [s]: its retrieval and check time.
 
@@ -147,6 +163,13 @@ def write_meta(target: Path, meta: CopyMeta) -> None:
     """Write the ``.meta.json`` file of the download at ``target`` atomically.
 
     Times must be floats (``time.time()``); :func:`read_copy` refuses others.
+
+    Parameters
+    ----------
+    target
+        The cached download's file.
+    meta
+        Its metadata: URL, digest, download and check times.
     """
     record = {"format": _META_FORMAT, **dataclasses.asdict(meta)}
     store_json(meta_path(target), record)
@@ -166,6 +189,15 @@ class Unchanged(SourceUnavailable):
 def require_max_age(max_age: float, interval: float, reason: str) -> None:
     """Raise :class:`ValueError` if ``max_age`` is below a source's least
     ``interval`` between two downloads.
+
+    Parameters
+    ----------
+    max_age
+        The largest age [s] of a cached copy the caller accepts.
+    interval
+        The source's least interval [s] between two downloads.
+    reason
+        Why the source sets it, for the message.
 
     Raises
     ------

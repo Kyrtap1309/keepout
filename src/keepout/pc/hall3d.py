@@ -158,7 +158,14 @@ def hall3d(
 def is_long(conjunction: Conjunction) -> bool:
     """Whether the encounter is long (see
     :func:`~keepout.pc._duration.long_encounter`), so that a sample can leave
-    the hard-body sphere and enter it again."""
+    the hard-body sphere and enter it again.
+
+    Parameters
+    ----------
+    conjunction
+        The conjunction; without an encounter plane (zero relative velocity) the
+        encounter is not called long.
+    """
     if not conjunction.has_plane:
         return False
     return long_encounter(conjunction, encounter_duration(conjunction)) is not None
@@ -177,6 +184,16 @@ def hall3d_over_scan(
     long encounter (:func:`is_long`) only adds the note that Nc counts
     repeated entries (the duration itself is in ``compute_pc``'s
     applicability warning).
+
+    Parameters
+    ----------
+    conjunction
+        The conjunction, both covariances known.
+    encounters
+        The scan of its collision rate over the window, from :func:`hall3d` or
+        :func:`~keepout.pc.compute_pc`.
+    rtol
+        Relative tolerance of the time integral, as for :func:`hall3d`.
 
     Raises
     ------

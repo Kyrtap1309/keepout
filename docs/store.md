@@ -183,32 +183,38 @@ three statuses:
   drops what it computed. Cancelling a job that has ended is an error
   (status 1).
 
-Three defaults set the timing:
-
-- a job may compute for 10 minutes. Past this time limit, the worker
-  stops the job and fails it (`stopped at the time limit of 10 minutes`);
-- a worker checks in on its job (a heartbeat) every 20 s;
-- a job whose worker has not checked in for 60 s is given back. This hold
-  is the job's lease.
-
-The [reference](reference/store.md#keepout.store.worker) explains leases,
-claims and attempts.
+A job may compute for 10 minutes. Past this time limit, the worker stops
+the job and fails it (`stopped at the time limit of 10 minutes`).
 
 SIGTERM or Ctrl+C stops the worker. It puts its job back in the queue
 and exits with status 0. The stop does not count against the job.
 
-A worker that dies (SIGKILL, a crash, its machine down) stops checking
-in. Once its lease lapses, the next worker to look at the queue queues
-the job again. A child process killed while computing (e.g. for lack of
-memory) gives its job back the same way, at once. If a job is given back
-like this twice, it fails (`the worker stopped twice without an
-answer`).
+A worker that dies (SIGKILL, a crash, its machine down) has its job queued
+again once it has been silent for 60 s. A job given back like this twice fails
+(`the worker stopped twice without an answer`). A job whose re-screen
+loses one of its processes fails at the time limit.
 
-One case is slower. When one process of a re-screen is killed, Python
-sends SIGTERM to the re-screen's other processes and waits for them to
-end. They ignore SIGTERM, like the child process that runs the job,
-because a stop is meant for the worker alone. So the wait never ends, and
-the job fails at the time limit.
+??? note "Implementation: heartbeats and leases"
+    Two more defaults set the timing:
+
+    - a worker checks in on its job (a heartbeat) every 20 s;
+    - a job whose worker has not checked in for 60 s is given back. This
+      hold is the job's lease.
+
+    A dead worker stops checking in. Once its lease lapses, the next worker
+    to look at the queue queues the job again. A child process killed while
+    computing (e.g. for lack of memory) gives its job back the same way, at
+    once.
+
+    The [reference](reference/store.md#keepout.store.worker) explains
+    leases, claims and attempts.
+
+??? note "Implementation: a re-screen process killed"
+    When one process of a re-screen is killed, Python sends SIGTERM to the
+    re-screen's other processes and waits for them to end. They ignore
+    SIGTERM, like the child process that runs the job, because a stop is
+    meant for the worker alone. So the wait never ends, and the job fails
+    at the time limit.
 
 The jobs are a table of the store's schema since revision `0002`. A store
 made before needs `keepout store upgrade`.

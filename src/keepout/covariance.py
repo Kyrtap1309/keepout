@@ -40,11 +40,13 @@ CovarianceFrame: TypeAlias = Literal["RTN", "GCRF"]
 """Frames a :class:`Covariance` can be expressed in."""
 
 COVARIANCE_FRAMES: Final[tuple[CovarianceFrame, ...]] = get_args(CovarianceFrame)
+"""Every :data:`CovarianceFrame`: ``("RTN", "GCRF")``."""
 
 Policy: TypeAlias = Literal["raise", "repair"]
 """What to do with an invalid covariance: raise, or repair with a diagnostic."""
 
 POLICIES: Final[tuple[Policy, ...]] = get_args(Policy)
+"""Every :data:`Policy`: ``("raise", "repair")``."""
 
 _FRAME: Final = "covariance frame"
 """What a frame is, in the error for an unsupported one."""
@@ -116,6 +118,11 @@ def to_correlation(matrix: FloatArray) -> tuple[FloatArray, FloatArray]:
     ``D = diag(sqrt|C[i, i]|)``, with 1 where a variance is negligible (see
     :data:`NEGLIGIBLE_VARIANCE`), so that row and column are left as they are
     instead of being divided by a vanishing deviation.
+
+    Parameters
+    ----------
+    matrix
+        A square matrix, e.g. a 6x6 covariance [m, m/s].
 
     Returns
     -------

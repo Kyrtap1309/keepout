@@ -254,6 +254,27 @@ def run(
     ValueError
         If ``start`` or ``created`` is not one time, or a screening argument
         is out of range (as :func:`~keepout.screening.screen`).
+
+    Examples
+    --------
+    ```python
+    from astropy.time import Time
+
+    from keepout import omm
+    from keepout.synthetic import load_fleet, run
+
+    fleet = load_fleet("examples/synthetic-operator/fleet.toml")
+    catalog = omm.load("tests/screening/data/celestrak-public.csv.gz")
+    start = Time("2026-10-06T00:00:00", scale="utc")
+    result = run(fleet, catalog, start, duration=86400.0)  # one day
+    for item in result.events:
+        pair = (item.approach.primary_number, item.approach.secondary_number)
+        print(*pair, f"{item.observation.pc:.1e}", item.action.label)
+    # 25544 58180 1.4e-30 ignore
+    # 38771 35434 1.5e-17 ignore
+    # 25544 58180 4.3e-59 ignore
+    # 38771 31882 4.3e-33 ignore
+    ```
     """
     elements = tuple(catalog)
     newest = deduplicate(elements).by_number

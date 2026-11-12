@@ -90,13 +90,26 @@ class Suite(enum.StrEnum):
     each value is the suite's name, as the report titles it."""
 
     ALFANO = "Alfano (2009)"
+    """Alfano's test cases with CARA's 2-D Pc (:func:`alfano_cases`)."""
     ALFANO_3D = "Alfano (2009), 3-D"
+    """Alfano's test cases with CARA's 3D-Nc Pc (:func:`alfano_3d_cases`)."""
     ALFANO_MONTE_CARLO = "Alfano (2009), Monte Carlo"
+    """Alfano's test cases with CARA's Monte Carlo Pc
+    (:func:`alfano_monte_carlo_cases`)."""
     PC_METHOD_SET = "CARA Pc method test set"
+    """CARA's 53 real conjunctions with its 2-D Pc
+    (:func:`pc_method_cases`)."""
     PC_METHOD_SET_3D = "CARA Pc method test set, 3-D"
+    """The same conjunctions with CARA's 3D-Nc Pc
+    (:func:`pc_method_3d_cases`)."""
     PC_METHOD_SET_MONTE_CARLO = "CARA Pc method test set, Monte Carlo"
+    """Those of the conjunctions with a Monte Carlo Pc large enough to check
+    (:func:`pc_method_monte_carlo_cases`)."""
     UNIT_TESTS = "CARA unit tests"
+    """Cases of CARA's MATLAB unit tests of the 2-D and 3-D methods."""
     MAX_PC_UNIT_TESTS = "CARA unit tests, maximum Pc"
+    """Cases of CARA's MATLAB unit tests of the maximum-Pc methods
+    (:func:`load_max_pc_cases`)."""
 
 
 MC_TARGET_HITS: Final = 400
@@ -189,7 +202,17 @@ def monte_carlo_options(
 ) -> MonteCarloSizing:
     """Samples and seed of a Monte Carlo case: about :data:`MC_TARGET_HITS`
     expected collisions within :data:`MC_SAMPLES`, and a seed fixed by the
-    case's name so the report is reproducible."""
+    case's name so the report is reproducible.
+
+    Parameters
+    ----------
+    suite
+        The case's suite.
+    case_id
+        The case's id within the suite.
+    reference
+        CARA's Monte Carlo Pc of the case, which sizes the sample count.
+    """
     wanted = MC_TARGET_HITS / reference if reference > 0.0 else MC_SAMPLES[1]
     samples = int(min(max(math.ceil(wanted), MC_SAMPLES[0]), MC_SAMPLES[1]))
     return {"samples": samples, "seed": zlib.crc32(f"{suite}/{case_id}".encode())}
@@ -233,6 +256,12 @@ def alfano_cases(alfano: Sequence[AlfanoInput]) -> list[ValidationCase]:
     """Alfano (2009) cases with a CARA 2-D reference (cases 1-11).
 
     Case 12 has zero relative velocity; CARA gives no 2-D value for it.
+
+    Parameters
+    ----------
+    alfano
+        The Alfano (2009) cases, from
+        :func:`~keepout.validation.cara_inputs.load_alfano_inputs`.
     """
     cases: list[ValidationCase] = []
     for item in alfano:
@@ -259,6 +288,15 @@ def alfano_3d_cases(
     The window is that of :func:`load_alfano_windows`, as in CARA's
     ``AlfanoTestCases_Pc3D.m``: cases 9 and 10 have the same states and
     differ only in it.
+
+    Parameters
+    ----------
+    alfano
+        The Alfano (2009) cases, from
+        :func:`~keepout.validation.cara_inputs.load_alfano_inputs`.
+    windows
+        Half-width [s] of each case's window, by case number, from
+        :func:`~keepout.validation.cara_inputs.load_alfano_windows`.
     """
     return [
         ValidationCase(
@@ -277,7 +315,17 @@ def alfano_3d_cases(
 def alfano_monte_carlo_cases(
     alfano: Sequence[AlfanoInput], windows: Mapping[int, float]
 ) -> list[ValidationCase]:
-    """Alfano (2009) cases 1-12 with CARA's two-body Monte Carlo reference."""
+    """Alfano (2009) cases 1-12 with CARA's two-body Monte Carlo reference.
+
+    Parameters
+    ----------
+    alfano
+        The Alfano (2009) cases, from
+        :func:`~keepout.validation.cara_inputs.load_alfano_inputs`.
+    windows
+        Half-width [s] of each case's window, by case number, from
+        :func:`~keepout.validation.cara_inputs.load_alfano_windows`.
+    """
     return [
         _monte_carlo_case(
             Suite.ALFANO_MONTE_CARLO,
@@ -300,6 +348,12 @@ def pc_method_cases(pc_method: Sequence[PcMethodInput]) -> list[ValidationCase]:
     The reference is CARA's ``Pc2D``: states moved to the true TCA before
     integrating. keepout projects the relative position onto the encounter
     plane, which is the same straight-line closest approach.
+
+    Parameters
+    ----------
+    pc_method
+        The conjunctions of CARA's Pc method test set, from
+        :func:`~keepout.validation.cara_inputs.load_pc_method_inputs`.
     """
     return [
         ValidationCase(
@@ -317,6 +371,12 @@ def pc_method_3d_cases(pc_method: Sequence[PcMethodInput]) -> list[ValidationCas
 
     CARA's Coppola 3-D Pc is shown for information only: it is another
     method, and CARA's own table flags where it underestimates.
+
+    Parameters
+    ----------
+    pc_method
+        The conjunctions of CARA's Pc method test set, from
+        :func:`~keepout.validation.cara_inputs.load_pc_method_inputs`.
     """
     return [
         ValidationCase(
@@ -335,7 +395,14 @@ def pc_method_3d_cases(pc_method: Sequence[PcMethodInput]) -> list[ValidationCas
 def pc_method_monte_carlo_cases(
     pc_method: Sequence[PcMethodInput],
 ) -> list[ValidationCase]:
-    """Test-set conjunctions whose CARA Monte Carlo Pc is at least ``MC_MIN_PC``."""
+    """Test-set conjunctions whose CARA Monte Carlo Pc is at least ``MC_MIN_PC``.
+
+    Parameters
+    ----------
+    pc_method
+        The conjunctions of CARA's Pc method test set, from
+        :func:`~keepout.validation.cara_inputs.load_pc_method_inputs`.
+    """
     return [
         _monte_carlo_case(
             Suite.PC_METHOD_SET_MONTE_CARLO,
@@ -354,6 +421,13 @@ def load_non_pd_case(cache: Path | None = None) -> ValidationCase:
 
     Reference and tolerance as in CARA's ``Pc2D_Foster_UnitTest.m``
     (``testNonPositiveDefinite``, HBR 20 m).
+
+    Parameters
+    ----------
+    cache
+        The cache directory of the CARA files (see
+        :func:`keepout.sources.cara.commit_dir`); ``None`` for ``$KEEPOUT_CACHE_DIR``,
+        else the user cache directory. Missing files are downloaded.
     """
     path = cara.fetch(cara.NON_PD_CDM, cache=cache)
     conjunction = cdm.load(path).conjunction(combined_hard_body_radius=UNIT_TEST_HBR)
@@ -411,6 +485,13 @@ def load_hall_2d3d_cases(cache: Path | None = None) -> list[ValidationCase]:
     from ``DistributedMatlab/ProbabilityOfCollision/UnitTests/
     Pc3D_Hall_UnitTest.m`` lines 107-122 (values on lines 108-111) at the
     pinned commit.
+
+    Parameters
+    ----------
+    cache
+        The cache directory of the CARA files (see
+        :func:`keepout.sources.cara.commit_dir`); ``None`` for ``$KEEPOUT_CACHE_DIR``,
+        else the user cache directory. Missing files are downloaded.
     """
     path = cara.fetch(cara.HALL_3D_CDM, cache=cache)
     conjunction = cdm.load(path).conjunction(combined_hard_body_radius=UNIT_TEST_HBR)
@@ -438,6 +519,13 @@ def load_max_pc_cases(cache: Path | None = None) -> list[ValidationCase]:
     The CDMs are read with :func:`~keepout.sources.cara_legacy.load_legacy_objects`:
     they do not conform to CCSDS. Frisbee's secondary covariance is unknown,
     as CARA's test passes zeros for it.
+
+    Parameters
+    ----------
+    cache
+        The cache directory of the CARA files (see
+        :func:`keepout.sources.cara.commit_dir`); ``None`` for ``$KEEPOUT_CACHE_DIR``,
+        else the user cache directory. Missing files are downloaded.
     """
     primary, secondary = load_legacy_objects(
         cara.fetch(cara.FRISBEE_CDM, cache=cache), known=(True, False)
@@ -469,7 +557,15 @@ def load_max_pc_cases(cache: Path | None = None) -> list[ValidationCase]:
 
 
 def load_all(cache: Path | None = None) -> list[ValidationCase]:
-    """Every validation case except Monte Carlo, downloading CARA files as needed."""
+    """Every validation case except Monte Carlo, downloading CARA files as needed.
+
+    Parameters
+    ----------
+    cache
+        The cache directory of the CARA files (see
+        :func:`keepout.sources.cara.commit_dir`); ``None`` for ``$KEEPOUT_CACHE_DIR``,
+        else the user cache directory. Missing files are downloaded.
+    """
     cara.prefetch(cara.MANIFEST, cache=cache)
     alfano = load_alfano_inputs(cache)
     windows = load_alfano_windows(cache)
@@ -489,7 +585,15 @@ def load_all(cache: Path | None = None) -> list[ValidationCase]:
 
 def load_monte_carlo_cases(cache: Path | None = None) -> list[ValidationCase]:
     """The Monte Carlo validation cases (minutes to hours of computing), with
-    the interval confidence of :data:`MC_SUITE_ALPHA`."""
+    the interval confidence of :data:`MC_SUITE_ALPHA`.
+
+    Parameters
+    ----------
+    cache
+        The cache directory of the CARA files (see
+        :func:`keepout.sources.cara.commit_dir`); ``None`` for ``$KEEPOUT_CACHE_DIR``,
+        else the user cache directory. Missing files are downloaded.
+    """
     cara.prefetch(cara.MANIFEST, cache=cache)
     cases = [
         *alfano_monte_carlo_cases(

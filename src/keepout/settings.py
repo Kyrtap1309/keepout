@@ -1,10 +1,26 @@
 """An operator's settings: how Pc is computed, risk thresholds and the
 manoeuvre target, read from a TOML file (the tables and keys of
-:data:`SETTINGS_KEYS`; an example is in the command line's documentation,
-under Settings).
+:data:`SETTINGS_KEYS`).
 
-Every key is optional; a missing one takes the library's default. No other
-key is allowed, so a typo is an error, not a silent default.
+A file with every key:
+
+```toml
+[pc]
+method = "foster"     # a Pc method, or "auto" (the default)
+policy = "repair"     # an invalid covariance: "repair" it, or "raise"
+hbr_m = 20.0          # combined hard-body radius [m]; else the CDMs' HBR
+
+[risk]
+green_below = 1e-7    # Pc below which an event is green
+red_from = 1e-4       # Pc from which an event is red
+
+[maneuver]
+target_pc = 1e-5      # Pc a burn must take the event below
+```
+
+Every key is optional; a missing one takes the library's default (the
+values above but ``method = "auto"`` and no ``hbr_m``). No other key is
+allowed, so a typo is an error, not a silent default.
 :func:`load_settings` raises :class:`~keepout.errors.SettingsError` naming
 the file and the key at fault. :func:`settings_to_data` and
 :func:`settings_from_data` turn settings into a settings file's tables
@@ -108,22 +124,33 @@ class PcTable(TypedDict):
     """The ``[pc]`` table of :class:`SettingsData`."""
 
     method: MethodChoice
+    """The Pc method: ``"auto"`` or a method name of
+    :data:`~keepout.pc.Method` (:attr:`Settings.compute` without options)."""
     policy: Policy
+    """What to do with an invalid covariance: ``"repair"`` it with a
+    diagnostic, or ``"raise"`` an error (:attr:`Settings.policy`)."""
     hbr_m: NotRequired[float]
-    """The combined hard-body radius [m]; only when it is set."""
+    """The combined hard-body radius [m], positive; only when it is set
+    (:attr:`Settings.combined_hard_body_radius`)."""
 
 
 class RiskTable(TypedDict):
     """The ``[risk]`` table of :class:`SettingsData`."""
 
     green_below: float
+    """Pc below which an event is green
+    (:attr:`~keepout.risk.Thresholds.green_below`)."""
     red_from: float
+    """Pc from which an event is red, above ``green_below`` and at most 1
+    (:attr:`~keepout.risk.Thresholds.red_from`)."""
 
 
 class ManeuverTable(TypedDict):
     """The ``[maneuver]`` table of :class:`SettingsData`."""
 
     target_pc: float
+    """Pc a burn must take the event below, in (0, 1)
+    (:attr:`Settings.target_pc`)."""
 
 
 class SettingsData(TypedDict):
@@ -131,19 +158,29 @@ class SettingsData(TypedDict):
     them."""
 
     pc: PcTable
+    """How Pc is computed."""
     risk: RiskTable
+    """The risk thresholds."""
     maneuver: ManeuverTable
+    """The manoeuvre target."""
 
 
 class PlanArguments(TypedDict):
     """The keyword arguments of :func:`~keepout.maneuver.plan_event` that
-    settings hold."""
+    settings hold; pass them as ``plan_event(event, **plan_arguments(settings))``."""
 
     target_pc: float
+    """Pc a burn must take the event below (:attr:`Settings.target_pc`)."""
     compute: PcComputation
+    """The Pc method and its options (:attr:`Settings.compute`)."""
     policy: Policy
+    """What to do with an invalid covariance (:attr:`Settings.policy`)."""
     combined_hard_body_radius: float | None
+    """The combined hard-body radius [m]; ``None`` for the sum of the CDM's
+    radii (:attr:`Settings.combined_hard_body_radius`)."""
     thresholds: Thresholds
+    """The Pc thresholds, whose basis turns a result into the Pc compared
+    with ``target_pc`` (:attr:`Settings.thresholds`)."""
 
 
 def plan_arguments(settings: Settings) -> PlanArguments:
@@ -237,7 +274,8 @@ def settings_to_data(settings: Settings) -> SettingsData:
     Parameters
     ----------
     settings
-        The settings.
+        The settings; ``compute`` without options or fallback, ``thresholds`` on the
+        default basis.
 
     Returns
     -------
@@ -344,6 +382,12 @@ def load_settings(path: Path) -> Settings:
     path
         The settings file.
 
+    Returns
+    -------
+    Settings
+        The file's settings, with the library's default for every key the
+        file leaves out.
+
     Raises
     ------
     SettingsError
@@ -352,6 +396,18 @@ def load_settings(path: Path) -> Settings:
         path and names the key.
     OSError
         If the file cannot be read.
+
+    Examples
+    --------
+    ```python
+    from keepout.settings import load_settings
+
+    settings = load_settings("settings.toml")  # the file of the module's example
+    print(settings.compute.method, settings.combined_hard_body_radius)
+    # foster 20.0
+    print(settings.thresholds.red_from, settings.target_pc)
+    # 0.0001 1e-05
+    ```
     """
     raw = Path(path).read_bytes()
     try:

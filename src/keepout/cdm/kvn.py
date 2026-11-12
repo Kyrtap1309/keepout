@@ -61,7 +61,7 @@ def loads(text: str) -> Cdm:
     Parameters
     ----------
     text
-        The message.
+        The message: one CDM as KVN, version 1.0 or 2.0.
 
     Raises
     ------
@@ -103,7 +103,8 @@ def dumps(cdm: Cdm) -> str:
     Parameters
     ----------
     cdm
-        The message.
+        The message, e.g. from :func:`~keepout.cdm.load` or
+        :func:`~keepout.cdm.make_cdm`.
 
     Raises
     ------
@@ -143,7 +144,8 @@ def dump(cdm: Cdm, path: str | Path) -> None:
     Parameters
     ----------
     cdm
-        The message.
+        The message, e.g. from :func:`~keepout.cdm.load` or
+        :func:`~keepout.cdm.make_cdm`.
     path
         File to write.
     """

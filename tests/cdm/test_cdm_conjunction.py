@@ -25,7 +25,9 @@ def test_explicit_radius_overrides_hbr() -> None:
 
 
 def test_cdm_without_hbr_needs_an_explicit_radius() -> None:
-    with pytest.raises(ValueError, match="no hard-body radius for 10001, 10002"):
+    with pytest.raises(
+        ValueError, match=r"for the primary \(10001\) and the secondary \(10002\)"
+    ):
         minimal_cdm().conjunction()
 
 

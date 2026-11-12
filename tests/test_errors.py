@@ -1,4 +1,5 @@
 import inspect
+import pickle
 
 import pytest
 
@@ -101,6 +102,18 @@ def test_cdm_data_errors_are_keepout_and_value_errors(
     # error the command line reports as a data error, not a bug.
     assert issubclass(error, KeepoutError)
     assert issubclass(error, ValueError)
+
+
+def test_a_hard_body_radius_error_keeps_its_detail_and_hint() -> None:
+    # The command line swaps the library's hint for its own options.
+    error = HardBodyRadiusError("CDM X gives no HBR for OBJECT2")
+    assert str(error) == (
+        "CDM X gives no HBR for OBJECT2: pass combined_hard_body_radius= (in metres)"
+    )
+    assert error.detail == "CDM X gives no HBR for OBJECT2"
+    assert str(HardBodyRadiusError("d", "h")) == "d: h"
+    copy = pickle.loads(pickle.dumps(error))
+    assert (str(copy), copy.detail, copy.hint) == (str(error), error.detail, error.hint)
 
 
 def test_an_unsupported_frame_is_a_geometry_and_value_error() -> None:

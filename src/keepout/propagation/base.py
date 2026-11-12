@@ -431,7 +431,17 @@ def propagate_in_chunks(
 
 def pair_sampler(primary: Propagator, secondary: Propagator, start: Time) -> States:
     """The states of a pair, from any propagators of one object each: rows 0
-    (``primary``) and 1 (``secondary``), at offsets [s] from ``start``."""
+    (``primary``) and 1 (``secondary``), at offsets [s] from ``start``.
+
+    Parameters
+    ----------
+    primary
+        Propagator of the primary alone.
+    secondary
+        Propagator of the secondary alone.
+    start
+        The time the offsets count from.
+    """
 
     def states(offsets: FloatArray) -> tuple[ErrorArray, FloatArray, FloatArray]:
         primary_states = primary.propagate(start, offsets)

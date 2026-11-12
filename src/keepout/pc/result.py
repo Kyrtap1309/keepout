@@ -96,7 +96,24 @@ class PcResult:
         kind: ResultKind = "estimate",
         diluted: bool | None = None,
     ) -> PcResult:
-        """A result with ``value`` clipped to ``[0, 1]`` (quadrature round-off)."""
+        """A result with ``value`` clipped to ``[0, 1]`` (quadrature round-off).
+
+        Parameters
+        ----------
+        value
+            The Pc as computed, possibly a little outside ``[0, 1]``.
+        method
+            The method that computed it.
+        diagnostics
+            Warnings about the value.
+        details
+            Method-specific numbers; none by default.
+        kind
+            ``"estimate"`` or ``"upper_bound"``.
+        diluted
+            For the dilution method, whether the conjunction is in its dilution region;
+            ``None`` for the others.
+        """
         return cls(
             min(max(value, 0.0), 1.0),
             method,

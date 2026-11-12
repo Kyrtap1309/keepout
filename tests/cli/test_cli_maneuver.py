@@ -658,7 +658,10 @@ def test_missing_hbr_exits_one(tmp_path: Path) -> None:
     file = write(tmp_path, "crossing.kvn", without_hbr(operator_kvn()[0]))
     result = keepout("maneuver", file)
     assert result.exit_code == ExitCode.ERROR
-    assert result.stderr.startswith("Error: no hard-body radius for 52939, 47826")
+    assert result.stderr == (
+        "Error: no hard-body radius for the primary (52939) and the secondary "
+        "(47826): pass --hbr METRES or set hbr_m in the --settings file\n"
+    )
 
 
 def test_help_loads_no_numerical_library() -> None:

@@ -118,7 +118,15 @@ class MethodSpec:
         return not self.on_plane
 
     def run(self, conjunction: Conjunction, options: Mapping[str, object]) -> PcResult:
-        """The method's result on a conjunction, with options it takes."""
+        """The method's result on a conjunction, with options it takes.
+
+        Parameters
+        ----------
+        conjunction
+            The conjunction at TCA.
+        options
+            Options of the method, by name; each must be in :attr:`options`.
+        """
         if self.on_plane:
             return self.function(
                 conjunction.plane, conjunction.combined_hard_body_radius, **options
@@ -141,34 +149,67 @@ METHODS: Final[Mapping[Method, MethodSpec]] = MappingProxyType(
 
 
 class FosterOptions(TypedDict, total=False):
-    """The options of :func:`~keepout.pc.foster`."""
+    """The options of :func:`~keepout.pc.foster`; every key is optional."""
 
     rtol: float
+    """Relative tolerance of the quadrature (:func:`scipy.integrate.quad`);
+    default :data:`~keepout.pc.foster.FOSTER_RTOL` (1e-10), at least
+    :data:`~keepout.pc.foster.MIN_RTOL`."""
 
 
 class ElrodOptions(TypedDict, total=False):
-    """The options of :func:`~keepout.pc.elrod`."""
+    """The options of :func:`~keepout.pc.elrod`; every key is optional."""
 
     order: int | None
+    """Number of Gauss-Chebyshev nodes, at least 1. ``None`` (default)
+    adapts the order from :data:`~keepout.pc.elrod.START_ORDER` up to
+    :data:`~keepout.pc.elrod.MAX_ORDER` until the Pc converges; CARA uses
+    64."""
 
 
 class Hall3dOptions(TypedDict, total=False):
-    """The options of :func:`~keepout.pc.hall3d`."""
+    """The options of :func:`~keepout.pc.hall3d`; every key is optional."""
 
     window: tuple[float, float] | None
+    """Integration window ``(start, end)``, in seconds from the
+    conjunction's TCA (negative before it), finite with ``start < end``.
+    ``None`` (default) grows a window about TCA and the straight-line closest
+    approach until the collision rate at its edges is negligible, up to one
+    orbital period (the shorter of the two objects') wide."""
     rtol: float
+    """Relative tolerance of the time integral of the collision rate;
+    default :data:`~keepout.pc.hall3d.HALL_RTOL` (1e-6)."""
 
 
 class MonteCarloOptions(TypedDict, total=False):
-    """The options of :func:`~keepout.pc.montecarlo`."""
+    """The options of :func:`~keepout.pc.montecarlo`; every key is optional."""
 
     window: tuple[float, float] | None
+    """Window ``(start, end)`` the samples are propagated over, in seconds
+    from the conjunction's TCA (negative before it), finite with
+    ``start < end``. ``None`` (default) sizes it as Hall's method does (see
+    :attr:`Hall3dOptions.window`)."""
     samples: int | None
+    """Exact number of samples, at least 1. ``None`` (default) samples in
+    batches until the confidence interval's half-width is at most ``rtol``
+    times the estimate, or ``max_samples`` is reached."""
     rtol: float
+    """Target relative half-width of the confidence interval, when
+    ``samples`` is ``None``; default :data:`~keepout.pc.montecarlo.MC_RTOL`
+    (0.1)."""
     max_samples: int
+    """Most samples drawn when stopping on ``rtol``; default
+    :data:`~keepout.pc.montecarlo.MC_MAX_SAMPLES` (10 million)."""
     confidence: float
+    """Confidence level of the Clopper-Pearson interval, in (0, 1); default
+    :data:`~keepout.pc.montecarlo.MC_CONFIDENCE` (0.99)."""
     seed: int | None
+    """Seed of the random generator: the same seed gives the same result,
+    whatever ``workers``. ``None`` (default): a fresh seed each call."""
     workers: int | None
+    """Number of processes to sample in: 1 (default) samples in this
+    process, ``None`` uses one per CPU, at most 4. A script that asks for
+    more than 1 needs an ``if __name__ == "__main__":`` guard."""
 
 
 @overload
@@ -284,6 +325,21 @@ def compute_pc(
         detection points than allowed, the rate is significant where the
         screen ruled it negligible, or the rate cannot be computed on the scan
         grid), since the Monte Carlo fallback shares that scan.
+
+    Examples
+    --------
+    ```python
+    from keepout import cdm, compute_pc
+
+    message = cdm.load("tests/cdm/data/tracss_v2.kvn")
+    # The CDM gives no HBR for OBJECT2: give the combined radius [m].
+    conjunction = message.conjunction(combined_hard_body_radius=20.0)
+    result = compute_pc(conjunction)  # "auto"
+    print(result.method, f"{result.value:.3e}", result.kind)
+    # hall3d 4.504e-02 estimate
+    print(f"{compute_pc(conjunction, 'foster', rtol=1e-8).value:.3e}")
+    # 4.503e-02
+    ```
     """
     return _compute(conjunction, method, options)
 
@@ -441,6 +497,11 @@ class PcComputation:
         ``"auto"`` runs it: Monte Carlo with its seed and sample budget, Hall's
         method with that Monte Carlo as its fallback.
 
+        Parameters
+        ----------
+        result
+            A result of this computation.
+
         Raises
         ------
         ValueError
@@ -501,5 +562,25 @@ def computation(method: MethodChoice = "auto", **options: object) -> PcComputati
         If ``method`` is unknown, or options are given with ``"auto"``.
     TypeError
         If the method does not take an option.
+
+    Examples
+    --------
+    ```python
+    from keepout import cdm
+    from keepout.pc import computation
+
+    foster = computation("foster", rtol=1e-8)
+    conjunction = cdm.load("tests/cdm/data/tracss_v2.kvn").conjunction(
+        combined_hard_body_radius=20.0
+    )
+    result = foster(conjunction)  # compute_pc(conjunction, "foster", rtol=1e-8)
+    print(foster.label, f"{result.value:.3e}")
+    # keepout (foster) 4.503e-02
+    ```
+
+    Pass it as ``compute=`` to
+    :meth:`~keepout.events.ConjunctionEvent.observations`,
+    :func:`~keepout.synthetic.run` or
+    :func:`~keepout.maneuver.plan_maneuver`.
     """
     return PcComputation(method, options)

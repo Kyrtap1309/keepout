@@ -302,7 +302,13 @@ class SyntheticCovarianceModel:
         return reduce_with_mappings(self)
 
     def parameters(self, regime: OrbitRegime) -> RegimeParameters:
-        """The parameters of ``regime``, before the safety factor."""
+        """The parameters of ``regime``, before the safety factor.
+
+        Parameters
+        ----------
+        regime
+            An orbit regime.
+        """
         return self.regimes[regime]
 
     def sigmas(self, omm: Omm, time: Time) -> RtnSigmas:
