@@ -147,7 +147,14 @@ def similar_conjunction(
     covariance: Callable[[FloatArray], Covariance],
 ) -> Conjunction:
     """The ``testSimilarTo*`` states at :data:`NOMINAL_EPOCH` with
-    ``covariance`` of each 6x6 matrix, HBR :data:`UNIT_TEST_HBR`."""
+    ``covariance`` of each 6x6 matrix, HBR :data:`UNIT_TEST_HBR`.
+
+    Parameters
+    ----------
+    covariance
+        What makes a :class:`~keepout.covariance.Covariance` of a 6x6 GCRF matrix [m,
+        m/s], e.g. with a repair policy.
+    """
     primary, secondary = (
         ObjectState(name, StateVector(NOMINAL_EPOCH, r, v, "GCRF"), covariance(matrix))
         for name, (r, v), matrix in zip(

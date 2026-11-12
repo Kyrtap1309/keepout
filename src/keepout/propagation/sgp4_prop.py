@@ -180,6 +180,11 @@ class Sgp4Shape(NamedTuple):
 def sgp4_shape(omm: Omm) -> Sgp4Shape:
     """The orbit's size and shape as SGP4 initialises it from ``omm``.
 
+    Parameters
+    ----------
+    omm
+        The element set.
+
     Raises
     ------
     UnsupportedElements

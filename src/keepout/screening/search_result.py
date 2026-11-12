@@ -82,7 +82,17 @@ def keep_earliest(
     failures: dict[int, ObjectFailure], index: int, failure: ObjectFailure
 ) -> None:
     """An object's new failure, stored in ``failures`` in place of the one
-    recorded unless that one is earlier (by offset, then code)."""
+    recorded unless that one is earlier (by offset, then code).
+
+    Parameters
+    ----------
+    failures
+        Failures by object index; updated in place.
+    index
+        The object's index.
+    failure
+        Its new failure.
+    """
     known = failures.get(index)
     if known is None or failure < known:
         failures[index] = failure
@@ -128,6 +138,12 @@ class SearchResult:
 
         The minima are put together and each object keeps its earliest
         failure; the results must number the objects alike.
+
+        Parameters
+        ----------
+        results
+            The results of searches over parts of one catalog, numbering the objects
+            alike.
         """
         minima: list[RangeMinimum] = []
         primary: dict[int, ObjectFailure] = {}

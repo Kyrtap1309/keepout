@@ -8,20 +8,24 @@ and relative velocity. It screens the general perturbations (GP) element
 sets that USSPACECOM publishes, with SGP4, as CelesTrak's
 [SOCRATES](https://celestrak.org/SOCRATES/) does.
 
+From a clone of the repository, this screens the ISS for 7 days against
+CelesTrak's public catalog as it was on 2026-10-06, frozen in
+`tests/screening/data/`:
+
 ```python
 from collections import Counter
 
 from astropy.time import Time
 
+import keepout.omm
 from keepout import screen
-from keepout.sources.celestrak import fetch_catalog
 
 
 def main() -> None:
-    catalog = fetch_catalog()  # CelesTrak's public catalog, one set per object
-    iss = [omm for omm in catalog.omms if omm.catalog_number == 25544]
-    start = Time("2026-10-06T00:00:00", scale="utc")  # live data: Time.now()
-    result = screen(iss, catalog.omms, start, workers=4)  # 7 days, 5 km sphere
+    catalog = keepout.omm.load("tests/screening/data/celestrak-public.csv.gz")
+    iss = [omm for omm in catalog if omm.catalog_number == 25544]
+    start = Time("2026-10-06T00:00:00", scale="utc")
+    result = screen(iss, catalog, start, workers=4)  # 7 days, 5 km sphere
     for approach in result.approaches:
         radial, transverse, normal = approach.miss_rtn
         print(
@@ -38,20 +42,23 @@ if __name__ == "__main__":  # needed for workers > 1
     main()
 ```
 
-The window starts on 2026-10-06 to match the catalog CelesTrak served that
-day. On that catalog (the frozen copy in `tests/screening/data/`) this
-prints the output below. On the live catalog, start the window from the
-data, as with `Time.now()`. A window that ends more than 30 days after an
-element set's epoch leaves that set out as stale (see
-[Element age](#element-age)). This fixed start therefore finds nothing from
-November 2026 on.
-
 ```text
 2026-10-06T05:12:33.772 58180 4633 m (R 3186, T -2873, N 1748) 7914 m/s
 2026-10-06T12:10:37.724 58180 4902 m (R -4629, T -1376, N -842) 7937 m/s
 2026-10-07T16:10:03.846 46275 4104 m (R -1521, T 1998, N 3246) 13035 m/s
 2026-10-10T14:08:54.848 49773 2751 m (R -2365, T -957, N 1030) 11225 m/s
 Counter({'stale': 28})
+```
+
+On live data, download the catalog and start the window now. A window
+must end within 30 days of an element set's epoch, or the set is left out
+as stale (see [Element age](#element-age)):
+
+```python
+from keepout.sources.celestrak import fetch_catalog
+
+catalog = fetch_catalog().omms  # CelesTrak's public catalog, one set per object
+start = Time.now()
 ```
 
 !!! warning "Screening finds geometry, not risk"
@@ -155,59 +162,69 @@ it would have is not seen.
 
 ### Element age
 
-The search's guarantee (next section) assumes that every acceleration
-beyond the point mass and J2 stays below 1 m/s² (`PERTURBATION`). On the
-public catalog of October 2026, SGP4 stays below 0.2 m/s² from 3 days before
-to 38 days after each element epoch. Further away some objects leave the
-bound, from 39 days after the epoch and by orders of magnitude. Hence the
-defaults:
+An element set is screened only near its epoch:
 
 - `max_age` of 30 days from the epoch to the end of the window;
 - `max_lead` of 3 days from the start of the window to a later epoch.
   CelesTrak serves epochs up to about a day and a half after the day of the
   download.
 
-One kind of object breaks the assumption inside these limits: an object
-re-entering the atmosphere. With its perigee 113 km up, SGP4's drag on
-object 270365 exceeds 1 m/s² from 8 days after its epoch, days before SGP4
-fails for it. The guarantee does not cover such objects. GP data loses
-accuracy much sooner than 30 days, so a smaller `max_age` may suit your
+Inside these limits the search finds every approach (next section),
+except for an object re-entering the atmosphere. GP data loses accuracy
+much sooner than 30 days, so a smaller `max_age` may suit your
 application better.
+
+??? note "Implementation: why 30 days and 3 days"
+    The search's guarantee assumes that every acceleration beyond the
+    point mass and J2 stays below 1 m/s² (`PERTURBATION`). On the public
+    catalog of October 2026, SGP4 stays below 0.2 m/s² from 3 days before
+    to 38 days after each element epoch. Further away some objects leave
+    the bound, from 39 days after the epoch and by orders of magnitude.
+    Hence the defaults.
+
+    One kind of object breaks the assumption inside these limits: an
+    object re-entering the atmosphere. With its perigee 113 km up, SGP4's
+    drag on object 270365 exceeds 1 m/s² from 8 days after its epoch, days
+    before SGP4 fails for it. The guarantee does not cover such objects.
 
 ### The search and its guarantee
 
-Both objects are sampled every `step` (120 s by default) and two sieves
-rule out the grid intervals in which the pair cannot come inside the
-volume. Both hold for any step, so the step changes the time screening
-takes, not what it finds:
-
-- **Speed sieve.** Each object's speed is bounded from its radius bounds
-  over the window (the perigee speed of the most eccentric orbit that fits,
-  plus 5 %), so the relative speed is below a bound *V*. A pair whose
-  ranges at the two ends of an interval of length *h* add up to more than
-  2*R* + *V h* (*R* the volume's bounding radius) cannot come within *R*
-  in between.
-- **Chord sieve.** With *A* a bound on the relative acceleration (the
-  gravity gradient over the largest range, 5 % added for the zonal terms,
-  plus twice `PERTURBATION`), the relative position stays within *A h*²/8
-  of the straight line between its two end points; if that line does not
-  come within *R* + *A h*²/8 of the primary, neither does the pair.
-
-In an interval that passes, a minimum of the range is a root of
-ρ·dρ/dt (ρ the relative position), found with Brent's method to 1 µs.
-dρ/dt comes from positions by a central difference, not from SGP4's
-velocities. SGP4's velocity is not exactly the derivative of its position
-(by up to 12 m/s), which would move the TCA of a slow pair by seconds. The
-states reported at TCA are SGP4's own, velocities included.
-
-The range of a co-orbital or formation-flying pair can change too slowly
-over an interval for the grid to decide. Such an interval is resampled
-every 10 s (`SLOW_STEP`). A minimum and a maximum of the range less than
-10 s apart are not told apart there.
+Both objects are sampled every `step` (120 s by default). Sieves rule out
+the grid intervals in which the pair cannot come inside the volume, and
+every minimum of the range in the other intervals is found, with its TCA
+to 1 µs. The sieves hold for any step, so the step changes the time
+screening takes, not what it finds. In a co-orbital or formation-flying
+pair, a minimum and a maximum of the range less than 10 s apart are not
+told apart.
 
 keepout's tests compare the search with a brute-force one (every pair
 sampled densely) on a small catalog, and check with property tests that no
 filter or sieve drops an approach the brute-force search finds.
+
+??? note "Implementation: the sieves and the minimum search"
+    - **Speed sieve.** Each object's speed is bounded from its radius bounds
+      over the window (the perigee speed of the most eccentric orbit that fits,
+      plus 5 %), so the relative speed is below a bound *V*. A pair whose
+      ranges at the two ends of an interval of length *h* add up to more than
+      2*R* + *V h* (*R* the volume's bounding radius) cannot come within *R*
+      in between.
+    - **Chord sieve.** With *A* a bound on the relative acceleration (the
+      gravity gradient over the largest range, 5 % added for the zonal terms,
+      plus twice `PERTURBATION`), the relative position stays within *A h*²/8
+      of the straight line between its two end points; if that line does not
+      come within *R* + *A h*²/8 of the primary, neither does the pair.
+
+    In an interval that passes, a minimum of the range is a root of
+    ρ·dρ/dt (ρ the relative position), found with Brent's method to 1 µs.
+    dρ/dt comes from positions by a central difference, not from SGP4's
+    velocities. SGP4's velocity is not exactly the derivative of its position
+    (by up to 12 m/s), which would move the TCA of a slow pair by seconds. The
+    states reported at TCA are SGP4's own, velocities included.
+
+    The range of a co-orbital or formation-flying pair can change too slowly
+    over an interval for the grid to decide. Such an interval is resampled
+    every 10 s (`SLOW_STEP`). A minimum and a maximum of the range less than
+    10 s apart are not told apart there.
 
 ### What counts as an approach
 

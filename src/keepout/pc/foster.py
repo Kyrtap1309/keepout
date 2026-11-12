@@ -136,6 +136,14 @@ def gaussian_pc(gaussian: PlaneGaussian, *, rtol: float = FOSTER_RTOL) -> PcResu
     The core of :func:`foster`, without its argument checks: for callers that
     integrate covariances other than the plane's own (see
     :mod:`keepout.pc.maxpc`).
+
+    Parameters
+    ----------
+    gaussian
+        The Gaussian on the encounter plane, in its principal axes, with the hard-body
+        radius.
+    rtol
+        Relative tolerance of the quadrature, as for :func:`foster`.
     """
     diagnostics = list(gaussian.diagnostics)
     band = _band(gaussian)

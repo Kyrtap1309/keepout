@@ -115,6 +115,11 @@ def download_once(url: str) -> bytes:
     """The body at ``url``, downloaded once: CelesTrak blocks clients that
     retry after an error, so nothing is retried.
 
+    Parameters
+    ----------
+    url
+        A CelesTrak URL, e.g. of :func:`group_url`.
+
     Raises
     ------
     HttpStatusError
@@ -154,6 +159,11 @@ class SocratesReport:
 
 def group_url(name: str) -> str:
     """The CSV URL of the GP group ``name`` (case-insensitive).
+
+    Parameters
+    ----------
+    name
+        The name of a CelesTrak GP group, e.g. ``active`` or ``stations``.
 
     Raises
     ------

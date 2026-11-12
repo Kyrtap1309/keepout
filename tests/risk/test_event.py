@@ -13,6 +13,7 @@ from keepout.events import (
     ConjunctionEvent,
     EventBounds,
     group_events,
+    missing_hard_body_radius,
     stable_event_id,
     time_to_tca,
     without_hard_body_radius,
@@ -184,7 +185,9 @@ def test_a_missing_hbr_is_reported_before_any_computation(
 
     monkeypatch.setattr(api, "_compute", refuse)
     event = ConjunctionEvent("E", (b1_cdm("A"), b1_cdm("B")))
-    with pytest.raises(ValueError, match="no HBR for both objects in A, B"):
+    with pytest.raises(
+        ValueError, match="CDM A gives no HBR for OBJECT1 and OBJECT2; CDM B gives none"
+    ):
         event.observations()
 
 
@@ -332,3 +335,8 @@ def test_the_cdms_without_hbr_are_listed_by_message_id() -> None:
     cdms = [b1_cdm("A"), with_hbr, b1_cdm("B")]
     assert without_hard_body_radius(cdms) == ("A", "B")
     assert without_hard_body_radius([with_hbr]) == ()
+    assert missing_hard_body_radius([*cdms, keepout.cdm.loads(text)]) == (
+        "CDM A gives no HBR for OBJECT1 and OBJECT2; CDM B gives none for OBJECT1 "
+        "and OBJECT2; CDM TRACSS-TEST-0001 gives none for OBJECT2"
+    )
+    assert missing_hard_body_radius([with_hbr]) == ""

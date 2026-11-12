@@ -53,7 +53,12 @@ __all__ = [
 ]
 
 CARA_REPO: Final = "nasa/CARA_Analysis_Tools"
+"""NASA CARA's analysis tools on GitHub (``owner/name``), where the
+validation data comes from."""
+
 CARA_COMMIT: Final = "1c78beb1f7aefc384886c3be1d09e4681acb5d37"
+"""The commit of :data:`CARA_REPO` every file is downloaded at, so the data
+cannot change under keepout."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,11 +127,15 @@ def _file(path: str) -> CaraFile:
 
 
 MANIFEST: Final[tuple[CaraFile, ...]] = tuple(_file(path) for path in _SHA256)
+"""Every CARA file keepout uses, with its SHA-256, as listed in
+:data:`MANIFEST_FILE`: what ``keepout fetch cara`` downloads."""
 
 ALFANO_2009_RESULTS: Final = _file(
     "DistributedMatlab/ProbabilityOfCollision/Pc3D_Hall_Utils/"
     "Output_AlfanoTestCases_Pc3D/A09TestCases_01_12_Distributed.csv"
 )
+"""CARA's results for Alfano (2009) test cases 1-12 (CSV): its 2-D, 3D-Nc
+and Monte Carlo Pc of each case, the references of the Alfano suites."""
 ALFANO_2009_TCA: Final[tuple[CaraFile, ...]] = tuple(
     _file(f"DataFiles/AlfanoInputData/Alfano_2009_Test_Cases/Case{n} data at TCA.xls")
     for n in range(1, 13)
@@ -181,6 +190,12 @@ def commit_dir(cache: Path | None = None) -> Path:
     ``<cache>/cara/<CARA_COMMIT>``, ``<cache>`` being ``cache``, else
     ``$KEEPOUT_CACHE_DIR``, else the user cache directory; a file's copy is
     at its :attr:`CaraFile.path` below it.
+
+    Parameters
+    ----------
+    cache
+        The cache directory; ``None`` for ``$KEEPOUT_CACHE_DIR``, else the user cache
+        directory.
     """
     return cache_dir(cache) / "cara" / CARA_COMMIT
 
@@ -197,6 +212,15 @@ def fetch(
     re-downloaded. The download is written atomically. A copy this process
     has already verified (or written) is not hashed again unless its inode,
     size or modification time changed.
+
+    Parameters
+    ----------
+    file
+        The CARA file, e.g. one of :data:`MANIFEST`.
+    cache
+        The cache directory, as for :func:`commit_dir`.
+    download
+        What downloads a URL's bytes; HTTPS with retries by default.
 
     Raises
     ------
@@ -227,6 +251,15 @@ def prefetch(
 ) -> None:
     """Download every file not cached yet, concurrently.
 
+    Parameters
+    ----------
+    files
+        The CARA files, e.g. :data:`MANIFEST`.
+    cache
+        The cache directory, as for :func:`commit_dir`.
+    download
+        What downloads a URL's bytes, as for :func:`fetch`.
+
     Raises
     ------
     SourceUnavailable, ChecksumMismatch
@@ -244,6 +277,11 @@ Cell: TypeAlias = object
 
 def load_csv(path: Path) -> list[dict[str, str]]:
     """The rows of a CSV file with a header row, one dict per row.
+
+    Parameters
+    ----------
+    path
+        The CSV file, UTF-8 (with or without a byte-order mark).
 
     Raises
     ------
@@ -268,6 +306,11 @@ def load_xlsx(path: Path) -> list[dict[str, Cell]]:
 
     Empty cells after the last header name, and rows with no value, are
     ignored. Needs the ``validation`` extra (``openpyxl``).
+
+    Parameters
+    ----------
+    path
+        The .xlsx workbook.
 
     Raises
     ------
@@ -306,6 +349,11 @@ def load_xls_rows(path: Path) -> list[list[Cell]]:
     """The rows of the first sheet of a legacy Excel (.xls) workbook.
 
     Needs the ``validation`` extra (``xlrd``). Empty cells are ``""``.
+
+    Parameters
+    ----------
+    path
+        The .xls workbook.
 
     Raises
     ------

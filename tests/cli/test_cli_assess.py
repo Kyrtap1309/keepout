@@ -135,7 +135,10 @@ def test_assess_needs_both_hard_body_radii_or_hbr(tmp_path: Path) -> None:
     file = write(tmp_path, "green.kvn", without_hbr(green()))
     result = keepout("assess", file)
     assert result.exit_code == ExitCode.ERROR
-    assert result.stderr.startswith("Error: no HBR for both objects in ")
+    assert result.stderr.startswith("Error: CDM ")
+    assert result.stderr.endswith(
+        ": pass --hbr METRES or set hbr_m in the --settings file\n"
+    )
     assert keepout("assess", file, "--hbr", "6").exit_code == ExitCode.OK
 
 
@@ -274,7 +277,7 @@ def test_assess_with_store_computes_with_the_method_and_hbr_given(
     args = ("assess", *files, "--store", str(db), "--json")
     refused = keepout(*args)
     assert refused.exit_code == ExitCode.ERROR
-    assert "no HBR for both objects" in refused.stderr
+    assert "gives no HBR for OBJECT1 and OBJECT2" in refused.stderr
     result = keepout(*args, "--method", "elrod", "--hbr", "1000")
     assert result.exit_code == ExitCode.MANEUVER
     (event,) = json.loads(result.stdout)["events"]

@@ -84,14 +84,18 @@ class Job:
     """
 
     id: int
+    """The job's number, unique in the store's queue."""
     event_id: str
+    """The store's id of the event whose manoeuvre is planned."""
     message_id: str
     """The CDM the computation is pinned to: the event's latest when
     queued."""
     key: str
     """The key its result is cached under."""
     settings: Settings
+    """The operator's settings the plan is computed with."""
     status: JobStatus
+    """Where the job is: queued, running, succeeded, failed or cancelled."""
     attempt: int
     """How many attempts it cost: a claim adds one, a release on a stop
     takes it back."""
@@ -102,14 +106,25 @@ class Job:
     """The worker that holds it, or held it when it succeeded, failed or was
     cancelled. Cleared when it goes back to the queue or its lease lapses."""
     created_at: Time
+    """When it was queued, in UTC."""
     started_at: Time | None
+    """When a worker last claimed it, in UTC; ``None`` while it waits in the
+    queue (also after going back to it)."""
     finished_at: Time | None
+    """When it succeeded, failed or was cancelled, in UTC; ``None`` while it
+    is active."""
     error: str | None
     """Why it failed."""
 
     @classmethod
     def of(cls, row: models.Job) -> Job:
-        """The job of a row."""
+        """The job of a row.
+
+        Parameters
+        ----------
+        row
+            The job's row in the store.
+        """
         return cls(
             id=row.id,
             event_id=row.event_id,
@@ -143,6 +158,8 @@ class Submission:
     """What a submission found or queued."""
 
     outcome: SubmissionOutcome
+    """Whether the result was cached, an identical job existed, or a job was
+    queued."""
     job: Job | None
     """The job queued, or the one already queued or running; ``None`` when
     the result is cached."""

@@ -1,6 +1,12 @@
 # Conjunction store
 
+The conjunction store, its background jobs and its worker. See [The conjunction store](../store.md).
+
 ::: keepout.store
+
+## Opening a store
+
+::: keepout.store.db
 
 ## Background jobs
 

@@ -27,7 +27,15 @@ __all__ = [
 
 
 def judge(case: ValidationCase, result: PcResult) -> Verdict:
-    """The verdict on a result against the case's reference, by the case's criterion."""
+    """The verdict on a result against the case's reference, by the case's criterion.
+
+    Parameters
+    ----------
+    case
+        The validation case.
+    result
+        keepout's result on the case.
+    """
     return case.criterion.judge(result.value, case.reference, result.interval)
 
 
@@ -66,6 +74,13 @@ def run(case: ValidationCase, method: Method) -> PcResult:
 
     :class:`ValidationCase` checks that its methods take its options, so
     each method is given all of them.
+
+    Parameters
+    ----------
+    case
+        The validation case, with the options of its methods.
+    method
+        One of the case's methods.
     """
     return PcComputation(method, case.options)(case.conjunction)
 
@@ -78,7 +93,7 @@ def evaluate(
     Parameters
     ----------
     cases
-        The cases.
+        The validation cases, e.g. of :func:`~keepout.validation.cases.load_all`.
     workers
         Processes to run them in; 1 runs them in this one, ``None`` one per
         CPU, at most 4. The results do not depend on it (Monte Carlo cases
@@ -135,6 +150,11 @@ def summarise(outcomes: Iterable[Outcome]) -> tuple[MethodSummary, ...]:
 
     Suites are in the order they first appear, and so are the methods
     within a suite (the order of the summary in ``docs/validation.md``).
+
+    Parameters
+    ----------
+    outcomes
+        The outcomes, e.g. of :func:`evaluate`.
     """
     suites: dict[Suite, dict[Method, list[Outcome]]] = {}
     for outcome in outcomes:

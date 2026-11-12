@@ -1,5 +1,7 @@
 # Manoeuvres
 
+Planning a collision-avoidance burn and re-screening it. See [Manoeuvre planning](../maneuver.md).
+
 ::: keepout.maneuver
 
 ## How the planner and the re-screen work

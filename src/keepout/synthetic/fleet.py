@@ -263,7 +263,13 @@ def load_fleet(path: str | Path) -> Fleet:
     Parameters
     ----------
     path
-        The fleet file.
+        The fleet file: UTF-8 TOML, in the format of :func:`read_fleet`.
+
+    Returns
+    -------
+    Fleet
+        The satellites the file names, in its order, with the catalog
+        objects' hard-body radius.
 
     Raises
     ------
@@ -272,6 +278,16 @@ def load_fleet(path: str | Path) -> Fleet:
         message starts with the file's path.
     OSError
         If the file cannot be read.
+
+    Examples
+    --------
+    ```python
+    from keepout.synthetic import load_fleet
+
+    fleet = load_fleet("examples/synthetic-operator/fleet.toml")
+    print(fleet.catalog_numbers)
+    # (25544, 38771, 44476)
+    ```
     """
     data = Path(path).read_bytes()
     try:

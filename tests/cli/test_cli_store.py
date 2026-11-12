@@ -320,6 +320,20 @@ def test_rebuild_skips_the_cdms_without_hbr_and_says_so(tmp_path: Path) -> None:
     assert payload == {"path": str(db), "computed": 0, "skipped": [bare]}
 
 
+def test_store_add_points_to_the_settings_for_a_missing_hbr(tmp_path: Path) -> None:
+    # store add has no --hbr: the radius comes from the settings file only.
+    db = tmp_path / "keepout.db"
+    _, yellow = operator_kvn()
+    bare = write(tmp_path, "bare.kvn", without_hbr(yellow))
+    refused = keepout("store", "add", bare, "--store", str(db))
+    assert refused.exit_code == ExitCode.ERROR
+    message_id = keepout_cdm.loads(without_hbr(yellow)).message_id
+    assert refused.stderr == (
+        f"Error: CDM {message_id} gives no HBR for OBJECT1 and OBJECT2: set "
+        "hbr_m in the --settings file\n"
+    )
+
+
 def test_rebuild_and_purge_do_not_create_a_store(tmp_path: Path) -> None:
     db = tmp_path / "keepout.db"
     for command in (("rebuild",), ("purge", "--before", "2030-01-01", "--yes")):

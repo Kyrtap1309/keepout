@@ -27,7 +27,10 @@ class Verdict(NamedTuple):
     error: float
     """Relative error if ``relative``, else absolute error."""
     relative: bool
+    """Whether ``error`` is relative to the reference (a relative bound
+    applied)."""
     passed: bool
+    """Whether the value meets the criterion."""
 
 
 REPRODUCIBILITY_FRACTION: Final = 0.25
@@ -50,13 +53,32 @@ class Criterion(Protocol):
     ) -> Verdict:
         """The verdict on ``value`` against ``reference``;
         ``result_interval`` is the result's confidence interval, if it has
-        one."""
+        one.
+
+        Parameters
+        ----------
+        value
+            The method's Pc.
+        reference
+            The case's reference Pc.
+        result_interval
+            The result's confidence interval ``(low, high)``, if it has one (Monte
+            Carlo).
+        """
         ...
 
     def margin(
         self, reference: float, result_interval: tuple[float, float] | None = None
     ) -> float:
-        """Absolute difference from ``reference`` the criterion allows."""
+        """Absolute difference from ``reference`` the criterion allows.
+
+        Parameters
+        ----------
+        reference
+            The case's reference Pc.
+        result_interval
+            The result's confidence interval, if it has one.
+        """
         ...
 
     def describe(self) -> str:
@@ -72,6 +94,17 @@ class Criterion(Protocol):
     ) -> bool:
         """Whether ``current`` repeats ``previous`` within
         :data:`REPRODUCIBILITY_FRACTION` of the :meth:`margin` at ``reference``.
+
+        Parameters
+        ----------
+        previous
+            The method's Pc in an earlier run.
+        current
+            Its Pc in this run.
+        reference
+            The case's reference Pc, where the margin is taken.
+        result_interval
+            The result's confidence interval, if it has one.
         """
         allowed = REPRODUCIBILITY_FRACTION * self.margin(reference, result_interval)
         return abs(current - previous) <= allowed
@@ -128,6 +161,16 @@ class BoundCriterion(Criterion):
 
         The relative bound falls back to the absolute bound (0 if none)
         where the reference is below ``small`` or is 0.
+
+        Parameters
+        ----------
+        value
+            The method's Pc.
+        reference
+            The case's reference Pc.
+        result_interval
+            The result's confidence interval ``(low, high)``, if it has one (Monte
+            Carlo).
         """
         del result_interval  # a bound does not depend on it
         difference = abs(value - reference)
@@ -143,7 +186,15 @@ class BoundCriterion(Criterion):
     def margin(
         self, reference: float, result_interval: tuple[float, float] | None = None
     ) -> float:
-        """The bound that applies at ``reference``, as an absolute difference."""
+        """The bound that applies at ``reference``, as an absolute difference.
+
+        Parameters
+        ----------
+        reference
+            The case's reference Pc.
+        result_interval
+            The result's confidence interval, if it has one.
+        """
         del result_interval  # a bound does not depend on it
         relative = self._relative_at(reference)
         if relative is not None:
@@ -187,7 +238,18 @@ class IntervalCriterion(Criterion):
     ) -> Verdict:
         """The verdict on ``value`` against ``reference``: passed if
         ``reference`` lies in ``result_interval``; the error is relative unless
-        the reference is 0."""
+        the reference is 0.
+
+        Parameters
+        ----------
+        value
+            The method's Pc.
+        reference
+            The case's reference Pc.
+        result_interval
+            The result's confidence interval ``(low, high)``, if it has one (Monte
+            Carlo).
+        """
         difference = abs(value - reference)
         low, high = _required(result_interval)
         error = difference / reference if reference > 0.0 else difference
@@ -197,7 +259,15 @@ class IntervalCriterion(Criterion):
     def margin(
         self, reference: float, result_interval: tuple[float, float] | None = None
     ) -> float:
-        """The half-width of the result's ``result_interval``."""
+        """The half-width of the result's ``result_interval``.
+
+        Parameters
+        ----------
+        reference
+            The case's reference Pc.
+        result_interval
+            The result's confidence interval, if it has one.
+        """
         del reference  # the interval does not depend on it
         low, high = _required(result_interval)
         return 0.5 * (high - low)

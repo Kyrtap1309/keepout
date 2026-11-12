@@ -175,7 +175,8 @@ SettingsFile: TypeAlias = Annotated[
         help=(
             "Operator settings, TOML: [pc] method, policy, hbr_m; [risk] "
             "green_below, red_from; [maneuver] target_pc (default: the "
-            "library's). An option given here wins over the file."
+            "library's). Where the command has --method, --hbr or "
+            "--target-pc, that option wins over the file."
         ),
     ),
 ]

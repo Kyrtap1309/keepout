@@ -113,7 +113,15 @@ class EncounterPlane:
 
 
 def sigma_along(direction: FloatArray, covariance: FloatArray) -> float:
-    """Standard deviation of a position covariance along a unit vector [m]."""
+    """Standard deviation of a position covariance along a unit vector [m].
+
+    Parameters
+    ----------
+    direction
+        A unit vector, shape ``(3,)``, in the covariance's frame.
+    covariance
+        A 3x3 position covariance [m^2].
+    """
     return float(np.sqrt(max(float(direction @ covariance @ direction), 0.0)))
 
 

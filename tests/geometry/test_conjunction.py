@@ -66,7 +66,9 @@ def test_radius_is_the_sum_of_object_radii() -> None:
 def test_missing_radius_is_an_error_not_a_default() -> None:
     base = TYPICAL_HEAD_ON
     primary = with_radius(base.primary, 3.0)
-    with pytest.raises(ValueError, match="no hard-body radius for SEC"):
+    with pytest.raises(
+        ValueError, match=r"no hard-body radius for the secondary \(SEC\)"
+    ):
         combined_hard_body_radius(primary, base.secondary)
 
 

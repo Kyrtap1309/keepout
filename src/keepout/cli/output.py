@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import enum
 import functools
+import inspect
 import json
 from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Final, NoReturn, ParamSpec, TypeAlias, TypeVar
@@ -20,7 +21,7 @@ from rich.console import Console, RenderableType
 from rich.table import Table
 
 from keepout._text import duration_words, pc_text, plural
-from keepout.errors import KeepoutError
+from keepout.errors import HardBodyRadiusError, KeepoutError
 
 if TYPE_CHECKING:
     from astropy.time import Time
@@ -156,19 +157,40 @@ _P = ParamSpec("_P")
 _R = TypeVar("_R")
 
 
+def _radius_hint(command: Callable[..., object]) -> str:
+    """How a user of ``command`` gives the combined hard-body radius: the
+    options it has for it (``--hbr``, ``hbr_m`` in ``--settings``)."""
+    options = inspect.signature(command).parameters
+    ways = [
+        way
+        for name, way in (
+            ("hbr", "pass --hbr METRES"),
+            ("settings", "set hbr_m in the --settings file"),
+        )
+        if name in options
+    ]
+    return " or ".join(ways) or "give HBR for both objects in the CDMs"
+
+
 def reported(command: Callable[_P, _R]) -> Callable[_P, _R]:
     """``command``, reporting its keepout and file errors with :func:`fail`.
 
     A :class:`~keepout.errors.KeepoutError` or :class:`OSError` becomes
     ``Error: <message>`` and :attr:`ExitCode.ERROR`; anything else is a bug
-    and keeps its traceback. Every command is registered through it
+    and keeps its traceback. A
+    :class:`~keepout.errors.HardBodyRadiusError` keeps its detail with the
+    command's own way to give the radius instead of the library's keyword
+    argument. Every command is registered through it
     (:mod:`keepout.cli.app`).
     """
+    hint = _radius_hint(command)
 
     @functools.wraps(command)
     def run(*args: _P.args, **kwargs: _P.kwargs) -> _R:
         try:
             return command(*args, **kwargs)
+        except HardBodyRadiusError as exc:
+            fail(f"{exc.detail}: {hint}")
         except (KeepoutError, OSError) as exc:
             fail(str(exc))
 

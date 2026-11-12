@@ -197,6 +197,8 @@ HEADER: Final = _table(
     _many("CCSDS_CDM_VERS ORIGINATOR MESSAGE_FOR MESSAGE_ID CONJUNCTION_ID", "str"),
     _many("CREATION_DATE", "time"),
 )
+"""The keywords of a CDM's header, by name: each with its type (and so its
+parser)."""
 
 RELATIVE: Final = _table(
     _many(
@@ -224,6 +226,9 @@ RELATIVE: Final = _table(
     ),
     _many("COLLISION_PROBABILITY", "float"),
 )
+"""The keywords of a CDM's relative metadata and data (TCA, miss distance,
+screening volume, relative state, Pc), by name: each with its type, unit and
+NDM/XML group."""
 
 SEGMENT: Final = _table(
     _many(
@@ -250,12 +255,18 @@ SEGMENT: Final = _table(
     _many("X_DOT Y_DOT Z_DOT", "float", "km/s", KM, _STATE),
     _COVARIANCE,
 )
+"""The keywords of an object's segment (metadata, OD parameters, physical
+parameters, state vector and covariance), by name: each with its type, unit
+and NDM/XML group. States are in km and km/s in the message, kept in SI
+units."""
 
 KEYWORDS: Final[Mapping[SectionKind, Mapping[str, Keyword]]] = {
     "header": HEADER,
     "relative": RELATIVE,
     "segment": SEGMENT,
 }
+"""Every keyword a CDM section can hold, by section: :data:`HEADER`,
+:data:`RELATIVE` and :data:`SEGMENT` (each object has one)."""
 
 REQUIRED: Final[Mapping[SectionKind, tuple[str, ...]]] = {
     "header": (VERSION_KEYWORD, "CREATION_DATE", "ORIGINATOR", "MESSAGE_ID"),
@@ -274,3 +285,5 @@ REQUIRED: Final[Mapping[SectionKind, tuple[str, ...]]] = {
         *covariance_names(6),
     ),
 }
+"""The keywords each section must give a value, by section: a
+:class:`~keepout.cdm.Cdm` without one is refused."""

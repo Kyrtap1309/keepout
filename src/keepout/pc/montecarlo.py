@@ -399,6 +399,17 @@ def montecarlo_over_scan(
     The core of :func:`montecarlo`, without its argument checks: for
     :func:`~keepout.pc.compute_pc`, whose fallback reuses the scan of the
     failed :func:`~keepout.pc.hall3d.hall3d`.
+
+    Parameters
+    ----------
+    conjunction
+        The conjunction, both covariances known and both orbits elliptic.
+    encounters
+        The scan of its collision rate, whose encounter segments are sampled.
+    samples, rtol, max_samples, confidence, seed
+        As for :func:`montecarlo`.
+    workers
+        Number of processes, at least 1 (``None`` already resolved).
     """
     scan = encounters.scan
     # A peak-overlap failure inside a segment could have narrowed the

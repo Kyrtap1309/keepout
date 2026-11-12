@@ -202,6 +202,24 @@ def screen(
         If ``adjust_primaries`` raises it, as a
         :class:`~keepout.propagation.ManeuveredPropagator` does for an orbit
         it cannot integrate.
+
+    Examples
+    --------
+    ```python
+    from astropy.time import Time
+
+    from keepout import omm, screen
+
+    catalog = omm.load("tests/screening/data/celestrak-public.csv.gz")
+    iss = [item for item in catalog if item.catalog_number == 25544]
+    start = Time("2026-10-06T00:00:00", scale="utc")
+    result = screen(iss, catalog, start, duration=86400.0)  # one day, 5 km sphere
+    for approach in result.approaches:
+        distance = round(approach.range_at_tca)  # [m]
+        print(approach.secondary_number, approach.tca.isot, distance)
+    # 58180 2026-10-06T05:12:33.772 4633
+    # 58180 2026-10-06T12:10:37.724 4902
+    ```
     """
     require_single_time(start, "start")
     require_non_negative(duration, "duration")

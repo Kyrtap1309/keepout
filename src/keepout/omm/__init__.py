@@ -60,6 +60,19 @@ def loads(text: str) -> tuple[Omm, ...]:
     OmmParseError
         If the text is in none of these formats, or the format's reader
         refuses it.
+
+    Examples
+    --------
+    ```python
+    from pathlib import Path
+
+    from keepout import omm
+
+    text = Path("tests/omm/data/ccsds_omm_g7.kvn").read_text()
+    (elements,) = omm.loads(text)  # CCSDS KVN, recognised by CCSDS_OMM_VERS
+    print(elements.object_name, elements.catalog_number, elements.epoch.isot)
+    # GOES 9 23581 2020-03-04T10:34:41.4264
+    ```
     """
     body = strip_bom(text)
     start = body.lstrip()
@@ -89,10 +102,27 @@ def load(path: str | Path) -> tuple[Omm, ...]:
         File to read: UTF-8 text, or gzip-compressed UTF-8 text (recognised
         by its content, whatever the file name).
 
+    Returns
+    -------
+    tuple[Omm, ...]
+        The objects in the order the file gives them.
+
     Raises
     ------
     OmmParseError
         If the file is broken gzip data, not UTF-8 text, or not OMM data.
+    OSError
+        If the file cannot be read.
+
+    Examples
+    --------
+    ```python
+    from keepout import omm
+
+    catalog = omm.load("tests/screening/data/celestrak-public.csv.gz")
+    print(len(catalog), catalog[0].object_name, catalog[0].catalog_number)
+    # 19914 CALSPHERE 1 900
+    ```
     """
     return load_data(Path(path).read_bytes(), path)
 

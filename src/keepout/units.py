@@ -23,7 +23,15 @@ DAY: Final = 86400.0
 
 
 def elapsed_seconds(start: Time, end: Time) -> float:
-    """SI seconds elapsed from ``start`` to ``end``, leap seconds included."""
+    """SI seconds elapsed from ``start`` to ``end``, leap seconds included.
+
+    Parameters
+    ----------
+    start
+        The earlier time, in any scale.
+    end
+        The later time; before ``start``, the result is negative.
+    """
     return float((end - start).to_value("s"))
 
 
@@ -34,5 +42,12 @@ def julian_seconds_between(start: Time, end: Time) -> float:
     Fast and exact for Times in one scale, but across a UTC leap second it
     differs from the elapsed SI seconds (:func:`elapsed_seconds`) by that
     second.
+
+    Parameters
+    ----------
+    start
+        The first time.
+    end
+        The second time, in the same scale as ``start`` for an exact result.
     """
     return float((end.jd1 - start.jd1) * DAY + (end.jd2 - start.jd2) * DAY)

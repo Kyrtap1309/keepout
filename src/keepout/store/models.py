@@ -61,10 +61,15 @@ class JobStatus(enum.StrEnum):
     """Where a job is: waiting, held by a worker, done, failed or cancelled."""
 
     QUEUED = "queued"
+    """Waiting for a worker."""
     RUNNING = "running"
+    """Claimed by a worker, under a lease it renews."""
     SUCCEEDED = "succeeded"
+    """Done: its plan is cached in the store."""
     FAILED = "failed"
+    """Ended with an error (:attr:`~keepout.store.Job.error`)."""
     CANCELLED = "cancelled"
+    """Cancelled while queued or running (:meth:`~keepout.store.JobQueue.cancel`)."""
 
     @property
     def is_active(self) -> bool:

@@ -144,7 +144,8 @@ class PcObservation:
         Parameters
         ----------
         result
-            keepout's result.
+            keepout's result of a Pc method, from :func:`~keepout.pc.compute_pc` or a
+            :class:`~keepout.pc.PcComputation`.
         time_to_tca
             Seconds from the message's creation to TCA.
         message_id

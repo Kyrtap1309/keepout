@@ -31,6 +31,7 @@ RefFrame: TypeAlias = Literal["GCRF", "EME2000", "ITRF", "TEME"]
 """Reference frames a state vector can be expressed in."""
 
 REF_FRAMES: Final[tuple[RefFrame, ...]] = get_args(RefFrame)
+"""Every :data:`RefFrame`: ``("GCRF", "EME2000", "ITRF", "TEME")``."""
 
 
 def as_ref_frame(name: str | None) -> RefFrame:

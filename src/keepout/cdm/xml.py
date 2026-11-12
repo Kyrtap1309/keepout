@@ -36,6 +36,9 @@ if TYPE_CHECKING:
 __all__ = ["NDM_NAMESPACE", "dump", "dumps", "load", "loads"]
 
 NDM_NAMESPACE: Final = "urn:ccsds:schema:ndmxml"
+"""The namespace of the CCSDS NDM/XML schemas (the ``ndm:`` prefix). Reading
+ignores namespaces, so a CDM with or without it reads alike; writing does
+not qualify elements with it."""
 _CDM_1_0_SCHEMA_LOCATION: Final = (
     "https://sanaregistry.org/r/ndmxml_unqualified/ndmxml-2.0.0-master-2.0.xsd"
 )
@@ -72,7 +75,7 @@ def loads(text: str) -> Cdm:
     Parameters
     ----------
     text
-        The message.
+        The message: one CDM as NDM/XML, version 1.0 or 2.0.
 
     Raises
     ------
@@ -203,7 +206,8 @@ def dumps(cdm: Cdm) -> str:
     Parameters
     ----------
     cdm
-        The message.
+        The message, e.g. from :func:`~keepout.cdm.load` or
+        :func:`~keepout.cdm.make_cdm`.
 
     Raises
     ------
@@ -247,7 +251,8 @@ def dump(cdm: Cdm, path: str | Path) -> None:
     Parameters
     ----------
     cdm
-        The message.
+        The message, e.g. from :func:`~keepout.cdm.load` or
+        :func:`~keepout.cdm.make_cdm`.
     path
         File to write.
     """

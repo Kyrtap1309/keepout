@@ -30,6 +30,7 @@ __all__ = [
     "ConjunctionEvent",
     "EventBounds",
     "group_events",
+    "missing_hard_body_radius",
     "stable_event_id",
     "time_to_tca",
     "without_hard_body_radius",
@@ -42,7 +43,13 @@ pair are at least a large fraction of an orbit apart."""
 
 
 def time_to_tca(cdm: Cdm) -> float:
-    """Seconds from the CDM's creation to its TCA (negative after TCA)."""
+    """Seconds from the CDM's creation to its TCA (negative after TCA).
+
+    Parameters
+    ----------
+    cdm
+        The message; its ``CREATION_DATE`` and ``TCA`` are used.
+    """
     return elapsed_seconds(cdm.creation_date, cdm.tca)
 
 
@@ -54,13 +61,40 @@ def without_hard_body_radius(cdms: Iterable[Cdm]) -> tuple[str, ...]:
     Parameters
     ----------
     cdms
-        The CDMs.
+        The CDMs to check, in any order.
     """
-    return tuple(
-        cdm.message_id
-        for cdm in cdms
-        if cdm.object1.hard_body_radius is None or cdm.object2.hard_body_radius is None
-    )
+    return tuple(cdm.message_id for cdm in cdms if _without_hbr(cdm))
+
+
+def _without_hbr(cdm: Cdm) -> tuple[str, ...]:
+    """``"OBJECT1"`` and ``"OBJECT2"``, each if the CDM gives it no ``HBR``."""
+    pairs = (("OBJECT1", cdm.object1), ("OBJECT2", cdm.object2))
+    return tuple(name for name, item in pairs if item.hard_body_radius is None)
+
+
+def missing_hard_body_radius(cdms: Iterable[Cdm]) -> str:
+    """Which CDMs lack ``HBR`` for which object, in words, e.g. ``"CDM A
+    gives no HBR for OBJECT1 and OBJECT2; CDM B gives none for OBJECT2"``:
+    the detail of a :class:`~keepout.errors.HardBodyRadiusError`.
+
+    Parameters
+    ----------
+    cdms
+        The CDMs; those with ``HBR`` for both objects are left out.
+
+    Returns
+    -------
+    str
+        The CDMs that lack it, in the order given; empty if none does.
+    """
+    parts: list[str] = []
+    for cdm in cdms:
+        lacking = _without_hbr(cdm)
+        if lacking:
+            given = "none" if parts else "no HBR"
+            objects = " and ".join(lacking)
+            parts.append(f"CDM {cdm.message_id} gives {given} for {objects}")
+    return "; ".join(parts)
 
 
 EVENT_ID_LENGTH: Final = 12
@@ -73,6 +107,11 @@ def stable_event_id(message_id: str) -> str:
     first :data:`EVENT_ID_LENGTH` hexadecimal characters of its SHA-256.
 
     The same CDMs give the same id, with a store or without, on any machine.
+
+    Parameters
+    ----------
+    message_id
+        ``MESSAGE_ID`` of the event's first CDM (by ``CREATION_DATE``).
     """
     digest = hashlib.sha256(message_id.encode("utf-8")).hexdigest()
     return digest[:EVENT_ID_LENGTH]
@@ -180,10 +219,34 @@ class ConjunctionEvent:
         tca_tolerance
             Largest spread [s] of the CDMs' TCAs.
 
+        Returns
+        -------
+        ConjunctionEvent
+            The event, its CDMs sorted by ``CREATION_DATE``.
+
         Raises
         ------
         ValueError
-            As :class:`ConjunctionEvent`.
+            If there are no CDMs or ``tca_tolerance`` is invalid.
+        EventError
+            If the CDMs do not make one event, as for
+            :class:`ConjunctionEvent`.
+
+        Examples
+        --------
+        ```python
+        from keepout import assess, cdm
+        from keepout.events import ConjunctionEvent
+
+        event = ConjunctionEvent.from_cdms([cdm.load("tests/cdm/data/tracss_v2.kvn")])
+        print(event.event_id, event.primary_id, event.secondary_id)
+        # 5ede3a14c345 12345 30337
+        observations = event.observations(combined_hard_body_radius=20.0)
+        print(observations[0].source, f"{observations[0].pc:.3e}")
+        # keepout (hall3d) 4.504e-02
+        print(assess(observations).decision.action.label)
+        # maneuver
+        ```
         """
         messages = tuple(cdms)
         if event_id is None and messages:
@@ -265,12 +328,9 @@ class ConjunctionEvent:
             object (checked before any Pc is computed).
         """
         if combined_hard_body_radius is None:
-            missing = without_hard_body_radius(self.cdms)
+            missing = missing_hard_body_radius(self.cdms)
             if missing:
-                raise HardBodyRadiusError(
-                    f"no HBR for both objects in {', '.join(missing)}: pass "
-                    "combined_hard_body_radius= (in metres)"
-                )
+                raise HardBodyRadiusError(missing)
         return tuple(
             _observe(cdm, compute, policy, combined_hard_body_radius)
             for cdm in self.cdms
@@ -317,7 +377,10 @@ class AssessedEvent(NamedTuple):
     (:func:`keepout.risk.assess` of its observations)."""
 
     event: ConjunctionEvent
+    """The event, with its CDMs."""
     assessment: Assessment
+    """The assessment of the event's Pc observations: the trend and the
+    recommended action."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -348,7 +411,13 @@ class EventBounds:
 
     @classmethod
     def of(cls, cdm: Cdm) -> EventBounds:
-        """The bounds of the event of ``cdm`` alone."""
+        """The bounds of the event of ``cdm`` alone.
+
+        Parameters
+        ----------
+        cdm
+            The event's first CDM.
+        """
         return cls(_pair(cdm), cdm.tca, cdm.tca, cdm.conjunction_id)
 
     @property
@@ -357,7 +426,13 @@ class EventBounds:
         return elapsed_seconds(self.first_tca, self.last_tca)
 
     def including(self, cdm: Cdm) -> EventBounds:
-        """The bounds of the event with ``cdm`` added, whether it fits or not."""
+        """The bounds of the event with ``cdm`` added, whether it fits or not.
+
+        Parameters
+        ----------
+        cdm
+            A CDM about the event's objects.
+        """
         first, last = self.first_tca, self.last_tca
         if elapsed_seconds(first, cdm.tca) < 0.0:
             first = cdm.tca
@@ -369,7 +444,16 @@ class EventBounds:
 
     def admits(self, cdm: Cdm, *, tca_tolerance: float = DEFAULT_TCA_TOLERANCE) -> bool:
         """Whether ``cdm`` joins the event: same objects, the TCAs with its
-        own within ``tca_tolerance`` [s], no other ``CONJUNCTION_ID``."""
+        own within ``tca_tolerance`` [s], no other ``CONJUNCTION_ID``.
+
+        Parameters
+        ----------
+        cdm
+            The CDM that may join the event.
+        tca_tolerance
+            Largest spread [s] of the TCAs of one event; :data:`DEFAULT_TCA_TOLERANCE`
+            by default.
+        """
         given = (self.conjunction_id, cdm.conjunction_id)
         return (
             _pair(cdm) == self.pair
@@ -410,6 +494,22 @@ def group_events(
         If a CDM fits more than one event (it gives no ``CONJUNCTION_ID``,
         and two events of different ones are within ``tca_tolerance``), or
         a ``MESSAGE_ID`` is repeated within an event.
+
+    Examples
+    --------
+    ```python
+    from keepout import cdm
+    from keepout.events import group_events
+
+    messages = [
+        cdm.load("tests/cdm/data/tracss_v2.kvn"),
+        cdm.load("tests/cdm/data/b1_example.kvn"),  # same objects, TCA in 2010
+    ]
+    for event in group_events(messages):
+        print(event.event_id, event.primary_id, event.secondary_id, len(event.cdms))
+    # 23c7fe5cf923 12345 30337 1
+    # 5ede3a14c345 12345 30337 1
+    ```
     """
     require_non_negative(tca_tolerance, "tca_tolerance")
     messages = list(cdms)

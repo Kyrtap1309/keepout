@@ -114,7 +114,7 @@ class ManeuverGrid:
         Parameters
         ----------
         plan
-            The plan.
+            The plan, from :func:`~keepout.maneuver.plan_maneuver`.
         """
         return cls(
             burn_leads=plan.burn_leads,
@@ -267,6 +267,31 @@ def plan_event(
         As those functions.
     KeepoutError
         As those functions.
+
+    Examples
+    --------
+    One burn 12 hours before TCA, 1 cm/s prograde, without a re-screen:
+
+    ```python
+    from keepout import cdm
+    from keepout.events import ConjunctionEvent
+    from keepout.maneuver import plan_event
+    from keepout.pc import computation
+
+    event = ConjunctionEvent.from_cdms([cdm.load("tests/cdm/data/tracss_v2.kvn")])
+    outcome = plan_event(
+        event,
+        combined_hard_body_radius=20.0,
+        compute=computation("foster"),
+        burn=(12 * 3600.0, 0.01),  # [s before TCA], [m/s]
+    )
+    (burn,) = outcome.burns
+    print(burn.direction, f"{burn.option.pc:.2e}", burn.option.meets_target)
+    # prograde 3.19e-10 True
+    ```
+
+    Pass ``catalog=`` (e.g. from :func:`keepout.omm.load`) and
+    ``catalog_label=`` to screen each burn against it too.
     """
     if (catalog is None) != (catalog_label is None):
         raise ValueError("give catalog and catalog_label together, or neither")

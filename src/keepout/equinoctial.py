@@ -95,7 +95,15 @@ singularity of the elements)."""
 
 
 def retrograde_factor(r: npt.ArrayLike, v: npt.ArrayLike) -> RetrogradeFactor:
-    """``+1`` for a prograde orbit (angular momentum ``h_z >= 0``), else ``-1``."""
+    """``+1`` for a prograde orbit (angular momentum ``h_z >= 0``), else ``-1``.
+
+    Parameters
+    ----------
+    r
+        Position [m], shape ``(3,)``; a complex-step perturbation is ignored.
+    v
+        Velocity [m/s], shape ``(3,)``; likewise.
+    """
     h = np.cross(np.real(np.asarray(r)), np.real(np.asarray(v)))
     return 1 if h[2] >= 0.0 else -1
 
@@ -226,7 +234,15 @@ def to_cartesian(
 
 
 def semi_major_axis(n: _Number, mu: float = EARTH_MU) -> _Number:
-    """Semi-major axis [m] of the mean motion ``n`` [rad/s] (Kepler's third law)."""
+    """Semi-major axis [m] of the mean motion ``n`` [rad/s] (Kepler's third law).
+
+    Parameters
+    ----------
+    n
+        Mean motion [rad/s], a number or an array.
+    mu
+        Gravitational parameter [m^3/s^2]; the Earth's by default.
+    """
     a: _Number = (mu / (n * n)) ** (1.0 / 3.0)  # pyright: ignore[reportAssignmentType]
     return a
 
@@ -373,7 +389,8 @@ class Orbits:
         elements
             Real equinoctial elements at TCA, shape ``(m, 6)``.
         fr
-            Retrograde factor.
+            Retrograde factor of every orbit: ``+1`` for prograde orbits, ``-1`` for
+            retrograde ones (see :func:`retrograde_factor`).
         mu
             Gravitational parameter [m^3/s^2].
         """
@@ -393,7 +410,13 @@ class Orbits:
         )
 
     def subset(self, rows: slice | IndexArray) -> Orbits:
-        """The orbits ``rows``, with their constants taken, not recomputed."""
+        """The orbits ``rows``, with their constants taken, not recomputed.
+
+        Parameters
+        ----------
+        rows
+            The orbits kept: a slice or an array of indices.
+        """
         return Orbits(
             self.elements[rows],
             self.n[rows],
@@ -409,7 +432,16 @@ class Orbits:
     def cartesian(
         self, t: float | FloatArray, rows: slice | IndexArray = slice(None)
     ) -> FloatArray:
-        """States ``(k, 6)`` of the orbits ``rows`` at ``t`` [s from TCA]."""
+        """States ``(k, 6)`` of the orbits ``rows`` at ``t`` [s from TCA].
+
+        Parameters
+        ----------
+        t
+            Time [s] from TCA, the epoch of the elements: one, or one per orbit of
+            ``rows``.
+        rows
+            The orbits to propagate: a slice or an array of indices; all by default.
+        """
         n, af, ag = self.n[rows], self.af[rows], self.ag[rows]
         lam = self.elements[rows, 5] + n * np.asarray(t)
         state: FloatArray = _state(
@@ -441,7 +473,13 @@ def propagate(elements: _Array, dt: npt.ArrayLike) -> _Array:
 
 
 def wrap_angle(angle: _Real) -> _Real:
-    """Angle difference wrapped to ``[-pi, pi)`` (real input only)."""
+    """Angle difference wrapped to ``[-pi, pi)`` (real input only).
+
+    Parameters
+    ----------
+    angle
+        An angle or angle difference [rad], a number or a real array.
+    """
     return (angle + math.pi) % (2.0 * math.pi) - math.pi
 
 

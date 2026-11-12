@@ -85,7 +85,15 @@ class Retrieval:
 
     @classmethod
     def of(cls, path: Path, meta: CopyMeta) -> Retrieval:
-        """The retrieval of the copy at ``path``, as its metadata records it."""
+        """The retrieval of the copy at ``path``, as its metadata records it.
+
+        Parameters
+        ----------
+        path
+            The cached copy.
+        meta
+            Its metadata, from :func:`~keepout.sources.cache.read_copy`.
+        """
         from astropy.time import Time
 
         return cls(
@@ -216,7 +224,7 @@ class CatalogReference:
         Parameters
         ----------
         path
-            The file.
+            The catalog file, as given to :func:`keepout.omm.load`; made absolute.
 
         Raises
         ------
@@ -321,7 +329,13 @@ class Catalog:
     @classmethod
     def of(cls, parts: Iterable[CatalogPart]) -> Catalog:
         """The catalog of ``parts``: each object's newest element set, by
-        catalog number."""
+        catalog number.
+
+        Parameters
+        ----------
+        parts
+            The downloads of the catalog, e.g. one per CelesTrak group.
+        """
         downloads = tuple(parts)
         kept, dropped = _newest(omm for part in downloads for omm in part.omms)
         return cls(kept, dropped, downloads)
@@ -395,6 +409,12 @@ class CatalogSource:
     def fetch(self, cache: Path | None = None) -> Catalog:
         """The catalog: its cached copy while that is younger than
         :attr:`reuse`, else a download.
+
+        Parameters
+        ----------
+        cache
+            The cache directory; ``None`` for ``$KEEPOUT_CACHE_DIR``, else the user
+            cache directory.
 
         Raises
         ------

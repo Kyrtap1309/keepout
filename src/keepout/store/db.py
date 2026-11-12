@@ -6,6 +6,12 @@ opens only at the revision this keepout was built for: an older file is
 upgraded on request (:func:`upgrade`, ``keepout store upgrade``); a newer one,
 or another application's database, is never touched, not even switched to
 write-ahead logging.
+
+:func:`open_store` opens a store (re-exported as
+:func:`keepout.store.open_store`), checking its revision against
+:data:`HEAD`. :func:`engine_for` makes the SQLAlchemy engine a
+:class:`~keepout.store.Store` runs on: write-ahead logging, foreign keys, and
+a wait of :data:`BUSY_TIMEOUT_MS` for another process's lock.
 """
 
 from __future__ import annotations
@@ -42,7 +48,11 @@ __all__ = [
 ]
 
 BUSY_TIMEOUT_MS: Final = 30_000
-"""How long a connection waits for a lock another one holds, in milliseconds."""
+"""How long a connection waits for a lock another one holds, in milliseconds
+(30 s); past it, the store raises :class:`~keepout.errors.StoreError`.
+
+SQLite's ``busy_timeout``, set on every connection of :func:`engine_for`: a
+writer waits this long for another process's write to end."""
 
 _MIGRATIONS: Final = "keepout.store:migrations"
 
@@ -59,7 +69,9 @@ _SCRIPTS: Final = ScriptDirectory.from_config(_config())
 
 # The package ships at least one migration, so there is a head.
 HEAD: Final = _SCRIPTS.get_current_head() or ""
-"""The schema revision this keepout reads and writes."""
+"""The schema revision this keepout reads and writes: the Alembic head of its
+migrations. :func:`open_store` opens only a store at this revision;
+:func:`upgrade` brings an older one to it."""
 
 _KNOWN: Final = frozenset(script.revision for script in _SCRIPTS.walk_revisions())
 """Every revision of this keepout's migrations."""
@@ -351,6 +363,25 @@ def open_store(path: str | Path, *, create: bool = True) -> Store:
         is another application's database; or if it was made by an older
         keepout (``keepout store upgrade`` upgrades it) or a newer one; or
         if Python's SQLite is older than 3.35. A refused file is not changed.
+
+    Examples
+    --------
+    ```python
+    from pathlib import Path
+
+    from keepout.settings import Settings
+    from keepout.store import CdmInput, open_store
+
+    with open_store("keepout.db") as store:  # created if missing
+        report = store.ingest([CdmInput.read(Path("tests/cdm/data/tracss_v2.kvn"))])
+        print(report.added, report.new_events)
+        # ('TRACSS-TEST-0001',) ('5ede3a14c345',)
+        settings = Settings(combined_hard_body_radius=20.0)  # [m]
+        for event, assessment in store.assess(report.events, settings):
+            action = assessment.decision.action
+            print(event.event_id, assessment.level.key, action.label)
+        # 5ede3a14c345 red maneuver
+    ```
     """
     _require_sqlite()
     path = Path(path)

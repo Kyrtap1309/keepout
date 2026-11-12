@@ -7,6 +7,8 @@ collision-avoidance manoeuvre planning.
 
 > **Status:** pre-alpha; the API may change without notice.
 
+**Documentation: <https://kyrtap1309.github.io/keepout/>**
+
 Pc algorithms are implemented from the published literature and validated
 against the public test cases of the
 [NASA CARA Analysis Tools](https://github.com/nasa/CARA_Analysis_Tools).
@@ -19,16 +21,17 @@ keepout needs Python 3.11 or later. It is not on PyPI yet, so install it
 from GitHub:
 
 ```bash
-pip install "keepout[cli] @ git+https://github.com/Kyrtap1309/keepout"
+pip install "keepout[cli,store] @ git+https://github.com/Kyrtap1309/keepout"
 ```
 
-The `cli` extra adds the `keepout` command. To run the examples that read
-files committed to the repository, clone it instead:
+The `cli` extra adds the `keepout` command and the `store` extra the
+conjunction store (a SQLite file); the library needs neither. To run the
+examples that read files committed to the repository, clone it instead:
 
 ```bash
 git clone https://github.com/Kyrtap1309/keepout
 cd keepout
-uv sync --extra cli
+uv sync --extra cli --extra store
 ```
 
 ## Example
@@ -37,30 +40,36 @@ uv sync --extra cli
 import keepout.cdm
 from keepout import compute_pc
 
-cdm = keepout.cdm.load("event.cdm")  # KVN or XML, CDM 1.0 or 2.0
-conjunction = cdm.conjunction(combined_hard_body_radius=20.0)
+# A sample CDM in the repository; any CDM 1.0 or 2.0, KVN or XML, works.
+cdm = keepout.cdm.load("tests/cdm/data/tracss_v2.kvn")
+conjunction = cdm.conjunction(combined_hard_body_radius=20.0)  # [m]
 result = compute_pc(conjunction)  # picks Foster, Hall 3D-Nc or a maximum Pc
-print(result.method, result.value, result.diagnostics)
+print(result.method, result.value)  # hall3d 0.045044354503398956
 ```
+
+New to conjunction assessment? [Concepts](https://kyrtap1309.github.io/keepout/concepts/) explains
+the workflow and the terms (Pc, TCA, HBR, CDM, ...).
 
 ## Documentation
 
-- [Overview](docs/index.md): install, where to start and a tour of every
-  feature.
-- [Screening](docs/screening.md): the method, the three built-in screening
-  volumes and the limits of GP data.
-- [Synthetic operator](docs/synthetic.md): CDMs and risk decisions for real
-  satellites on public data, with [assumed covariances](docs/assumptions.md).
-- [2-D probability of collision](docs/pc-2d.md) and
-  [3-D, Monte Carlo and maximum Pc](docs/pc-3d.md).
-- [Risk assessment](docs/risk.md): from a sequence of CDMs to an action.
-- [Manoeuvre planning](docs/maneuver.md): the smallest burn that clears an
-  event, and what it brings.
-- [Command line](docs/cli.md) and [Space-Track data](docs/spacetrack.md).
-- [The conjunction store](docs/store.md): `keepout[store]` keeps CDMs,
-  events and their Pc in a local SQLite file. Each event has a stable id
-  of 12 hexadecimal characters. `keepout worker` computes queued
-  manoeuvre plans in the background.
+The documentation is published at <https://kyrtap1309.github.io/keepout/>:
+
+- [Getting started](https://kyrtap1309.github.io/keepout/): install, where to start and a tour of every
+  feature; [Concepts](https://kyrtap1309.github.io/keepout/concepts/) and the glossary.
+- [Screening](https://kyrtap1309.github.io/keepout/screening/) and the
+  [synthetic operator](https://kyrtap1309.github.io/keepout/synthetic/), with its
+  [assumed covariances](https://kyrtap1309.github.io/keepout/assumptions/).
+- [2-D probability of collision](https://kyrtap1309.github.io/keepout/pc-2d/) and
+  [3-D, Monte Carlo and maximum Pc](https://kyrtap1309.github.io/keepout/pc-3d/).
+- [Risk assessment](https://kyrtap1309.github.io/keepout/risk/) and
+  [manoeuvre planning](https://kyrtap1309.github.io/keepout/maneuver/).
+- [Command line](https://kyrtap1309.github.io/keepout/cli/), [the conjunction store](https://kyrtap1309.github.io/keepout/store/) and
+  [Space-Track data](https://kyrtap1309.github.io/keepout/spacetrack/).
+- [API reference](https://kyrtap1309.github.io/keepout/reference/), [FAQ](https://kyrtap1309.github.io/keepout/faq/) and
+  [changelog](https://kyrtap1309.github.io/keepout/changelog/).
+
+The same pages are in [`docs/`](docs/); `uv run mkdocs serve` renders them
+locally.
 
 ## Validation
 
@@ -189,4 +198,5 @@ MIT. The third-party data committed for tests is not covered:
 - the Kelvins excerpt in `tests/sources/data/` (see its `README.md`).
 
 Development commands are listed in the
-[documentation](docs/index.md#development).
+[documentation](https://kyrtap1309.github.io/keepout/#development). To cite keepout, see
+[Citing keepout](https://kyrtap1309.github.io/keepout/#citing-keepout).

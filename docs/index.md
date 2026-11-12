@@ -17,35 +17,71 @@ from GitHub:
 pip install "keepout[cli] @ git+https://github.com/Kyrtap1309/keepout"
 ```
 
-The `cli` extra adds the `keepout` command; without it you get the library
-only. Several examples below read files committed to the repository (the
-example fleet and the frozen catalogs). To run those, clone the repository
-and work inside it:
+Two extras add optional parts; without them you get the library only:
+
+| Extra | Adds | Needed for |
+|---|---|---|
+| `cli` | Typer and Rich | the `keepout` command |
+| `store` | SQLAlchemy and Alembic | the [conjunction store](store.md): `--store`, `keepout store`, `keepout jobs`, `keepout worker` |
+
+```bash
+pip install "keepout[cli,store] @ git+https://github.com/Kyrtap1309/keepout"
+```
+
+The examples on these pages read files committed to the repository: a
+sample CDM, the example fleet and the frozen catalogs. To run them, clone
+the repository and work inside it:
 
 ```bash
 git clone https://github.com/Kyrtap1309/keepout
 cd keepout
-uv sync --extra cli
+uv sync --extra cli --extra store
 uv run keepout --help
 ```
 
+!!! tip "One thread per process"
+    NumPy and SciPy start a thread per CPU core by default, which makes
+    keepout's batched computations slower, not faster: the manoeuvre
+    planner, for one, uses 20 times the CPU time and takes longer. The
+    `keepout` command limits them to one thread itself
+    ([Threads](cli.md#threads)). In Python, set `OMP_NUM_THREADS=1` and
+    `OPENBLAS_NUM_THREADS=1` before starting it, and use the `workers=`
+    argument for parallel work.
+
 ## Where to start
 
+- **New to conjunction assessment?** [Concepts](concepts.md) explains the
+  workflow and every term (Pc, TCA, HBR, CDM, ...) in one page.
 - **Have CDMs?** [Reading a CDM](#reading-a-cdm) →
   [2-D probability of collision](pc-2d.md) → [Risk assessment](risk.md).
 - **Only public data?** [Screening](screening.md) →
   [Synthetic operator](synthetic.md).
+- **Prefer a terminal?** [Command line](cli.md) walks through a week of
+  a synthetic operator.
+- **Stuck?** [FAQ and troubleshooting](faq.md).
 
 ## Reading a CDM
+
+`tests/cdm/data/tracss_v2.kvn` is a sample CDM 2.0 in the repository;
+use your own file in its place.
 
 ```python
 import keepout.cdm
 from keepout import Conjunction
 
-cdm = keepout.cdm.load("event.cdm")  # KVN or XML, CDM 1.0 or 2.0
+cdm = keepout.cdm.load("tests/cdm/data/tracss_v2.kvn")  # KVN or XML, CDM 1.0 or 2.0
 primary, secondary = cdm.object_states()  # GCRF, SI units
 plane = Conjunction(primary, secondary, combined_hard_body_radius=20.0).plane
-print(plane.miss_distance, plane.covariance, primary.covariance.repairs)
+print(plane.miss_distance)  # metres, on the encounter plane
+print(plane.covariance)  # the combined 2x2 covariance on the plane [m²]
+print(primary.covariance.repairs)  # what was fixed in the CDM's covariance
+```
+
+```text
+100.00000000184745
+[[1.94620108e+04 7.58118981e-01]
+ [7.58118981e-01 5.00000036e+02]]
+()
 ```
 
 [Frames and units](frames-and-units.md) explains the frames keepout accepts,
@@ -75,12 +111,24 @@ Specification 001*, v2.1.
 import keepout.cdm
 from keepout import compute_pc
 
-conjunction = keepout.cdm.load("event.cdm").conjunction(combined_hard_body_radius=20.0)
+cdm = keepout.cdm.load("tests/cdm/data/tracss_v2.kvn")
+conjunction = cdm.conjunction(combined_hard_body_radius=20.0)  # [m]
 result = compute_pc(conjunction)  # picks Foster, Hall 3D-Nc or a maximum Pc
-print(result.method, result.value, result.diagnostics)
-print(compute_pc(conjunction, "hall3d").details["nc"])  # a method by name
+print(result.method, result.value)
+print(result.diagnostics)  # why the result may need a closer look
+print(compute_pc(conjunction, "foster").value)  # a method by name
 mc = compute_pc(conjunction, "montecarlo", samples=100_000, seed=1)
 print(mc.value, mc.interval)  # with its 99% confidence interval
+```
+
+Here `auto` chose Hall's 3-D method, because the CDM's states are not
+exactly at the closest approach:
+
+```text
+hall3d 0.045044354503398956
+('states are 300 m from closest approach along the relative velocity; 2-D Pc uses the straight-line closest approach',)
+0.04502836467786191
+0.04495 (0.04327898883992029, 0.04666447805443355)
 ```
 
 Without `combined_hard_body_radius`, keepout uses the sum of both objects'
@@ -90,17 +138,28 @@ Without `combined_hard_body_radius`, keepout uses the sum of both objects'
 
 ## Risk of an event
 
-```python
-from pathlib import Path
+An event is all the CDMs of one encounter. Here it has a single CDM;
+with your own, pass every CDM of the event, e.g.
+`[keepout.cdm.load(path) for path in Path("event").glob("*.kvn")]`.
 
+```python
 import keepout.cdm
 from keepout import ConjunctionEvent, assess
 
-cdms = [keepout.cdm.load(path) for path in Path("event").glob("*.cdm")]
-event = ConjunctionEvent.from_cdms(cdms)  # one encounter, oldest CDM first
+cdms = [keepout.cdm.load("tests/cdm/data/tracss_v2.kvn")]
+event = ConjunctionEvent.from_cdms(cdms)  # one encounter, in any order
 assessment = assess(event.observations(combined_hard_body_radius=20.0))
-print(assessment.decision.action.name, assessment.decision.reasons)
-print(assessment.trend.direction, assessment.level)
+print(assessment.decision.action.name)
+for reason in assessment.decision.reasons:
+    print("-", reason)
+```
+
+```text
+MANEUVER
+- latest Pc 4.50e-02 is red, 0.84 d before TCA
+- trend undetermined
+- within the decision point (2.00 d before TCA)
+- diagnostic: states are 300 m from closest approach along the relative velocity; 2-D Pc uses the straight-line closest approach
 ```
 
 See [Risk assessment](risk.md) for the rules. The
@@ -185,16 +244,26 @@ import keepout.cdm
 from keepout import ConjunctionEvent
 from keepout.maneuver import plan_maneuver
 
-event = ConjunctionEvent.from_cdms([keepout.cdm.load("event.cdm")])
+event = ConjunctionEvent.from_cdms([keepout.cdm.load("tests/cdm/data/tracss_v2.kvn")])
 plan = plan_maneuver(event, combined_hard_body_radius=20.0)  # target Pc 1e-5
-print(plan.baseline.pc, plan.retrograde, plan.prograde, plan.notes)
+for option in (plan.retrograde, plan.prograde):  # None if no burn meets it
+    if option is not None:
+        hours = option.burn_lead / 3600
+        print(f"{option.delta_v:+.4f} m/s {hours:.1f} h before TCA, Pc {option.pc:.1e}")
+```
+
+```text
+-0.0063 m/s 17.1 h before TCA, Pc 8.5e-06
++0.0040 m/s 18.9 h before TCA, Pc 9.6e-06
 ```
 
 keepout plans an impulsive along-track burn of the primary from the latest
 CDM of an event. It computes the Pc for a grid of burns (Δv against burn
 time) and picks the smallest prograde and retrograde burn below the target
 Pc. It can also screen each burn against a catalog for the approaches it
-brings. On the command line this is `keepout maneuver`.
+brings. On the command line this is `keepout maneuver`. (Commands and
+API names use the US spelling "maneuver", as the CCSDS keywords do; the
+prose of these pages uses the British "manoeuvre".)
 
 [Manoeuvre planning](maneuver.md) describes the method and its assumptions
 and limits. The [report](maneuver-report.md) shows the Δv × burn-time
@@ -215,6 +284,16 @@ with keepout.
   nightly, compares keepout's Monte Carlo with CARA's.
 - [Screening against SOCRATES](screening-socrates.md) compares `screen`
   with CelesTrak's SOCRATES.
+
+## Citing keepout
+
+keepout has no paper yet. Cite the repository, with the version
+(`keepout.__version__`) or the commit you used:
+
+> Niczke, P. *keepout: spacecraft conjunction assessment in Python*,
+> version 0.1.0.dev0, 2026. <https://github.com/Kyrtap1309/keepout>
+
+Cite the data as well, as below.
 
 ## Data and licences
 
