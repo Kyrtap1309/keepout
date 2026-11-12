@@ -89,7 +89,7 @@ def jobs_cancel(job_id: JobId, *, store: StorePath, as_json: JsonFlag = False) -
     """Cancel a queued or running job.
 
     A running job's worker stops computing it when it next renews its
-    lease, within 20 seconds.
+    lease.
     """
     with importing_store():
         from keepout.store import JobQueue

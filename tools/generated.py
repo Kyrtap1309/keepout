@@ -9,13 +9,17 @@ import argparse
 import difflib
 import json
 import os
-from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Final, TypedDict, TypeVar
+from typing import TYPE_CHECKING, Final, TypedDict, TypeVar
 
 from typeguard import CollectionCheckStrategy, TypeCheckError, check_type
 
-from keepout.risk import Basis, Thresholds
+from keepout.risk import Basis
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
+    from keepout.risk import Thresholds
 
 REPO: Final = Path(__file__).resolve().parents[1]
 """The repository's root directory."""

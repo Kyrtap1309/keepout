@@ -29,10 +29,9 @@ import json
 import resource
 import sys
 import time
-from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TypedDict
+from typing import TYPE_CHECKING, TypedDict
 
 from astropy.time import Time
 
@@ -40,6 +39,9 @@ from keepout.omm import Omm, load
 from keepout.screening import ScreeningResult, ScreeningVolume, VolumeRule, screen
 from keepout.screening.volume import SOCRATES_RADIUS
 from keepout.units import DAY
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 @dataclass(frozen=True, slots=True)

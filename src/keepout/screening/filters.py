@@ -41,13 +41,17 @@ determine future close approaches between satellites", Celestial Mechanics
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 import numpy as np
 
-from keepout._types import BoolArray
-from keepout.propagation.base import RadiusBounds
 from keepout.screening.volume import ScreeningVolume, per_primary
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from keepout._types import BoolArray
+    from keepout.propagation.base import RadiusBounds
 
 __all__ = ["apogee_perigee_filter"]
 

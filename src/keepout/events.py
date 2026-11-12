@@ -4,22 +4,24 @@ from __future__ import annotations
 
 import hashlib
 from collections import Counter
-from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, NamedTuple
 
 from keepout._defaults import TCA_TOLERANCE
 from keepout._validation import is_probability, require_non_negative
-from keepout.cdm.model import Cdm
-from keepout.covariance import Policy
 from keepout.errors import EventError, HardBodyRadiusError, KeepoutError
 from keepout.pc import AUTO, PcComputation
-from keepout.risk.decision import Assessment
 from keepout.risk.observation import PcObservation
 from keepout.units import elapsed_seconds
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from astropy.time import Time
+
+    from keepout.cdm.model import Cdm
+    from keepout.covariance import Policy
+    from keepout.risk.decision import Assessment
 
 __all__ = [
     "DEFAULT_TCA_TOLERANCE",

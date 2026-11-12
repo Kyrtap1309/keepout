@@ -3,12 +3,10 @@ applicability assessment of 2-D Pc it rests on."""
 
 from __future__ import annotations
 
-from typing import Final, NamedTuple
+from typing import TYPE_CHECKING, Final, NamedTuple
 
 import numpy as np
 
-from keepout.conjunction import Conjunction
-from keepout.encounter import Role
 from keepout.errors import GeometryError, PcConvergenceError
 from keepout.orbits import orbital_period
 from keepout.pc._duration import DURATION_LIMIT, encounter_duration, long_encounter
@@ -18,7 +16,11 @@ from keepout.pc.foster import foster
 from keepout.pc.hall3d import hall3d_over_scan
 from keepout.pc.maxpc import alfano, frisbee
 from keepout.pc.montecarlo import montecarlo_over_scan
-from keepout.pc.result import Method, PcResult
+
+if TYPE_CHECKING:
+    from keepout.conjunction import Conjunction
+    from keepout.encounter import Role
+    from keepout.pc.result import Method, PcResult
 
 __all__ = [
     "AUTO_MC_SAMPLES",

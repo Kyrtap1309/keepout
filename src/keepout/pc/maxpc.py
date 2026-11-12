@@ -27,21 +27,24 @@ All three are upper bounds, not estimates: their results have
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 import numpy as np
 from scipy import optimize
 
-from keepout._types import FloatArray
 from keepout._validation import require_positive
-from keepout.encounter import EncounterPlane
 from keepout.pc._plane import (
     plane_gaussian,
     plane_gaussian_of,
 )
 from keepout.pc.foster import gaussian_pc
 from keepout.pc.result import PcResult
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from keepout._types import FloatArray
+    from keepout.encounter import EncounterPlane
 
 __all__ = [
     "DILUTION_TOLERANCE",

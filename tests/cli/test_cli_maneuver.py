@@ -13,7 +13,6 @@ of what is shown of a re-screen make its result without screening
 import dataclasses
 import functools
 import json
-import os
 import re
 import shutil
 import subprocess
@@ -25,6 +24,7 @@ from typing import Any, Final
 import astropy.units as u
 import pytest
 from astropy.time import Time
+from builders import SMALL_GRID
 from cli_builders import (
     FIXTURE_CSV,
     START,
@@ -32,9 +32,14 @@ from cli_builders import (
     block_store_extra,
     calculated,
     celestrak_pages,
+    crossing,
     keepout,
+    maneuver_event,
     operator_kvn,
     operator_run,
+    queue,
+    stored_crossing,
+    text_and_json,
     usage_error,
     without_hbr,
     write,
@@ -45,14 +50,11 @@ from worker_jobs import small_grid_maneuver
 
 from keepout import maneuver
 from keepout._defaults import SCREENING_DURATION
-from keepout._workers import ONE_THREAD
-from keepout.cli import worker as worker_cli
 from keepout.cli.output import ExitCode, minute
 from keepout.cli.store import STORE_HINT
 from keepout.errors import StoreError
 from keepout.events import ConjunctionEvent
 from keepout.maneuver import (
-    BurnGrid,
     ManeuverOption,
     ManeuverPlan,
     NewApproach,
@@ -63,13 +65,12 @@ from keepout.omm import Omm, load
 from keepout.omm.celestrak import dumps_csv
 from keepout.risk import RiskLevel
 from keepout.screening import CloseApproach, screen
-from keepout.store import Store
+from keepout.store import Store, planning
 
 PRIMARY: Final = 52939
 SECONDARY: Final = 47826
 NEIGHBOURS: Final = frozenset({PRIMARY, SECONDARY, 57087, 62118, 100000})
 """The objects whose approaches the burns of these tests change."""
-SMALL: Final = BurnGrid(steps_per_orbit=1, delta_v_per_direction=6)
 FULL_PLAN: Final = maneuver.plan_maneuver
 """The planner on its default grid, 8 s here."""
 
@@ -78,18 +79,13 @@ pytestmark = pytest.mark.usefixtures("small_grid")
 
 @pytest.fixture
 def small_grid(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Plans on :data:`SMALL`, whatever grid the command asks for."""
+    """Plans on :data:`SMALL_GRID`, whatever grid the command asks for."""
     monkeypatch.setattr(outcome, "plan_maneuver", small_plan)
 
 
 def small_plan(event: ConjunctionEvent, **settings: Any) -> ManeuverPlan:
-    """The plan of ``event`` on :data:`SMALL` instead of the grid given."""
-    return FULL_PLAN(event, **{**settings, "grid": SMALL})
-
-
-def crossing(folder: Path) -> str:
-    """The operator's CDM of 52939 against 47826 (maneuverable), written."""
-    return write(folder, "crossing.kvn", operator_kvn()[0])
+    """The plan of ``event`` on :data:`SMALL_GRID` instead of the grid given."""
+    return FULL_PLAN(event, **{**settings, "grid": SMALL_GRID})
 
 
 def catalog_of(folder: Path, numbers: frozenset[int] = NEIGHBOURS) -> str:
@@ -914,15 +910,6 @@ maneuverable = true
 """A fleet of 52939 alone: one approach in :func:`catalog_of`'s catalog."""
 
 
-def stored_crossing(folder: Path) -> tuple[Path, str]:
-    """A store holding the operator's CDM of the crossing event (no catalog),
-    and the event's id."""
-    db = folder / "keepout.db"
-    added = keepout("store", "add", crossing(folder), "--store", str(db), "--json")
-    (event_id,) = json.loads(added.stdout)["store"]["events"]
-    return db, event_id
-
-
 @pytest.fixture(scope="module")
 def screened_store(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, str]:
     """A store of :data:`ONE_SATELLITE` screened against :func:`catalog_of`'s
@@ -1117,7 +1104,7 @@ def test_settings_give_the_target_and_target_pc_wins(tmp_path: Path) -> None:
 
 @pytest.fixture
 def planned(monkeypatch: pytest.MonkeyPatch) -> list[ConjunctionEvent]:
-    """The events the planner is called on (on :data:`SMALL`), in order."""
+    """The events the planner is called on (on :data:`SMALL_GRID`), in order."""
     seen: list[ConjunctionEvent] = []
 
     def counted(event: ConjunctionEvent, **settings: Any) -> ManeuverPlan:
@@ -1128,41 +1115,26 @@ def planned(monkeypatch: pytest.MonkeyPatch) -> list[ConjunctionEvent]:
     return seen
 
 
-@pytest.fixture
-def one_thread(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The worker sets :data:`~keepout._workers.ONE_THREAD` in this process:
-    undone after."""
-    for name, value in ONE_THREAD.items():
-        monkeypatch.setenv(name, os.environ.get(name, value))
-
-
-def test_sync_run_caches(tmp_path: Path, planned: list[ConjunctionEvent]) -> None:
+def test_other_settings_miss_the_cache(
+    tmp_path: Path, planned: list[ConjunctionEvent]
+) -> None:
     db, event_id = stored_crossing(tmp_path)
-    stored = ("maneuver", "--event", event_id, "--store", str(db), "--hbr", "1000")
-    first = keepout(*stored)
-    assert first.exit_code == ExitCode.OK
-    assert len(planned) == 1
-    first_json = keepout(*stored, "--json")
-    again = keepout(*stored)
-    assert len(planned) == 1
-    assert (again.exit_code, again.stdout) == (first.exit_code, first.stdout)
-    # The JSON from the cache is that of a plan computed now (other settings
-    # miss the cache, and the JSON of this plan is cached for them).
-    other = (*stored[:-1], "1001")
+    assert keepout(*maneuver_event(db, event_id)).exit_code == ExitCode.OK
+    other = maneuver_event(db, event_id, hbr="1001")
     computed = keepout(*other, "--json")
     assert len(planned) == 2
+    # Then cached for them.
     assert keepout(*other, "--json").stdout == computed.stdout
     assert len(planned) == 2
-    assert json.loads(first_json.stdout)["event"] == event_id
 
 
 def test_cache_gives_the_output_of_a_computed_plan(
     tmp_path: Path, planned: list[ConjunctionEvent]
 ) -> None:
     db, event_id = stored_crossing(tmp_path)
-    stored = ("maneuver", "--event", event_id, "--store", str(db), "--hbr", "1000")
-    computed = [keepout(*stored, *extra) for extra in ((), ("--json",))]
-    cached = [keepout(*stored, *extra) for extra in ((), ("--json",))]
+    stored = maneuver_event(db, event_id)
+    computed = text_and_json(*stored)
+    cached = text_and_json(*stored)
     # The first run cached its plan: the second, as JSON, read it.
     assert len(planned) == 1
     assert [r.stdout for r in cached] == [r.stdout for r in computed]
@@ -1170,7 +1142,7 @@ def test_cache_gives_the_output_of_a_computed_plan(
     fresh = tmp_path / "fresh"
     fresh.mkdir()
     db2, _ = stored_crossing(fresh)
-    recomputed = keepout(*stored[:4], str(db2), "--hbr", "1000", "--json")
+    recomputed = keepout(*maneuver_event(db2, event_id), "--json")
     assert len(planned) == 2
     assert recomputed.stdout == cached[1].stdout
 
@@ -1179,9 +1151,9 @@ def test_a_cached_plan_without_a_safe_burn_exits_four(
     tmp_path: Path, planned: list[ConjunctionEvent]
 ) -> None:
     db, event_id = stored_crossing(tmp_path)
-    stored = ("maneuver", "--event", event_id, "--store", str(db), "--hbr", "500000")
-    computed = [keepout(*stored, *extra) for extra in ((), ("--json",))]
-    cached = [keepout(*stored, *extra) for extra in ((), ("--json",))]
+    stored = maneuver_event(db, event_id, hbr="500000")
+    computed = text_and_json(*stored)
+    cached = text_and_json(*stored)
     assert len(planned) == 1
     assert [r.exit_code for r in computed + cached] == [ExitCode.NO_SAFE_BURN] * 4
     assert [r.stdout for r in cached] == [r.stdout for r in computed]
@@ -1198,14 +1170,14 @@ def test_a_cached_plan_shows_its_rescreens_without_the_catalog_copy(
         monkeypatch, per_direction(only(returns=[back()]), only(new=[red()]))
     )
     db, event_id = copied_store(screened_store, tmp_path)
-    stored = ("maneuver", "--event", event_id, "--store", str(db), "--hbr", "1000")
-    computed = [keepout(*stored, *extra) for extra in ((), ("--json",))]
+    stored = maneuver_event(db, event_id)
+    computed = text_and_json(*stored)
     assert "prograde re-screened against" in computed[0].stdout
     assert "CONFLICT: a new or closer approach is at red." in computed[0].stdout
     # The cache is read without the store's copy of the catalog.
     (copy,) = list((tmp_path / f"{db.name}.catalogs").iterdir())
     copy.unlink()
-    cached = [keepout(*stored, *extra) for extra in ((), ("--json",))]
+    cached = text_and_json(*stored)
     assert len(planned) == 1
     assert [r.stdout for r in cached] == [r.stdout for r in computed]
     assert [r.exit_code for r in cached] == [r.exit_code for r in computed]
@@ -1221,7 +1193,7 @@ def test_a_plan_not_cached_is_still_shown(
     tmp_path: Path, planned: list[ConjunctionEvent], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     db, event_id = stored_crossing(tmp_path)
-    stored = ("maneuver", "--event", event_id, "--store", str(db), "--hbr", "1000")
+    stored = maneuver_event(db, event_id)
 
     def refuse(*args: object) -> None:
         raise StoreError("database is locked")
@@ -1243,7 +1215,7 @@ def test_a_catalog_given_is_not_cached(
 ) -> None:
     replace_rescreen(monkeypatch, lambda result: result)
     db, event_id = stored_crossing(tmp_path)
-    stored = ("maneuver", "--event", event_id, "--store", str(db), "--hbr", "1000")
+    stored = maneuver_event(db, event_id)
     other = catalog_of(tmp_path, frozenset({PRIMARY, SECONDARY}))
     for _ in range(2):
         assert keepout(*stored, "--catalog", other).exit_code == ExitCode.OK
@@ -1270,7 +1242,7 @@ def test_new_cdm_misses_the_cache(
     tmp_path: Path, planned: list[ConjunctionEvent]
 ) -> None:
     db, event_id = stored_crossing(tmp_path)
-    stored = ("maneuver", "--event", event_id, "--store", str(db), "--hbr", "1000")
+    stored = maneuver_event(db, event_id)
     assert keepout(*stored).exit_code == ExitCode.OK
     assert keepout(*stored).exit_code == ExitCode.OK
     assert len(planned) == 1
@@ -1283,13 +1255,7 @@ def test_new_cdm_misses_the_cache(
     assert len(planned) == 2
 
 
-def queue(db: Path, event_id: str, *options: str) -> Result:
-    """``keepout maneuver --event ID --store DB --hbr 1000 --queue OPTIONS``."""
-    stored = ("--event", event_id, "--store", str(db), "--hbr", "1000")
-    return keepout("maneuver", *stored, "--queue", *options)
-
-
-@pytest.mark.usefixtures("one_thread")
+@pytest.mark.timeout(60)
 def test_queue_then_worker_then_cached(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1303,13 +1269,13 @@ def test_queue_then_worker_then_cached(
     assert [(j["job"], j["status"]) for j in json.loads(listed.stdout)["jobs"]] == [
         (1, "queued")
     ]
-    monkeypatch.setattr(worker_cli, "run_maneuver_job", small_grid_maneuver)
+    monkeypatch.setattr(planning, "run_maneuver_job", small_grid_maneuver)
     ran = keepout("worker", "--store", str(db), "--until-idle", "--workers", "1")
     assert ran.exit_code == ExitCode.OK
     assert ran.stdout == "Ran 1 job.\n"
     assert "job 1 succeeded" in ran.stderr
-    stored = ("maneuver", "--event", event_id, "--store", str(db), "--hbr", "1000")
-    from_worker = [keepout(*stored, *extra) for extra in ((), ("--json",))]
+    stored = maneuver_event(db, event_id)
+    from_worker = text_and_json(*stored)
     assert planned == []
     assert json.loads(queue(db, event_id, "--json").stdout) == {
         "event": event_id,
@@ -1325,8 +1291,7 @@ def test_queue_then_worker_then_cached(
     fresh = tmp_path / "fresh"
     fresh.mkdir()
     db2, _ = stored_crossing(fresh)
-    here = ("maneuver", "--event", event_id, "--store", str(db2), "--hbr", "1000")
-    computed = [keepout(*here, *extra) for extra in ((), ("--json",))]
+    computed = text_and_json(*maneuver_event(db2, event_id))
     assert [r.stdout for r in from_worker] == [r.stdout for r in computed]
     assert [r.exit_code for r in from_worker] == [r.exit_code for r in computed]
 
@@ -1362,7 +1327,7 @@ def test_queue_needs_event(tmp_path: Path) -> None:
     ],
     ids=["catalog", "source", "burn", "workers"],
 )
-def test_queue_refuses_catalog(
+def test_queue_refuses_options_of_a_sync_run(
     tmp_path: Path, given: tuple[str, ...], named: str
 ) -> None:
     db, event_id = stored_crossing(tmp_path)

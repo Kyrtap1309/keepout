@@ -9,12 +9,14 @@ import math
 from dataclasses import dataclass
 from functools import lru_cache
 from itertools import pairwise
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 import numpy as np
 
 from keepout._types import FloatArray, read_only
-from keepout.pc._timeline import Rate, RateScan
+
+if TYPE_CHECKING:
+    from keepout.pc._timeline import Rate, RateScan
 
 MAX_BREAKPOINTS: Final = 50
 """Largest number of local maxima a segment is split at."""

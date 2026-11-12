@@ -17,14 +17,16 @@ from __future__ import annotations
 
 import csv
 from dataclasses import dataclass
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from astropy.time import Time
 
 from keepout.ccsds.files import strip_bom
 from keepout.errors import SourceFormatError
-from keepout.omm import Omm
 from keepout.units import DAY, KM, julian_seconds_between
+
+if TYPE_CHECKING:
+    from keepout.omm import Omm
 
 __all__ = [
     "COLUMNS",

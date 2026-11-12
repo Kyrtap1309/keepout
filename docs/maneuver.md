@@ -220,28 +220,34 @@ re-screen it.
 
 ## The outcome
 
-`plan_event(event, settings, catalog=..., catalog_label=...)` does what
-`keepout maneuver` does: it plans the event with an operator's
-[settings](reference/settings.md) (target, Pc method, covariance policy,
-hard-body radius, thresholds), re-screens each option against the catalog
-if one is given, and returns a `ManeuverOutcome`. That keeps what is shown
-of a plan: the baseline, the notes, the burns (`PlannedBurn`, an option
-and its re-screen or `None`), the Pc grid (`ManeuverGrid`) and what the
-burns were re-screened against. Its `verdict` is `judge`'s.
-`ManeuverOutcome.of(context, burns, label)` makes the same from a burn of
-one's own (no grid), as `--burn-before --dv` does.
+The plan `keepout maneuver` shows is a `ManeuverOutcome`. `plan_event`
+does what the command does. It plans the event with a target, Pc method,
+covariance policy, hard-body radius and thresholds; `plan_arguments`
+reads them from an operator's [settings](reference/settings.md). If a
+catalog is given, it re-screens each option against it.
+
+A `ManeuverOutcome` holds everything the command shows:
+
+- the baseline and the notes;
+- the burns (`PlannedBurn`: an option, and its re-screen or `None`);
+- the Pc grid (`ManeuverGrid`);
+- what the burns were re-screened against.
+
+`outcome.verdict` applies `judge` to its burns. With `burn=(lead, dv)`,
+`plan_event` evaluates a burn of one's own and plans no grid, as
+`--burn-before --dv` does.
 
 ```python
 from keepout.maneuver import plan_event
-from keepout.settings import Settings
+from keepout.settings import Settings, plan_arguments
 
-outcome = plan_event(event, Settings())  # no catalog: no re-screen
+outcome = plan_event(event, **plan_arguments(Settings()))  # no catalog: no re-screen
 print(outcome.verdict.recommendable, [burn.direction for burn in outcome.burns])
 ```
 
-The [conjunction store](store.md#background-jobs) caches an outcome,
-without its event, which the store holds already; a background job
-computes it with `plan_event`.
+The [conjunction store](store.md#background-jobs) caches an outcome as
+a result row. It leaves out the event, which the store holds already. A
+background job computes the outcome with `plan_event`.
 
 ## Time
 

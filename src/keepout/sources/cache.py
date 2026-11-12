@@ -18,18 +18,20 @@ import gzip
 import hashlib
 import json
 import math
-from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING, Final, NamedTuple, TypeVar
 
-from keepout._types import JsonValue
 from keepout.errors import SourceFormatError, SourceUnavailable
 from keepout.sources._http import gunzip
 from keepout.sources._store import store_bytes, store_json
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
+
     from typing_extensions import TypeIs
+
+    from keepout._types import JsonValue
 
 __all__ = [
     "CachedCopy",

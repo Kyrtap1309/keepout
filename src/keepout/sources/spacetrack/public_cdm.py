@@ -10,14 +10,12 @@ rows may not be redistributed without Space-Track's approval.
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from astropy.time import Time
 
-from keepout._types import JsonValue
 from keepout._validation import (
     require_at_least,
     require_non_negative,
@@ -25,7 +23,12 @@ from keepout._validation import (
 )
 from keepout.errors import SourceFormatError
 from keepout.sources._format import refuse_format
-from keepout.sources.catalog import Retrieval
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from keepout._types import JsonValue
+    from keepout.sources.catalog import Retrieval
 
 __all__ = [
     "PUBLIC_CDM_COLUMNS",

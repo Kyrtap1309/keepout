@@ -23,9 +23,17 @@ derivatives accurate to machine precision.
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Final, Generic, Literal, NamedTuple, TypeAlias, TypeVar
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Final,
+    Generic,
+    Literal,
+    NamedTuple,
+    TypeAlias,
+    TypeVar,
+)
 
 import numpy as np
 import numpy.typing as npt
@@ -34,6 +42,9 @@ from keepout._linalg import take
 from keepout._types import ComplexArray, FloatArray, IndexArray
 from keepout.errors import GeometryError
 from keepout.orbits import EARTH_MU
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 __all__ = [
     "COMPLEX_STEP",

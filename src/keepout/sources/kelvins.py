@@ -25,8 +25,7 @@ import shutil
 import zipfile
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Final, NamedTuple, TextIO, TypeAlias
+from typing import TYPE_CHECKING, Final, NamedTuple, TextIO, TypeAlias
 
 import numpy as np
 
@@ -36,6 +35,9 @@ from keepout.risk.observation import PC_FLOOR, PcObservation
 from keepout.sources._http import Sink, http_stream, retrying
 from keepout.sources._store import cache_dir, has_digest, store
 from keepout.units import DAY
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 __all__ = [
     "ARCHIVE_SHA256",

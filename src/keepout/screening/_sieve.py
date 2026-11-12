@@ -4,13 +4,15 @@ which grid intervals of a pair may hold a point inside the volume (see
 
 from __future__ import annotations
 
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 import numpy as np
 
-from keepout._types import BoolArray, FloatArray, IndexArray
 from keepout.orbits import EARTH_MU
-from keepout.propagation import RadiusBounds
+
+if TYPE_CHECKING:
+    from keepout._types import BoolArray, FloatArray, IndexArray
+    from keepout.propagation import RadiusBounds
 
 __all__ = [
     "GRAVITY_MARGIN",

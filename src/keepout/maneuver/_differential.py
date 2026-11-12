@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import contextlib
 from dataclasses import dataclass
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 import numpy as np
 import numpy.typing as npt
@@ -24,8 +24,10 @@ from keepout._types import BoolArray, FloatArray, read_only
 from keepout._validation import require_positive
 from keepout.errors import PropagationError
 from keepout.propagation.cowell import integrate
-from keepout.propagation.forces import ForceModel
 from keepout.state import StateVector, require_frame
+
+if TYPE_CHECKING:
+    from keepout.propagation.forces import ForceModel
 
 __all__ = ["BurnEffects", "burn_effects", "closest_approach_shift"]
 

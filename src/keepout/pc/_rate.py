@@ -11,19 +11,21 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Final, NamedTuple
+from typing import TYPE_CHECKING, Final, NamedTuple
 
 import numpy as np
 from scipy import special
 
 from keepout._linalg import from_eigen, take
-from keepout._types import BoolArray, FloatArray
 from keepout.errors import PcConvergenceError
-from keepout.pc._orbit import OrbitUncertainty
 from keepout.pc._overlap import RATE_ERRORS, Gaussians, peak_overlap
 from keepout.pc._plane import SIGMA_FLOOR, SQRT_2, SQRT_2PI
 from keepout.pc._screen import negligible
 from keepout.pc._sphere import SphereGrid, sphere_grids
+
+if TYPE_CHECKING:
+    from keepout._types import BoolArray, FloatArray
+    from keepout.pc._orbit import OrbitUncertainty
 
 __all__ = ["CollisionRate"]
 

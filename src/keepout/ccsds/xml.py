@@ -14,11 +14,13 @@ parse error of the message family (:class:`~keepout.ccsds.message.Family`:
 from __future__ import annotations
 
 import re
-from collections.abc import Collection, Iterator
-from typing import Final
+from typing import TYPE_CHECKING, Final
 from xml.etree import ElementTree
 
 from keepout.ccsds.message import USER_DEFINED, USER_DEFINED_PREFIX, Family, Located
+
+if TYPE_CHECKING:
+    from collections.abc import Collection, Iterator
 
 __all__ = [
     "XSI",

@@ -1,4 +1,4 @@
-"""The jobs: computations queued on an event's CDM.
+"""The jobs: manoeuvre plans queued on an event's CDM.
 
 Revision ID: 0002
 Revises: 0001
@@ -21,7 +21,6 @@ def upgrade() -> None:
     op.create_table(
         "jobs",
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
-        sa.Column("kind", sa.String(), nullable=False),
         sa.Column("event_id", sa.String(12), nullable=False),
         sa.Column("message_id", sa.String(), nullable=False),
         sa.Column("key", sa.String(64), nullable=False),

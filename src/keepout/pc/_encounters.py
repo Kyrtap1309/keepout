@@ -5,14 +5,11 @@ locates where the rate is not negligible, shared by
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import partial
-from typing import Final, Self
+from typing import TYPE_CHECKING, Final, Self
 
 from keepout._types import override
-from keepout.conjunction import Conjunction
-from keepout.encounter import Role
 from keepout.errors import GeometryError, PcConvergenceError
 from keepout.pc._duration import straight_line_half_window
 from keepout.pc._orbit import OrbitUncertainty
@@ -20,6 +17,12 @@ from keepout.pc._plane import require_known_covariance
 from keepout.pc._rate import CollisionRate
 from keepout.pc._screen import screen
 from keepout.pc._timeline import RateScan, locate, locate_auto
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from keepout.conjunction import Conjunction
+    from keepout.encounter import Role
 
 __all__ = [
     "FALLBACK_TOLERANCE",

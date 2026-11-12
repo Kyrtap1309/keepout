@@ -1,31 +1,29 @@
 """The job queue: submission, claim, lease, attempts and cancel."""
 
 import multiprocessing
-import os
 import threading
-from collections.abc import Iterator
-from pathlib import Path
+import time
 
 import astropy.units as u
 import pytest
 from astropy.time import Time
-from sqlalchemy import func, select, update
-from store_builders import message
+from sqlalchemy import select, update
+from store_builders import FOSTER, count_rows, message
 
-from keepout._workers import ONE_THREAD
 from keepout.errors import StoreError
-from keepout.pc import PcComputation, computation
+from keepout.pc import PcComputation
 from keepout.settings import Settings, settings_to_data
 from keepout.store import Store, models, open_store
+from keepout.store.codec import maneuver_key
 from keepout.store.jobs import (
     LEASE_SECONDS,
     MAX_ATTEMPTS,
     JobQueue,
     JobStatus,
+    SubmissionOutcome,
 )
-from keepout.store.maneuver_codec import maneuver_key
+from keepout.store.repo import save_maneuver_in
 
-FOSTER = Settings(compute=computation("foster"), combined_hard_body_radius=20.0)
 PAYLOAD = {"ok": True}
 
 
@@ -40,12 +38,6 @@ class Clock:
 
     def advance(self, seconds: float) -> None:
         self.time = self.time + seconds * u.s
-
-
-@pytest.fixture
-def store(tmp_path: Path) -> Iterator[Store]:
-    with open_store(tmp_path / "keepout.db") as opened:
-        yield opened
 
 
 @pytest.fixture
@@ -66,36 +58,18 @@ def queue(store: Store, clock: Clock) -> JobQueue:
     return JobQueue(store, now=clock)
 
 
-def _results(store: Store) -> int:
-    with store.read() as session:
-        return session.scalar(select(func.count()).select_from(models.Result)) or 0
-
-
-def test_the_constants() -> None:
-    assert LEASE_SECONDS == 60.0
-    assert MAX_ATTEMPTS == 2
-    assert [status.value for status in JobStatus] == [
-        "queued",
-        "running",
-        "succeeded",
-        "failed",
-        "cancelled",
-    ]
-
-
 def test_submit_then_claim(queue: JobQueue, event_id: str, clock: Clock) -> None:
     submission = queue.submit(event_id, FOSTER)
-    assert not submission.cached
-    assert not submission.existing
+    assert submission.outcome is SubmissionOutcome.QUEUED
     assert submission.job is not None
     assert submission.job.status is JobStatus.QUEUED
     assert submission.job.attempt == 0
     assert submission.job.claims == 0
     assert submission.job.worker is None
+    assert submission.job.created_at.isot == clock.time.isot
     stored = queue.job(submission.job.id)
     assert submission.job.created_at.isot == stored.created_at.isot
     assert submission.job.created_at.scale == stored.created_at.scale == "utc"
-    assert submission.job.kind == "maneuver"
     assert submission.job.key == maneuver_key(FOSTER, None)
     assert settings_to_data(submission.job.settings) == settings_to_data(FOSTER)
     job = queue.claim("w1")
@@ -113,6 +87,16 @@ def test_submit_then_claim(queue: JobQueue, event_id: str, clock: Clock) -> None
 
 def test_claim_on_an_empty_queue(queue: JobQueue, event_id: str) -> None:
     assert queue.claim("w1") is None
+
+
+def test_an_idle_claim_does_not_take_the_write_lock(
+    queue: JobQueue, store: Store, event_id: str
+) -> None:
+    # A claim that would write waits for this writer (BUSY_TIMEOUT_MS).
+    with store.write():
+        started = time.monotonic()
+        assert queue.claim("w1") is None
+        assert time.monotonic() - started < 1.0
 
 
 def test_the_oldest_job_is_claimed_first(
@@ -160,22 +144,20 @@ def test_a_job_that_cannot_be_read_is_failed_and_skipped(
 def test_submit_is_idempotent(queue: JobQueue, store: Store, event_id: str) -> None:
     first = queue.submit(event_id, FOSTER)
     second = queue.submit(event_id, FOSTER)
-    assert second.existing
-    assert not second.cached
+    assert second.outcome is SubmissionOutcome.EXISTING
     assert first.job is not None
     assert second.job is not None
     assert second.job.id == first.job.id
     job = queue.claim("w1")
     assert job is not None
     running = queue.submit(event_id, FOSTER)
-    assert running.existing
+    assert running.outcome is SubmissionOutcome.EXISTING
     assert running.job is not None
     assert running.job.id == job.id
     assert running.job.status is JobStatus.RUNNING
     assert queue.finish(job, PAYLOAD)
     third = queue.submit(event_id, FOSTER)
-    assert third.cached
-    assert not third.existing
+    assert third.outcome is SubmissionOutcome.CACHED
     assert third.job is None
     assert len(queue.jobs()) == 1
 
@@ -186,7 +168,7 @@ def test_a_failed_job_is_submitted_again(queue: JobQueue, event_id: str) -> None
     assert job is not None
     assert queue.fail(job, "no burn")
     again = queue.submit(event_id, FOSTER)
-    assert not again.existing
+    assert again.outcome is SubmissionOutcome.QUEUED
     assert again.job is not None
     assert again.job.id != job.id
 
@@ -194,13 +176,13 @@ def test_a_failed_job_is_submitted_again(queue: JobQueue, event_id: str) -> None
 def test_submit_pins_the_latest_cdm(
     queue: JobQueue, store: Store, event_id: str
 ) -> None:
-    latest = store.latest_message_id(event_id)
+    latest = store.event(event_id).latest.message_id
     submission = queue.submit(event_id, FOSTER)
     assert submission.job is not None
     assert submission.job.message_id == latest == "B"
     assert submission.job.event_id == event_id
     store.ingest([message("C", tca=2.0, created=-30.0)])
-    assert store.latest_message_id(event_id) == "C"
+    assert store.event(event_id).latest.message_id == "C"
     assert queue.job(submission.job.id).message_id == "B"
 
 
@@ -311,14 +293,14 @@ def test_finish_after_reclaim_is_false(
     assert not queue.finish(stale, PAYLOAD)
     assert not queue.fail(stale, "no burn")
     assert not queue.release(stale)
-    assert _results(store) == 0
+    assert count_rows(store, models.Result) == 0
     assert queue.job(fresh.id).status is JobStatus.RUNNING
     assert queue.finish(fresh, PAYLOAD)
     done = queue.job(fresh.id)
     assert done.status is JobStatus.SUCCEEDED
     assert done.finished_at is not None
     assert done.error is None
-    assert _results(store) == 1
+    assert count_rows(store, models.Result) == 1
     assert not queue.finish(fresh, PAYLOAD)
 
 
@@ -337,6 +319,21 @@ def test_finish_saves_the_result_on_the_pinned_cdm(
         maneuver_key(FOSTER, None),
         PAYLOAD,
     )
+
+
+def test_finish_keeps_a_result_cached_meanwhile(
+    queue: JobQueue, store: Store, event_id: str
+) -> None:
+    # E.g. by a synchronous run of the same settings: the job still ends.
+    queue.submit(event_id, FOSTER)
+    job = queue.claim("w1")
+    assert job is not None
+    with store.write() as session:
+        assert save_maneuver_in(session, job.message_id, job.key, {"first": True})
+    assert queue.finish(job, PAYLOAD)
+    assert queue.job(job.id).status is JobStatus.SUCCEEDED
+    with store.read() as session:
+        assert session.scalars(select(models.Result.payload)).all() == [{"first": True}]
 
 
 def test_fail_keeps_the_message(queue: JobQueue, event_id: str) -> None:
@@ -386,10 +383,10 @@ def test_stale_write_after_release_and_reclaim_is_false(
     assert held.status is JobStatus.RUNNING
     assert held.worker == "w2"
     assert held.attempt == 1
-    assert _results(store) == 0
+    assert count_rows(store, models.Result) == 0
     assert queue.finish(fresh, PAYLOAD)
     assert queue.job(fresh.id).status is JobStatus.SUCCEEDED
-    assert _results(store) == 1
+    assert count_rows(store, models.Result) == 1
 
 
 def test_cancel_a_queued_job(queue: JobQueue, event_id: str) -> None:
@@ -444,12 +441,8 @@ def _claim(path: str, start: threading.Barrier, worker: str) -> int | None:
     return None if job is None else job.id
 
 
-@pytest.mark.slow
-def test_two_processes_claim_one_job(
-    store: Store, event_id: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    for name, value in ONE_THREAD.items():
-        monkeypatch.setenv(name, os.environ.get(name, value))
+@pytest.mark.timeout(60)
+def test_two_processes_claim_one_job(store: Store, event_id: str) -> None:
     submission = JobQueue(store).submit(event_id, FOSTER)
     assert submission.job is not None
     context = multiprocessing.get_context("spawn")

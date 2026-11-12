@@ -24,17 +24,19 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from functools import partial
-from typing import Final, Self
+from typing import TYPE_CHECKING, Final, Self
 
 import erfa
 import numpy as np
-from astropy.time import Time
 
 from keepout._linalg import as_vector
 from keepout._types import FloatArray, override
 from keepout._validation import non_negative_float, require_single_time
 from keepout.orbits import EARTH_MU
 from keepout.propagation._atmosphere import density
+
+if TYPE_CHECKING:
+    from astropy.time import Time
 
 __all__ = ["EARTH_RADIUS", "ForceModel", "earth_pole"]
 

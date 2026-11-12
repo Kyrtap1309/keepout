@@ -19,9 +19,8 @@ from rich import box
 from rich.console import Console, RenderableType
 from rich.table import Table
 
-from keepout._text import pc_text, plural
+from keepout._text import duration_words, pc_text, plural
 from keepout.errors import KeepoutError
-from keepout.units import DAY, HOUR, MINUTE
 
 if TYPE_CHECKING:
     from astropy.time import Time
@@ -139,20 +138,6 @@ def minute(time: Time) -> str:
 def objects(cdm: Cdm) -> str:
     """The pair of a CDM: ``"<object1> / <object2>"``."""
     return f"{cdm.object1.object_id} / {cdm.object2.object_id}"
-
-
-def duration_words(seconds: float) -> str:
-    """A whole number of the largest unit of days, hours and minutes that
-    ``seconds`` holds, in words: ``a day``, ``an hour``, ``10 minutes``
-    (else seconds, ``90 s``); for help texts."""
-    for unit, noun, one in ((DAY, "day", "a day"), (HOUR, "hour", "an hour")):
-        count = seconds / unit
-        if count >= 1.0 and count.is_integer():
-            return one if count == 1.0 else f"{count:g} {noun}s"
-    count = seconds / MINUTE
-    if count >= 1.0 and count.is_integer():
-        return "a minute" if count == 1.0 else f"{count:g} minutes"
-    return f"{seconds:g} s"
 
 
 def table(title: str) -> Table:

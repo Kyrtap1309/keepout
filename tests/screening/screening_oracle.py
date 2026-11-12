@@ -30,9 +30,8 @@ from __future__ import annotations
 import dataclasses
 import functools
 import math
-from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 import astropy.units as u
 import numpy as np
@@ -43,8 +42,11 @@ from screening_data import DATA, FIXTURE
 from sgp4 import omm as sgp4_omm
 from sgp4.api import Satrec, SatrecArray
 
-from keepout._types import FloatArray
-from keepout.omm import Omm
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
+    from keepout._types import FloatArray
+    from keepout.omm import Omm
 
 ORACLE_STEP: Final = 10.0
 """Default time between samples [s]."""

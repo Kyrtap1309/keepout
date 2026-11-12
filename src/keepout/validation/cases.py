@@ -9,17 +9,14 @@ from __future__ import annotations
 import enum
 import math
 import zlib
-from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from pathlib import Path
-from typing import Final, TypedDict
+from typing import TYPE_CHECKING, Final, TypedDict
 
 from keepout import cdm
 from keepout.conjunction import Conjunction
 from keepout.covariance import Covariance, make_covariance
 from keepout.errors import CaraFormatError
 from keepout.pc.api import METHODS, require_options
-from keepout.pc.result import Method
 from keepout.sources import cara
 from keepout.sources.cara_legacy import load_legacy_objects
 from keepout.validation.cara_inputs import (
@@ -49,6 +46,12 @@ from keepout.validation.unit_tests import (
     UNIT_TEST_HBR,
     similar_conjunction,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+    from pathlib import Path
+
+    from keepout.pc.result import Method
 
 __all__ = [
     "MC_MIN_PC",

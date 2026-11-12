@@ -12,11 +12,11 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from functools import cached_property
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from keepout._linalg import from_eigen, symmetric_part
-from keepout._types import FloatArray
 from keepout.covariance import to_correlation
 from keepout.equinoctial import (
     RetrogradeFactor,
@@ -29,8 +29,11 @@ from keepout.equinoctial import (
     wrap_angle,
 )
 from keepout.errors import CovarianceError
-from keepout.objects import ObjectState
 from keepout.orbits import EARTH_MU
+
+if TYPE_CHECKING:
+    from keepout._types import FloatArray
+    from keepout.objects import ObjectState
 
 
 @dataclass(frozen=True, eq=False)

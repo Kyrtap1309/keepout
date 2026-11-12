@@ -4,6 +4,7 @@ child processes as the real one is."""
 
 import json
 import os
+import re
 import signal
 import threading
 import time
@@ -12,89 +13,130 @@ from pathlib import Path
 
 import pytest
 from alembic import command
-from cli_builders import keepout, operator_kvn, usage_error, write
-from sqlalchemy import create_engine
-from worker_jobs import ready_then_sleep
+from cli_builders import (
+    keepout,
+    operator_run,
+    queued_job,
+    stored_crossing,
+    usage_error,
+)
+from inline_snapshot import snapshot
+from sqlalchemy import create_engine, select
+from worker_jobs import ready_then_sleep, workers_given
 
-from keepout._workers import ONE_THREAD
-from keepout.cli import worker as worker_cli
 from keepout.cli.output import ExitCode
+from keepout.store import JobQueue, models, open_store, planning
 from keepout.store import db as store_db
-
-
-@pytest.fixture(autouse=True)
-def one_thread(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The worker sets :data:`ONE_THREAD` in this process: undone after."""
-    for name, value in ONE_THREAD.items():
-        monkeypatch.setenv(name, os.environ.get(name, value))
 
 
 @pytest.fixture
 def stored(tmp_path: Path) -> tuple[Path, str]:
-    """A store of the operator's CDM of the crossing event, and its id."""
-    cdm = write(tmp_path, "crossing.kvn", operator_kvn()[0])
-    db = tmp_path / "keepout.db"
-    added = keepout("store", "add", cdm, "--store", str(db), "--json")
-    (event_id,) = json.loads(added.stdout)["store"]["events"]
-    return db, event_id
+    """:func:`~cli_builders.stored_crossing` in the test's folder."""
+    return stored_crossing(tmp_path)
 
 
-def queue(db: Path, event_id: str, *options: str) -> int:
-    """The id of the job ``maneuver --queue`` queued."""
-    stored = ("--event", event_id, "--store", str(db), "--hbr", "1000")
-    result = keepout("maneuver", *stored, "--queue", *options, "--json")
-    assert result.exit_code == ExitCode.OK
-    job = json.loads(result.stdout)["job"]
-    assert isinstance(job, int)
-    return job
+def _times_apart(value: object) -> object:
+    """``value`` with each time of the JSON (to the millisecond) ``<time>``."""
+    if isinstance(value, str) and re.fullmatch(r"[\d-]{10}T[\d:]{8}\.\d{3}", value):
+        return "<time>"
+    return value
+
+
+def _failed_oldest(db: Path) -> None:
+    """Claim the oldest job as worker ``w1`` and fail it: ``no burn``."""
+    with open_store(db, create=False) as store:
+        queue = JobQueue(store)
+        job = queue.claim("w1")
+        assert job is not None
+        assert queue.fail(job, "no burn")
+
+
+def test_list_on_an_empty_queue(stored: tuple[Path, str]) -> None:
+    db, _ = stored
+    empty = keepout("jobs", "list", "--store", str(db))
+    assert (empty.exit_code, empty.stdout) == (ExitCode.OK, f"No jobs in {db}.\n")
 
 
 def test_list_shows_the_jobs_newest_first(stored: tuple[Path, str]) -> None:
     db, event_id = stored
-    empty = keepout("jobs", "list", "--store", str(db))
-    assert (empty.exit_code, empty.stdout) == (ExitCode.OK, f"No jobs in {db}.\n")
-    first = queue(db, event_id)
-    second = queue(db, event_id, "--target-pc", "1e-6")
+    assert queued_job(db, event_id) == 1
+    assert queued_job(db, event_id, "--target-pc", "1e-6") == 2
+    _failed_oldest(db)
+    # The CDM is the one the job is pinned to: the message, not the event.
+    cdm = operator_run().cdms[0].message_id
+    assert (event_id, cdm) == snapshot(
+        ("2a85ed50c4e6", "52939_47826_20261006T193642.717Z_20261006T000000.000Z")
+    )
     listed = keepout("jobs", "list", "--store", str(db), env={"COLUMNS": "200"})
     assert listed.exit_code == ExitCode.OK
-    header = listed.stdout.splitlines()[1].split()
-    assert header == [
-        "Job",
-        "Event",
-        "CDM",
-        "Status",
-        "Attempt",
-        "Created",
-        "(UTC)",
-        "Error",
+    lines = listed.stdout.splitlines()
+    assert lines[0] == f"Jobs in {db}"
+    minutes = re.compile(r"\d{4}-\d\d-\d\d \d\d:\d\d")
+    cells = [
+        re.split(r" {2,}", minutes.sub("<minute>", line).strip())
+        for line in (lines[1], *lines[3:])
     ]
-    rows = [line.split() for line in listed.stdout.splitlines()[3:]]
-    assert [(row[0], row[1], row[3], row[4]) for row in rows] == [
-        (str(second), event_id, "queued", "0"),
-        (str(first), event_id, "queued", "0"),
-    ]
+    assert cells == snapshot(
+        [
+            ["Job", "Event", "CDM", "Status", "Attempt", "Created (UTC)", "Error"],
+            [
+                "2",
+                "2a85ed50c4e6",
+                "52939_47826_20261006T193642.717Z_20261006T000000.000Z",
+                "queued",
+                "0",
+                "<minute>",
+            ],
+            [
+                "1",
+                "2a85ed50c4e6",
+                "52939_47826_20261006T193642.717Z_20261006T000000.000Z",
+                "failed",
+                "1",
+                "<minute>",
+                "no burn",
+            ],
+        ]
+    )
     payload = json.loads(keepout("jobs", "list", "--store", str(db), "--json").stdout)
     assert payload["path"] == str(db)
-    (newest, oldest) = payload["jobs"]
-    assert set(newest) == {
-        "job",
-        "event",
-        "cdm",
-        "status",
-        "attempt",
-        "worker",
-        "created",
-        "started",
-        "finished",
-        "error",
-    }
-    assert (newest["job"], oldest["job"]) == (second, first)
-    assert newest["started"] is None
+    jobs = [
+        {key: _times_apart(value) for key, value in job.items()}
+        for job in payload["jobs"]
+    ]
+    assert jobs == snapshot(
+        [
+            {
+                "job": 2,
+                "event": "2a85ed50c4e6",
+                "cdm": "52939_47826_20261006T193642.717Z_20261006T000000.000Z",
+                "status": "queued",
+                "attempt": 0,
+                "worker": None,
+                "created": "<time>",
+                "started": None,
+                "finished": None,
+                "error": None,
+            },
+            {
+                "job": 1,
+                "event": "2a85ed50c4e6",
+                "cdm": "52939_47826_20261006T193642.717Z_20261006T000000.000Z",
+                "status": "failed",
+                "attempt": 1,
+                "worker": "w1",
+                "created": "<time>",
+                "started": "<time>",
+                "finished": "<time>",
+                "error": "no burn",
+            },
+        ]
+    )
 
 
 def test_cancel(stored: tuple[Path, str]) -> None:
     db, event_id = stored
-    job = queue(db, event_id)
+    job = queued_job(db, event_id)
     cancelled = keepout("jobs", "cancel", str(job), "--store", str(db))
     assert cancelled.exit_code == ExitCode.OK
     assert cancelled.stdout == f"Cancelled job {job} (event {event_id}).\n"
@@ -104,12 +146,12 @@ def test_cancel(stored: tuple[Path, str]) -> None:
     payload = json.loads(keepout("jobs", "list", "--store", str(db), "--json").stdout)
     assert payload["jobs"][0]["status"] == "cancelled"
     # A cancelled job is not one to wait for: queued again, a new job.
-    assert queue(db, event_id) == job + 1
+    assert queued_job(db, event_id) == job + 1
 
 
 def test_cancel_json(stored: tuple[Path, str]) -> None:
     db, event_id = stored
-    job = queue(db, event_id)
+    job = queued_job(db, event_id)
     cancelled = keepout("jobs", "cancel", str(job), "--store", str(db), "--json")
     assert json.loads(cancelled.stdout) == {
         "job": job,
@@ -168,10 +210,29 @@ def test_worker_on_old_schema(tmp_path: Path, args: tuple[str, ...]) -> None:
     assert db.read_bytes() == before
 
 
+@pytest.mark.timeout(60)
 def test_worker_on_an_empty_queue(stored: tuple[Path, str]) -> None:
     db, _ = stored
     result = keepout("worker", "--store", str(db), "--until-idle")
     assert (result.exit_code, result.stdout) == (ExitCode.OK, "Ran 0 jobs.\n")
+
+
+@pytest.mark.timeout(60)
+def test_worker_gives_its_workers_to_the_computation(
+    stored: tuple[Path, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db, event_id = stored
+    job = queued_job(db, event_id)
+    monkeypatch.setattr(planning, "run_maneuver_job", workers_given)
+    result = keepout("worker", "--store", str(db), "--until-idle", "--workers", "3")
+    assert (result.exit_code, result.stdout) == (ExitCode.OK, "Ran 1 job.\n")
+    with open_store(db, create=False) as store:
+        key = JobQueue(store).job(job).key
+        with store.read() as session:
+            cached = session.scalars(
+                select(models.Result.payload).where(models.Result.key == key)
+            ).one()
+    assert cached == {"workers": 3}
 
 
 @pytest.fixture
@@ -186,6 +247,7 @@ def restored_signals() -> Iterator[None]:
 
 
 @pytest.mark.skipif(not hasattr(os, "kill"), reason="POSIX signals")
+@pytest.mark.timeout(60)
 @pytest.mark.usefixtures("restored_signals")
 @pytest.mark.parametrize("signum", [signal.SIGTERM, signal.SIGINT], ids=["term", "int"])
 def test_a_signal_stops_the_worker_and_releases_its_job(
@@ -194,13 +256,17 @@ def test_a_signal_stops_the_worker_and_releases_its_job(
     signum: signal.Signals,
 ) -> None:
     db, event_id = stored
-    job = queue(db, event_id)
-    monkeypatch.setattr(worker_cli, "run_maneuver_job", ready_then_sleep)
+    job = queued_job(db, event_id)
+    monkeypatch.setattr(planning, "run_maneuver_job", ready_then_sleep)
     ready = db.with_name("ready")
 
     def signal_when_ready() -> None:
+        # Never to the test run itself unless the job is running: without
+        # it, the worker runs on until the test's timeout fails it.
         end = time.monotonic() + 10.0
-        while not ready.exists() and time.monotonic() < end:
+        while not ready.exists():
+            if time.monotonic() > end:
+                return
             time.sleep(0.02)
         os.kill(os.getpid(), signum)
 

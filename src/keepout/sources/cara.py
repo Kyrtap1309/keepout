@@ -14,16 +14,18 @@ import re
 import urllib.parse
 import zipfile
 import zlib
-from collections.abc import Iterable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path, PurePosixPath
-from typing import Final, TypeAlias
+from typing import TYPE_CHECKING, Final, TypeAlias
 
 from keepout.errors import CaraFormatError
 from keepout.sources._http import Downloader, http_download
 from keepout.sources._store import cache_dir, has_digest, store
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Mapping
 
 __all__ = [
     "ALFANO_2009_RESULTS",

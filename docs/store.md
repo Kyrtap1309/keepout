@@ -1,11 +1,12 @@
 # The conjunction store
 
 A conjunction is assessed again with every new CDM, over days. The
-conjunction store keeps the CDMs of each event, the Pc keepout computed
-from them and the catalog a screening used, in one SQLite file, so that
-the next CDM adds to the event's history instead of starting it again.
+conjunction store keeps each event's history in one SQLite file, so the
+next CDM adds to it instead of starting again. It holds the CDMs, the Pc
+keepout computed from them and the catalog a screening used. It also
+holds manoeuvre plans, computed in the command or by a background worker.
 The command line uses it with `--store FILE` (see
-[`keepout store`](cli.md#store)); the library with `keepout.store`.
+[`keepout store`](cli.md#store)). The library uses `keepout.store`.
 
 ```bash
 pip install "keepout[store] @ git+https://github.com/Kyrtap1309/keepout"
@@ -15,9 +16,11 @@ The `store` extra installs [SQLAlchemy](https://www.sqlalchemy.org/) and
 [Alembic](https://alembic.sqlalchemy.org/). `import keepout` loads
 neither, and neither does `keepout --help`. Without the extra, a command
 given `--store` prints `--store needs the store extra: pip install
-'keepout[store]'` and exits with status 1. The store needs SQLite 3.35 or
-newer, the one Python's `sqlite3` module is built with
-(`sqlite3.sqlite_version`); with an older one, opening a store is an
+'keepout[store]'` and exits with status 1.
+
+The store needs SQLite 3.35 or newer, for `UPDATE … RETURNING`, which the
+job queue uses. This is the SQLite Python's `sqlite3` module is built
+with (`sqlite3.sqlite_version`). With an older one, opening a store is an
 error naming its version.
 
 ## What it keeps
@@ -44,11 +47,10 @@ error naming its version.
 - **Catalogs.** A CDM that `keepout screen --store` issued keeps a
   reference to the catalog it was screened against: each file's name,
   URL, retrieval time and SHA-256.
-- **Manoeuvre plans**, one per event's latest CDM and per way of planning:
-  keepout's version, the settings (target and thresholds among them) and
-  the catalog re-screened against. `keepout maneuver --event ID` keeps
-  the plan it computes, and a [background job](#background-jobs) the plan
-  it computes; a newer CDM of the event is planned again.
+- **Manoeuvre plans.** A plan is cached on the CDM it was planned from.
+  There is one per settings, catalog and keepout version.
+  `keepout maneuver --event ID` and [background jobs](#background-jobs)
+  both write them. After a newer CDM, the event is planned again.
 - **Jobs**: the manoeuvre plans queued for a worker, and how far each got.
 
 ### Event ids
@@ -115,74 +117,100 @@ ever deletes from the store.
 ## Background jobs
 
 Planning an event takes tens of seconds, up to minutes with a re-screen
-or a slow Pc method. A job leaves it to a worker, and the plan is then read
-from the store at once, by `keepout maneuver --event ID`.
+or a slow Pc method. A job leaves that work to a worker. The plan is then
+read from the store at once.
 
 ```bash
-keepout maneuver --event 3befe6f1305d --store keepout.db --queue
-keepout worker --store keepout.db
+keepout maneuver --event 3befe6f1305d --store keepout.db --queue   # Job 1 queued
+keepout worker --store keepout.db --until-idle   # or leave it running; Ctrl+C stops it
+keepout jobs list --store keepout.db             # succeeded?
+keepout maneuver --event 3befe6f1305d --store keepout.db   # the plan, at once
 ```
 
-[Stored events](cli.md#stored-events) runs both on the walk-through's
-store.
+The cache matches on the CDM, the settings and keepout's version. So give
+the last command the same options as the queued one.
+[Stored events](cli.md#stored-events) runs these commands on the
+walk-through's store.
 
-- **Submitting.** `maneuver --event ID --queue` queues the plan of the
-  event with the settings given (`--target-pc`, `--hbr`, `--settings`).
-  A job is pinned to the event's latest CDM when queued, and the catalog
-  that CDM was screened against (the store's copy): a CDM stored later
-  changes nothing it computes. A job plans on the default burn grid and
-  re-screens each burn against that catalog, if there is one. Queueing
-  is idempotent: if the plan is cached already, nothing is queued; if the
-  same plan (same CDM, same settings) is queued or running, that job is
-  given back instead of a second one.
-- **The worker.** `keepout worker --store FILE` takes the oldest queued
-  job, computes it and takes the next, until stopped; with `--until-idle`
-  it stops once the queue is empty. `--workers N` gives each re-screen N
-  processes, as for `screen`. Each job is computed in a child process,
-  which only reads the store; the worker alone writes the job's end and
-  its plan. The worker logs each job on standard error, and prints how
-  many it ran when it stops. Several workers can share a store: a job is
-  taken by one of them only. In a container, run the worker under an init
-  process (Docker's `init: true`, or `docker run --init`), so that the
-  processes it kills are reaped.
-- **Statuses.** A job is `queued`, then `running` while a worker holds
-  it, and ends `succeeded`, `failed` (with its error) or `cancelled`.
-  `keepout jobs list --store FILE` shows them, the newest first.
-- **Leases and attempts.** A worker holds its job by a lease of 60 s,
-  renewed every 20 s. A worker that dies (killed, its machine down)
-  stops renewing it: once the lease lapses, the next worker to look at
-  the queue puts the job back as `queued`, or `failed` if it was its
-  second attempt (`the worker stopped twice without an answer`). A
-  child process that exits without an answer (a crash, killed for lack
-  of memory) costs an attempt the same way, at once.
-- **Errors.** A job whose computation raises fails at once and is not
-  tried again: the same input would fail the same way. A keepout error
-  (an unknown covariance, a primary that cannot manoeuvre, a stored
-  catalog copy deleted or changed) is stored as its message; any other
-  error as `internal error`, with the traceback in the worker's log.
-- **Time limit.** A job that computes for more than 10 minutes is
-  stopped and fails (`stopped at the time limit of 10 min`). The child
-  runs in a process group of its own and is killed with it, its
-  re-screen's processes too. A re-screen whose process was killed (e.g.
-  for lack of memory) hangs until the time limit: its processes ignore
-  Ctrl+C and SIGTERM.
-- **Stopping.** SIGTERM or Ctrl+C stops the worker: it kills the child,
-  gives its job back to the queue without counting the attempt and
-  exits with status 0. A worker killed at once (SIGKILL) cannot: its
-  child notices within a second or so and goes, with its processes, and
-  the job's lease lapses as for a dead worker.
-- **Cancelling.** `keepout jobs cancel ID --store FILE` cancels a queued
-  or running job; cancelling a job that has ended is an error (status
-  1). The worker of a running job notices at its next lease renewal,
-  within 20 s, kills the child and drops what it computed.
-- **The cache.** A job that succeeds caches its plan on the CDM it was
-  pinned to, as `keepout maneuver --event ID` caches the plan it
-  computes in the command; whichever is first is kept. That command
-  shows the cached plan while that CDM is the event's latest and the
-  settings and keepout's version are the same. After a newer CDM, it
-  plans again (or queue it again).
+### Submitting
 
-The jobs are a table of the store's schema since revision `0002`: a store
+`maneuver --event ID --queue` queues the plan of the event. It takes
+`--target-pc`, `--hbr` and `--settings`. A job plans on the default burn
+grid.
+
+A job plans the event as it was when queued. It plans from the event's
+latest CDM at that time. If that CDM came from a screening, each burn is
+re-screened against the catalog it was screened with (the store's copy).
+CDMs stored afterwards do not change the job.
+
+Queueing twice does no harm. If the plan is cached already, nothing is
+queued. If the same plan (same CDM, same settings) is queued or running,
+the command names that job instead of queueing a second one.
+
+### Running a worker
+
+`keepout worker --store FILE` takes the oldest queued job, computes it,
+then takes the next. It runs until stopped. With `--until-idle` it stops
+once the queue is empty. `--workers N` gives each re-screen N processes,
+as for `screen`.
+
+The worker logs each job on standard error. When it stops, it prints how
+many jobs it ran.
+
+### Deployment
+
+Several workers can share a store. Each job is taken by one worker only.
+
+Each job runs in a child process of the worker. In a container, run the
+worker under an init process (Docker's `init: true`, or `docker run
+--init`). The init process reaps the child processes the worker kills.
+
+### What happens to a job
+
+`keepout jobs list --store FILE` shows the jobs, the newest first. A job
+is `queued` until a worker takes it, then `running`. It ends in one of
+three statuses:
+
+- `succeeded`: its plan is cached, as if `keepout maneuver --event ID`
+  had computed it. If both computed it, the first plan is kept.
+- `failed`: `jobs list` shows the error. A job whose computation raises
+  an error is not tried again, since it would fail the same way. A
+  keepout error, such as an unknown covariance or a stored catalog copy
+  that was deleted or changed, is shown as its message. Any other error
+  is shown as `internal error`, with the traceback in the worker's log.
+- `cancelled`: `keepout jobs cancel ID --store FILE` cancels a queued or
+  running job. A running job's worker notices at its next check-in and
+  drops what it computed. Cancelling a job that has ended is an error
+  (status 1).
+
+Three defaults set the timing:
+
+- a job may compute for 10 minutes. Past this time limit, the worker
+  stops the job and fails it (`stopped at the time limit of 10 minutes`);
+- a worker checks in on its job (a heartbeat) every 20 s;
+- a job whose worker has not checked in for 60 s is given back. This hold
+  is the job's lease.
+
+The [reference](reference/store.md#keepout.store.worker) explains leases,
+claims and attempts.
+
+SIGTERM or Ctrl+C stops the worker. It puts its job back in the queue
+and exits with status 0. The stop does not count against the job.
+
+A worker that dies (SIGKILL, a crash, its machine down) stops checking
+in. Once its lease lapses, the next worker to look at the queue queues
+the job again. A child process killed while computing (e.g. for lack of
+memory) gives its job back the same way, at once. If a job is given back
+like this twice, it fails (`the worker stopped twice without an
+answer`).
+
+One case is slower. When one process of a re-screen is killed, Python
+sends SIGTERM to the re-screen's other processes and waits for them to
+end. They ignore SIGTERM, like the child process that runs the job,
+because a stop is meant for the worker alone. So the wait never ends, and
+the job fails at the time limit.
+
+The jobs are a table of the store's schema since revision `0002`. A store
 made before needs `keepout store upgrade`.
 
 ## Concurrent use and backups

@@ -3,24 +3,27 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Final, SupportsFloat
+from typing import TYPE_CHECKING, Final, SupportsFloat
 
 import numpy as np
 import numpy.typing as npt
 from astropy.time import Time
 
 from keepout import cdm
-from keepout._types import FloatArray
 from keepout.conjunction import Conjunction
 from keepout.covariance import Covariance, make_covariance
 from keepout.errors import CaraFormatError
 from keepout.objects import ObjectState
 from keepout.sources import cara
-from keepout.sources.cara import Cell
 from keepout.state import StateVector
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+    from pathlib import Path
+
+    from keepout._types import FloatArray
+    from keepout.sources.cara import Cell
 
 __all__ = [
     "NOMINAL_EPOCH",

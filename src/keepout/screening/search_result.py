@@ -3,11 +3,15 @@ the range inside the volumes and the objects that failed."""
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from keepout._linalg import as_vector
-from keepout._types import FloatArray
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Mapping
+
+    from keepout._types import FloatArray
 
 __all__ = ["ObjectFailure", "RangeMinimum", "SearchResult"]
 

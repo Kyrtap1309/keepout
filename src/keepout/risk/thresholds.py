@@ -8,10 +8,10 @@ from typing import TYPE_CHECKING, Final, Literal, TypeAlias, get_args
 
 from keepout._types import OrderedEnum
 from keepout._validation import require_choice
-from keepout.risk.observation import PcObservation
 
 if TYPE_CHECKING:
     from keepout.pc import PcResult
+    from keepout.risk.observation import PcObservation
 
 __all__ = ["BASES", "DEFAULT_THRESHOLDS", "Basis", "RiskLevel", "Thresholds"]
 

@@ -1,20 +1,11 @@
 """The outcome of planning an event: the burns, their re-screens and verdict."""
 
-import math
-from typing import Final
-
-import astropy.units as u
 import numpy as np
 import pytest
-from astropy.time import Time
+from builders import SMALL_GRID, leo_crossing
 
-from keepout._types import FloatArray
-from keepout.cdm import CovarianceMethod, Maneuverable, ObjectMetadata, make_cdm
-from keepout.conjunction import Conjunction
-from keepout.covariance import Covariance
 from keepout.events import ConjunctionEvent
 from keepout.maneuver import (
-    BurnGrid,
     ManeuverGrid,
     ManeuverOutcome,
     ManeuverPlan,
@@ -24,68 +15,22 @@ from keepout.maneuver import (
     plan_maneuver,
     prepare_maneuver,
 )
-from keepout.objects import ObjectState
-from keepout.orbits import EARTH_MU
-from keepout.propagation.forces import EARTH_RADIUS
-from keepout.settings import Settings
-from keepout.state import StateVector
-from keepout.units import HOUR, KM
-
-TCA: Final = Time("2026-10-06T00:00:00", scale="utc")
-RADIUS: Final = EARTH_RADIUS + 630 * KM
-SMALL: Final = BurnGrid(steps_per_orbit=1, delta_v_per_direction=6)
-"""About 70 cells at 25 h, which take a fraction of a second."""
-
-
-def _item(object_id: str, r: FloatArray, angle: float) -> ObjectState:
-    speed = math.sqrt(EARTH_MU / RADIUS)
-    v = speed * np.array([0.0, math.cos(angle), math.sin(angle)])
-    covariance = np.diag([100.0**2] * 3 + [0.01**2] * 3)
-    return ObjectState(
-        object_id,
-        StateVector(TCA, r, v, "GCRF"),
-        Covariance(covariance, "GCRF", TCA),
-        10.0,
-    )
-
-
-def leo_event() -> ConjunctionEvent:
-    """A fast crossing in LEO, 150 m apart radially, 25 h before TCA, as the
-    planner's tests make it: Pc about 5e-3."""
-    conjunction = Conjunction(
-        _item("1001", np.array([RADIUS, 0.0, 0.0]), 0.9),
-        _item("2002", np.array([RADIUS + 150.0, 0.0, 0.0]), -0.9),
-        20.0,
-    )
-    method = CovarianceMethod.CALCULATED
-    cdm = make_cdm(
-        conjunction,
-        ObjectMetadata(
-            "PRI",
-            "2020-001A",
-            maneuverable=Maneuverable.YES,
-            covariance_method=method,
-        ),
-        ObjectMetadata("SEC", "2019-001A", covariance_method=method),
-        created=TCA - 25 * HOUR * u.s,
-    )
-    return ConjunctionEvent.from_cdms([cdm], event_id="EVENT-7")
 
 
 @pytest.fixture(scope="module", name="event")
 def the_event() -> ConjunctionEvent:
-    return leo_event()
+    return leo_crossing()
 
 
 @pytest.fixture(scope="module", name="plan")
 def small_plan(event: ConjunctionEvent) -> ManeuverPlan:
-    return plan_maneuver(event, grid=SMALL)
+    return plan_maneuver(event, grid=SMALL_GRID)
 
 
 def test_plan_event_matches_plan_maneuver(
     event: ConjunctionEvent, plan: ManeuverPlan
 ) -> None:
-    outcome = plan_event(event, Settings(), grid=SMALL)
+    outcome = plan_event(event, grid=SMALL_GRID)
     assert outcome.event is event
     assert outcome.target_pc == plan.target_pc
     assert outcome.baseline == plan.baseline
@@ -122,20 +67,35 @@ def test_outcome_of_a_context_has_no_grid(
     context = prepare_maneuver(event)
     option = plan.options[0]
     burn = evaluate_burn(context, burn_lead=option.burn_lead, delta_v=option.delta_v)
-    outcome = ManeuverOutcome.of(context, [PlannedBurn(burn, None)], None)
+    outcome = ManeuverOutcome.of(context, [PlannedBurn(burn, None)], None, grid=None)
     assert outcome.grid is None
     assert outcome.burns == (PlannedBurn(burn, None),)
     assert outcome.baseline == context.baseline
 
 
+def test_plan_event_of_one_burn_has_no_grid(
+    event: ConjunctionEvent, plan: ManeuverPlan
+) -> None:
+    option = plan.options[0]
+    outcome = plan_event(
+        event, burn=(option.burn_lead, option.delta_v), target_pc=plan.target_pc
+    )
+    context = prepare_maneuver(event)
+    burn = evaluate_burn(context, burn_lead=option.burn_lead, delta_v=option.delta_v)
+    assert outcome.grid is None
+    assert outcome.burns == (PlannedBurn(burn, None),)
+    assert outcome.baseline == context.baseline
+    assert outcome.notes == context.notes
+
+
 def test_verdict_is_judge_of_the_burns(plan: ManeuverPlan) -> None:
-    outcome = ManeuverOutcome.of(plan, [], None)
+    outcome = ManeuverOutcome.of(plan, [], None, grid=ManeuverGrid.of(plan))
     assert outcome.verdict.burns == 0
     assert not outcome.verdict.recommendable
 
 
 def test_catalog_needs_its_label(event: ConjunctionEvent) -> None:
     with pytest.raises(ValueError, match="catalog"):
-        plan_event(event, Settings(), catalog=[])
+        plan_event(event, catalog=[])
     with pytest.raises(ValueError, match="catalog"):
-        plan_event(event, Settings(), catalog_label="nothing")
+        plan_event(event, catalog_label="nothing")

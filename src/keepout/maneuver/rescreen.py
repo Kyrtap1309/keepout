@@ -40,20 +40,16 @@ hard-body radius, on the basis of the plan's thresholds.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 import astropy.units as u
 import numpy as np
-from astropy.time import Time
 
 from keepout._defaults import SCREENING_DURATION
 from keepout._text import before_tca
 from keepout._validation import require_non_negative
 from keepout.errors import ManeuverError, PropagationError
-from keepout.events import ConjunctionEvent
-from keepout.maneuver.planner import ManeuverContext, ManeuverOption
 from keepout.omm import Omm, deduplicate
 from keepout.pc import AUTO, PcComputation
 from keepout.propagation import (
@@ -76,9 +72,17 @@ from keepout.screening import (
     screen,
 )
 from keepout.screening.tca import SEARCH_REACH
-from keepout.synthetic.covariance_model import SyntheticCovarianceModel
 from keepout.synthetic.operator import DEFAULT_MODEL
 from keepout.units import DAY, elapsed_seconds
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable, Mapping, Sequence
+
+    from astropy.time import Time
+
+    from keepout.events import ConjunctionEvent
+    from keepout.maneuver.planner import ManeuverContext, ManeuverOption
+    from keepout.synthetic.covariance_model import SyntheticCovarianceModel
 
 __all__ = ["BurnVerdict", "NewApproach", "RescreenResult", "judge", "rescreen"]
 

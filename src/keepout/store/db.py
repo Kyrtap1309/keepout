@@ -91,7 +91,8 @@ def _engine(path: Path, *, wal: bool, foreign_keys: bool) -> Engine:
 
     @event.listens_for(engine, "begin")
     def _begin(connection: Connection) -> None:
-        immediate = connection.get_execution_options().get(WRITE, False)
+        # The writers set the option to True (execution options are Any).
+        immediate = connection.get_execution_options().get(WRITE) is True
         connection.exec_driver_sql("BEGIN IMMEDIATE" if immediate else "BEGIN")
 
     return engine
@@ -253,7 +254,8 @@ def _migrating(path: Path) -> Generator[Connection]:
             yield connection
             broken = connection.exec_driver_sql("PRAGMA foreign_key_check").all()
             if broken:
-                tables = sorted({str(row[0]) for row in broken})
+                # A raw PRAGMA's rows are untyped: the first column is the table.
+                tables = sorted({str(row[0]) for row in broken})  # pyright: ignore[reportAny]
                 raise StoreError(
                     f"migrating {path} broke foreign keys in {', '.join(tables)}"
                 )

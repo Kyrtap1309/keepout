@@ -7,19 +7,22 @@ import threading
 import time
 from pathlib import Path
 
+from builders import SMALL_GRID
+
 from keepout._types import JsonValue
 from keepout.errors import ManeuverError
-from keepout.maneuver import BurnGrid
 from keepout.store.jobs import Job
-from keepout.store.worker import run_maneuver_job
-
-SMALL_GRID = BurnGrid(steps_per_orbit=1, delta_v_per_direction=6)
-"""A burn grid of a few dozen cells, planned in a fraction of a second."""
+from keepout.store.planning import run_maneuver_job
 
 
 def quick(path: str, job: Job, workers: int | None) -> dict[str, JsonValue]:
     """An answer at once."""
     return {"ok": True}
+
+
+def workers_given(path: str, job: Job, workers: int | None) -> dict[str, JsonValue]:
+    """An answer at once: the ``workers`` it was given."""
+    return {"workers": workers}
 
 
 def sleep_forever(path: str, job: Job, workers: int | None) -> dict[str, JsonValue]:
@@ -62,7 +65,8 @@ def crash_once(path: str, job: Job, workers: int | None) -> dict[str, JsonValue]
 def small_grid_maneuver(
     path: str, job: Job, workers: int | None
 ) -> dict[str, JsonValue]:
-    """:func:`~keepout.store.worker.run_maneuver_job` on :data:`SMALL_GRID`."""
+    """:func:`~keepout.store.planning.run_maneuver_job` on
+    :data:`~builders.SMALL_GRID`."""
     return run_maneuver_job(path, job, workers, grid=SMALL_GRID)
 
 

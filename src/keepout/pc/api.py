@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import dataclasses
 import inspect
-from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import (
@@ -21,7 +20,6 @@ from typing import (
 from keepout._methods import MethodChoice
 from keepout._pickling import reduce_with_mappings
 from keepout._types import override
-from keepout.conjunction import Conjunction
 from keepout.errors import PcConvergenceError
 from keepout.pc._auto import (
     AUTO_MC_SAMPLES,
@@ -39,12 +37,16 @@ from keepout.pc.foster import foster
 from keepout.pc.hall3d import hall3d
 from keepout.pc.maxpc import alfano, dilution, frisbee
 from keepout.pc.montecarlo import montecarlo
-from keepout.pc.result import Method, PcResult
 
 if TYPE_CHECKING:
     # typing.Unpack types **kwargs from Python 3.12; typing_extensions stays
     # out of the dependencies.
+    from collections.abc import Callable, Mapping
+
     from typing_extensions import Unpack
+
+    from keepout.conjunction import Conjunction
+    from keepout.pc.result import Method, PcResult
 
 __all__ = [
     "AUTO",
@@ -356,7 +358,7 @@ def _spec(method: str) -> MethodSpec:
         If ``method`` names no method (nor does ``"auto"``: it is a choice).
     """
     # A name that is no method is only looked up: it finds nothing.
-    spec = METHODS.get(cast(Method, method))
+    spec = METHODS.get(cast("Method", method))
     if spec is None:
         raise ValueError(
             f"unknown Pc method {method!r}; expected 'auto' or one of {tuple(METHODS)}"

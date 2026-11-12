@@ -1,22 +1,21 @@
 """The outcome of planning an event: its burns, their re-screens and the verdict.
 
-:func:`plan_event` plans an event with an operator's settings and re-screens
-each burn against a catalog, if one is given; :meth:`ManeuverOutcome.of`
-makes the same value from burns of one's own. A :class:`ManeuverOutcome`
-holds what is shown of a plan, and :attr:`ManeuverOutcome.verdict` says
-whether a burn can be recommended.
+:func:`plan_event` plans an event on the burn grid, or evaluates one burn of
+its own. It re-screens each burn against a catalog, if one is given.
+:meth:`ManeuverOutcome.of` makes the same value from burns found otherwise.
+A :class:`ManeuverOutcome` holds what is shown of an event's burns, and
+:attr:`ManeuverOutcome.verdict` says whether a burn can be recommended.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
 
+from keepout._defaults import TARGET_PC
 from keepout._types import FloatArray, read_only
-from keepout.events import ConjunctionEvent
 from keepout.maneuver.planner import (
     DEFAULT_BURN_GRID,
     BurnDirection,
@@ -24,21 +23,27 @@ from keepout.maneuver.planner import (
     ManeuverContext,
     ManeuverOption,
     ManeuverPlan,
+    evaluate_burn,
     plan_maneuver,
+    prepare_maneuver,
 )
 from keepout.maneuver.rescreen import BurnVerdict, RescreenResult, judge, rescreen
-from keepout.omm import Omm
+from keepout.pc import AUTO, PcComputation
+from keepout.risk import DEFAULT_THRESHOLDS, Thresholds
 
-# The settings sit above the library's manoeuvres: only their type is needed.
 if TYPE_CHECKING:
-    from keepout.settings import Settings
+    from collections.abc import Sequence
+
+    from keepout.covariance import Policy
+    from keepout.events import ConjunctionEvent
+    from keepout.omm import Omm
 
 __all__ = ["ManeuverGrid", "ManeuverOutcome", "PlannedBurn", "plan_event"]
 
 
 @dataclass(frozen=True, slots=True)
 class PlannedBurn:
-    """A burn of a plan, and its re-screen if there was a catalog.
+    """A burn of an outcome, and its re-screen if there was a catalog.
 
     Parameters
     ----------
@@ -121,7 +126,7 @@ class ManeuverGrid:
 
 @dataclass(frozen=True, eq=False, slots=True, kw_only=True)
 class ManeuverOutcome:
-    """What planning an event found: the baseline, the burns and their
+    """The outcome of planning an event: the baseline, the burns and their
     re-screens.
 
     Parameters
@@ -133,7 +138,7 @@ class ManeuverOutcome:
     baseline
         The event without a burn.
     notes
-        What a reader must know of the plan.
+        What a reader must know of the outcome.
     burns
         The burns, prograde first; each with its re-screen if there was a
         catalog.
@@ -170,61 +175,78 @@ class ManeuverOutcome:
     @classmethod
     def of(
         cls,
-        plan: ManeuverContext,
+        context: ManeuverContext,
         burns: Sequence[PlannedBurn],
         catalog_label: str | None,
+        *,
+        grid: ManeuverGrid | None,
     ) -> ManeuverOutcome:
-        """The outcome of burns of a plan or a context.
+        """The outcome of burns of an event.
 
         Parameters
         ----------
-        plan
-            The event's :class:`~keepout.maneuver.ManeuverPlan`, whose grid
-            the outcome keeps, or :class:`~keepout.maneuver.ManeuverContext`.
+        context
+            The event ready for burns: a
+            :class:`~keepout.maneuver.ManeuverContext` or a
+            :class:`~keepout.maneuver.ManeuverPlan`.
         burns
             The burns, each with its re-screen if there was a catalog.
         catalog_label
             What the burns were re-screened against; ``None`` if they were
             not.
+        grid
+            The Pc grid the burns were found on (:meth:`ManeuverGrid.of` a
+            plan); ``None`` for burns of one's own.
         """
         return cls(
-            event=plan.event,
-            target_pc=plan.target_pc,
-            baseline=plan.baseline,
-            notes=plan.notes,
+            event=context.event,
+            target_pc=context.target_pc,
+            baseline=context.baseline,
+            notes=context.notes,
             burns=tuple(burns),
-            grid=ManeuverGrid.of(plan) if isinstance(plan, ManeuverPlan) else None,
+            grid=grid,
             catalog_label=catalog_label,
         )
 
 
 def plan_event(
     event: ConjunctionEvent,
-    settings: Settings,
     *,
+    target_pc: float = TARGET_PC,
+    compute: PcComputation = AUTO,
+    policy: Policy = "repair",
+    combined_hard_body_radius: float | None = None,
+    thresholds: Thresholds = DEFAULT_THRESHOLDS,
+    burn: tuple[float, float] | None = None,
+    grid: BurnGrid = DEFAULT_BURN_GRID,
     catalog: Sequence[Omm] | None = None,
     catalog_label: str | None = None,
-    grid: BurnGrid = DEFAULT_BURN_GRID,
     workers: int | None = 1,
 ) -> ManeuverOutcome:
-    """The burns of an event, by :func:`~keepout.maneuver.plan_maneuver` with
-    an operator's settings, each re-screened against a catalog if one is
-    given.
+    """The outcome of an event's burns, each re-screened against a catalog
+    if one is given.
+
+    Without ``burn``, the burns are those of
+    :func:`~keepout.maneuver.plan_maneuver` on ``grid``. With it, the one
+    burn is evaluated by :func:`~keepout.maneuver.evaluate_burn`, and the
+    grid is not planned.
 
     Parameters
     ----------
     event
         The event; its latest CDM is planned from.
-    settings
-        The target, Pc method, covariance policy, hard-body radius and
-        thresholds of the plan.
+    target_pc, compute, policy, combined_hard_body_radius, thresholds
+        As for :func:`~keepout.maneuver.plan_maneuver`.
+    burn
+        One burn to evaluate instead of the grid: its time before TCA [s]
+        and its signed Δv along the velocity [m/s].
+    grid
+        The burns tried without ``burn``.
     catalog
         The element sets to re-screen each burn against
         (:func:`~keepout.maneuver.rescreen`); ``None``: no re-screen.
     catalog_label
         What ``catalog`` is, for people; given with ``catalog`` and only then.
-    grid
-        The burns tried.
     workers
         Processes of each re-screen, as for
         :func:`~keepout.maneuver.rescreen`.
@@ -232,39 +254,54 @@ def plan_event(
     Returns
     -------
     ManeuverOutcome
-        The outcome, with the plan's grid.
+        The outcome; with the plan's grid unless ``burn`` is given.
 
     Raises
     ------
     ValueError
-        If only one of ``catalog`` and ``catalog_label`` is given, and as
-        :func:`~keepout.maneuver.plan_maneuver` and
+        If only one of ``catalog`` and ``catalog_label`` is given. Also as
+        :func:`~keepout.maneuver.plan_maneuver`,
+        :func:`~keepout.maneuver.evaluate_burn` and
         :func:`~keepout.maneuver.rescreen`.
     ManeuverError
-        As :func:`~keepout.maneuver.plan_maneuver` and
-        :func:`~keepout.maneuver.rescreen`.
+        As those functions.
     KeepoutError
-        As :func:`~keepout.maneuver.plan_maneuver` and
-        :func:`~keepout.maneuver.rescreen`.
+        As those functions.
     """
     if (catalog is None) != (catalog_label is None):
         raise ValueError("give catalog and catalog_label together, or neither")
-    plan = plan_maneuver(
-        event,
-        target_pc=settings.target_pc,
-        grid=grid,
-        compute=settings.compute,
-        policy=settings.policy,
-        combined_hard_body_radius=settings.combined_hard_body_radius,
-        thresholds=settings.thresholds,
-    )
+    context: ManeuverContext
+    if burn is None:
+        context = plan = plan_maneuver(
+            event,
+            target_pc=target_pc,
+            grid=grid,
+            compute=compute,
+            policy=policy,
+            combined_hard_body_radius=combined_hard_body_radius,
+            thresholds=thresholds,
+        )
+        options = plan.options
+        found = ManeuverGrid.of(plan)
+    else:
+        context = prepare_maneuver(
+            event,
+            target_pc=target_pc,
+            compute=compute,
+            policy=policy,
+            combined_hard_body_radius=combined_hard_body_radius,
+            thresholds=thresholds,
+        )
+        lead, delta_v = burn
+        options = (evaluate_burn(context, burn_lead=lead, delta_v=delta_v),)
+        found = None
     burns = [
         PlannedBurn(
             option,
             None
             if catalog is None
-            else rescreen(plan, option, catalog, workers=workers),
+            else rescreen(context, option, catalog, workers=workers),
         )
-        for option in plan.options
+        for option in options
     ]
-    return ManeuverOutcome.of(plan, burns, catalog_label)
+    return ManeuverOutcome.of(context, burns, catalog_label, grid=found)

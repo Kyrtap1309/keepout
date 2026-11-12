@@ -11,9 +11,8 @@ performed.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from pathlib import Path
-from typing import Final
+from typing import TYPE_CHECKING, Final
 from xml.etree import ElementTree
 
 from keepout.ccsds.message import COMMENT, USER_DEFINED, USER_DEFINED_PREFIX, Located
@@ -30,6 +29,9 @@ from keepout.cdm.keywords import (
 )
 from keepout.cdm.model import Cdm, Field, Section, format_field
 from keepout.errors import CdmParseError
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 __all__ = ["NDM_NAMESPACE", "dump", "dumps", "load", "loads"]
 

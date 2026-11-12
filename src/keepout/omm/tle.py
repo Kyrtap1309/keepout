@@ -23,9 +23,7 @@ from __future__ import annotations
 
 import datetime
 import re
-from collections.abc import Callable, Mapping
-from pathlib import Path
-from typing import Final, NamedTuple
+from typing import TYPE_CHECKING, Final, NamedTuple
 
 from sgp4.alpha5 import from_alpha5
 from sgp4.io import compute_checksum
@@ -34,7 +32,12 @@ from keepout.ccsds.message import UNKNOWN, Located
 from keepout.errors import OmmParseError
 from keepout.omm._io import OMM, parse_record
 from keepout.omm.keywords import DEFAULTS
-from keepout.omm.model import Omm
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
+    from pathlib import Path
+
+    from keepout.omm.model import Omm
 
 __all__ = ["checksum", "load", "loads"]
 

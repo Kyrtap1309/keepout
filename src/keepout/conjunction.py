@@ -5,15 +5,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import cached_property
+from typing import TYPE_CHECKING
 
-from astropy.time import Time
-
-from keepout._types import FloatArray
 from keepout._validation import positive_float
 from keepout.encounter import EncounterPlane, Role, encounter_plane
 from keepout.errors import HardBodyRadiusError
 from keepout.objects import ObjectState, require_same_epoch
 from keepout.state import RelativeMotion, relative_motion
+
+if TYPE_CHECKING:
+    from astropy.time import Time
+
+    from keepout._types import FloatArray
 
 __all__ = ["Conjunction", "combined_hard_body_radius"]
 

@@ -41,11 +41,9 @@ from __future__ import annotations
 
 import re
 import time
-from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from http import HTTPStatus
-from pathlib import Path
-from typing import Final, TypeVar
+from typing import TYPE_CHECKING, Final, TypeVar
 
 from keepout._defaults import CELESTRAK_TTL
 from keepout.ccsds.files import strip_bom
@@ -57,6 +55,10 @@ from keepout.sources._store import cache_dir
 from keepout.sources.cache import Unchanged, cached_fetch
 from keepout.sources.catalog import Catalog, CatalogPart, Retrieval
 from keepout.sources.socrates import COLUMNS, SocratesApproach, read_socrates
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable
+    from pathlib import Path
 
 __all__ = [
     "GP_URL",

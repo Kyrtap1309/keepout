@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Final, Literal, Self, TypeAlias, get_args
+from typing import TYPE_CHECKING, Final, Literal, Self, TypeAlias, get_args
 
 from keepout._methods import Method
 from keepout._pickling import reduce_with_mappings
 from keepout._types import override
 from keepout._validation import require_choice, require_probability
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 __all__ = ["RESULT_KINDS", "Method", "PcResult", "ResultKind"]
 

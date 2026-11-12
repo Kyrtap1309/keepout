@@ -12,12 +12,10 @@ depends on its object and its time only.
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
 from typing import TYPE_CHECKING, ClassVar, Final, Literal, NamedTuple, Self
 
 import numpy as np
 import numpy.typing as npt
-from astropy.time import Time
 
 from keepout._linalg import as_axis
 from keepout._types import FloatArray, override
@@ -38,6 +36,9 @@ from keepout.propagation.forces import EARTH_RADIUS, ForceModel
 from keepout.units import elapsed_seconds
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from astropy.time import Time
     from scipy.interpolate import CubicHermiteSpline
 
 __all__ = ["SPAN_SLACK", "CowellPropagator", "integrate"]

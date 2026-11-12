@@ -14,7 +14,7 @@ the settings it was computed with
 (:func:`~keepout.store.codec.result_key`); an event's manoeuvre outcome
 (:meth:`Store.maneuver`) is cached on its latest CDM under the key of the
 operator's settings and the catalog
-(:func:`~keepout.store.maneuver_codec.maneuver_key`).
+(:func:`~keepout.store.codec.maneuver_key`).
 """
 
 from __future__ import annotations
@@ -49,11 +49,11 @@ from keepout.risk import assess
 from keepout.sources.catalog import CatalogFileRef, CatalogReference
 from keepout.store import models
 from keepout.store.codec import (
+    maneuver_key,
     observation_from_json,
     observation_to_json,
     result_key,
 )
-from keepout.store.maneuver_codec import maneuver_key, outcome_from_json
 from keepout.store.models import EventId, MessageId
 from keepout.units import elapsed_seconds
 
@@ -304,7 +304,7 @@ def _insert_results(
             select(models.Cdm.message_id).where(models.Cdm.message_id.in_(given))
         )
     )
-    rows = [
+    rows: list[dict[str, object]] = [
         {
             "message_id": message_id,
             "key": key,
@@ -354,7 +354,7 @@ def save_maneuver_in(
     message_id
         The ``MESSAGE_ID`` of the CDM the outcome was planned on.
     key
-        Its :func:`~keepout.store.maneuver_codec.maneuver_key`.
+        Its :func:`~keepout.store.codec.maneuver_key`.
     payload
         Its :func:`~keepout.store.maneuver_codec.outcome_to_json`.
 
@@ -365,6 +365,106 @@ def save_maneuver_in(
         meanwhile) or an outcome is already cached on it under ``key``.
     """
     return _insert_results(session, key, [(message_id, payload)]) == 1
+
+
+def _maneuver_key_in(
+    session: Session, base: Path, message_id: str, settings: Settings
+) -> str:
+    """The key of a plan with ``settings`` on a stored CDM: its
+    :func:`~keepout.store.codec.maneuver_key` with the CDM's catalog.
+
+    Raises
+    ------
+    ValueError
+        If a settings file cannot hold ``settings``.
+    """
+    return maneuver_key(settings, catalog_in(session, base, message_id))
+
+
+def maneuver_slot_in(
+    session: Session, base: Path, event_id: str, settings: Settings
+) -> tuple[MessageId, str]:
+    """Where a plan of a stored event with ``settings`` is cached, in the
+    caller's transaction: the event's latest CDM and the plan's key.
+
+    Internal to :mod:`keepout.store`: the cache and the job queue look up
+    the same slot.
+
+    Parameters
+    ----------
+    session
+        A session of the store.
+    base
+        The directory of the store file.
+    event_id
+        The store's id of the event.
+    settings
+        The operator's settings of the plan.
+
+    Raises
+    ------
+    StoreError
+        If there is no such event.
+    ValueError
+        If a settings file cannot hold ``settings``, as
+        :func:`~keepout.store.codec.maneuver_key`.
+    """
+    message_id = latest_in(session, event_id)
+    return message_id, _maneuver_key_in(session, base, message_id, settings)
+
+
+def pinned_in(
+    session: Session, base: Path, event_id: str, message_id: str | None
+) -> tuple[ConjunctionEvent, CatalogReference | None]:
+    """A stored event as it was at one of its CDMs, and that CDM's catalog,
+    in the caller's transaction.
+
+    Internal to :mod:`keepout.store`: a plan reads both in one transaction.
+
+    Parameters
+    ----------
+    session
+        A session of the store.
+    base
+        The directory of the store file.
+    event_id
+        The store's id of the event.
+    message_id
+        The ``MESSAGE_ID`` of one of its CDMs: the event without the CDMs
+        after it in (``CREATION_DATE``, ``MESSAGE_ID``) order. ``None``: its
+        latest CDM.
+
+    Raises
+    ------
+    StoreError
+        If there is no such event, or ``message_id`` is not a CDM of it.
+    CdmParseError
+        If a stored CDM no longer parses (a store edited by hand).
+    EventError
+        If the stored CDMs no longer make an event (likewise).
+    """
+    cdms = _cdms_of(session, event_id, message_id)
+    latest = _latest_message_id(session, cdms)
+    event = _parsed_event(event_id, _texts(session, cdms))
+    return event, catalog_in(session, base, latest)
+
+
+def _cached_payloads(
+    session: Session, event_id: str, key: str
+) -> Sequence[tuple[str, Mapping[str, object] | None]]:
+    """The ``MESSAGE_ID`` of each CDM of an event, oldest first, and its
+    payload cached under ``key``: ``None`` where there is none (the outer
+    join's ``NULL``, which the column's type does not say)."""
+    joined = and_(
+        models.Result.message_id == models.Cdm.message_id,
+        models.Result.key == key,
+    )
+    return session.execute(
+        select(models.Cdm.message_id, models.Result.payload)
+        .outerjoin(models.Result, joined)
+        .where(models.Cdm.event_id == event_id)
+        .order_by(models.Cdm.creation_date, models.Cdm.message_id)
+    ).all()
 
 
 def _require_events(session: Session, event_ids: Collection[str]) -> None:
@@ -428,11 +528,8 @@ def _latest_message_id(session: Session, cdms: ColumnElement[bool]) -> MessageId
 
 
 def latest_in(session: Session, event_id: str) -> MessageId:
-    """The ``MESSAGE_ID`` of an event's latest CDM (as
-    :meth:`Store.latest_message_id`), in the caller's transaction.
-
-    Internal to :mod:`keepout.store`: a job is pinned to it in the
-    transaction that queues the job.
+    """The ``MESSAGE_ID`` of an event's latest CDM, by ``CREATION_DATE``
+    (then by ``MESSAGE_ID``), in the caller's transaction.
 
     Raises
     ------
@@ -932,30 +1029,25 @@ class Store:
             for event in self.events(event_ids=event_ids)
         ]
 
-    def event(self, event_id: str, *, until: str | None = None) -> ConjunctionEvent:
+    def event(self, event_id: str) -> ConjunctionEvent:
         """A stored event, its CDMs read from their stored text.
 
         Parameters
         ----------
         event_id
             The store's id of the event.
-        until
-            The ``MESSAGE_ID`` of one of its CDMs: the event as it was when
-            that CDM was its latest, i.e. without the CDMs after it in
-            (``CREATION_DATE``, ``MESSAGE_ID``) order. ``None``: every CDM.
 
         Raises
         ------
         StoreError
-            If there is no such event, if ``until`` is not a CDM of it, or if
-            the database cannot be used.
+            If there is no such event, or if the database cannot be used.
         CdmParseError
             If a stored CDM no longer parses (a store edited by hand).
         EventError
             If the stored CDMs no longer make an event (likewise).
         """
         with self.read() as session:
-            texts = _texts(session, _cdms_of(session, event_id, until))
+            texts = _texts(session, _cdms_of(session, event_id, None))
         return _parsed_event(event_id, texts)
 
     def events(
@@ -1019,38 +1111,25 @@ class Store:
             for these settings (:meth:`refresh` caches them) or cannot be
             read; or if the database cannot be used.
         """
-        joined = and_(
-            models.Result.message_id == models.Cdm.message_id,
-            models.Result.key == result_key(settings),
-        )
         with self.read() as session:
             _require_events(session, [event_id])
-            rows = session.execute(
-                select(models.Cdm.message_id, models.Result.payload)
-                .outerjoin(models.Result, joined)
-                .where(models.Cdm.event_id == event_id)
-                .order_by(models.Cdm.creation_date, models.Cdm.message_id)
-            ).all()
+            rows = _cached_payloads(session, event_id, result_key(settings))
+        payloads = [payload for _, payload in rows if payload is not None]
         missing = [message_id for message_id, payload in rows if payload is None]
         if missing:
             raise StoreError(
                 f"no Pc of {', '.join(missing)} in event {event_id} for these "
                 "settings: refresh the store first"
             )
-        return tuple(observation_from_json(payload) for _, payload in rows)
+        return tuple(observation_from_json(payload) for payload in payloads)
 
-    def catalog(
-        self, event_id: str, *, until: str | None = None
-    ) -> CatalogReference | None:
+    def catalog(self, event_id: str) -> CatalogReference | None:
         """The catalog the event's latest CDM was made from.
 
         Parameters
         ----------
         event_id
             The store's id of the event.
-        until
-            The ``MESSAGE_ID`` of one of its CDMs, latest as in
-            :meth:`event`; ``None``: the event's latest CDM.
 
         Returns
         -------
@@ -1063,29 +1142,10 @@ class Store:
         Raises
         ------
         StoreError
-            If there is no such event, if ``until`` is not a CDM of it, or if
-            the database cannot be used.
-        """
-        with self.read() as session:
-            latest = _latest_message_id(session, _cdms_of(session, event_id, until))
-            return catalog_in(session, self.path.parent, latest)
-
-    def latest_message_id(self, event_id: str) -> str:
-        """The ``MESSAGE_ID`` of an event's latest CDM, by ``CREATION_DATE``
-        (then by ``MESSAGE_ID``).
-
-        Parameters
-        ----------
-        event_id
-            The store's id of the event.
-
-        Raises
-        ------
-        StoreError
             If there is no such event, or if the database cannot be used.
         """
         with self.read() as session:
-            return latest_in(session, event_id)
+            return catalog_in(session, self.path.parent, latest_in(session, event_id))
 
     def maneuver(self, event_id: str, settings: Settings) -> ManeuverOutcome | None:
         """The cached manoeuvre outcome of an event: the one planned on its
@@ -1100,13 +1160,13 @@ class Store:
             The store's id of the event.
         settings
             The operator's settings of the plan (by their
-            :func:`~keepout.store.maneuver_codec.maneuver_key`).
+            :func:`~keepout.store.codec.maneuver_key`).
 
         Returns
         -------
         ManeuverOutcome or None
-            The outcome, its event every stored CDM of the event; ``None`` if
-            none is cached.
+            The outcome, with the event built from all its stored CDMs;
+            ``None`` if none is cached.
 
         Raises
         ------
@@ -1115,16 +1175,16 @@ class Store:
             or if the database cannot be used.
         ValueError
             If a settings file cannot hold ``settings``, as
-            :func:`~keepout.store.maneuver_codec.maneuver_key`.
+            :func:`~keepout.store.codec.maneuver_key`.
         CdmParseError
             If a stored CDM no longer parses (a store edited by hand).
         EventError
             If the stored CDMs no longer make an event (likewise).
         """
         with self.read() as session:
-            cdms = _cdms_of(session, event_id, None)
-            latest = _latest_message_id(session, cdms)
-            key = maneuver_key(settings, catalog_in(session, self.path.parent, latest))
+            latest, key = maneuver_slot_in(
+                session, self.path.parent, event_id, settings
+            )
             payload = session.scalar(
                 select(models.Result.payload).where(
                     models.Result.message_id == latest, models.Result.key == key
@@ -1132,37 +1192,46 @@ class Store:
             )
             if payload is None:
                 return None
-            texts = _texts(session, cdms)
+            texts = _texts(session, _cdms_of(session, event_id, None))
+        from keepout.store.maneuver_codec import outcome_from_json
+
         return outcome_from_json(payload, _parsed_event(event_id, texts))
 
     def save_maneuver(
-        self, message_id: str, key: str, payload: Mapping[str, JsonValue]
+        self, message_id: str, settings: Settings, outcome: ManeuverOutcome
     ) -> bool:
-        """Cache a manoeuvre outcome's JSON on a CDM, in one write
-        transaction.
+        """Cache a manoeuvre outcome on a CDM, in one write transaction.
 
         Parameters
         ----------
         message_id
             The ``MESSAGE_ID`` of the CDM the outcome was planned on: the
-            event's latest then.
-        key
-            Its :func:`~keepout.store.maneuver_codec.maneuver_key`.
-        payload
-            Its :func:`~keepout.store.maneuver_codec.outcome_to_json`.
+            latest CDM of its event.
+        settings
+            The operator's settings of the plan; with the CDM's catalog they
+            give its :func:`~keepout.store.codec.maneuver_key`.
+        outcome
+            The outcome.
 
         Returns
         -------
         bool
             Whether it was written: not if the CDM is not stored (e.g. purged
-            meanwhile) or an outcome is already cached on it under ``key``.
+            meanwhile) or an outcome is already cached on it under its key.
 
         Raises
         ------
         StoreError
             If the database cannot be used.
+        ValueError
+            If a settings file cannot hold ``settings``, as
+            :func:`~keepout.store.codec.maneuver_key`.
         """
+        from keepout.store.maneuver_codec import outcome_to_json
+
+        payload = outcome_to_json(outcome)
         with self.write() as session:
+            key = _maneuver_key_in(session, self.path.parent, message_id, settings)
             return save_maneuver_in(session, message_id, key, payload)
 
     def count_before(self, before: Time) -> int:

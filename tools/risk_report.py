@@ -15,10 +15,17 @@ from __future__ import annotations
 import argparse
 import sys
 from collections import Counter
-from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final, Literal, TypeAlias, TypedDict, TypeVar, get_args
+from typing import (
+    TYPE_CHECKING,
+    Final,
+    Literal,
+    TypeAlias,
+    TypedDict,
+    TypeVar,
+    get_args,
+)
 
 import matplotlib as mpl
 from generated import (
@@ -49,8 +56,12 @@ from keepout.risk import (
     assess,
 )
 from keepout.sources import kelvins
-from keepout.sources.kelvins import KelvinsEvent
 from keepout.units import DAY
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable, Mapping, Sequence
+
+    from keepout.sources.kelvins import KelvinsEvent
 
 PAGE: Final = REPO / "docs/risk-kelvins.md"
 IMAGES: Final = REPO / "docs/img/risk-kelvins"

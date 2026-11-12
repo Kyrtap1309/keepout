@@ -18,7 +18,6 @@ import os
 import stat
 import tempfile
 import threading
-from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, TypeAlias
 
@@ -27,6 +26,8 @@ import platformdirs
 from keepout.errors import ChecksumMismatch
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
+
     from keepout.sources._http import Sink
 
 __all__ = [

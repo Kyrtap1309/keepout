@@ -8,11 +8,11 @@ from typing import TYPE_CHECKING, Final, NamedTuple
 
 import numpy as np
 
-from keepout._types import BoolArray, FloatArray
-from keepout.pc._overlap import Gaussians
 from keepout.pc._timeline import Candidate, regions
 
 if TYPE_CHECKING:
+    from keepout._types import BoolArray, FloatArray
+    from keepout.pc._overlap import Gaussians
     from keepout.pc._rate import CollisionRate
 
 __all__ = [

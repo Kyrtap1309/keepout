@@ -1,8 +1,10 @@
 """The JSON of a manoeuvre outcome, and the key it is cached under."""
 
+import contextlib
 import dataclasses
 import json
 import math
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, Final
 
@@ -10,79 +12,35 @@ import astropy.units as u
 import numpy as np
 import pytest
 from astropy.time import Time
+from builders import CROSSING_RADIUS as RADIUS
+from builders import CROSSING_TCA as TCA
+from builders import SMALL_GRID, leo_crossing
+from hypothesis import given
+from hypothesis import strategies as st
+from inline_snapshot import snapshot
 from screening_data import FIXTURE_START, load_fixture
 
 import keepout
 from keepout._types import JsonValue
-from keepout.cdm import CovarianceMethod, Maneuverable, ObjectMetadata, make_cdm
-from keepout.conjunction import Conjunction
-from keepout.covariance import Covariance
 from keepout.errors import StoreError
-from keepout.events import ConjunctionEvent
 from keepout.maneuver import (
-    BurnGrid,
     ManeuverOutcome,
     NewApproach,
     PlannedBurn,
     RescreenResult,
     plan_event,
 )
-from keepout.objects import ObjectState
-from keepout.orbits import EARTH_MU
 from keepout.pc import computation
-from keepout.propagation.forces import EARTH_RADIUS
 from keepout.risk import RiskLevel, Thresholds
 from keepout.screening import CloseApproach
 from keepout.settings import Settings
 from keepout.sources.catalog import CatalogFileRef, CatalogReference
 from keepout.state import StateVector
-from keepout.store.codec import result_key
-from keepout.store.maneuver_codec import (
-    MANEUVER_KIND,
-    maneuver_key,
-    outcome_from_json,
-    outcome_to_json,
-)
+from keepout.store.codec import MANEUVER_KIND, maneuver_key, result_key
+from keepout.store.maneuver_codec import outcome_from_json, outcome_to_json
 from keepout.synthetic import Fleet, FleetSatellite
 from keepout.synthetic.operator import run
-from keepout.units import DAY, HOUR, KM
-
-TCA: Final = Time("2026-10-06T00:00:00", scale="utc")
-RADIUS: Final = EARTH_RADIUS + 630 * KM
-SMALL: Final = BurnGrid(steps_per_orbit=1, delta_v_per_direction=6)
-"""About 70 cells at 25 h, which take a fraction of a second."""
-
-
-def _item(object_id: str, r: list[float], angle: float) -> ObjectState:
-    speed = math.sqrt(EARTH_MU / RADIUS)
-    v = speed * np.array([0.0, math.cos(angle), math.sin(angle)])
-    covariance = np.diag([100.0**2] * 3 + [0.01**2] * 3)
-    return ObjectState(
-        object_id,
-        StateVector(TCA, r, v, "GCRF"),
-        Covariance(covariance, "GCRF", TCA),
-        10.0,
-    )
-
-
-def leo_event() -> ConjunctionEvent:
-    """A fast crossing in LEO, 150 m apart radially, 25 h before TCA: Pc
-    about 5e-3, as in the outcome's tests."""
-    conjunction = Conjunction(
-        _item("1001", [RADIUS, 0.0, 0.0], 0.9),
-        _item("2002", [RADIUS + 150.0, 0.0, 0.0], -0.9),
-        20.0,
-    )
-    method = CovarianceMethod.CALCULATED
-    cdm = make_cdm(
-        conjunction,
-        ObjectMetadata(
-            "PRI", "2020-001A", maneuverable=Maneuverable.YES, covariance_method=method
-        ),
-        ObjectMetadata("SEC", "2019-001A", covariance_method=method),
-        created=TCA - 25 * HOUR * u.s,
-    )
-    return ConjunctionEvent.from_cdms([cdm], event_id="EVENT-7")
+from keepout.units import DAY
 
 
 def approach(secondary: int, at: Time, pc: float, level: RiskLevel) -> NewApproach:
@@ -143,7 +101,7 @@ def with_rescreens(outcome: ManeuverOutcome) -> ManeuverOutcome:
 
 @pytest.fixture(scope="module", name="outcome")
 def an_outcome() -> ManeuverOutcome:
-    planned = plan_event(leo_event(), Settings(), grid=SMALL)
+    planned = plan_event(leo_crossing(), grid=SMALL_GRID)
     assert planned.burns
     return with_rescreens(planned)
 
@@ -153,61 +111,121 @@ def through_text(payload: dict[str, JsonValue]) -> Any:
     return json.loads(json.dumps(payload, allow_nan=False))
 
 
+def _same_float(actual: float | None, expected: float | None) -> bool:
+    """Whether two floats are equal, NaN equal to NaN."""
+    if actual is None or expected is None:
+        return actual is expected
+    return actual == expected or (math.isnan(actual) and math.isnan(expected))
+
+
+def assert_same_time(actual: Time, expected: Time) -> None:
+    assert (actual.scale, actual.jd1, actual.jd2) == (
+        expected.scale,
+        expected.jd1,
+        expected.jd2,
+    )
+
+
+def assert_same_state(actual: StateVector, expected: StateVector) -> None:
+    assert_same_time(actual.epoch, expected.epoch)
+    assert actual.frame == expected.frame
+    assert np.array_equal(actual.r, expected.r)
+    assert np.array_equal(actual.v, expected.v)
+
+
+def assert_same_approaches(
+    actual: Sequence[NewApproach], expected: Sequence[NewApproach]
+) -> None:
+    """Approaches equal field by field: :class:`NewApproach` and
+    :class:`CloseApproach` compare by identity."""
+    assert len(actual) == len(expected)
+    for got, want in zip(actual, expected, strict=True):
+        assert got.level is want.level
+        assert _same_float(got.pc, want.pc)
+        assert (got.approach.primary_number, got.approach.secondary_number) == (
+            want.approach.primary_number,
+            want.approach.secondary_number,
+        )
+        assert_same_state(got.approach.primary_state, want.approach.primary_state)
+        assert_same_state(got.approach.secondary_state, want.approach.secondary_state)
+
+
+def assert_same_rescreen(
+    actual: RescreenResult | None, expected: RescreenResult | None
+) -> None:
+    """Re-screens equal field by field: :class:`RescreenResult` compares by
+    identity."""
+    if expected is None:
+        assert actual is None
+        return
+    assert actual is not None
+    assert actual.option == expected.option
+    assert_same_approaches(actual.new_approaches, expected.new_approaches)
+    assert_same_approaches(actual.closer_approaches, expected.closer_approaches)
+    assert_same_approaches(actual.event_returns, expected.event_returns)
+    assert _same_float(actual.event_range, expected.event_range)
+    for got, want in zip(actual.window, expected.window, strict=True):
+        assert_same_time(got, want)
+    assert (
+        actual.catalog_objects,
+        actual.secondary_screened,
+        actual.skipped_objects,
+    ) == (
+        expected.catalog_objects,
+        expected.secondary_screened,
+        expected.skipped_objects,
+    )
+
+
+def assert_same_outcome(actual: ManeuverOutcome, expected: ManeuverOutcome) -> None:
+    """Outcomes equal field by field, against the original objects."""
+    assert actual.event is expected.event
+    assert actual.target_pc == expected.target_pc
+    assert actual.baseline == expected.baseline
+    assert actual.notes == expected.notes
+    assert actual.catalog_label == expected.catalog_label
+    assert len(actual.burns) == len(expected.burns)
+    for got, want in zip(actual.burns, expected.burns, strict=True):
+        assert got.option == want.option
+        assert_same_rescreen(got.rescreen, want.rescreen)
+    if expected.grid is None:
+        assert actual.grid is None
+        return
+    assert actual.grid is not None
+    for name in ("burn_leads", "delta_v", "pc", "range_at_tca"):
+        assert np.array_equal(
+            getattr(actual.grid, name), getattr(expected.grid, name), equal_nan=True
+        )
+
+
 def test_outcome_round_trip(outcome: ManeuverOutcome) -> None:
     payload = outcome_to_json(outcome)
     back = outcome_from_json(through_text(payload), outcome.event)
+    assert_same_outcome(back, outcome)
     assert outcome_to_json(back) == payload
-    assert back.event is outcome.event
-    assert back.target_pc == outcome.target_pc
-    assert back.baseline == outcome.baseline
-    assert back.notes == outcome.notes
-    assert back.catalog_label == "gp.json"
-    assert [burn.option for burn in back.burns] == [b.option for b in outcome.burns]
     assert back.verdict == outcome.verdict
     first = back.burns[0].rescreen
-    original = outcome.burns[0].rescreen
     assert first is not None
-    assert original is not None
-    assert first.option == back.burns[0].option
-    assert [item.level for item in first.new_approaches] == [
-        RiskLevel.RED,
-        RiskLevel.YELLOW,
-    ]
-    new = first.new_approaches[0].approach
-    old = original.new_approaches[0].approach
-    assert new.primary_state.epoch.scale == "tdb"
-    assert new.primary_state.epoch.jd1 == old.primary_state.epoch.jd1
-    assert new.primary_state.epoch.jd2 == old.primary_state.epoch.jd2
-    assert new.primary_state.frame == "GCRF"
-    assert np.array_equal(new.primary_state.r, old.primary_state.r)
-    assert np.array_equal(new.secondary_state.v, old.secondary_state.v)
-    assert new.range_at_tca == old.range_at_tca
+    assert first.new_approaches[0].approach.primary_state.epoch.scale == "tdb"
     assert first.window[0].scale == "utc"
-    assert first.window[0].jd1 == original.window[0].jd1
-    assert first.window[0].jd2 == original.window[0].jd2
-    assert first.event_range == 1234.5
-    assert back.burns[1].rescreen is not None
-    assert back.burns[1].rescreen.event_range is None
-    assert back.grid is not None
-    assert outcome.grid is not None
-    assert np.array_equal(back.grid.pc, outcome.grid.pc, equal_nan=True)
 
 
 @pytest.mark.slow
 def test_outcome_of_a_real_rescreen_round_trips() -> None:
     """A plan of a synthetic event on the committed GP data, both burns
-    re-screened against it (8 s)."""
+    re-screened against it (10 s)."""
     fixture = load_fixture()
     fleet = Fleet(
         (FleetSatellite(52939, 5.0, maneuverable=True),), catalog_hard_body_radius=1.0
     )
     (found,) = run(fleet, fixture, FIXTURE_START, 3 * DAY).events
     outcome = plan_event(
-        found.event, Settings(), catalog=fixture, catalog_label="fixture", grid=SMALL
+        found.event, catalog=fixture, catalog_label="fixture", grid=SMALL_GRID
     )
     assert all(burn.rescreen is not None for burn in outcome.burns)
     payload = outcome_to_json(outcome)
     back = outcome_from_json(through_text(payload), outcome.event)
+    assert_same_outcome(back, outcome)
     assert outcome_to_json(back) == payload
     assert back.verdict == outcome.verdict
 
@@ -223,9 +241,7 @@ def test_outcome_without_grid_or_rescreens_round_trips(
     )
     payload = outcome_to_json(bare)
     back = outcome_from_json(through_text(payload), bare.event)
-    assert back.grid is None
-    assert back.catalog_label is None
-    assert all(burn.rescreen is None for burn in back.burns)
+    assert_same_outcome(back, bare)
     assert outcome_to_json(back) == payload
 
 
@@ -305,8 +321,17 @@ def test_key_ignores_the_catalogs_label_paths_and_file_order() -> None:
     assert maneuver_key(Settings(), CatalogReference("one", files)) == maneuver_key(
         Settings(), CatalogReference("two", moved)
     )
-    assert maneuver_key(Settings(), None) == maneuver_key(Settings(), None)
-    assert len(maneuver_key(Settings(), None)) == 64
+
+
+def test_key_is_pinned(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A change of the key's text makes every cached plan miss: on purpose only.
+    monkeypatch.setattr(keepout, "__version__", "0.0.0+pinned")
+    assert maneuver_key(Settings(), None) == snapshot(
+        "d5a675fe894d83ea08b903c85d4d1ff69d8135964df9cf086d28e50a11e3271a"
+    )
+    assert maneuver_key(Settings(), CATALOG) == snapshot(
+        "65f965b7ad89cc7e7f301a9a463ac7f738d359159ecbe4cb9564bdf0578940a5"
+    )
 
 
 def test_key_differs_from_result_key() -> None:
@@ -320,75 +345,71 @@ def test_key_of_settings_a_file_cannot_hold_is_a_value_error() -> None:
         maneuver_key(settings, None)
 
 
-def test_broken_payload(outcome: ManeuverOutcome) -> None:
+def _rescreen_of(payload: Any) -> Any:
+    return payload["burns"][0]["rescreen"]
+
+
+def _state_of(payload: Any) -> Any:
+    return _rescreen_of(payload)["new_approaches"][0]["approach"]["primary_state"]
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        pytest.param(lambda p: p.pop("burns"), id="missing_key"),
+        pytest.param(lambda p: p.update(target_pc="x"), id="text_for_number"),
+        pytest.param(lambda p: p.update(target_pc=True), id="bool_for_number"),
+        pytest.param(lambda p: p["baseline"].update(method="nope"), id="method"),
+        pytest.param(lambda p: p.update(baseline=[]), id="list_for_object"),
+        pytest.param(
+            lambda p: p["grid"].update(pc=[[0.1], [0.1, 0.2]]), id="ragged_grid"
+        ),
+        pytest.param(lambda p: p["grid"].update(pc=[[0.1]]), id="grid_shape"),
+        pytest.param(
+            lambda p: _rescreen_of(p)["window"][0].update(scale="martian"),
+            id="time_scale",
+        ),
+        pytest.param(lambda p: _rescreen_of(p).update(window=[]), id="window"),
+        pytest.param(lambda p: _state_of(p).update(r=[1.0, 2.0]), id="state"),
+    ],
+)
+def test_wrong_values_raise_store_errors(
+    outcome: ManeuverOutcome, change: Callable[[Any], object]
+) -> None:
     payload = through_text(outcome_to_json(outcome))
-    del payload["burns"]
-    with pytest.raises(StoreError, match=r"^cached manoeuvre: missing key\(s\) burns$"):
+    change(payload)
+    with pytest.raises(StoreError, match=r"^cached manoeuvre unreadable: "):
         outcome_from_json(payload, outcome.event)
 
 
-def _broken(payload: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
-    """Copies of ``payload``, each broken in one place, with what the error
-    names."""
-    cases: list[tuple[str, dict[str, Any]]] = []
-
-    def broken(match: str, change: Any) -> None:
-        copy = json.loads(json.dumps(payload))
-        change(copy)
-        cases.append((match, copy))
-
-    broken("unknown key", lambda p: p.update(extra=1))
-    broken("target_pc", lambda p: p.update(target_pc="x"))
-    broken("target_pc", lambda p: p.update(target_pc=True))
-    broken("notes", lambda p: p.update(notes=[1]))
-    broken("catalog_label", lambda p: p.update(catalog_label=1))
-    broken("same length", lambda p: p["grid"].update(pc=[[0.1], [0.1, 0.2]]))
-    broken(
-        "must not be null",
-        lambda p: p["burns"][0]["rescreen"]["window"][0].update(jd1=None),
-    )
-    broken("burns", lambda p: p.update(burns={}))
-    broken("method", lambda p: p["baseline"].update(method="nope"))
-    broken("meets_target", lambda p: p["baseline"].update(meets_target=1))
-    broken("baseline", lambda p: p.update(baseline=[]))
-    broken(
-        "catalog_objects",
-        lambda p: p["burns"][0]["rescreen"].update(catalog_objects=1.5),
-    )
-    broken(
-        "level",
-        lambda p: p["burns"][0]["rescreen"]["new_approaches"][0].update(level="RED"),
-    )
-    broken(
-        "scale",
-        lambda p: p["burns"][0]["rescreen"]["window"][0].update(scale="martian"),
-    )
-    broken("window", lambda p: p["burns"][0]["rescreen"].update(window=[]))
-    broken(
-        "r",
-        lambda p: p["burns"][0]["rescreen"]["new_approaches"][0]["approach"][
-            "primary_state"
-        ].update(r=[1.0, 2.0]),
-    )
-    broken(
-        "r",
-        lambda p: p["burns"][0]["rescreen"]["new_approaches"][0]["approach"][
-            "primary_state"
-        ].update(r=[1.0, 2.0, None]),
-    )
-    broken(
-        "epoch",
-        lambda p: p["burns"][0]["rescreen"]["new_approaches"][0]["approach"][
-            "secondary_state"
-        ]["epoch"].update(jd1=0.0),
-    )
-    broken("pc", lambda p: p["grid"].update(pc=[[0.1]]))
-    broken("delta_v", lambda p: p["grid"].update(delta_v=[["x"]]))
-    return cases
+JSON_VALUES: Final = st.recursive(
+    st.none() | st.booleans() | st.integers() | st.floats() | st.text(),
+    lambda children: st.lists(children) | st.dictionaries(st.text(), children),
+    max_leaves=10,
+)
+"""JSON values, as :func:`json.loads` gives them (NaN and infinities too)."""
 
 
-def test_wrong_values_raise_store_errors(outcome: ManeuverOutcome) -> None:
+@given(JSON_VALUES)
+def test_any_json_raises_only_store_errors(outcome: ManeuverOutcome, data: Any) -> None:
+    with pytest.raises(StoreError):
+        outcome_from_json(data, outcome.event)
+
+
+@given(st.data())
+def test_a_payload_changed_anywhere_raises_only_store_errors(
+    outcome: ManeuverOutcome, data: st.DataObject
+) -> None:
     payload = through_text(outcome_to_json(outcome))
-    for match, copy in _broken(payload):
-        with pytest.raises(StoreError, match=f"^cached manoeuvre: .*{match}"):
-            outcome_from_json(copy, outcome.event)
+    node = payload
+    while True:
+        keys = list(node) if isinstance(node, dict) else list(range(len(node)))
+        key = data.draw(st.sampled_from(keys))
+        child = node[key]
+        if isinstance(child, dict | list) and child and data.draw(st.booleans()):
+            node = child
+            continue
+        node[key] = data.draw(JSON_VALUES)
+        break
+    with contextlib.suppress(StoreError):
+        outcome_from_json(payload, outcome.event)

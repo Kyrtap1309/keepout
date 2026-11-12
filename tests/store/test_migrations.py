@@ -287,9 +287,9 @@ def test_a_migration_that_breaks_a_foreign_key_is_rolled_back(tmp_path: Path) ->
 
 def _job(status: str = "queued") -> TextClause:
     return text(
-        "INSERT INTO jobs (kind, event_id, message_id, key, params, status,"
+        "INSERT INTO jobs (event_id, message_id, key, params, status,"
         " attempt, claims, created_at)"
-        " VALUES ('maneuver', '0123abcd', 'm', 'k', '{}', :status, 0, 0, 't')"
+        " VALUES ('0123abcd', 'm', 'k', '{}', :status, 0, 0, 't')"
     ).bindparams(status=status)
 
 

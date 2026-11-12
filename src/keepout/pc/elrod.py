@@ -25,15 +25,17 @@ evaluates the new nodes, until two orders agree to :data:`ELROD_RTOL`.
 from __future__ import annotations
 
 import math
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 import numpy as np
 
-from keepout._types import FloatArray
 from keepout._validation import require_at_least
-from keepout.encounter import EncounterPlane
 from keepout.pc._plane import PlaneGaussian, plane_gaussian_of
 from keepout.pc.result import PcResult
+
+if TYPE_CHECKING:
+    from keepout._types import FloatArray
+    from keepout.encounter import EncounterPlane
 
 __all__ = ["ELROD_RTOL", "MAX_ORDER", "START_ORDER", "elrod"]
 

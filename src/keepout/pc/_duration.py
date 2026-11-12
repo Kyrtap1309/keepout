@@ -8,15 +8,17 @@ for the straight-line half-window, by the automatic 3D-Nc window.
 from __future__ import annotations
 
 import math
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 import numpy as np
 
-from keepout._types import FloatArray
-from keepout.conjunction import Conjunction
 from keepout.encounter import sigma_along
 from keepout.orbits import orbital_period
 from keepout.pc._timeline import SIGMA_REACH
+
+if TYPE_CHECKING:
+    from keepout._types import FloatArray
+    from keepout.conjunction import Conjunction
 
 SIGMA_EXTENT: Final = 5.0
 """Standard deviations of the combined position covariance along the

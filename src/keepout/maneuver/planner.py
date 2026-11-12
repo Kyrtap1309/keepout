@@ -12,11 +12,10 @@ from __future__ import annotations
 
 import enum
 from dataclasses import dataclass
-from typing import Final, NamedTuple
+from typing import TYPE_CHECKING, Final, NamedTuple
 
 import astropy.units as u
 import numpy as np
-from astropy.time import Time
 
 from keepout._defaults import DECISION_POINT, MIN_BURN_LEAD, TARGET_PC
 from keepout._text import before_tca, plural
@@ -29,7 +28,6 @@ from keepout._validation import (
 )
 from keepout.cdm import Cdm, CdmObject, Maneuverable
 from keepout.conjunction import Conjunction
-from keepout.covariance import Policy
 from keepout.errors import (
     KeepoutError,
     ManeuverError,
@@ -48,6 +46,11 @@ from keepout.propagation.forces import EARTH_RADIUS, ForceModel, earth_pole
 from keepout.risk import DEFAULT_THRESHOLDS, Thresholds
 from keepout.state import StateVector
 from keepout.units import KM
+
+if TYPE_CHECKING:
+    from astropy.time import Time
+
+    from keepout.covariance import Policy
 
 __all__ = [
     "DEFAULT_BURN_GRID",

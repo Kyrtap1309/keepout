@@ -11,13 +11,16 @@ a repeated keyword the same way in every family.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Final, NamedTuple, TypeVar
+from typing import TYPE_CHECKING, Final, NamedTuple, TypeVar
 
 from keepout.ccsds.files import read_file
-from keepout.errors import CcsdsParseError, KeepoutError
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
+
+    from keepout.errors import CcsdsParseError, KeepoutError
 
 __all__ = [
     "COMMENT",

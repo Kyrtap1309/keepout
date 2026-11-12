@@ -56,10 +56,9 @@ import statistics
 import sys
 import tempfile
 import time
-from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final, Literal, TypedDict
+from typing import TYPE_CHECKING, Final, Literal, TypedDict
 
 import snapshot_files
 from generated import REPO, day_text, json_text, positive, second_text
@@ -81,9 +80,7 @@ from keepout._workers import process_pool, resolve_workers
 from keepout.errors import SourceFormatError, SourceUnavailable
 from keepout.omm import Omm, load
 from keepout.omm.celestrak import dumps_csv
-from keepout.screening.result import CloseApproach
 from keepout.sources._store import store_bytes
-from keepout.sources.catalog import Catalog
 from keepout.sources.spacetrack import (
     CATALOG,
     HIDDEN,
@@ -103,6 +100,12 @@ from keepout.sources.spacetrack import (
 )
 from keepout.sources.spacetrack import read_catalog as read_gp
 from keepout.units import KM, MINUTE, julian_seconds_between
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping, Sequence
+
+    from keepout.screening.result import CloseApproach
+    from keepout.sources.catalog import Catalog
 
 TOOL: Final = "tools/spacetrack_snapshot.py"
 DATA: Final = REPO / "tests/screening/spacetrack-data"

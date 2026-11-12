@@ -11,3 +11,5 @@
         - MAX_ATTEMPTS
 
 ::: keepout.store.worker
+
+::: keepout.store.planning

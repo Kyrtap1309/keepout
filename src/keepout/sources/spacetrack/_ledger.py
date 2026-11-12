@@ -5,15 +5,18 @@ from __future__ import annotations
 
 import json
 import math
-from collections.abc import Mapping
-from pathlib import Path
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
-from keepout._types import JsonValue
 from keepout.errors import SourceFormatError
 from keepout.sources._store import store_json
 from keepout.sources.spacetrack._query import CLASS_INTERVALS
 from keepout.units import HOUR
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+    from pathlib import Path
+
+    from keepout._types import JsonValue
 
 __all__ = ["LEDGER_FILE", "RequestLedger"]
 

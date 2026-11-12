@@ -2,13 +2,13 @@
 
 :func:`run_worker` is a supervisor. It claims a job
 (:meth:`~keepout.store.jobs.JobQueue.claim`) and runs its computation (by
-default :func:`run_maneuver_job`) in a ``spawn`` child process, the only way
-to stop a computation at once. While
-the child computes, the supervisor renews the job's lease, ends it at the
-time limit and notices a job that is no longer its own (cancelled, purged
-with its event, or taken by another worker after a lapsed lease). The child
-only reads the store; the supervisor alone writes the job's end and its
-result.
+default :func:`~keepout.store.planning.run_maneuver_job`) in a ``spawn``
+child process, the only way to stop a computation at once.
+
+While the child computes, the supervisor renews the job's lease. It kills
+the child at the time limit, on a stop, or once the job is no longer its own
+(:mod:`keepout.store.jobs` says when). The child only reads the store. The
+supervisor alone writes the job's end and its result.
 
 How a job ends:
 
@@ -17,19 +17,19 @@ How a job ends:
   with the error's message, and any other error with ``internal error``,
   the child's traceback in the log; neither is tried again;
 - a child that exits without either (a crash, a killed process): the job
-  goes back to the queue with the attempt counted, or fails after
-  :data:`~keepout.store.jobs.MAX_ATTEMPTS`
-  (:meth:`~keepout.store.jobs.JobQueue.abandon`);
+  is abandoned (:meth:`~keepout.store.jobs.JobQueue.abandon`), which costs
+  an attempt;
 - the time limit: the child is killed and the job fails;
 - a stop request (``stop``, or ``KeyboardInterrupt``): the child is killed
-  and the job goes back to the queue, the attempt not counted.
+  and the job is released, the attempt not counted.
 
-The worker logs on the ``keepout.worker`` logger.
+The worker logs on the :data:`LOGGER_NAME` logger.
 """
 
 from __future__ import annotations
 
 import contextlib
+import enum
 import logging
 import multiprocessing
 import os
@@ -38,27 +38,29 @@ import socket
 import threading
 import time
 import traceback
-from collections.abc import Callable
-from pathlib import Path
-from typing import TYPE_CHECKING, Final, Protocol, TypeAlias
+from collections.abc import Callable, Generator
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Final, Protocol, TypeAlias, cast
 
+from keepout._text import duration_words
 from keepout._workers import ONE_THREAD
 from keepout.errors import KeepoutError
-from keepout.maneuver.planner import DEFAULT_BURN_GRID, BurnGrid
 from keepout.store.db import open_store
 from keepout.store.jobs import LEASE_SECONDS, Job, JobQueue
+from keepout.store.planning import run_maneuver_job
 
 if TYPE_CHECKING:
     from multiprocessing.context import SpawnProcess
+    from pathlib import Path
 
     from keepout._types import JsonValue
 
 __all__ = [
     "HEARTBEAT_SECONDS",
+    "LOGGER_NAME",
     "POLL_SECONDS",
     "TIME_LIMIT_SECONDS",
     "Compute",
-    "run_maneuver_job",
     "run_worker",
 ]
 
@@ -72,6 +74,9 @@ POLL_SECONDS: Final = 2.0
 """How long an idle worker waits before it looks at the queue again, in
 seconds."""
 
+LOGGER_NAME: Final = "keepout.worker"
+"""The name of the worker's logger."""
+
 _TICK: Final = 1.0
 """Most seconds the supervisor waits for its child's answer before it looks
 at the time, the lease and ``stop``."""
@@ -79,6 +84,9 @@ at the time, the lease and ``stop``."""
 _PARENT_POLL: Final = 1.0
 """How often a child looks whether its supervisor is still there, in
 seconds."""
+
+_SPAWN: Final = multiprocessing.get_context("spawn")
+"""The context of the children: ``spawn`` on every platform."""
 
 _INTERNAL: Final = "internal error"
 """The error of a job whose computation raised anything but a keepout
@@ -88,7 +96,7 @@ Compute: TypeAlias = Callable[[str, Job, "int | None"], "dict[str, JsonValue]"]
 """The computation of a job: ``(store path, job, workers) -> result``. A
 module-level function, which a spawned child process unpickles."""
 
-logger = logging.getLogger("keepout.worker")
+logger = logging.getLogger(LOGGER_NAME)
 
 
 class _Receiver(Protocol):
@@ -107,63 +115,42 @@ class _Sender(Protocol):
     def close(self) -> None: ...
 
 
-def run_maneuver_job(
-    path: str, job: Job, workers: int | None, *, grid: BurnGrid = DEFAULT_BURN_GRID
-) -> dict[str, JsonValue]:
-    """The manoeuvre plan of a job, as JSON: its event as it was at the
-    job's CDM, re-screened against that CDM's catalog (the store's copy),
-    if it was made from one.
+@dataclass(frozen=True, slots=True)
+class _Answer:
+    """The child's message of a result."""
 
-    Parameters
-    ----------
-    path
-        The store's database file.
-    job
-        The job.
-    workers
-        Processes of each re-screen, as for
-        :func:`~keepout.maneuver.plan_event`.
-    grid
-        The burns tried.
+    payload: dict[str, JsonValue]
 
-    Returns
-    -------
-    dict
-        The outcome's :func:`~keepout.store.maneuver_codec.outcome_to_json`.
 
-    Raises
-    ------
-    StoreError
-        If the store cannot be opened or no longer holds the job's event.
-    SourceUnavailable
-        If the copy of the catalog is gone; the message names it.
-    ChecksumMismatch
-        If the copy of the catalog changed; the message names it.
-    KeepoutError
-        As :func:`~keepout.maneuver.plan_event`.
-    ValueError
-        As :func:`~keepout.maneuver.plan_event`.
-    """
-    from keepout.maneuver import outcome
-    from keepout.sources.catalog import load_reference
-    from keepout.store.maneuver_codec import outcome_to_json
+@dataclass(frozen=True, slots=True, kw_only=True)
+class _Failure:
+    """The child's message of an error."""
 
-    with open_store(path, create=False) as store:
-        event = store.event(job.event_id, until=job.message_id)
-        reference = store.catalog(job.event_id, until=job.message_id)
-    if reference is None:
-        catalog, label = None, None
-    else:
-        catalog, label = load_reference(reference), f"stored copy of {reference.label}"
-    planned = outcome.plan_event(
-        event,
-        job.settings,
-        catalog=catalog,
-        catalog_label=label,
-        grid=grid,
-        workers=workers,
-    )
-    return outcome_to_json(planned)
+    message: str
+    from_keepout: bool
+    """Whether it is a :class:`~keepout.errors.KeepoutError`, or a bug."""
+    traceback: str
+
+
+class _Run(enum.Enum):
+    """How the supervisor's run of a job ended."""
+
+    RAN = enum.auto()
+    """Ended by the worker, or found no longer its own."""
+    GIVEN_BACK = enum.auto()
+    """Released to the queue on a stop."""
+
+
+class _Step(enum.Enum):
+    """What the supervisor does next while its child computes."""
+
+    WAIT = enum.auto()
+    RENEW = enum.auto()
+    """Renew the lease."""
+    GIVE_BACK = enum.auto()
+    """Kill the child and release the job: a stop was asked for."""
+    TIME_OUT = enum.auto()
+    """Kill the child and fail the job at the time limit."""
 
 
 def run_worker(
@@ -178,8 +165,8 @@ def run_worker(
     time_limit: float = TIME_LIMIT_SECONDS,
     poll: float = POLL_SECONDS,
 ) -> int:
-    """The number of jobs a worker ran from a store's queue, one at a time,
-    each in a child process, until asked to stop.
+    """A worker of a store's queue: its jobs run one at a time, each in a
+    child process, until it is asked to stop.
 
     Parameters
     ----------
@@ -221,11 +208,10 @@ def run_worker(
         raise ValueError(
             f"heartbeat must be less than lease, got {heartbeat} and {lease}"
         )
-    for name, value in ONE_THREAD.items():
-        os.environ.setdefault(name, value)
+    stop = stop or threading.Event()
     name = f"{socket.gethostname()}:{os.getpid()}"
     supervisor = _Supervisor(
-        str(path),
+        path=str(path),
         compute=compute,
         workers=workers,
         stop=stop,
@@ -234,14 +220,14 @@ def run_worker(
         time_limit=time_limit,
     )
     ran = 0
-    with open_store(path, create=False) as store:
+    with _one_thread(), open_store(path, create=False) as store:
         queue = JobQueue(store)
-        while not _is_set(stop):
+        while not stop.is_set():
             job = queue.claim(name, lease=lease)
             if job is None:
                 if until_idle:
                     break
-                _wait(stop, poll)
+                stop.wait(poll)
                 continue
             logger.info(
                 "claimed job %d (event %s, attempt %d)",
@@ -249,58 +235,69 @@ def run_worker(
                 job.event_id,
                 job.attempt,
             )
-            if supervisor.run(queue, job):
+            if supervisor.run(queue, job) is _Run.RAN:
                 ran += 1
     return ran
 
 
-def _is_set(stop: threading.Event | None) -> bool:
-    """Whether ``stop`` is given and set."""
-    return stop is not None and stop.is_set()
+@contextlib.contextmanager
+def _one_thread() -> Generator[None]:
+    """:data:`~keepout._workers.ONE_THREAD` in this process's environment
+    while in the context, unless set already; restored on the way out.
+
+    A child spawned meanwhile inherits it. Its numerical libraries then run
+    on one thread and do not compete with the processes of its re-screen.
+    """
+    saved = {name: os.environ.get(name) for name in ONE_THREAD}
+    for name, value in ONE_THREAD.items():
+        os.environ.setdefault(name, value)
+    try:
+        yield
+    finally:
+        for name, before in saved.items():
+            if before is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = before
 
 
-def _wait(stop: threading.Event | None, seconds: float) -> None:
-    """A pause of ``seconds``, or until ``stop`` is set."""
-    if stop is None:
-        time.sleep(seconds)
-    else:
-        stop.wait(seconds)
+def _next_step(
+    *,
+    stopping: bool,
+    computing: float,
+    since_beat: float,
+    time_limit: float,
+    heartbeat: float,
+) -> _Step:
+    """What the supervisor does next, its child ``computing`` for so many
+    seconds and its last heartbeat ``since_beat`` seconds ago.
+
+    A stop comes first, then the time limit, then the heartbeat.
+    """
+    if stopping:
+        return _Step.GIVE_BACK
+    if computing >= time_limit:
+        return _Step.TIME_OUT
+    if since_beat >= heartbeat:
+        return _Step.RENEW
+    return _Step.WAIT
 
 
-def _duration(seconds: float) -> str:
-    """``seconds`` for people: whole minutes in ``min``, else in ``s``."""
-    if seconds >= 60.0 and seconds % 60.0 == 0.0:
-        return f"{seconds / 60.0:g} min"
-    return f"{seconds:g} s"
-
-
+@dataclass(frozen=True, slots=True, kw_only=True)
 class _Supervisor:
     """What runs one job after another in a child process: the options of
     :func:`run_worker`."""
 
-    def __init__(
-        self,
-        path: str,
-        *,
-        compute: Compute,
-        workers: int | None,
-        stop: threading.Event | None,
-        lease: float,
-        heartbeat: float,
-        time_limit: float,
-    ) -> None:
-        self.path = path
-        self.compute = compute
-        self.workers = workers
-        self.stop = stop
-        self.lease = lease
-        self.heartbeat = heartbeat
-        self.time_limit = time_limit
-        self.context = multiprocessing.get_context("spawn")
+    path: str
+    compute: Compute
+    workers: int | None
+    stop: threading.Event
+    lease: float
+    heartbeat: float
+    time_limit: float
 
-    def run(self, queue: JobQueue, job: Job) -> bool:
-        """Whether a job the worker claimed ran to its end in a child
-        process (not given back on a stop).
+    def run(self, queue: JobQueue, job: Job) -> _Run:
+        """How a job the worker claimed ended, run in a child process.
 
         Raises
         ------
@@ -309,8 +306,8 @@ class _Supervisor:
         KeyboardInterrupt
             On an interrupt, the job given back first.
         """
-        receiver, sender = self.context.Pipe(duplex=False)
-        child = self.context.Process(
+        receiver, sender = _SPAWN.Pipe(duplex=False)
+        child = _SPAWN.Process(
             target=_child,
             args=(self.compute, self.path, job, self.workers, sender),
             name=f"keepout job {job.id}",
@@ -331,9 +328,9 @@ class _Supervisor:
 
     def _watch(
         self, queue: JobQueue, job: Job, child: SpawnProcess, receiver: _Receiver
-    ) -> bool:
-        """Whether the job ran: the child's answer awaited, and the job
-        ended by it, its time limit or the loss of its lease.
+    ) -> _Run:
+        """How the job ended: by the child's answer, the time limit, a stop
+        or the loss of its lease.
 
         Raises
         ------
@@ -346,31 +343,63 @@ class _Supervisor:
             if receiver.poll(tick):
                 answer = _answer(receiver)
                 # A child gone without an answer on a stop was stopped too.
-                if answer is not None or not _is_set(self.stop):
-                    _end(queue, job, answer)
-                    return True
-            if _is_set(self.stop):
-                _kill(child)
-                if queue.release(job):
-                    logger.info("job %d given back to the queue", job.id)
-                    return False
-                _lost(job)
-                return True
+                if answer is not None or not self.stop.is_set():
+                    _record_answer(queue, job, answer)
+                    return _Run.RAN
             now = time.monotonic()
-            if now - start >= self.time_limit:
-                _kill(child)
-                message = f"stopped at the time limit of {_duration(self.time_limit)}"
-                if queue.fail(job, message):
-                    logger.warning("job %d failed: %s", job.id, message)
-                else:
-                    _lost(job)
-                return True
-            if now - beat >= self.heartbeat:
-                beat = now
-                if not queue.heartbeat(job, lease=self.lease):
+            step = _next_step(
+                stopping=self.stop.is_set(),
+                computing=now - start,
+                since_beat=now - beat,
+                time_limit=self.time_limit,
+                heartbeat=self.heartbeat,
+            )
+            match step:
+                case _Step.WAIT:
+                    continue
+                case _Step.RENEW:
+                    beat = now
+                    if queue.heartbeat(job, lease=self.lease):
+                        continue
                     _kill(child)
                     _lost(job)
-                    return True
+                    return _Run.RAN
+                case _Step.GIVE_BACK:
+                    _kill(child)
+                    return self._give_back(queue, job)
+                case _Step.TIME_OUT:
+                    _kill(child)
+                    self._time_out(queue, job)
+                    return _Run.RAN
+
+    @staticmethod
+    def _give_back(queue: JobQueue, job: Job) -> _Run:
+        """Release a job on a stop, its child killed.
+
+        Raises
+        ------
+        StoreError
+            If the database cannot be used.
+        """
+        if queue.release(job):
+            logger.info("job %d given back to the queue", job.id)
+            return _Run.GIVEN_BACK
+        _lost(job)
+        return _Run.RAN
+
+    def _time_out(self, queue: JobQueue, job: Job) -> None:
+        """Fail a job at the time limit, its child killed.
+
+        Raises
+        ------
+        StoreError
+            If the database cannot be used.
+        """
+        message = f"stopped at the time limit of {duration_words(self.time_limit)}"
+        if queue.fail(job, message):
+            logger.warning("job %d failed: %s", job.id, message)
+        else:
+            _lost(job)
 
 
 def _answer(receiver: _Receiver) -> object:
@@ -381,7 +410,7 @@ def _answer(receiver: _Receiver) -> object:
         return None
 
 
-def _end(queue: JobQueue, job: Job, answer: object) -> None:
+def _record_answer(queue: JobQueue, job: Job, answer: object) -> None:
     """The end of a job by its child's answer (``None``: none).
 
     Raises
@@ -390,15 +419,15 @@ def _end(queue: JobQueue, job: Job, answer: object) -> None:
         If the database cannot be used.
     """
     match answer:
-        case ("ok", dict() as payload):
+        case _Answer(payload=payload):
             held = queue.finish(job, payload)
             if held:
                 logger.info("job %d succeeded", job.id)
-        case ("error", str(message), bool(is_keepout), str(text)):
-            error = message if is_keepout else _INTERNAL
+        case _Failure(message=message, from_keepout=from_keepout, traceback=text):
+            error = message if from_keepout else _INTERNAL
             held = queue.fail(job, error)
             if held:
-                if is_keepout:
+                if from_keepout:
                     logger.warning("job %d failed: %s", job.id, message)
                 else:
                     logger.error("job %d failed: %s\n%s", job.id, error, text)
@@ -425,7 +454,8 @@ def _kill(child: SpawnProcess) -> None:
     if child.pid is None:
         return
     if hasattr(os, "killpg"):
-        # Not yet a group of its own: the child alone, killed below.
+        # If the child has not yet called setpgrp, killpg finds no group;
+        # child.kill() below still kills it.
         with contextlib.suppress(ProcessLookupError, PermissionError):
             os.killpg(child.pid, signal.SIGKILL)
     if child.is_alive():
@@ -484,25 +514,39 @@ def _send(
     result that cannot be sent is an error too."""
     try:
         try:
-            connection.send(_message(compute, path, job, workers))
+            connection.send(_compute_answer(compute, path, job, workers))
         except Exception as exc:  # noqa: BLE001 - not picklable: a bug
-            connection.send(("error", str(exc), False, traceback.format_exc()))
+            connection.send(
+                _Failure(
+                    message=str(exc),
+                    from_keepout=False,
+                    traceback=traceback.format_exc(),
+                )
+            )
     finally:
         connection.close()
 
 
-def _message(
+def _compute_answer(
     compute: Compute, path: str, job: Job, workers: int | None
-) -> tuple[object, ...]:
-    """The message of ``compute``'s answer, or its error; a result that is
-    not a dict is an error."""
+) -> _Answer | _Failure:
+    """The message of ``compute``'s answer, or of its error.
+
+    A result that is not a dict, which its type rules out, is an error too.
+    """
     try:
-        payload: object = compute(path, job, workers)
+        # Seen as an object: a job's code may break its declared type.
+        payload = cast("object", compute(path, job, workers))
     except KeepoutError as exc:
-        return ("error", str(exc), True, traceback.format_exc())
+        return _Failure(
+            message=str(exc), from_keepout=True, traceback=traceback.format_exc()
+        )
     except Exception as exc:  # noqa: BLE001 - any bug is the job's failure
-        return ("error", str(exc), False, traceback.format_exc())
+        return _Failure(
+            message=str(exc), from_keepout=False, traceback=traceback.format_exc()
+        )
     if isinstance(payload, dict):
-        return ("ok", payload)
+        return _Answer(cast("dict[str, JsonValue]", payload))
     kind = type(payload).__name__
-    return ("error", f"a job's result must be a dict, got {kind}", False, "")
+    message = f"a job's result must be a dict, got {kind}"
+    return _Failure(message=message, from_keepout=False, traceback="")

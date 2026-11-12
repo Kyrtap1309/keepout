@@ -96,12 +96,10 @@ from __future__ import annotations
 
 import contextlib
 import math
-from collections.abc import Sequence
-from typing import Final, NamedTuple
+from typing import TYPE_CHECKING, Final, NamedTuple
 
 import numpy as np
 import numpy.typing as npt
-from astropy.time import Time
 
 from keepout._types import BoolArray, FloatArray, IndexArray, read_only
 from keepout._validation import (
@@ -145,6 +143,11 @@ from keepout.screening._sieve import (
 )
 from keepout.screening.search_result import RangeMinimum, SearchResult
 from keepout.screening.volume import ScreeningVolume, per_primary
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from astropy.time import Time
 
 __all__ = [
     "DEFAULT_STEP",

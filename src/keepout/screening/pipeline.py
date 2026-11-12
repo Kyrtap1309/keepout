@@ -57,16 +57,14 @@ script read from standard input (``python -``) cannot.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 import astropy.units as u
 import numpy as np
 from astropy.time import Time
 
 from keepout._defaults import SCREENING_DURATION
-from keepout._types import FloatArray, IndexArray
 from keepout._validation import (
     require_at_least,
     require_non_negative,
@@ -105,6 +103,11 @@ from keepout.screening.volume import (
 )
 from keepout.state import RefFrame, StateVector
 from keepout.units import DAY
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable, Mapping, Sequence
+
+    from keepout._types import FloatArray, IndexArray
 
 __all__ = ["DEFAULT_DURATION", "MAX_AGE", "MAX_LEAD", "screen"]
 

@@ -25,10 +25,9 @@ from __future__ import annotations
 
 import tomllib
 from collections import Counter
-from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from keepout._validation import (
     is_single_line,
@@ -37,6 +36,9 @@ from keepout._validation import (
 )
 from keepout.errors import FleetError
 from keepout.omm.model import MAX_CATALOG_NUMBER
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 __all__ = [
     "FLEET_KEYS",

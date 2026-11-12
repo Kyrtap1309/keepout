@@ -6,12 +6,14 @@ from __future__ import annotations
 import os
 import re
 import urllib.parse
-from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Final, Self
+from typing import TYPE_CHECKING, Final, Self
 
 from keepout._types import override
 from keepout.errors import AuthError
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 __all__ = [
     "HIDDEN",

@@ -1,9 +1,11 @@
 """Builders, constants and Hypothesis strategies shared by the test packages."""
 
+import math
 import sqlite3
 from pathlib import Path
 from typing import TypedDict, Unpack
 
+import astropy.units as u
 import numpy as np
 import numpy.typing as npt
 import pytest
@@ -14,14 +16,19 @@ from hypothesis.extra.numpy import arrays
 from scipy.spatial.transform import Rotation
 
 from keepout._types import FloatArray, override
+from keepout.cdm import CovarianceMethod, Maneuverable, ObjectMetadata, make_cdm
 from keepout.conjunction import Conjunction
 from keepout.covariance import Covariance
+from keepout.events import ConjunctionEvent
+from keepout.maneuver import BurnGrid
 from keepout.objects import ObjectState
+from keepout.orbits import EARTH_MU
 from keepout.pc.result import PcResult
 from keepout.propagation import ManeuveredPropagator
+from keepout.propagation.forces import EARTH_RADIUS
 from keepout.risk import PcKind, PcObservation
 from keepout.state import StateVector
-from keepout.units import DAY
+from keepout.units import DAY, HOUR, KM
 from keepout.validation.cases import Suite, ValidationCase
 from keepout.validation.criteria import TWO_D, BoundCriterion
 
@@ -315,3 +322,48 @@ def base_revision_store(path: Path) -> None:
             " CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num))"
         )
     connection.close()
+
+
+CROSSING_TCA = Time("2026-10-06T00:00:00", scale="utc")
+"""The TCA of :func:`leo_crossing`."""
+
+CROSSING_RADIUS = EARTH_RADIUS + 630 * KM
+"""The orbital radius of :func:`leo_crossing`'s objects [m]."""
+
+SMALL_GRID = BurnGrid(steps_per_orbit=1, delta_v_per_direction=6)
+"""A burn grid of a few dozen cells (about 70 at 25 h), planned in a
+fraction of a second."""
+
+
+def _crossing_object(object_id: str, r: npt.ArrayLike, angle: float) -> ObjectState:
+    """An object of :func:`leo_crossing`, at ``r`` on a circular orbit
+    inclined by ``angle``."""
+    speed = math.sqrt(EARTH_MU / CROSSING_RADIUS)
+    v = speed * np.array([0.0, math.cos(angle), math.sin(angle)])
+    covariance = np.diag([100.0**2] * 3 + [0.01**2] * 3)
+    return ObjectState(
+        object_id,
+        StateVector(CROSSING_TCA, r, v, "GCRF"),
+        Covariance(covariance, "GCRF", CROSSING_TCA),
+        10.0,
+    )
+
+
+def leo_crossing() -> ConjunctionEvent:
+    """A fast crossing in LEO, 150 m apart radially, 25 h before TCA, as the
+    planner's tests make it: Pc about 5e-3."""
+    conjunction = Conjunction(
+        _crossing_object("1001", [CROSSING_RADIUS, 0.0, 0.0], 0.9),
+        _crossing_object("2002", [CROSSING_RADIUS + 150.0, 0.0, 0.0], -0.9),
+        20.0,
+    )
+    method = CovarianceMethod.CALCULATED
+    cdm = make_cdm(
+        conjunction,
+        ObjectMetadata(
+            "PRI", "2020-001A", maneuverable=Maneuverable.YES, covariance_method=method
+        ),
+        ObjectMetadata("SEC", "2019-001A", covariance_method=method),
+        created=CROSSING_TCA - 25 * HOUR * u.s,
+    )
+    return ConjunctionEvent.from_cdms([cdm], event_id="EVENT-7")

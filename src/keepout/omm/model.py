@@ -12,15 +12,17 @@ from __future__ import annotations
 
 import math
 import numbers
-from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Final, NamedTuple
+from typing import TYPE_CHECKING, Final, NamedTuple
 
 from astropy.time import Time
 
 from keepout.ccsds.epochs import format_epoch, parse_epoch
 from keepout.ccsds.keywords import format_value
 from keepout.omm.keywords import ATTRIBUTE_KEYWORDS, KEYWORDS, SGP4_EPHEMERIS_TYPE
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 __all__ = [
     "MAX_CATALOG_NUMBER",

@@ -22,10 +22,9 @@ from __future__ import annotations
 import argparse
 import sys
 from collections import defaultdict
-from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Final, Literal, TypeAlias, TypedDict, get_args
+from typing import TYPE_CHECKING, Final, Literal, TypeAlias, TypedDict, get_args
 
 import screening_snapshot as snapshot
 from astropy.time import Time
@@ -47,7 +46,6 @@ from screening_snapshot import SocratesSummary
 
 from keepout._text import plural
 from keepout._workers import DEFAULT_WORKERS
-from keepout.omm import Omm
 from keepout.screening import (
     DEFAULT_DURATION,
     DEFAULT_VOLUME,
@@ -59,6 +57,11 @@ from keepout.screening import (
 )
 from keepout.sources.socrates import SocratesApproach, read_socrates
 from keepout.units import DAY, KM, MINUTE, julian_seconds_between
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
+    from keepout.omm import Omm
 
 PAGE: Final = REPO / "docs/screening-socrates.md"
 START: Final = "<!-- screening-socrates-summary:start -->"

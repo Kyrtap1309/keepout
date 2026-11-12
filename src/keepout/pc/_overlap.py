@@ -4,14 +4,16 @@ overlap most, found by iteration at each time."""
 
 from __future__ import annotations
 
-from typing import Final, NamedTuple
+from typing import TYPE_CHECKING, Final, NamedTuple
 
 import numpy as np
 
 from keepout._linalg import from_eigen, take
-from keepout._types import BoolArray, FloatArray, IndexArray
 from keepout.errors import GeometryError
-from keepout.pc._orbit import OrbitUncertainty
+
+if TYPE_CHECKING:
+    from keepout._types import BoolArray, FloatArray, IndexArray
+    from keepout.pc._orbit import OrbitUncertainty
 
 __all__ = [
     "OVERLAP_MAX_ITERATIONS",

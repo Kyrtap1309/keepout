@@ -1,7 +1,6 @@
 """The walk-through of ``docs/cli.md``, run as written: each command's output
 is the block that follows it on the page."""
 
-import os
 import re
 import shlex
 from pathlib import Path
@@ -10,7 +9,6 @@ from typing import Any, Final
 import pytest
 from cli_builders import keepout
 
-from keepout._workers import ONE_THREAD
 from keepout.cli.output import ExitCode
 from keepout.events import ConjunctionEvent
 from keepout.maneuver import ManeuverPlan
@@ -47,6 +45,7 @@ def run(arguments: list[str]) -> tuple[int, str]:
 
 
 @pytest.mark.slow
+@pytest.mark.timeout(300)
 def test_the_walk_through_prints_what_the_page_shows(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -67,8 +66,6 @@ def test_the_walk_through_prints_what_the_page_shows(
 
     # The stored event the page plans, queued and computed by the worker. Its
     # child process imports keepout afresh and plans on the full default grid.
-    for name, value in ONE_THREAD.items():
-        monkeypatch.setenv(name, os.environ.get(name, value))
     submit, queued = documented("maneuver --event")
     assert run(submit) == (ExitCode.OK, queued)
     worker, ran = documented("worker")

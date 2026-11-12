@@ -12,7 +12,7 @@ test compares the two.
 from __future__ import annotations
 
 import enum
-from typing import Any, Final, NewType, get_args
+from typing import Any, Final, NewType, cast, get_args
 
 from astropy.time import Time
 from sqlalchemy import (
@@ -44,6 +44,7 @@ __all__ = [
     "EventId",
     "Job",
     "JobStatus",
+    "JobStatusText",
     "MessageId",
     "Result",
     "UtcTime",
@@ -65,6 +66,11 @@ class JobStatus(enum.StrEnum):
     FAILED = "failed"
     CANCELLED = "cancelled"
 
+    @property
+    def is_active(self) -> bool:
+        """Whether a job of this status has not ended: queued or running."""
+        return self in {JobStatus.QUEUED, JobStatus.RUNNING}
+
 
 NAMING_CONVENTION: Final = {
     "ix": "ix_%(table_name)s_%(column_0_N_name)s",
@@ -75,6 +81,8 @@ NAMING_CONVENTION: Final = {
 }
 """Names of indexes and constraints: SQLite alters a table by copying it
 (Alembic's batch mode), which needs every constraint named."""
+
+_CDM_FORMATS: Final[tuple[CdmFormat, ...]] = get_args(CdmFormat)
 
 
 class UtcTime(TypeDecorator[Time]):
@@ -92,7 +100,8 @@ class UtcTime(TypeDecorator[Time]):
         """The text of a time, rounded to the nanosecond."""
         if value is None:
             return None
-        return str(Time(value.utc, precision=9).isot)
+        # A scalar time's isot is a str (astropy types it array-or-scalar).
+        return cast("str", Time(value.utc, precision=9).isot)
 
     @override
     def process_result_value(
@@ -113,6 +122,31 @@ class UtcTime(TypeDecorator[Time]):
         return elapsed_seconds(x, y) == 0.0
 
 
+class JobStatusText(TypeDecorator[JobStatus]):
+    """A :class:`JobStatus` as its text."""
+
+    impl: TypeEngine[Any] | type[TypeEngine[Any]] = String
+    cache_ok: bool | None = True
+
+    @override
+    def process_bind_param(
+        self,
+        value: JobStatus | None,
+        dialect: Dialect,  # noqa: ARG002 (SQLite only)
+    ) -> str | None:
+        """The text of a status."""
+        return None if value is None else JobStatus(value).value
+
+    @override
+    def process_result_value(
+        self,
+        value: str | None,
+        dialect: Dialect,  # noqa: ARG002 (SQLite only)
+    ) -> JobStatus | None:
+        """The status of a text."""
+        return None if value is None else JobStatus(value)
+
+
 class Base(DeclarativeBase):
     """Base class of the store's tables."""
 
@@ -123,7 +157,7 @@ class Event(Base):
     """A conjunction event: the CDMs of one encounter of two objects."""
 
     __tablename__ = "events"
-    __table_args__ = (Index(None, "object1", "object2", "tca_min"),)
+    __table_args__: tuple[object, ...] = (Index(None, "object1", "object2", "tca_min"),)
 
     id: Mapped[EventId] = mapped_column(String(12), primary_key=True)
     object1: Mapped[str] = mapped_column(String)
@@ -144,10 +178,10 @@ class Cdm(Base):
     """A stored CDM: its original text and where it came from."""
 
     __tablename__ = "cdms"
-    __table_args__ = (
+    __table_args__: tuple[object, ...] = (
         Index(None, "event_id", "creation_date"),
         CheckConstraint(
-            f"format IN ({', '.join(repr(f) for f in get_args(CdmFormat))})",
+            f"format IN ({', '.join(repr(f) for f in _CDM_FORMATS)})",
             name="format",
         ),
     )
@@ -213,7 +247,7 @@ class Result(Base):
     """A cached computation on a CDM, e.g. its Pc observation."""
 
     __tablename__ = "results"
-    __table_args__ = (UniqueConstraint("message_id", "key"),)
+    __table_args__: tuple[object, ...] = (UniqueConstraint("message_id", "key"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     message_id: Mapped[MessageId] = mapped_column(
@@ -228,11 +262,10 @@ class Result(Base):
 
 
 class Job(Base):
-    """A computation queued on an event's CDM, e.g. a manoeuvre plan, and
-    how far it got."""
+    """A manoeuvre plan queued on an event's CDM, and how far it got."""
 
     __tablename__ = "jobs"
-    __table_args__ = (
+    __table_args__: tuple[object, ...] = (
         Index(None, "status", "created_at"),
         CheckConstraint(
             f"status IN ({', '.join(repr(s.value) for s in JobStatus)})",
@@ -244,8 +277,6 @@ class Job(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     """Never reused (SQLite ``AUTOINCREMENT``): a worker's stale write to a
     deleted job cannot reach a new one."""
-    kind: Mapped[str] = mapped_column(String)
-    """What is computed, e.g. ``"maneuver"``."""
     event_id: Mapped[EventId] = mapped_column(
         String(12), ForeignKey("events.id", ondelete="CASCADE"), index=True
     )
@@ -257,15 +288,16 @@ class Job(Base):
     """The key its result is cached under."""
     params: Mapped[dict[str, Any]] = mapped_column(JSON)
     """What the computation needs, e.g. the settings."""
-    status: Mapped[str] = mapped_column(String)
-    """A :class:`JobStatus`."""
+    status: Mapped[JobStatus] = mapped_column(JobStatusText)
     attempt: Mapped[int] = mapped_column(Integer, default=0)
-    """How many times a worker took it."""
+    """How many attempts it cost: a claim adds one, a release on a stop takes
+    it back."""
     claims: Mapped[int] = mapped_column(Integer, default=0)
     """How many times it was claimed, never lowered: a worker's writes name
     the claim they belong to."""
     worker: Mapped[str | None] = mapped_column(String)
-    """The worker that holds it."""
+    """The worker that holds it, or that finished, failed or held it when
+    cancelled; cleared when it goes back to the queue."""
     lease_until: Mapped[Time | None] = mapped_column(UtcTime)
     """When the worker's hold on it lapses."""
     created_at: Mapped[Time] = mapped_column(UtcTime)

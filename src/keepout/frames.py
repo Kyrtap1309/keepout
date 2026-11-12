@@ -15,8 +15,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 import astropy.units as u
 import erfa
@@ -28,6 +27,9 @@ from keepout._types import FloatArray, read_only
 from keepout.errors import GeometryError
 from keepout.state import RefFrame, StateVector, as_ref_frame
 from keepout.units import DAY, MINUTE
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 __all__ = [
     "FRAME_BIAS",

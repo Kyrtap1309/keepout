@@ -1,48 +1,46 @@
 """The job queue of a store: manoeuvre plans computed in the background.
 
-A caller submits an event and its settings (:meth:`JobQueue.submit`); a
-worker claims the oldest queued job (:meth:`JobQueue.claim`), holds it with a
-lease it renews (:meth:`JobQueue.heartbeat`) and ends it
+A caller submits an event and its settings (:meth:`JobQueue.submit`). A
+worker claims the oldest queued job (:meth:`JobQueue.claim`) and holds it
+with a lease it renews (:meth:`JobQueue.heartbeat`). It ends the job
 (:meth:`JobQueue.finish`, :meth:`JobQueue.fail`) or gives it back
 (:meth:`JobQueue.release`, :meth:`JobQueue.abandon`).
 
-A job is pinned to its event's latest CDM at submission and its result is
-cached there, under :func:`~keepout.store.maneuver_codec.maneuver_key`: a CDM
-ingested later does not change what it computes. Submission is idempotent: a
-cached result means no job, and a queued or running job of the same CDM and
+A job is pinned to its event's latest CDM at submission. Its result is
+cached there, under :func:`~keepout.store.codec.maneuver_key`, so a CDM
+ingested later does not change what it computes. Submission is idempotent.
+A cached result means no job. A queued or running job of the same CDM and
 key is returned instead of a second one.
 
-A worker's every write about its job holds only if the job is still held
-by the claim it made (same id, ``running``, same :attr:`Job.claims`, a count
-of claims that never goes down): ``False`` means it was cancelled, released
-or given back and claimed again, or purged with its event, and the worker
-drops what it computed. A lapsed lease, or a worker that stops without an
-answer (:meth:`JobQueue.abandon`), costs an attempt: the job is queued
-again, or failed after :data:`MAX_ATTEMPTS`. A release
-(:meth:`JobQueue.release`) gives the attempt back, but never the claim.
+Every write a worker makes checks that the job is still its own: same id,
+``running``, and :attr:`Job.claims` unchanged. ``False`` means the job was
+cancelled, purged, or given back and claimed again. The worker then drops
+its result. A lapsed lease or a lost child (:meth:`JobQueue.abandon`) costs
+an attempt. After :data:`MAX_ATTEMPTS` the job fails. A release on a stop
+(:meth:`JobQueue.release`) costs none.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Final
+from enum import StrEnum
+from typing import TYPE_CHECKING, Final, TypedDict
 
 import astropy.units as u
 from astropy.time import Time
-from sqlalchemy import exists, select, update
-from sqlalchemy.orm import Session
+from sqlalchemy import ColumnElement, exists, select, update
 
 from keepout.errors import SettingsError, StoreError
 from keepout.settings import Settings, settings_from_data, settings_to_data
 from keepout.store import models
-from keepout.store.maneuver_codec import MANEUVER_KIND, maneuver_key
 from keepout.store.models import JobStatus
-from keepout.store.repo import catalog_in, latest_in, save_maneuver_in
+from keepout.store.repo import maneuver_slot_in, save_maneuver_in
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Collection, Mapping
+    from typing import Unpack
 
-    from sqlalchemy import ColumnElement
+    from sqlalchemy.orm import Session
 
     from keepout._types import JsonValue
     from keepout.store.repo import Store
@@ -54,6 +52,7 @@ __all__ = [
     "JobQueue",
     "JobStatus",
     "Submission",
+    "SubmissionOutcome",
 ]
 
 LEASE_SECONDS: Final = 60.0
@@ -63,10 +62,16 @@ MAX_ATTEMPTS: Final = 2
 """How many times a job is taken before a worker that stops without an
 answer fails it."""
 
-_STOPPED: Final = "the worker stopped twice without an answer"
+
+def _times(count: int) -> str:
+    """``count`` times in words: ``once``, ``twice``, ``3 times``."""
+    return {1: "once", 2: "twice"}.get(count, f"{count} times")
+
+
+_STOPPED: Final = f"the worker stopped {_times(MAX_ATTEMPTS)} without an answer"
 """The error of a job failed after :data:`MAX_ATTEMPTS`."""
 
-_ACTIVE: Final = (JobStatus.QUEUED, JobStatus.RUNNING)
+_ACTIVE: Final = tuple(status for status in JobStatus if status.is_active)
 """The statuses of a job that has not ended."""
 
 
@@ -79,8 +84,6 @@ class Job:
     """
 
     id: int
-    kind: str
-    """What is computed: ``"maneuver"``."""
     event_id: str
     message_id: str
     """The CDM the computation is pinned to: the event's latest when
@@ -90,12 +93,14 @@ class Job:
     settings: Settings
     status: JobStatus
     attempt: int
-    """How many tries it cost: a claim counts one, a release gives it back."""
+    """How many attempts it cost: a claim adds one, a release on a stop
+    takes it back."""
     claims: int
     """How many times it was claimed, never lowered: a worker's writes name
     the claim they belong to."""
     worker: str | None
-    """The worker that holds it, or that finished or failed it."""
+    """The worker that holds it, or held it when it succeeded, failed or was
+    cancelled. Cleared when it goes back to the queue or its lease lapses."""
     created_at: Time
     started_at: Time | None
     finished_at: Time | None
@@ -107,12 +112,11 @@ class Job:
         """The job of a row."""
         return cls(
             id=row.id,
-            kind=row.kind,
             event_id=row.event_id,
             message_id=row.message_id,
             key=row.key,
             settings=settings_from_data(row.params),
-            status=JobStatus(row.status),
+            status=row.status,
             attempt=row.attempt,
             claims=row.claims,
             worker=row.worker,
@@ -123,17 +127,70 @@ class Job:
         )
 
 
+class SubmissionOutcome(StrEnum):
+    """What became of a submission (:meth:`JobQueue.submit`)."""
+
+    CACHED = "cached"
+    """The result is cached already: no job."""
+    EXISTING = "existing"
+    """An identical job (same CDM and key) was already queued or running."""
+    QUEUED = "queued"
+    """A job was queued."""
+
+
 @dataclass(frozen=True, slots=True)
 class Submission:
     """What a submission found or queued."""
 
+    outcome: SubmissionOutcome
     job: Job | None
     """The job queued, or the one already queued or running; ``None`` when
-    :attr:`cached`."""
-    cached: bool
-    """The result is cached already: no job."""
-    existing: bool
-    """An identical job (same CDM and key) was already queued or running."""
+    the result is cached."""
+
+
+class _Columns(TypedDict, total=False):
+    """The columns of a job that its transitions write."""
+
+    status: JobStatus
+    attempt: int | ColumnElement[int]
+    worker: str | None
+    lease_until: Time | None
+    started_at: Time | None
+    finished_at: Time | None
+    error: str | None
+
+
+def _ended(
+    status: JobStatus,
+    now: Time,
+    *,
+    error: str | None = None,
+    forget_worker: bool = False,
+) -> _Columns:
+    """The columns of a job that ends now with ``status``.
+
+    ``error`` is written only if given. The worker is kept, unless
+    ``forget_worker``.
+    """
+    values = _Columns(status=status, finished_at=now, lease_until=None)
+    if error is not None:
+        values["error"] = error
+    if forget_worker:
+        values["worker"] = None
+    return values
+
+
+def _requeued(*, give_back_attempt: bool = False) -> _Columns:
+    """The columns of a job back in the queue: no worker, lease or start.
+
+    Its attempt stays counted, unless ``give_back_attempt``.
+    """
+    values = _Columns(
+        status=JobStatus.QUEUED, worker=None, lease_until=None, started_at=None
+    )
+    if give_back_attempt:
+        values["attempt"] = models.Job.attempt - 1
+    return values
 
 
 def _held(job: Job) -> ColumnElement[bool]:
@@ -147,28 +204,109 @@ def _held(job: Job) -> ColumnElement[bool]:
 
 
 def _lapse(session: Session, which: ColumnElement[bool], now: Time) -> int:
-    """Give back running jobs whose worker stopped without an answer: queued
-    again with the attempt counted, or failed at :data:`MAX_ATTEMPTS`;
-    worker and lease cleared. How many it gave back."""
+    """Give back the running jobs of ``which`` whose worker stopped without
+    an answer; how many it gave back.
+
+    The attempt stays counted. A job is queued again, or failed at
+    :data:`MAX_ATTEMPTS`. Its worker is cleared either way.
+    """
     running = which & (models.Job.status == JobStatus.RUNNING)
     connection = session.connection()
     failed = connection.execute(
         update(models.Job)
         .where(running, models.Job.attempt >= MAX_ATTEMPTS)
-        .values(
-            status=JobStatus.FAILED,
-            error=_STOPPED,
-            finished_at=now,
-            worker=None,
-            lease_until=None,
-        )
+        .values(**_ended(JobStatus.FAILED, now, error=_STOPPED, forget_worker=True))
     )
     queued = connection.execute(
         update(models.Job)
         .where(running, models.Job.attempt < MAX_ATTEMPTS)
-        .values(status=JobStatus.QUEUED, worker=None, lease_until=None, started_at=None)
+        .values(**_requeued())
     )
     return failed.rowcount + queued.rowcount
+
+
+def _lapsed(now: Time) -> ColumnElement[bool]:
+    """The jobs whose lease lapsed before ``now``."""
+    return models.Job.lease_until < now
+
+
+def _claimable(session: Session, now: Time) -> bool:
+    """Whether a claim at ``now`` has anything to do: a queued job, or a
+    running one whose lease lapsed."""
+    waiting = (models.Job.status == JobStatus.QUEUED) | (
+        (models.Job.status == JobStatus.RUNNING) & _lapsed(now)
+    )
+    return bool(session.scalar(select(exists().where(waiting))))
+
+
+def _claim_oldest(
+    session: Session, worker: str, now: Time, lease: float
+) -> models.Job | None:
+    """The oldest queued job, now ``running`` for ``worker`` with one more
+    attempt and claim; ``None`` if none is queued."""
+    oldest = (
+        select(models.Job.id)
+        .where(models.Job.status == JobStatus.QUEUED)
+        .order_by(models.Job.created_at, models.Job.id)
+        .limit(1)
+        .scalar_subquery()
+    )
+    return session.scalars(
+        update(models.Job)
+        .where(models.Job.id == oldest)
+        .values(
+            status=JobStatus.RUNNING,
+            attempt=models.Job.attempt + 1,
+            claims=models.Job.claims + 1,
+            worker=worker,
+            started_at=now,
+            lease_until=now + lease * u.s,
+        )
+        .returning(models.Job)
+        .execution_options(synchronize_session=False)
+    ).one_or_none()
+
+
+def _fail_unreadable(
+    session: Session, row: models.Job, exc: SettingsError, now: Time
+) -> None:
+    """Fail a claimed job whose settings cannot be read: it could never be
+    computed, and must not block the queue."""
+    error = f"cannot read its settings: {exc}"
+    session.connection().execute(
+        update(models.Job)
+        .where(models.Job.id == row.id)
+        .values(**_ended(JobStatus.FAILED, now, error=error))
+    )
+
+
+def _is_cached(session: Session, message_id: str, key: str) -> bool:
+    """Whether a result is cached on ``message_id`` under ``key``."""
+    return bool(
+        session.scalar(
+            select(
+                exists().where(
+                    models.Result.message_id == message_id,
+                    models.Result.key == key,
+                )
+            )
+        )
+    )
+
+
+def _active_job(session: Session, message_id: str, key: str) -> Job | None:
+    """The oldest queued or running job of ``message_id`` and ``key``."""
+    row = session.scalars(
+        select(models.Job)
+        .where(
+            models.Job.message_id == message_id,
+            models.Job.key == key,
+            models.Job.status.in_(_ACTIVE),
+        )
+        .order_by(models.Job.id)
+        .limit(1)
+    ).one_or_none()
+    return None if row is None else Job.of(row)
 
 
 class JobQueue:
@@ -211,34 +349,15 @@ class JobQueue:
         params = settings_to_data(settings)
         now = self._now()
         with self.store.write() as session:
-            message_id = latest_in(session, event_id)
-            catalog = catalog_in(session, self.store.path.parent, message_id)
-            key = maneuver_key(settings, catalog)
-            cached = session.scalar(
-                select(
-                    exists().where(
-                        models.Result.message_id == message_id,
-                        models.Result.key == key,
-                    )
-                )
+            message_id, key = maneuver_slot_in(
+                session, self.store.path.parent, event_id, settings
             )
-            if cached:
-                return Submission(None, cached=True, existing=False)
-            found = session.scalars(
-                select(models.Job)
-                .where(
-                    models.Job.kind == MANEUVER_KIND,
-                    models.Job.message_id == message_id,
-                    models.Job.key == key,
-                    models.Job.status.in_(_ACTIVE),
-                )
-                .order_by(models.Job.id)
-                .limit(1)
-            ).one_or_none()
+            if _is_cached(session, message_id, key):
+                return Submission(SubmissionOutcome.CACHED, None)
+            found = _active_job(session, message_id, key)
             if found is not None:
-                return Submission(Job.of(found), cached=False, existing=True)
+                return Submission(SubmissionOutcome.EXISTING, found)
             row = models.Job(
-                kind=MANEUVER_KIND,
                 event_id=event_id,
                 message_id=message_id,
                 key=key,
@@ -251,13 +370,15 @@ class JobQueue:
             session.add(row)
             session.flush()
             session.refresh(row)  # the times as stored, as job() reads them
-            return Submission(Job.of(row), cached=False, existing=False)
+            return Submission(SubmissionOutcome.QUEUED, Job.of(row))
 
     def claim(self, worker: str, *, lease: float = LEASE_SECONDS) -> Job | None:
         """Take the oldest queued job, after giving back those whose lease
         lapsed.
 
-        One write transaction: a job is claimed by one worker only.
+        It reads first, and takes the write lock only if a job is queued or
+        a lease lapsed. The claim is one write transaction, so a job is
+        claimed by one worker only.
 
         Parameters
         ----------
@@ -279,55 +400,30 @@ class JobQueue:
             If the database cannot be used.
         """
         now = self._now()
+        # An idle worker calls this every few seconds: read first, and take
+        # the write lock only if there is something to write.
+        with self.store.read() as session:
+            if not _claimable(session, now):
+                return None
         with self.store.write() as session:
-            _lapse(session, models.Job.lease_until < now, now)
-            oldest = (
-                select(models.Job.id)
-                .where(models.Job.status == JobStatus.QUEUED)
-                .order_by(models.Job.created_at, models.Job.id)
-                .limit(1)
-                .scalar_subquery()
-            )
-            while True:
-                row = session.scalars(
-                    update(models.Job)
-                    .where(models.Job.id == oldest)
-                    .values(
-                        status=JobStatus.RUNNING,
-                        attempt=models.Job.attempt + 1,
-                        claims=models.Job.claims + 1,
-                        worker=worker,
-                        started_at=now,
-                        lease_until=now + lease * u.s,
-                    )
-                    .returning(models.Job)
-                    .execution_options(synchronize_session=False)
-                ).one_or_none()
-                if row is None:
-                    return None
+            _lapse(session, _lapsed(now), now)
+            while (row := _claim_oldest(session, worker, now, lease)) is not None:
                 try:
                     return Job.of(row)
                 except SettingsError as exc:
-                    # Never computable: failed, not left to block the queue.
-                    session.connection().execute(
-                        update(models.Job)
-                        .where(models.Job.id == row.id)
-                        .values(
-                            status=JobStatus.FAILED,
-                            error=f"cannot read its settings: {exc}",
-                            finished_at=now,
-                            lease_until=None,
-                        )
-                    )
+                    _fail_unreadable(session, row, exc, now)
+            return None
 
-    def _change(self, job: Job, **values: object) -> bool:
+    def _update_if_held(self, job: Job, **values: Unpack[_Columns]) -> bool:
         """Write ``values`` to ``job`` if it is still held as claimed, in one
         write transaction; whether it was."""
         with self.store.write() as session:
-            return self._change_in(session, job, **values)
+            return self._update_if_held_in(session, job, **values)
 
     @staticmethod
-    def _change_in(session: Session, job: Job, **values: object) -> bool:
+    def _update_if_held_in(
+        session: Session, job: Job, **values: Unpack[_Columns]
+    ) -> bool:
         """Write ``values`` to ``job`` if it is still held as claimed;
         whether it was."""
         changed = session.connection().execute(
@@ -356,7 +452,7 @@ class JobQueue:
         StoreError
             If the database cannot be used.
         """
-        return self._change(job, lease_until=self._now() + lease * u.s)
+        return self._update_if_held(job, lease_until=self._now() + lease * u.s)
 
     def finish(self, job: Job, payload: Mapping[str, JsonValue]) -> bool:
         """End a job a worker holds as succeeded and cache its result on the
@@ -386,12 +482,8 @@ class JobQueue:
         """
         now = self._now()
         with self.store.write() as session:
-            held = self._change_in(
-                session,
-                job,
-                status=JobStatus.SUCCEEDED,
-                finished_at=now,
-                lease_until=None,
+            held = self._update_if_held_in(
+                session, job, **_ended(JobStatus.SUCCEEDED, now)
             )
             if held:
                 save_maneuver_in(session, job.message_id, job.key, payload)
@@ -417,12 +509,8 @@ class JobQueue:
         StoreError
             If the database cannot be used.
         """
-        return self._change(
-            job,
-            status=JobStatus.FAILED,
-            error=message,
-            finished_at=self._now(),
-            lease_until=None,
+        return self._update_if_held(
+            job, **_ended(JobStatus.FAILED, self._now(), error=message)
         )
 
     def release(self, job: Job) -> bool:
@@ -444,14 +532,7 @@ class JobQueue:
         StoreError
             If the database cannot be used.
         """
-        return self._change(
-            job,
-            status=JobStatus.QUEUED,
-            attempt=models.Job.attempt - 1,
-            worker=None,
-            lease_until=None,
-            started_at=None,
-        )
+        return self._update_if_held(job, **_requeued(give_back_attempt=True))
 
     def abandon(self, job: Job) -> bool:
         """Give back a job a worker holds whose computation stopped without
@@ -502,7 +583,7 @@ class JobQueue:
             row = session.scalars(
                 update(models.Job)
                 .where(models.Job.id == job_id, models.Job.status.in_(_ACTIVE))
-                .values(status=JobStatus.CANCELLED, finished_at=now, lease_until=None)
+                .values(**_ended(JobStatus.CANCELLED, now))
                 .returning(models.Job)
                 .execution_options(synchronize_session=False)
             ).one_or_none()

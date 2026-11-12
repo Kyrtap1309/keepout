@@ -3,9 +3,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Final, NamedTuple
+from typing import TYPE_CHECKING, Any, Final, NamedTuple
 
 from astropy.time import Time
 
@@ -23,6 +22,9 @@ from keepout.omm.keywords import (
     VERSIONS,
 )
 from keepout.omm.model import InvalidElement, Omm
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 OMM: Final = Family(
     "OMM",

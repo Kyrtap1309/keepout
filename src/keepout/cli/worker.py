@@ -24,10 +24,8 @@ from keepout.cli.store import StorePath, importing_store
 if TYPE_CHECKING:
     from types import FrameType
 
-    from keepout._types import JsonValue
-    from keepout.store.jobs import Job
 
-__all__ = ["run_maneuver_job", "worker_command"]
+__all__ = ["worker_command"]
 
 _LOG_FORMAT: Final = "%(asctime)s %(levelname)s %(message)s"
 """The worker's log lines on standard error."""
@@ -40,23 +38,6 @@ UntilIdle: TypeAlias = Annotated[
     typer.Option("--until-idle", help="Stop once the queue is empty."),
 ]
 """``--until-idle``: return when no job is queued instead of waiting."""
-
-
-def run_maneuver_job(path: str, job: Job, workers: int | None) -> dict[str, JsonValue]:
-    """The manoeuvre plan of a job, as JSON: the computation the worker runs
-    in its child process, :func:`keepout.store.worker.run_maneuver_job`,
-    imported there (``keepout --help`` does not load the store).
-
-    Raises
-    ------
-    KeepoutError
-        As :func:`keepout.store.worker.run_maneuver_job`.
-    ValueError
-        As :func:`keepout.store.worker.run_maneuver_job`.
-    """
-    from keepout.store import worker
-
-    return worker.run_maneuver_job(path, job, workers)
 
 
 @contextmanager
@@ -76,10 +57,9 @@ def _stopped_by_signals(stop: threading.Event) -> Generator[None]:
 
 
 @contextmanager
-def _logged() -> Generator[None]:
-    """The ``keepout.worker`` log at INFO on standard error while in the
-    context."""
-    logger = logging.getLogger("keepout.worker")
+def _logged(name: str) -> Generator[None]:
+    """The log ``name`` at INFO on standard error while in the context."""
+    logger = logging.getLogger(name)
     handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(logging.Formatter(_LOG_FORMAT))
     level = logger.level
@@ -108,13 +88,15 @@ def worker_command(
     error; the number of jobs it ran is printed on exit.
     """
     with importing_store():
-        from keepout.store.worker import run_worker
+        from keepout.store import planning
+        from keepout.store.worker import LOGGER_NAME, run_worker
 
     stop = threading.Event()
-    with _logged(), _stopped_by_signals(stop):
+    with _logged(LOGGER_NAME), _stopped_by_signals(stop):
         ran = run_worker(
             store,
-            compute=run_maneuver_job,
+            # Looked up now, not bound at import: a test replaces it.
+            compute=planning.run_maneuver_job,
             workers=workers,
             until_idle=until_idle,
             stop=stop,

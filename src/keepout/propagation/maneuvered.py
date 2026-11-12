@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING, Final, Self
 import astropy.units as u
 import numpy as np
 import numpy.typing as npt
-from astropy.time import Time
 
 from keepout._types import FloatArray, override
 from keepout._validation import (
@@ -36,11 +35,13 @@ from keepout.propagation.base import (
 )
 from keepout.propagation.cowell import SPAN_SLACK, integrate
 from keepout.propagation.forces import ForceModel, earth_pole
-from keepout.state import RefFrame
 from keepout.units import elapsed_seconds
 
 if TYPE_CHECKING:
+    from astropy.time import Time
     from scipy.interpolate import CubicHermiteSpline
+
+    from keepout.state import RefFrame
 
 __all__ = ["ManeuveredPropagator"]
 

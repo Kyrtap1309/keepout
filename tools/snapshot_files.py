@@ -5,13 +5,11 @@ for byte the same while their data does."""
 
 from __future__ import annotations
 
-import argparse
 import dataclasses
 import gzip
 import hashlib
 import json
 from collections import Counter
-from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import (
@@ -27,14 +25,18 @@ from typing import (
 from astropy.time import Time
 from generated import read_json, write_or_check
 
-from keepout._types import JsonValue
-from keepout.omm import Omm
 from keepout.omm.celestrak import dumps_csv, loads_csv
 from keepout.sources._http import gunzip
 from keepout.sources._store import store_json
 
 if TYPE_CHECKING:
+    import argparse
+    from collections.abc import Callable, Collection, Mapping, Sequence
+
     from _typeshed import DataclassInstance
+
+    from keepout._types import JsonValue
+    from keepout.omm import Omm
 
 RAW_INDEX: Final = "raw.json"
 """The file in a tool's ``RAW`` directory listing each saved answer: its

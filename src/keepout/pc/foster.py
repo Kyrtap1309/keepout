@@ -15,13 +15,15 @@ from __future__ import annotations
 
 import math
 import sys
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from scipy import integrate
 
-from keepout.encounter import EncounterPlane
 from keepout.pc._plane import PlaneGaussian, plane_gaussian_of
 from keepout.pc.result import PcResult
+
+if TYPE_CHECKING:
+    from keepout.encounter import EncounterPlane
 
 __all__ = [
     "BREAKPOINT_GAP",

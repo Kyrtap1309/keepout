@@ -7,17 +7,20 @@ The files are those of ``DistributedMatlab`` at the pinned commit
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 import numpy as np
 
-from keepout._types import FloatArray
 from keepout.conjunction import Conjunction
-from keepout.covariance import Covariance
 from keepout.objects import ObjectState
 from keepout.state import StateVector
 from keepout.validation.cara_inputs import NOMINAL_EPOCH
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
+
+    from keepout._types import FloatArray
+    from keepout.covariance import Covariance
 
 __all__ = [
     "DILUTION_REFERENCES",

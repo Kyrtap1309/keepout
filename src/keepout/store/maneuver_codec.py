@@ -1,132 +1,61 @@
-"""The JSON of a cached manoeuvre outcome, and the key it is cached under.
+"""The JSON of a cached manoeuvre outcome.
 
 A store keeps an event's :class:`~keepout.maneuver.ManeuverOutcome` as JSON
-(:func:`outcome_to_json`, :func:`outcome_from_json`): everything but its
-event, which the store holds already. Floats are JSON numbers, NaN is
-``null``; a time is its scale and two-part Julian date, so it reads back
-exactly; a state is its epoch, position and velocity, in GCRF as every
-state of a close approach is; a risk level is its
+(:func:`outcome_to_json`, :func:`outcome_from_json`). The JSON holds
+everything but the event, which the store holds already. Floats are JSON
+numbers, and NaN is ``null``. A time is its scale and two-part Julian date,
+so it reads back exactly. A state is its epoch, position and velocity, in
+GCRF as every state of a close approach is. A risk level is its
 :attr:`~keepout._types.OrderedEnum.key`.
 
-The key it is cached under (:func:`maneuver_key`) is a hash of all that
-changes a plan: keepout's version, the operator's settings (thresholds and
-target among them, unlike :func:`~keepout.store.codec.result_key`) and the
-digests of the catalog's files the burns were re-screened against. Its
-``kind`` keeps it apart from every key of a result.
+Only keepout writes this JSON, under a key that holds keepout's version
+(:func:`~keepout.store.codec.maneuver_key`). So the reader checks little:
+JSON it cannot read is a :class:`~keepout.errors.StoreError` that does not
+say where.
 """
 
 from __future__ import annotations
 
-import hashlib
-import json
 import math
-from collections.abc import Callable, Mapping
-from typing import TYPE_CHECKING, Final, TypeVar, get_args
+from typing import TYPE_CHECKING, Final, TypeVar, cast, get_args
 
 import numpy as np
 from astropy.time import Time
 
-import keepout
 from keepout._methods import Method
+from keepout._validation import require_choice
 from keepout.errors import KeepoutError, StoreError
 from keepout.maneuver.outcome import ManeuverGrid, ManeuverOutcome, PlannedBurn
 from keepout.maneuver.planner import ManeuverOption
 from keepout.maneuver.rescreen import NewApproach, RescreenResult
 from keepout.risk import RiskLevel
 from keepout.screening import CloseApproach
-from keepout.settings import settings_to_data
 from keepout.state import StateVector
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from keepout._types import FloatArray, JsonValue
     from keepout.events import ConjunctionEvent
-    from keepout.settings import Settings
-    from keepout.sources.catalog import CatalogReference
 
-__all__ = ["MANEUVER_KIND", "maneuver_key", "outcome_from_json", "outcome_to_json"]
-
-MANEUVER_KIND: Final = "maneuver"
-"""The ``kind`` in the text a manoeuvre key hashes."""
-
-_WHERE: Final = "cached manoeuvre: "
+__all__ = ["outcome_from_json", "outcome_to_json"]
 
 _METHODS: Final[tuple[Method, ...]] = get_args(Method)
 _SCALES: Final = ("tai", "tcb", "tcg", "tdb", "tt", "ut1", "utc")
 """The time scales of astropy but ``local``, which has no Julian date."""
 _LEVELS: Final = {level.key: level for level in RiskLevel}
 
-_OUTCOME_KEYS: Final = frozenset(
-    {"target_pc", "baseline", "notes", "burns", "grid", "catalog_label"}
+_UNREADABLE: Final = (
+    KeyError,
+    TypeError,
+    ValueError,
+    IndexError,
+    OverflowError,
+    KeepoutError,
 )
-_OPTION_KEYS: Final = frozenset(
-    {
-        "burn_lead",
-        "delta_v",
-        "pc",
-        "range_at_tca",
-        "method",
-        "meets_target",
-        "notes",
-    }
-)
-_BURN_KEYS: Final = frozenset({"option", "rescreen"})
-_GRID_KEYS: Final = frozenset({"burn_leads", "delta_v", "pc", "range_at_tca"})
-_RESCREEN_KEYS: Final = frozenset(
-    {
-        "new_approaches",
-        "closer_approaches",
-        "event_returns",
-        "event_range",
-        "window",
-        "catalog_objects",
-        "secondary_screened",
-        "skipped_objects",
-    }
-)
-_NEW_KEYS: Final = frozenset({"approach", "pc", "level"})
-_APPROACH_KEYS: Final = frozenset(
-    {"primary_number", "secondary_number", "primary_state", "secondary_state"}
-)
-_STATE_KEYS: Final = frozenset({"epoch", "r", "v"})
-_TIME_KEYS: Final = frozenset({"scale", "jd1", "jd2"})
+"""What reading JSON that keepout did not write may raise."""
 
 _T = TypeVar("_T")
-
-
-def maneuver_key(settings: Settings, catalog: CatalogReference | None) -> str:
-    """The key of the outcome ``settings`` plan with ``catalog``: the SHA-256
-    (hex) of the JSON of keepout's version, ``kind`` :data:`MANEUVER_KIND`,
-    the settings as a settings file holds them and the sorted digests of the
-    catalog's files.
-
-    The catalog's label and the files' names and paths do not change it: the
-    same bytes give the same re-screens.
-
-    Parameters
-    ----------
-    settings
-        The settings of the plan.
-    catalog
-        The catalog the burns are re-screened against; ``None``: none.
-
-    Raises
-    ------
-    ValueError
-        If a settings file cannot hold ``settings``, as
-        :func:`~keepout.settings.settings_to_data`.
-    """
-    text = json.dumps(
-        {
-            "keepout": keepout.__version__,
-            "kind": MANEUVER_KIND,
-            "settings": settings_to_data(settings),
-            "catalog": None
-            if catalog is None
-            else sorted(file.sha256 for file in catalog.files),
-        },
-        sort_keys=True,
-    )
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 # --- To JSON ---------------------------------------------------------------
@@ -140,9 +69,9 @@ def _number(value: float) -> float | None:
 
 def _array_json(array: FloatArray) -> JsonValue:
     """The nested lists of an array, NaN as ``None``."""
-    if array.ndim == 0:
-        return _number(float(array))
-    return [_array_json(item) for item in array]
+    cells = array.astype(object)
+    cells[np.isnan(array)] = None
+    return cast("JsonValue", cells.tolist())  # numpy types tolist() as Any
 
 
 def _time_json(time: Time) -> dict[str, JsonValue]:
@@ -237,303 +166,150 @@ def outcome_to_json(outcome: ManeuverOutcome) -> dict[str, JsonValue]:
 
 
 # --- From JSON -------------------------------------------------------------
+# Each reader raises one of _UNREADABLE on JSON it cannot read.
 
 
-def _message(where: str, message: str) -> str:
-    """The message of a :class:`StoreError` at ``where`` in the JSON."""
-    return f"{_WHERE}{where}{': ' if where else ''}{message}"
-
-
-def _object(value: object, where: str, keys: frozenset[str]) -> Mapping[str, object]:
-    """``value``, a JSON object with exactly ``keys``.
+def _of(value: object, kind: type[_T]) -> _T:
+    """``value``, of type ``kind``; a bool is of no type but bool.
 
     Raises
     ------
-    StoreError
-        If it is no object, or a key is unknown or missing.
-    """
-    if not isinstance(value, Mapping):
-        raise StoreError(_message(where, f"must be an object, got {value!r}"))
-    data: Mapping[str, object] = value
-    unknown = sorted(set(data) - keys)
-    if unknown:
-        raise StoreError(_message(where, f"unknown key(s) {', '.join(unknown)}"))
-    missing = sorted(keys - set(data))
-    if missing:
-        raise StoreError(_message(where, f"missing key(s) {', '.join(missing)}"))
-    return data
-
-
-def _path(where: str, key: str | int) -> str:
-    if isinstance(key, int):
-        return f"{where}[{key}]"
-    return f"{where}.{key}" if where else key
-
-
-def _float(value: object, where: str) -> float:
-    """``value``, a number, or NaN for ``null``.
-
-    Raises
-    ------
-    StoreError
-        If it is neither (a bool is not a number).
-    """
-    if value is None:
-        return math.nan
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        raise StoreError(_message(where, f"must be a number, got {value!r}"))
-    return float(value)
-
-
-def _integer(value: object, where: str) -> int:
-    """``value``, an integer.
-
-    Raises
-    ------
-    StoreError
-        If it is not one (a bool is not one).
-    """
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise StoreError(_message(where, f"must be an integer, got {value!r}"))
-    return value
-
-
-def _flag(value: object, where: str) -> bool:
-    """``value``, true or false.
-
-    Raises
-    ------
-    StoreError
-        If it is neither.
-    """
-    if not isinstance(value, bool):
-        raise StoreError(_message(where, f"must be true or false, got {value!r}"))
-    return value
-
-
-def _list(value: object, where: str) -> list[object]:
-    """``value``, a JSON array.
-
-    Raises
-    ------
-    StoreError
-        If it is not one.
-    """
-    if not isinstance(value, list):
-        raise StoreError(_message(where, f"must be a list, got {value!r}"))
-    items: list[object] = value
-    return items
-
-
-def _strings(value: object, where: str) -> tuple[str, ...]:
-    """``value``, an array of strings.
-
-    Raises
-    ------
-    StoreError
-        If it is not one.
-    """
-    items = _list(value, where)
-    if not all(isinstance(item, str) for item in items):
-        raise StoreError(_message(where, f"must be a list of strings, got {value!r}"))
-    return tuple(str(item) for item in items)
-
-
-def _optional_text(value: object, where: str) -> str | None:
-    """``value``, a string or ``None``.
-
-    Raises
-    ------
-    StoreError
-        If it is neither.
-    """
-    if value is not None and not isinstance(value, str):
-        raise StoreError(_message(where, f"must be a string, got {value!r}"))
-    return value
-
-
-def _array(value: object, where: str, ndim: int) -> FloatArray:
-    """``value``, nested arrays of numbers (``null`` for NaN) ``ndim`` deep.
-
-    Raises
-    ------
-    StoreError
+    TypeError
         If it is not.
     """
-    items = _list(value, where)
-    if ndim == 1:
-        return np.array(
-            [_float(item, _path(where, i)) for i, item in enumerate(items)],
-            dtype=np.float64,
-        )
-    rows = [_array(item, _path(where, i), ndim - 1) for i, item in enumerate(items)]
-    if len({row.shape for row in rows}) > 1:
-        raise StoreError(_message(where, "rows must have the same length"))
+    if not isinstance(value, kind) or (isinstance(value, bool) and kind is not bool):
+        raise TypeError(f"expected a {kind.__name__}, got {value!r}")
+    return value
+
+
+def _object(value: object) -> Mapping[str, object]:
+    """``value``, a JSON object."""
+    # A JSON object's keys are strings.
+    return cast("Mapping[str, object]", _of(value, dict))
+
+
+def _list(value: object) -> list[object]:
+    """``value``, a JSON array."""
+    return cast("list[object]", _of(value, list))
+
+
+def _float(value: object) -> float:
+    """``value``, a number, or NaN for ``null``."""
+    if value is None:
+        return math.nan
+    return float(_of(value, float if isinstance(value, float) else int))
+
+
+def _texts(value: object) -> tuple[str, ...]:
+    """``value``, a list of strings."""
+    return tuple(_of(item, str) for item in _list(value))
+
+
+def _array(value: object, ndim: int) -> FloatArray:
+    """``value``, nested lists of numbers (``null`` for NaN) ``ndim`` deep."""
+    rows = _list(value)
     if not rows:
         return np.empty((0,) * ndim, dtype=np.float64)
-    return np.array(rows, dtype=np.float64)
+    if ndim == 1:
+        return np.array([_float(item) for item in rows], dtype=np.float64)
+    return np.array([_array(row, ndim - 1) for row in rows], dtype=np.float64)
 
 
-def _items(
-    value: object, where: str, read: Callable[[object, str], _T]
-) -> tuple[_T, ...]:
-    """The items of an array, each read by ``read``.
-
-    Raises
-    ------
-    StoreError
-        If it is no array, or as ``read``.
-    """
-    return tuple(
-        read(item, _path(where, i)) for i, item in enumerate(_list(value, where))
-    )
-
-
-def _built(where: str, build: Callable[[], _T]) -> _T:
-    """``build()``, its errors of a value as :class:`StoreError`.
-
-    Raises
-    ------
-    StoreError
-        If it raises a :class:`ValueError` or a :class:`KeepoutError`.
-    """
-    try:
-        return build()
-    except (ValueError, KeepoutError) as exc:
-        raise StoreError(_message(where, str(exc))) from exc
-
-
-def _time(value: object, where: str) -> Time:
-    data = _object(value, where, _TIME_KEYS)
-    scale = data["scale"]
-    if not isinstance(scale, str) or scale not in _SCALES:
-        raise StoreError(
-            _message(_path(where, "scale"), f"unknown time scale {scale!r}")
-        )
-    jd1 = _float(data["jd1"], _path(where, "jd1"))
-    jd2 = _float(data["jd2"], _path(where, "jd2"))
+def _time(value: object) -> Time:
+    data = _object(value)
+    scale = require_choice(data["scale"], _SCALES, "time scale")
+    jd1, jd2 = _float(data["jd1"]), _float(data["jd2"])
     if not (math.isfinite(jd1) and math.isfinite(jd2)):
-        raise StoreError(_message(where, "jd1 and jd2 must not be null"))
+        raise ValueError("a time's jd1 and jd2 must be numbers")
     return Time(jd1, jd2, format="jd", scale=scale)
 
 
-def _state(value: object, where: str) -> StateVector:
-    data = _object(value, where, _STATE_KEYS)
-    epoch = _time(data["epoch"], _path(where, "epoch"))
-    r = _array(data["r"], _path(where, "r"), 1)
-    v = _array(data["v"], _path(where, "v"), 1)
-    return _built(where, lambda: StateVector(epoch, r, v, "GCRF"))
+def _state(value: object) -> StateVector:
+    data = _object(value)
+    epoch = _time(data["epoch"])
+    return StateVector(epoch, _array(data["r"], 1), _array(data["v"], 1), "GCRF")
 
 
-def _new(value: object, where: str) -> NewApproach:
-    data = _object(value, where, _NEW_KEYS)
-    at = _path(where, "approach")
-    fields = _object(data["approach"], at, _APPROACH_KEYS)
-    primary = _integer(fields["primary_number"], _path(at, "primary_number"))
-    secondary = _integer(fields["secondary_number"], _path(at, "secondary_number"))
-    primary_state = _state(fields["primary_state"], _path(at, "primary_state"))
-    secondary_state = _state(fields["secondary_state"], _path(at, "secondary_state"))
-    approach = _built(
-        at, lambda: CloseApproach(primary, secondary, primary_state, secondary_state)
-    )
-    level = data["level"]
-    if not isinstance(level, str) or level not in _LEVELS:
-        raise StoreError(
-            _message(
-                _path(where, "level"),
-                f"must be one of {', '.join(_LEVELS)}, got {level!r}",
-            )
-        )
+def _new(value: object) -> NewApproach:
+    data = _object(value)
+    approach = _object(data["approach"])
+    level = require_choice(data["level"], tuple(_LEVELS), "risk level")
     return NewApproach(
-        approach=approach,
-        pc=_float(data["pc"], _path(where, "pc")),
+        approach=CloseApproach(
+            _of(approach["primary_number"], int),
+            _of(approach["secondary_number"], int),
+            _state(approach["primary_state"]),
+            _state(approach["secondary_state"]),
+        ),
+        pc=_float(data["pc"]),
         level=_LEVELS[level],
     )
 
 
-def _option(value: object, where: str) -> ManeuverOption:
-    data = _object(value, where, _OPTION_KEYS)
-    method = data["method"]
-    if not isinstance(method, str) or method not in _METHODS:
-        raise StoreError(
-            _message(
-                _path(where, "method"),
-                f"must be one of {', '.join(_METHODS)}, got {method!r}",
-            )
-        )
+def _option(value: object) -> ManeuverOption:
+    data = _object(value)
     return ManeuverOption(
-        burn_lead=_float(data["burn_lead"], _path(where, "burn_lead")),
-        delta_v=_float(data["delta_v"], _path(where, "delta_v")),
-        pc=_float(data["pc"], _path(where, "pc")),
-        range_at_tca=_float(data["range_at_tca"], _path(where, "range_at_tca")),
-        method=method,
-        meets_target=_flag(data["meets_target"], _path(where, "meets_target")),
-        notes=_strings(data["notes"], _path(where, "notes")),
+        burn_lead=_float(data["burn_lead"]),
+        delta_v=_float(data["delta_v"]),
+        pc=_float(data["pc"]),
+        range_at_tca=_float(data["range_at_tca"]),
+        method=require_choice(data["method"], _METHODS, "method"),
+        meets_target=_of(data["meets_target"], bool),
+        notes=_texts(data["notes"]),
     )
 
 
-def _rescreen(value: object, where: str, option: ManeuverOption) -> RescreenResult:
-    data = _object(value, where, _RESCREEN_KEYS)
-    window = _items(data["window"], _path(where, "window"), _time)
-    if len(window) != 2:
-        raise StoreError(
-            _message(_path(where, "window"), f"must hold 2 times, got {len(window)}")
-        )
+def _rescreen(value: object, option: ManeuverOption) -> RescreenResult:
+    data = _object(value)
+    start, end = (_time(item) for item in _list(data["window"]))
     event_range = data["event_range"]
     return RescreenResult(
         option=option,
-        new_approaches=_items(
-            data["new_approaches"], _path(where, "new_approaches"), _new
+        new_approaches=tuple(_new(item) for item in _list(data["new_approaches"])),
+        closer_approaches=tuple(
+            _new(item) for item in _list(data["closer_approaches"])
         ),
-        closer_approaches=_items(
-            data["closer_approaches"], _path(where, "closer_approaches"), _new
-        ),
-        event_returns=_items(
-            data["event_returns"], _path(where, "event_returns"), _new
-        ),
-        event_range=None
-        if event_range is None
-        else _float(event_range, _path(where, "event_range")),
-        window=(window[0], window[1]),
-        catalog_objects=_integer(
-            data["catalog_objects"], _path(where, "catalog_objects")
-        ),
-        secondary_screened=_flag(
-            data["secondary_screened"], _path(where, "secondary_screened")
-        ),
-        skipped_objects=_integer(
-            data["skipped_objects"], _path(where, "skipped_objects")
-        ),
+        event_returns=tuple(_new(item) for item in _list(data["event_returns"])),
+        event_range=None if event_range is None else _float(event_range),
+        window=(start, end),
+        catalog_objects=_of(data["catalog_objects"], int),
+        secondary_screened=_of(data["secondary_screened"], bool),
+        skipped_objects=_of(data["skipped_objects"], int),
     )
 
 
-def _burn(value: object, where: str) -> PlannedBurn:
-    data = _object(value, where, _BURN_KEYS)
-    option = _option(data["option"], _path(where, "option"))
+def _burn(value: object) -> PlannedBurn:
+    data = _object(value)
+    option = _option(data["option"])
     found = data["rescreen"]
-    return PlannedBurn(
-        option,
-        None if found is None else _rescreen(found, _path(where, "rescreen"), option),
+    return PlannedBurn(option, None if found is None else _rescreen(found, option))
+
+
+def _grid(value: object) -> ManeuverGrid:
+    data = _object(value)
+    return ManeuverGrid(
+        burn_leads=_array(data["burn_leads"], 1),
+        delta_v=_array(data["delta_v"], 1),
+        pc=_array(data["pc"], 2),
+        range_at_tca=_array(data["range_at_tca"], 2),
     )
 
 
-def _grid(value: object, where: str) -> ManeuverGrid:
-    data = _object(value, where, _GRID_KEYS)
-    leads = _array(data["burn_leads"], _path(where, "burn_leads"), 1)
-    changes = _array(data["delta_v"], _path(where, "delta_v"), 1)
-    pc = _array(data["pc"], _path(where, "pc"), 2)
-    ranges = _array(data["range_at_tca"], _path(where, "range_at_tca"), 2)
-    return _built(
-        where,
-        lambda: ManeuverGrid(
-            burn_leads=leads, delta_v=changes, pc=pc, range_at_tca=ranges
-        ),
+def _outcome(value: object, event: ConjunctionEvent) -> ManeuverOutcome:
+    data = _object(value)
+    grid, label = data["grid"], data["catalog_label"]
+    return ManeuverOutcome(
+        event=event,
+        target_pc=_float(data["target_pc"]),
+        baseline=_option(data["baseline"]),
+        notes=_texts(data["notes"]),
+        burns=tuple(_burn(item) for item in _list(data["burns"])),
+        grid=None if grid is None else _grid(grid),
+        catalog_label=None if label is None else _of(label, str),
     )
 
 
-def outcome_from_json(
-    data: Mapping[str, object], event: ConjunctionEvent
-) -> ManeuverOutcome:
+def outcome_from_json(data: object, event: ConjunctionEvent) -> ManeuverOutcome:
     """The outcome of its JSON (:func:`outcome_to_json`) and its event.
 
     Parameters
@@ -546,18 +322,10 @@ def outcome_from_json(
     Raises
     ------
     StoreError
-        If a key is unknown or missing, a value has the wrong type, or the
-        values make no valid outcome; the message, ``cached manoeuvre: ...``,
-        names where.
+        If the JSON makes no outcome: a key is missing, or a value is of the
+        wrong type or out of range.
     """
-    fields = _object(data, "", _OUTCOME_KEYS)
-    grid = fields["grid"]
-    return ManeuverOutcome(
-        event=event,
-        target_pc=_float(fields["target_pc"], "target_pc"),
-        baseline=_option(fields["baseline"], "baseline"),
-        notes=_strings(fields["notes"], "notes"),
-        burns=_items(fields["burns"], "burns", _burn),
-        grid=None if grid is None else _grid(grid, "grid"),
-        catalog_label=_optional_text(fields["catalog_label"], "catalog_label"),
-    )
+    try:
+        return _outcome(data, event)
+    except _UNREADABLE as exc:
+        raise StoreError(f"cached manoeuvre unreadable: {exc}") from exc

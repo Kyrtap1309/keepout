@@ -3,8 +3,12 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from keepout._defaults import TARGET_PC
+from keepout._methods import METHOD_CHOICES
+from keepout.covariance import POLICIES
 from keepout.errors import SettingsError
 from keepout.pc import AUTO, PcComputation
 from keepout.risk import DEFAULT_THRESHOLDS, Thresholds
@@ -159,12 +163,37 @@ def test_settings_round_trip(settings: Settings) -> None:
 
 def test_settings_data_has_every_key() -> None:
     data = settings_to_data(Settings(combined_hard_body_radius=20.0))
-    assert {name: set(table) for name, table in data.items()} == {
-        "pc": {"method", "policy", "hbr_m"},
-        "risk": {"green_below", "red_from"},
-        "maneuver": {"target_pc"},
-    }
+    assert set(data) == {"pc", "risk", "maneuver"}
+    assert set(data["pc"]) == {"method", "policy", "hbr_m"}
+    assert set(data["risk"]) == {"green_below", "red_from"}
+    assert set(data["maneuver"]) == {"target_pc"}
     assert "hbr_m" not in settings_to_data(Settings())["pc"]
+
+
+_PROBABILITIES = st.floats(min_value=1e-300, max_value=1.0, exclude_max=True)
+
+
+@st.composite
+def settings_files_hold(draw: st.DrawFn) -> Settings:
+    """Settings a settings file can hold: any but options, a fallback or
+    another basis."""
+    green, red = sorted(draw(st.lists(_PROBABILITIES, min_size=2, max_size=2)))
+    if green == red:
+        red = 1.0
+    return Settings(
+        compute=PcComputation(draw(st.sampled_from(METHOD_CHOICES))),
+        policy=draw(st.sampled_from(POLICIES)),
+        combined_hard_body_radius=draw(
+            st.none() | st.floats(min_value=1e-3, max_value=1e4)
+        ),
+        thresholds=Thresholds(green_below=green, red_from=red),
+        target_pc=draw(_PROBABILITIES),
+    )
+
+
+@given(settings_files_hold())
+def test_any_settings_round_trip(settings: Settings) -> None:
+    _assert_same_settings(settings_from_data(settings_to_data(settings)), settings)
 
 
 @pytest.mark.parametrize(

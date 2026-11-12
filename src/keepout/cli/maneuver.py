@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Final, TypeAlias
 
@@ -222,6 +223,91 @@ def maneuver_command(
     again for the same settings until a newer CDM arrives. --queue leaves
     it to keepout worker instead.
     """
+    mode = _mode(
+        cdms,
+        event_id,
+        store,
+        catalog=catalog,
+        source=source,
+        burn_before=burn_before,
+        dv=dv,
+        workers=workers,
+        queue=queue,
+    )
+    chosen = operator_settings(
+        settings, combined_hard_body_radius=hbr, target_pc=target_pc
+    )
+    match mode:
+        case _Queued(store=path, event_id=stored_id):
+            _queue(path, stored_id, chosen, as_json=as_json)
+        case _Stored(store=path, event_id=stored_id):
+            _show(_stored_plan(path, stored_id, chosen, workers), as_json=as_json)
+        case _Planned(burn=burn):
+            from keepout.maneuver import plan_event
+            from keepout.settings import plan_arguments
+
+            event, screened = _event_and_catalog(
+                cdms, event_id, store, catalog, source, cache_dir
+            )
+            outcome = plan_event(
+                event,
+                **plan_arguments(chosen),
+                burn=burn,
+                catalog=None if screened is None else screened.omms,
+                catalog_label=None if screened is None else screened.label,
+                workers=workers,
+            )
+            _show(outcome, as_json=as_json)
+
+
+@dataclass(frozen=True, slots=True)
+class _Queued:
+    """Queue the plan of a stored event for ``keepout worker``."""
+
+    store: Path
+    event_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class _Stored:
+    """Show the plan of a stored event against its stored catalog: the
+    cached one, else one planned now and cached."""
+
+    store: Path
+    event_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class _Planned:
+    """Plan the event now, without the cache: on the grid, or one burn."""
+
+    burn: tuple[float, float] | None
+    """The burn given: its time before TCA [s] and its Δv [m/s]; ``None``
+    for the grid."""
+
+
+def _mode(
+    cdms: Sequence[Path] | None,
+    event_id: str | None,
+    store: Path | None,
+    *,
+    catalog: Path | None,
+    source: CatalogSourceName | None,
+    burn_before: float | None,
+    dv: float | None,
+    workers: int | None,
+    queue: bool,
+) -> _Queued | _Stored | _Planned:
+    """What the command line asks for, its options checked.
+
+    A stored event without a catalog or a burn given is planned through the
+    cache. Any other event is planned now.
+
+    Raises
+    ------
+    typer.BadParameter
+        If the options do not go together: a usage error.
+    """
     if queue:
         _require_queueable(event_id, catalog, source, burn_before, dv, workers)
     if (burn_before is None) != (dv is None):
@@ -230,32 +316,14 @@ def maneuver_command(
         )
     _require_one_event(cdms, event_id, store)
     require_one_catalog(catalog, source)
-    chosen = operator_settings(
-        settings, combined_hard_body_radius=hbr, target_pc=target_pc
-    )
     if event_id is not None and store is not None:
         if queue:
-            _queue(store, event_id, chosen, as_json=as_json)
-            return
+            return _Queued(store, event_id)
         if catalog is None and source is None and burn_before is None:
-            _show(_stored_plan(store, event_id, chosen, workers), as_json=as_json)
-            return
-    event, screened = _event_and_catalog(
-        cdms, event_id, store, catalog, source, cache_dir
-    )
+            return _Stored(store, event_id)
     if burn_before is None or dv is None:
-        from keepout.maneuver import plan_event
-
-        outcome = plan_event(
-            event,
-            chosen,
-            catalog=None if screened is None else screened.omms,
-            catalog_label=None if screened is None else screened.label,
-            workers=workers,
-        )
-    else:
-        outcome = _one_burn(event, chosen, burn_before * HOUR, dv, screened, workers)
-    _show(outcome, as_json=as_json)
+        return _Planned(None)
+    return _Planned((burn_before * HOUR, dv))
 
 
 def _show(outcome: ManeuverOutcome, *, as_json: bool) -> None:
@@ -283,55 +351,6 @@ maneuver_command.__doc__ = (maneuver_command.__doc__ or "").format_map(
         "duration": duration_words(SCREENING_DURATION),
     }
 )
-
-
-def _one_burn(
-    event: ConjunctionEvent,
-    chosen: Settings,
-    burn_lead: float,
-    delta_v: float,
-    screened: CatalogInput | None,
-    workers: int | None,
-) -> ManeuverOutcome:
-    """The outcome of one burn of the event, without the grid, re-screened
-    against ``screened`` if given.
-
-    Raises
-    ------
-    ManeuverError
-        As :func:`~keepout.maneuver.prepare_maneuver`,
-        :func:`~keepout.maneuver.evaluate_burn` and
-        :func:`~keepout.maneuver.rescreen`.
-    KeepoutError
-        If the CDM's conjunction or a Pc cannot be computed.
-    """
-    from keepout.maneuver import (
-        ManeuverOutcome,
-        PlannedBurn,
-        evaluate_burn,
-        prepare_maneuver,
-        rescreen,
-    )
-
-    context = prepare_maneuver(
-        event,
-        target_pc=chosen.target_pc,
-        compute=chosen.compute,
-        policy=chosen.policy,
-        combined_hard_body_radius=chosen.combined_hard_body_radius,
-        thresholds=chosen.thresholds,
-    )
-    option = evaluate_burn(context, burn_lead=burn_lead, delta_v=delta_v)
-    result = (
-        None
-        if screened is None
-        else rescreen(context, option, screened.omms, workers=workers)
-    )
-    return ManeuverOutcome.of(
-        context,
-        [PlannedBurn(option, result)],
-        None if screened is None else screened.label,
-    )
 
 
 def _require_one_event(
@@ -407,25 +426,26 @@ def _queue(store: Path, event_id: str, chosen: Settings, *, as_json: bool) -> No
         line builds), as :meth:`~keepout.store.JobQueue.submit`.
     """
     with importing_store():
-        from keepout.store import JobQueue
+        from keepout.store import Job, JobQueue, SubmissionOutcome
 
     with open_cli_store(store, create=False) as opened:
         submission = JobQueue(opened).submit(event_id, chosen)
     job = submission.job
-    if job is None:
-        text = (
-            f"Event {event_id} is already planned for these settings: "
-            f"keepout maneuver --event {event_id} shows it."
-        )
-    elif submission.existing:
-        text = f"Job {job.id} is already {job.status.value} for event {event_id}."
-    else:
-        text = f"Job {job.id} queued for event {event_id}."
+    match submission.outcome, job:
+        case SubmissionOutcome.EXISTING, Job():
+            text = f"Job {job.id} is already {job.status.value} for event {event_id}."
+        case SubmissionOutcome.QUEUED, Job():
+            text = f"Job {job.id} queued for event {event_id}."
+        case _:
+            text = (
+                f"Event {event_id} is already planned for these settings: "
+                f"keepout maneuver --event {event_id} shows it."
+            )
     payload: dict[str, JsonOut] = {
         "event": event_id,
         "job": None if job is None else job.id,
         "status": None if job is None else job.status.value,
-        "cached": submission.cached,
+        "cached": submission.outcome is SubmissionOutcome.CACHED,
     }
     show(payload, text, as_json=as_json)
 
@@ -434,8 +454,9 @@ def _stored_plan(
     store: Path, event_id: str, chosen: Settings, workers: int | None
 ) -> ManeuverOutcome:
     """The plan of a stored event against its stored catalog: the cached
-    one, else one planned now and cached on the event's latest CDM (if it
-    cannot be, a warning on standard error says so).
+    one, else one planned now and cached on the event's latest CDM.
+
+    If the plan cannot be cached, a warning on standard error says so.
 
     Raises
     ------
@@ -452,32 +473,20 @@ def _stored_plan(
         As :func:`~keepout.maneuver.plan_event`.
     ValueError
         If a settings file cannot hold ``chosen`` (never those the command
-        line builds), as :func:`~keepout.store.maneuver_codec.maneuver_key`.
+        line builds), as :func:`~keepout.store.codec.maneuver_key`.
     """
-    from keepout.maneuver import plan_event
-
     with importing_store():
-        from keepout.store.maneuver_codec import maneuver_key, outcome_to_json
+        from keepout.store.planning import plan_stored
 
     with open_cli_store(store, create=False) as opened:
         cached = opened.maneuver(event_id, chosen)
         if cached is not None:
             return cached
-        # Read at one CDM: one ingested meanwhile is not planned under its id.
-        latest = opened.latest_message_id(event_id)
-        event = opened.event(event_id, until=latest)
-        reference = opened.catalog(event_id, until=latest)
-        screened = _stored_catalog(reference)
-        outcome = plan_event(
-            event,
-            chosen,
-            catalog=None if screened is None else screened.omms,
-            catalog_label=None if screened is None else screened.label,
-            workers=workers,
-        )
-        key = maneuver_key(chosen, reference)
+        outcome = plan_stored(opened, event_id, chosen, workers=workers)
+        # Planned at the event's latest CDM then: the latest of the event planned.
+        planned_on = outcome.event.latest.message_id
         try:
-            opened.save_maneuver(latest, key, outcome_to_json(outcome))
+            opened.save_maneuver(planned_on, chosen, outcome)
         except StoreError as exc:
             # Minutes of computing are shown, cached or not.
             typer.echo(f"Warning: the plan was not cached: {exc}", err=True)

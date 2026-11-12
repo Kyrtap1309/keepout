@@ -11,10 +11,9 @@ the change of an object's state at TCA for each burn of a grid, as a
 :func:`rescreen` screens a burn against a catalog and returns a
 :class:`RescreenResult` listing the approaches it brings
 (:class:`NewApproach`). :func:`judge` says whether a burn can be recommended
-(:class:`BurnVerdict`). :func:`plan_event` does all of it with an
-operator's settings and returns a :class:`ManeuverOutcome`: the burns
-(:class:`PlannedBurn`), their re-screens and the grid
-(:class:`ManeuverGrid`).
+(:class:`BurnVerdict`). :func:`plan_event` does all of it and returns a
+:class:`ManeuverOutcome`: the burns (:class:`PlannedBurn`), their
+re-screens and the grid (:class:`ManeuverGrid`).
 """
 
 from keepout.maneuver._differential import (

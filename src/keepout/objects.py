@@ -2,12 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Final
-
-import numpy.typing as npt
-from astropy.time import Time
+from typing import TYPE_CHECKING, Final
 
 from keepout._validation import require_non_negative
 from keepout.covariance import Covariance, Policy, make_covariance
@@ -15,6 +11,12 @@ from keepout.errors import GeometryError
 from keepout.frames import to_gcrf_all
 from keepout.state import StateVector, require_frame
 from keepout.units import elapsed_seconds
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    import numpy.typing as npt
+    from astropy.time import Time
 
 __all__ = [
     "EPOCH_TOLERANCE",

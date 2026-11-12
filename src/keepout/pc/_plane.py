@@ -16,16 +16,18 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Final, Self, overload
+from typing import TYPE_CHECKING, Final, Self, overload
 
 import numpy as np
 from scipy import special
 
 from keepout._types import FloatArray, override
 from keepout._validation import require_positive
-from keepout.encounter import EncounterPlane, Role
 from keepout.errors import CovarianceError, GeometryError
-from keepout.pc.result import Method
+
+if TYPE_CHECKING:
+    from keepout.encounter import EncounterPlane, Role
+    from keepout.pc.result import Method
 
 SQRT_2: Final = math.sqrt(2.0)
 SQRT_2PI: Final = math.sqrt(2.0 * math.pi)

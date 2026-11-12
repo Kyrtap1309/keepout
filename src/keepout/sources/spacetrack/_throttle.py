@@ -5,10 +5,12 @@ from __future__ import annotations
 
 import time
 from collections import deque
-from collections.abc import Callable
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from keepout.units import HOUR, MINUTE
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 __all__ = ["PER_HOUR", "PER_MINUTE", "Throttle"]
 
