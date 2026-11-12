@@ -23,16 +23,20 @@ from __future__ import annotations
 import csv
 import io
 import json
-from collections.abc import Iterable
-from pathlib import Path
+from typing import TYPE_CHECKING
 
-from keepout._types import JsonValue
 from keepout.ccsds.epochs import preparse_epochs
 from keepout.ccsds.files import strip_bom
 from keepout.errors import OmmParseError
 from keepout.omm._io import OMM, parse_record
 from keepout.omm.keywords import KEYWORDS
 from keepout.omm.model import SGP4_EPOCH_DIGITS, Omm
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+    from pathlib import Path
+
+    from keepout._types import JsonValue
 
 __all__ = [
     "dumps_csv",

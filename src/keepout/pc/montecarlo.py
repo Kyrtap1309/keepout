@@ -20,23 +20,26 @@ from __future__ import annotations
 
 import contextlib
 import itertools
-from collections.abc import Iterator
-from concurrent.futures import Executor
 from dataclasses import dataclass
-from typing import Final, NamedTuple
+from typing import TYPE_CHECKING, Final, NamedTuple
 
 import numpy as np
 
-from keepout._types import BoolArray, FloatArray, IndexArray
 from keepout._validation import require_at_least, require_positive
 from keepout._workers import process_pool, resolve_workers
-from keepout.conjunction import Conjunction
 from keepout.equinoctial import Orbits
 from keepout.orbits import EARTH_MU
 from keepout.pc._encounters import Encounters, check_fallbacks
 from keepout.pc._plane import require_known_covariance
 from keepout.pc._timeline import RateScan, negligible_note
 from keepout.pc.result import PcResult
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from concurrent.futures import Executor
+
+    from keepout._types import BoolArray, FloatArray, IndexArray
+    from keepout.conjunction import Conjunction
 
 __all__ = [
     "MC_BATCH",

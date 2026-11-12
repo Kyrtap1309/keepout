@@ -15,16 +15,18 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Final, Protocol, Self, TypeAlias, runtime_checkable
+from typing import TYPE_CHECKING, Final, Protocol, Self, TypeAlias, runtime_checkable
 
 import astropy.units as u
 import numpy as np
 import numpy.typing as npt
-from astropy.time import Time
 
 from keepout._types import BoolArray, FloatArray, IndexArray, read_only
 from keepout._validation import require_at_least, require_single_time
 from keepout.state import RefFrame, as_ref_frame
+
+if TYPE_CHECKING:
+    from astropy.time import Time
 
 __all__ = [
     "CHUNK_STATES",

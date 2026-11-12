@@ -39,9 +39,8 @@ import os
 import platform
 import sys
 import time
-from collections.abc import Sequence
 from pathlib import Path
-from typing import Final, Literal, NamedTuple, TypedDict
+from typing import TYPE_CHECKING, Final, Literal, NamedTuple, TypedDict
 
 import matplotlib as mpl
 import numpy as np
@@ -64,9 +63,6 @@ from generated import (
     threshold_text,
     write_or_check,
 )
-from matplotlib.artist import Artist
-from matplotlib.axes import Axes
-from matplotlib.collections import QuadMesh
 from matplotlib.colors import Colormap, LinearSegmentedColormap
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
@@ -77,7 +73,6 @@ from synthetic_operator_report import FLEET, level_key, shown, window_start
 from keepout._defaults import TCA_TOLERANCE
 from keepout._methods import Method
 from keepout._text import pc_text, plural
-from keepout._types import FloatArray
 from keepout._workers import DEFAULT_WORKERS, ONE_THREAD
 from keepout.cdm import Cdm, load
 from keepout.events import ConjunctionEvent, group_events, time_to_tca
@@ -93,7 +88,6 @@ from keepout.maneuver import (
     plan_maneuver,
     rescreen,
 )
-from keepout.omm import Omm
 from keepout.risk import RiskLevel, Thresholds
 from keepout.screening import DEFAULT_DURATION, DEFAULT_VOLUME
 from keepout.sources import cara
@@ -101,6 +95,16 @@ from keepout.synthetic import OperatorEvent, OperatorResult, load_fleet
 from keepout.synthetic.operator import run
 from keepout.units import DAY, HOUR, MINUTE
 from keepout.validation.cara_inputs import column_number
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from matplotlib.artist import Artist
+    from matplotlib.axes import Axes
+    from matplotlib.collections import QuadMesh
+
+    from keepout._types import FloatArray
+    from keepout.omm import Omm
 
 PAGE: Final = REPO / "docs/maneuver-report.md"
 IMAGES: Final = REPO / "docs/img/maneuver"

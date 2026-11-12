@@ -13,12 +13,14 @@ exactly when it is written back.
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
 from types import MappingProxyType
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from keepout.ccsds.keywords import Keyword
 from keepout.units import DAY
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 __all__ = [
     "ATTRIBUTES",

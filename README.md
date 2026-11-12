@@ -58,9 +58,9 @@ print(result.method, result.value, result.diagnostics)
   event, and what it brings.
 - [Command line](docs/cli.md) and [Space-Track data](docs/spacetrack.md).
 - [The conjunction store](docs/store.md): `keepout[store]` keeps CDMs,
-  events and their Pc in a local SQLite file: `--store` on `screen` and
-  `assess`, `keepout store add`, and `keepout maneuver --event ID`, with
-  each event under a stable 8-character id.
+  events and their Pc in a local SQLite file. Each event has a stable id
+  of 12 hexadecimal characters. `keepout worker` computes queued
+  manoeuvre plans in the background.
 
 ## Validation
 

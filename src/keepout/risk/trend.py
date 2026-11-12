@@ -5,15 +5,17 @@ from __future__ import annotations
 import enum
 import math
 import statistics
-from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from keepout._text import days_text
 from keepout._validation import require_at_least, require_positive
 from keepout.risk.observation import PC_FLOOR, PcObservation
 from keepout.risk.thresholds import DEFAULT_THRESHOLDS, RiskLevel, Thresholds
 from keepout.units import DAY
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
 
 __all__ = [
     "DEFAULT_TREND_CONFIG",

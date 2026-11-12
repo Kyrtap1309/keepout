@@ -3,13 +3,16 @@ parse errors."""
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from keepout.ccsds.message import COMMENT, Family, KeywordValues, Located
-from keepout.cdm.keywords import SectionKind
 from keepout.cdm.model import Cdm, Field, Section, parse_field
 from keepout.errors import CdmParseError, CdmWriteError
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from keepout.cdm.keywords import SectionKind
 
 CDM: Final = Family(
     "CDM", CdmParseError, CdmWriteError, keyword_width=30, unknown_is_text=False

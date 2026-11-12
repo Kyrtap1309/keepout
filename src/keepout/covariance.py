@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Final, Literal, NamedTuple, TypeAlias, get_args
+from typing import TYPE_CHECKING, Final, Literal, NamedTuple, TypeAlias, get_args
 
 import numpy as np
 import numpy.typing as npt
-from astropy.time import Time
 
 from keepout._linalg import from_eigen, symmetric_part
 from keepout._types import FloatArray, read_only
@@ -16,6 +14,11 @@ from keepout._validation import require_choice
 from keepout.errors import CovarianceError, UnsupportedFrame
 from keepout.frames import inertial_to_rtn_covariance, rtn_to_inertial_covariance
 from keepout.state import StateVector, require_frame
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from astropy.time import Time
 
 __all__ = [
     "COVARIANCE_FRAMES",

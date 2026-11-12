@@ -16,14 +16,13 @@ orders of the time integral, the Monte Carlo batch size and the methods
 
 import importlib
 from collections.abc import Callable
-from typing import NamedTuple, Self, cast
+from typing import TYPE_CHECKING, NamedTuple, Self, cast
 
 import numpy as np
 import pytest
 from typing_extensions import override
 
 from keepout._types import BoolArray, FloatArray, IndexArray
-from keepout.equinoctial import Orbits
 from keepout.errors import GeometryError
 from keepout.pc import _auto as auto_module
 from keepout.pc import _encounters as encounters_module
@@ -37,6 +36,9 @@ from keepout.pc._timeline import Rate, RateScan, Screen
 from keepout.pc._timeline import locate_auto as real_locate_auto
 from keepout.pc.montecarlo import _SamplePairs
 from keepout.pc.result import PcResult
+
+if TYPE_CHECKING:
+    from keepout.equinoctial import Orbits
 
 # The package exports the functions hall3d and montecarlo under their
 # modules' names.
@@ -304,4 +306,4 @@ def misleading_newton_search() -> ClosestBelow:
     acceleration misleads Newton's method (see :class:`_MisleadingLine`):
     it passes the closest approach at t = 0.1 (distance 1) but never settles
     there."""
-    return _MisleadingLine(cast(Orbits, None), cast(Orbits, None)).closest_below
+    return _MisleadingLine(cast("Orbits", None), cast("Orbits", None)).closest_below

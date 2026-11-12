@@ -11,14 +11,17 @@ values are converted by :func:`keepout.ccsds.keywords.parse_value` and
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
-from typing import Final, Literal, TypeAlias
+from typing import TYPE_CHECKING, Final, Literal, TypeAlias
 
 import numpy as np
 
-from keepout._types import FloatArray
 from keepout.ccsds.keywords import Keyword, ValueKind
 from keepout.units import DAY, KM
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping, Sequence
+
+    from keepout._types import FloatArray
 
 __all__ = [
     "ADDITIONAL_PARAMETERS",

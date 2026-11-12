@@ -1,8 +1,10 @@
 """Helpers of the command-line tests: run ``keepout`` in-process, fake the
-web and Space-Track, a fleet with approaches in the screening fixture and
-the CDMs the synthetic operator issues for it."""
+web and Space-Track, a fleet with approaches in the screening fixture, the
+CDMs the synthetic operator issues for it, and a store of its crossing event
+with jobs queued."""
 
 import functools
+import json
 import sys
 import time
 import urllib.request
@@ -19,6 +21,7 @@ from web_builders import FakeResponse
 
 from keepout.cdm import kvn
 from keepout.cli.app import app
+from keepout.cli.output import ExitCode
 from keepout.omm import load
 from keepout.omm.celestrak import dumps_csv
 from keepout.sources import celestrak, spacetrack
@@ -164,6 +167,45 @@ def write(folder: Path, name: str, text: str) -> str:
     path = folder / name
     path.write_text(text, encoding="utf-8")
     return str(path)
+
+
+def crossing(folder: Path) -> str:
+    """The operator's CDM of 52939 against 47826 (maneuverable), written."""
+    return write(folder, "crossing.kvn", operator_kvn()[0])
+
+
+def stored_crossing(folder: Path) -> tuple[Path, str]:
+    """A store in ``folder`` holding :func:`crossing` (no catalog), and the
+    event's id."""
+    db = folder / "keepout.db"
+    added = keepout("store", "add", crossing(folder), "--store", str(db), "--json")
+    (event_id,) = json.loads(added.stdout)["store"]["events"]
+    return db, event_id
+
+
+def maneuver_event(db: Path, event_id: str, hbr: str = "1000") -> tuple[str, ...]:
+    """The arguments of ``keepout maneuver --event ID --store DB --hbr HBR``."""
+    return ("maneuver", "--event", event_id, "--store", str(db), "--hbr", hbr)
+
+
+def text_and_json(*args: str) -> list[Result]:
+    """The results of ``keepout ARGS``, then of ``keepout ARGS --json``."""
+    return [keepout(*args, *extra) for extra in ((), ("--json",))]
+
+
+def queue(db: Path, event_id: str, *options: str) -> Result:
+    """The result of ``keepout maneuver --event ID --store DB --hbr 1000
+    --queue OPTIONS``."""
+    return keepout(*maneuver_event(db, event_id), "--queue", *options)
+
+
+def queued_job(db: Path, event_id: str, *options: str) -> int:
+    """The id of the job :func:`queue` queued."""
+    result = queue(db, event_id, *options, "--json")
+    assert result.exit_code == ExitCode.OK, result.stderr
+    job = json.loads(result.stdout)["job"]
+    assert isinstance(job, int)
+    return job
 
 
 def without_hbr(text: str) -> str:

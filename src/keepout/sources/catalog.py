@@ -24,7 +24,6 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import importlib
-from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
@@ -34,6 +33,8 @@ from keepout._defaults import CELESTRAK_TTL, GP_INTERVAL
 from keepout.errors import ChecksumMismatch, SourceUnavailable
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable, Mapping
+
     from astropy.time import Time
 
     from keepout.omm.model import Omm

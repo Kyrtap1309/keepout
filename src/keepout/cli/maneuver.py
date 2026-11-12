@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Final, NamedTuple, TypeAlias
+from typing import TYPE_CHECKING, Annotated, Final, TypeAlias
 
 import typer
 
@@ -48,8 +49,8 @@ from keepout.cli.output import (
     table,
     utc,
 )
-from keepout.cli.store import EventStore, open_cli_store
-from keepout.errors import ManeuverError
+from keepout.cli.store import EventStore, importing_store, open_cli_store
+from keepout.errors import ManeuverError, StoreError
 from keepout.units import HOUR, MINUTE
 
 # The library is imported where it is used: keepout --help need not load the
@@ -61,13 +62,14 @@ if TYPE_CHECKING:
     from keepout.events import ConjunctionEvent
     from keepout.maneuver import (
         BurnDirection,
-        BurnVerdict,
-        ManeuverContext,
         ManeuverOption,
+        ManeuverOutcome,
         NewApproach,
+        PlannedBurn,
         RescreenResult,
     )
-    from keepout.sources.catalog import CatalogSourceName
+    from keepout.settings import Settings
+    from keepout.sources.catalog import CatalogReference, CatalogSourceName
 
 __all__ = ["maneuver_command"]
 
@@ -171,17 +173,18 @@ DeltaV: TypeAlias = Annotated[
 ]
 """``--dv``: how large the burn given is."""
 
-
-class _Burn(NamedTuple):
-    """A burn to show, and its re-screen if there was a catalog."""
-
-    option: ManeuverOption
-    rescreen: RescreenResult | None
-
-    @property
-    def direction(self) -> BurnDirection:
-        """The burn's direction along the velocity."""
-        return self.option.direction
+Queue: TypeAlias = Annotated[
+    bool,
+    typer.Option(
+        "--queue",
+        help=(
+            "Queue the plan of the stored event of --event for keepout worker "
+            "instead of planning it now; keepout maneuver --event shows it "
+            "once computed."
+        ),
+    ),
+]
+"""``--queue``: submit the plan of ``--event`` to the store's job queue."""
 
 
 def maneuver_command(
@@ -198,6 +201,7 @@ def maneuver_command(
     source: SourceOption = None,
     workers: Workers = None,
     cache_dir: CacheDir = None,
+    queue: Queue = False,
     as_json: JsonFlag = False,
 ) -> None:
     """Find the smallest burn each way that takes an event below a target Pc.
@@ -214,69 +218,127 @@ def maneuver_command(
     burn given misses the target, or every burn brings a red approach or the
     event's pair back above the target. --settings gives the target, the
     Pc method, covariance policy, hard-body radius and risk thresholds;
-    --target-pc and --hbr win over it.
+    --target-pc and --hbr win over it. A stored event's plan against its
+    stored catalog is cached in the store, on its latest CDM, and shown
+    again for the same settings until a newer CDM arrives. --queue leaves
+    it to keepout worker instead.
     """
+    mode = _mode(
+        cdms,
+        event_id,
+        store,
+        catalog=catalog,
+        source=source,
+        burn_before=burn_before,
+        dv=dv,
+        workers=workers,
+        queue=queue,
+    )
+    chosen = operator_settings(
+        settings, combined_hard_body_radius=hbr, target_pc=target_pc
+    )
+    match mode:
+        case _Queued(store=path, event_id=stored_id):
+            _queue(path, stored_id, chosen, as_json=as_json)
+        case _Stored(store=path, event_id=stored_id):
+            _show(_stored_plan(path, stored_id, chosen, workers), as_json=as_json)
+        case _Planned(burn=burn):
+            from keepout.maneuver import plan_event
+            from keepout.settings import plan_arguments
+
+            event, screened = _event_and_catalog(
+                cdms, event_id, store, catalog, source, cache_dir
+            )
+            outcome = plan_event(
+                event,
+                **plan_arguments(chosen),
+                burn=burn,
+                catalog=None if screened is None else screened.omms,
+                catalog_label=None if screened is None else screened.label,
+                workers=workers,
+            )
+            _show(outcome, as_json=as_json)
+
+
+@dataclass(frozen=True, slots=True)
+class _Queued:
+    """Queue the plan of a stored event for ``keepout worker``."""
+
+    store: Path
+    event_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class _Stored:
+    """Show the plan of a stored event against its stored catalog: the
+    cached one, else one planned now and cached."""
+
+    store: Path
+    event_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class _Planned:
+    """Plan the event now, without the cache: on the grid, or one burn."""
+
+    burn: tuple[float, float] | None
+    """The burn given: its time before TCA [s] and its Δv [m/s]; ``None``
+    for the grid."""
+
+
+def _mode(
+    cdms: Sequence[Path] | None,
+    event_id: str | None,
+    store: Path | None,
+    *,
+    catalog: Path | None,
+    source: CatalogSourceName | None,
+    burn_before: float | None,
+    dv: float | None,
+    workers: int | None,
+    queue: bool,
+) -> _Queued | _Stored | _Planned:
+    """What the command line asks for, its options checked.
+
+    A stored event without a catalog or a burn given is planned through the
+    cache. Any other event is planned now.
+
+    Raises
+    ------
+    typer.BadParameter
+        If the options do not go together: a usage error.
+    """
+    if queue:
+        _require_queueable(event_id, catalog, source, burn_before, dv, workers)
     if (burn_before is None) != (dv is None):
         raise typer.BadParameter(
             "give --burn-before and --dv together", param_hint="--burn-before"
         )
     _require_one_event(cdms, event_id, store)
     require_one_catalog(catalog, source)
-    chosen = operator_settings(
-        settings, combined_hard_body_radius=hbr, target_pc=target_pc
-    )
-    from keepout.maneuver import (
-        evaluate_burn,
-        judge,
-        plan_maneuver,
-        prepare_maneuver,
-        rescreen,
-    )
-
-    event, screened = _event_and_catalog(
-        cdms, event_id, store, catalog, source, cache_dir
-    )
-    plan: ManeuverContext
+    if event_id is not None and store is not None:
+        if queue:
+            return _Queued(store, event_id)
+        if catalog is None and source is None and burn_before is None:
+            return _Stored(store, event_id)
     if burn_before is None or dv is None:
-        plan = plan_maneuver(
-            event,
-            target_pc=chosen.target_pc,
-            compute=chosen.compute,
-            policy=chosen.policy,
-            combined_hard_body_radius=chosen.combined_hard_body_radius,
-            thresholds=chosen.thresholds,
-        )
-        options = plan.options
-    else:
-        plan = prepare_maneuver(
-            event,
-            target_pc=chosen.target_pc,
-            compute=chosen.compute,
-            policy=chosen.policy,
-            combined_hard_body_radius=chosen.combined_hard_body_radius,
-            thresholds=chosen.thresholds,
-        )
-        burn_lead = burn_before * HOUR
-        options = (evaluate_burn(plan, burn_lead=burn_lead, delta_v=dv),)
-    burns = [
-        _Burn(
-            option,
-            None
-            if screened is None
-            else rescreen(plan, option, screened.omms, workers=workers),
-        )
-        for option in options
-    ]
-    verdict = judge(burns)
-    text = _summary(
-        plan,
-        burns,
-        [] if burn_before is not None else _gaps(burns),
-        None if screened is None else screened.label,
-    )
+        return _Planned(None)
+    return _Planned((burn_before * HOUR, dv))
+
+
+def _show(outcome: ManeuverOutcome, *, as_json: bool) -> None:
+    """The output of an outcome, as text or JSON.
+
+    Raises
+    ------
+    typer.Exit
+        With status 4 if no burn can be recommended.
+    """
+    verdict = outcome.verdict
+    text = _summary(outcome)
     if not verdict.recommendable:
-        text.append(_refusal(plan, verdict))
-    show(_payload(plan, burns, verdict), *text, as_json=as_json)
+        text.append(_refusal(outcome))
+    show(_payload(outcome), *text, as_json=as_json)
     if not verdict.recommendable:
         raise typer.Exit(ExitCode.NO_SAFE_BURN)
 
@@ -313,6 +375,140 @@ def _require_one_event(
         raise typer.BadParameter(
             "--event needs --store (or $KEEPOUT_STORE)", param_hint="--event"
         )
+
+
+def _require_queueable(
+    event_id: str | None,
+    catalog: Path | None,
+    source: CatalogSourceName | None,
+    burn_before: float | None,
+    dv: float | None,
+    workers: int | None,
+) -> None:
+    """A check that ``--queue`` is given with a stored event, and without the
+    options a job does not take: a job plans on the burn grid, against the
+    event's stored catalog, with the processes of ``keepout worker``.
+
+    Raises
+    ------
+    typer.BadParameter
+        If not: a usage error.
+    """
+    if event_id is None:
+        raise typer.BadParameter("--queue needs --event", param_hint="--queue")
+    planned = "a job plans on the burn grid, against the event's stored catalog"
+    given = (
+        ("--catalog", catalog, planned),
+        ("--source", source, planned),
+        ("--burn-before", burn_before, planned),
+        ("--dv", dv, planned),
+        ("--workers", workers, "keepout worker --workers sets a job's processes"),
+    )
+    for name, value, reason in given:
+        if value is not None:
+            raise typer.BadParameter(
+                f"--queue cannot take {name}: {reason}", param_hint="--queue"
+            )
+
+
+def _queue(store: Path, event_id: str, chosen: Settings, *, as_json: bool) -> None:
+    """Submit the plan of a stored event to the store's job queue, and say
+    what became of it.
+
+    Raises
+    ------
+    typer.Exit
+        Without the ``store`` extra (status 1).
+    StoreError
+        If the store cannot be opened or holds no such event.
+    ValueError
+        If a settings file cannot hold ``chosen`` (never those the command
+        line builds), as :meth:`~keepout.store.JobQueue.submit`.
+    """
+    with importing_store():
+        from keepout.store import Job, JobQueue, SubmissionOutcome
+
+    with open_cli_store(store, create=False) as opened:
+        submission = JobQueue(opened).submit(event_id, chosen)
+    job = submission.job
+    match submission.outcome, job:
+        case SubmissionOutcome.EXISTING, Job():
+            text = f"Job {job.id} is already {job.status.value} for event {event_id}."
+        case SubmissionOutcome.QUEUED, Job():
+            text = f"Job {job.id} queued for event {event_id}."
+        case _:
+            text = (
+                f"Event {event_id} is already planned for these settings: "
+                f"keepout maneuver --event {event_id} shows it."
+            )
+    payload: dict[str, JsonOut] = {
+        "event": event_id,
+        "job": None if job is None else job.id,
+        "status": None if job is None else job.status.value,
+        "cached": submission.outcome is SubmissionOutcome.CACHED,
+    }
+    show(payload, text, as_json=as_json)
+
+
+def _stored_plan(
+    store: Path, event_id: str, chosen: Settings, workers: int | None
+) -> ManeuverOutcome:
+    """The plan of a stored event against its stored catalog: the cached
+    one, else one planned now and cached on the event's latest CDM.
+
+    If the plan cannot be cached, a warning on standard error says so.
+
+    Raises
+    ------
+    typer.Exit
+        Without the ``store`` extra (status 1).
+    StoreError
+        If the store cannot be opened, holds no such event, or its cached
+        plan cannot be read.
+    SourceUnavailable
+        If the stored catalog's file is gone; the message names it.
+    ChecksumMismatch
+        If the stored catalog's file changed; the message names it.
+    KeepoutError
+        As :func:`~keepout.maneuver.plan_event`.
+    ValueError
+        If a settings file cannot hold ``chosen`` (never those the command
+        line builds), as :func:`~keepout.store.codec.maneuver_key`.
+    """
+    with importing_store():
+        from keepout.store.planning import plan_stored
+
+    with open_cli_store(store, create=False) as opened:
+        cached = opened.maneuver(event_id, chosen)
+        if cached is not None:
+            return cached
+        outcome = plan_stored(opened, event_id, chosen, workers=workers)
+        # Planned at the event's latest CDM then: the latest of the event planned.
+        planned_on = outcome.event.latest.message_id
+        try:
+            opened.save_maneuver(planned_on, chosen, outcome)
+        except StoreError as exc:
+            # Minutes of computing are shown, cached or not.
+            typer.echo(f"Warning: the plan was not cached: {exc}", err=True)
+    return outcome
+
+
+def _stored_catalog(reference: CatalogReference | None) -> CatalogInput | None:
+    """The store's copy of a stored event's catalog, read (``None``: none).
+
+    Raises
+    ------
+    SourceUnavailable
+        If the copy is gone; the message names it.
+    ChecksumMismatch
+        If the copy changed; the message names it.
+    """
+    if reference is None:
+        return None
+    from keepout.sources.catalog import load_reference
+
+    omms = load_reference(reference)
+    return CatalogInput(omms, f"stored copy of {reference.label}", reference)
 
 
 def _event_and_catalog(
@@ -355,12 +551,7 @@ def _event_and_catalog(
             reference = opened.catalog(event_id)
     if catalog is not None or source is not None:
         return event, catalog_input(catalog, source, cache_dir)
-    if reference is None:
-        return event, None
-    from keepout.sources.catalog import load_reference
-
-    omms = load_reference(reference)
-    return event, CatalogInput(omms, f"stored copy of {reference.label}", reference)
+    return event, _stored_catalog(reference)
 
 
 def _one_event(events: Sequence[ConjunctionEvent]) -> ConjunctionEvent:
@@ -382,9 +573,10 @@ def _one_event(events: Sequence[ConjunctionEvent]) -> ConjunctionEvent:
     return events[0]
 
 
-def _refusal(plan: ManeuverContext, verdict: BurnVerdict) -> str:
+def _refusal(outcome: ManeuverOutcome) -> str:
     """The line saying why no burn can be recommended."""
-    target = f"the target Pc {pc_text(plan.target_pc)}"
+    verdict = outcome.verdict
+    target = f"the target Pc {pc_text(outcome.target_pc)}"
     if not verdict.burns:
         reason = f"No burn on the grid meets {target}"
     elif verdict.missed_target:
@@ -400,11 +592,14 @@ def _refusal(plan: ManeuverContext, verdict: BurnVerdict) -> str:
     return f"{reason} (exit status {int(ExitCode.NO_SAFE_BURN)})."
 
 
-def _gaps(burns: Sequence[_Burn]) -> list[str]:
-    """The line of the direction without an option, if the other has one."""
+def _gaps(outcome: ManeuverOutcome) -> list[str]:
+    """The line of the direction without an option, if the other has one;
+    none for a burn of one's own (no grid)."""
     from keepout.maneuver import BurnDirection
 
-    found = {burn.direction for burn in burns}
+    if outcome.grid is None:
+        return []
+    found = {burn.direction for burn in outcome.burns}
     return [
         f"No {direction} burn on the grid meets the target."
         for direction in BurnDirection
@@ -453,7 +648,7 @@ def _rescreen_json(result: RescreenResult) -> dict[str, JsonOut]:
     }
 
 
-def _burn_json(burn: _Burn) -> dict[str, JsonOut]:
+def _burn_json(burn: PlannedBurn) -> dict[str, JsonOut]:
     option = burn.option
     return {
         "direction": str(burn.direction),
@@ -464,23 +659,21 @@ def _burn_json(burn: _Burn) -> dict[str, JsonOut]:
     }
 
 
-def _payload(
-    plan: ManeuverContext, burns: Sequence[_Burn], verdict: BurnVerdict
-) -> dict[str, JsonOut]:
+def _payload(outcome: ManeuverOutcome) -> dict[str, JsonOut]:
     """The result as JSON values, for ``--json``; its ``refusal`` is the line
     saying why no burn can be recommended (``None`` if one can)."""
-    latest = plan.event.latest
+    latest = outcome.event.latest
     return {
-        "event": plan.event.event_id,
+        "event": outcome.event.event_id,
         "primary": latest.object1.object_id,
         "secondary": latest.object2.object_id,
-        "target_pc": plan.target_pc,
-        "method": plan.baseline.method,
-        "assumed_covariance": plan.assumed_covariance,
-        "baseline": _option_json(plan.baseline),
-        "options": [_burn_json(burn) for burn in burns],
-        "notes": list(plan.notes),
-        "refusal": None if verdict.recommendable else _refusal(plan, verdict),
+        "target_pc": outcome.target_pc,
+        "method": outcome.baseline.method,
+        "assumed_covariance": outcome.assumed_covariance,
+        "baseline": _option_json(outcome.baseline),
+        "options": [_burn_json(burn) for burn in outcome.burns],
+        "notes": list(outcome.notes),
+        "refusal": None if outcome.verdict.recommendable else _refusal(outcome),
     }
 
 
@@ -496,7 +689,7 @@ def _row(name: str, lead: str, delta_v: str, option: ManeuverOption) -> list[str
     ]
 
 
-def _burns_table(plan: ManeuverContext, burns: Sequence[_Burn]) -> Table:
+def _burns_table(outcome: ManeuverOutcome) -> Table:
     """A table of the baseline and the burns."""
     rows = table("Burns of the primary")
     rows.add_column("Option", no_wrap=True)
@@ -504,8 +697,8 @@ def _burns_table(plan: ManeuverContext, burns: Sequence[_Burn]) -> Table:
         rows.add_column(column, justify="right", no_wrap=True)
     rows.add_column("Method", no_wrap=True)
     rows.add_column("Target", no_wrap=True)
-    rows.add_row(*_row("no burn", "-", "-", plan.baseline))
-    for burn in burns:
+    rows.add_row(*_row("no burn", "-", "-", outcome.baseline))
+    for burn in outcome.burns:
         option = burn.option
         lead = f"{option.burn_lead / HOUR:.1f}"
         delta_v = f"{option.delta_v:+.3g}"
@@ -604,21 +797,17 @@ def _rescreen_lines(
     ]
 
 
-def _summary(
-    plan: ManeuverContext,
-    burns: Sequence[_Burn],
-    gaps: Sequence[str],
-    catalog_label: str | None,
-) -> list[RenderableType]:
+def _summary(outcome: ManeuverOutcome) -> list[RenderableType]:
     """The result for people: the event, the table of burns, the notes and
     what each re-screen found."""
-    event = plan.event
+    event = outcome.event
     latest = event.latest
+    catalog_label = outcome.catalog_label
     head = (
         f"Event {event.event_id}: {objects(latest)}, TCA {minute(latest.tca)} UTC, "
-        f"target Pc {pc_text(plan.target_pc)}."
+        f"target Pc {pc_text(outcome.target_pc)}."
     )
-    notes = [f"Note: {note}" for note in plan.notes]
+    notes = [f"Note: {note}" for note in outcome.notes]
     if catalog_label is None:
         rescreens = [
             (
@@ -630,10 +819,10 @@ def _summary(
         secondary = latest.object2.object_id
         rescreens = [
             line
-            for burn in burns
+            for burn in outcome.burns
             if burn.rescreen is not None
             for line in _rescreen_lines(
                 burn.direction, burn.rescreen, secondary, catalog_label
             )
         ]
-    return [head, _burns_table(plan, burns), *gaps, *notes, *rescreens]
+    return [head, _burns_table(outcome), *_gaps(outcome), *notes, *rescreens]

@@ -23,7 +23,7 @@ from typing import Any, Final
 import astropy.units as u
 import pytest
 from astropy.time import Time
-from builders import DifferenceWidened
+from builders import SMALL_GRID, DifferenceWidened
 from screening_data import FIXTURE_START, fixture_by_number, load_fixture
 
 from keepout._defaults import TCA_TOLERANCE
@@ -32,7 +32,6 @@ from keepout.conjunction import Conjunction
 from keepout.errors import GeometryError, ManeuverError
 from keepout.events import ConjunctionEvent
 from keepout.maneuver import (
-    BurnGrid,
     ManeuverOption,
     ManeuverPlan,
     NewApproach,
@@ -90,7 +89,6 @@ REPEATING: Final = 57062
 """Passes ``REPEATED`` twice, 7.8 h after ``START`` at 3401 m (its event) and
 48 min later at 671 m."""
 REPEATED: Final = 63216
-SMALL: Final = BurnGrid(steps_per_orbit=1, delta_v_per_direction=6)
 FOSTER: Final = computation("foster")
 
 
@@ -102,7 +100,7 @@ def plan_of(primary: int) -> ManeuverPlan:
         for event in run(FLEET, FIXTURE, START, 3 * DAY).events
         if event.approach.primary_number == primary
     )
-    return plan_maneuver(event.event, grid=SMALL)
+    return plan_maneuver(event.event, grid=SMALL_GRID)
 
 
 def burn(
@@ -419,7 +417,7 @@ def repeating_plan() -> ManeuverPlan:
     )
     catalog = [BY_NUMBER[REPEATING], BY_NUMBER[REPEATED]]
     (first, _) = run(fleet, catalog, START, 3 * DAY).events
-    return plan_maneuver(first.event, grid=SMALL)
+    return plan_maneuver(first.event, grid=SMALL_GRID)
 
 
 def closer_to(result: RescreenResult, secondary: int) -> list[NewApproach]:

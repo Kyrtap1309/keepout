@@ -20,9 +20,8 @@ from __future__ import annotations
 
 import enum
 import math
-from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Final, Protocol
+from typing import TYPE_CHECKING, Final, Protocol
 
 import numpy as np
 from astropy.time import Time
@@ -37,9 +36,13 @@ from keepout.cdm.keywords import (
     covariance_entries,
 )
 from keepout.cdm.model import Cdm, CovarianceMethod, Field, Section
-from keepout.conjunction import Conjunction
 from keepout.frames import rtn_rotation
-from keepout.objects import ObjectState
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from keepout.conjunction import Conjunction
+    from keepout.objects import ObjectState
 
 __all__ = [
     "MESSAGE_ID_PRECISION",

@@ -16,10 +16,7 @@ parameters are read past; the metadata of
 
 from __future__ import annotations
 
-from collections.abc import Iterable
-from pathlib import Path
-
-from astropy.time import Time
+from typing import TYPE_CHECKING
 
 from keepout.ccsds.kvn import format_line, located_value, read_lines, require_started
 from keepout.ccsds.message import UNKNOWN, KeywordValues
@@ -31,7 +28,14 @@ from keepout.omm._io import (
     parse_record,
 )
 from keepout.omm.keywords import DEFAULTS, KEYWORDS, VERSION, VERSION_KEYWORD
-from keepout.omm.model import Omm
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+    from pathlib import Path
+
+    from astropy.time import Time
+
+    from keepout.omm.model import Omm
 
 __all__ = ["dumps", "load", "loads"]
 

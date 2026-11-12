@@ -1,13 +1,23 @@
 import re
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from keepout._defaults import TARGET_PC
+from keepout._methods import METHOD_CHOICES
+from keepout.covariance import POLICIES
 from keepout.errors import SettingsError
-from keepout.pc import AUTO
+from keepout.pc import AUTO, PcComputation
 from keepout.risk import DEFAULT_THRESHOLDS, Thresholds
-from keepout.settings import Settings, load_settings
+from keepout.settings import (
+    Settings,
+    load_settings,
+    settings_from_data,
+    settings_to_data,
+)
 
 
 def _write(tmp_path: Path, text: str) -> Path:
@@ -117,3 +127,96 @@ def test_settings_that_are_not_toml(tmp_path: Path) -> None:
     path.write_bytes(b"\xff")
     with pytest.raises(SettingsError, match=rf"{re.escape(str(path))}: not UTF-8"):
         load_settings(path)
+
+
+def _assert_same_settings(actual: Settings, expected: Settings) -> None:
+    """Settings equal, ``compute`` field by field: :class:`PcComputation`
+    compares by identity."""
+    assert (
+        actual.compute.method,
+        dict(actual.compute.options),
+        actual.compute.fallback,
+    ) == (
+        expected.compute.method,
+        dict(expected.compute.options),
+        expected.compute.fallback,
+    )
+    assert replace(actual, compute=expected.compute) == expected
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        Settings(),
+        Settings(
+            compute=PcComputation("foster"),
+            policy="raise",
+            combined_hard_body_radius=20.0,
+            thresholds=replace(DEFAULT_THRESHOLDS, green_below=1e-6, red_from=1e-4),
+            target_pc=1e-6,
+        ),
+    ],
+)
+def test_settings_round_trip(settings: Settings) -> None:
+    _assert_same_settings(settings_from_data(settings_to_data(settings)), settings)
+
+
+def test_settings_data_has_every_key() -> None:
+    data = settings_to_data(Settings(combined_hard_body_radius=20.0))
+    assert set(data) == {"pc", "risk", "maneuver"}
+    assert set(data["pc"]) == {"method", "policy", "hbr_m"}
+    assert set(data["risk"]) == {"green_below", "red_from"}
+    assert set(data["maneuver"]) == {"target_pc"}
+    assert "hbr_m" not in settings_to_data(Settings())["pc"]
+
+
+_PROBABILITIES = st.floats(min_value=1e-300, max_value=1.0, exclude_max=True)
+
+
+@st.composite
+def settings_files_hold(draw: st.DrawFn) -> Settings:
+    """Settings a settings file can hold: any but options, a fallback or
+    another basis."""
+    green, red = sorted(draw(st.lists(_PROBABILITIES, min_size=2, max_size=2)))
+    if green == red:
+        red = 1.0
+    return Settings(
+        compute=PcComputation(draw(st.sampled_from(METHOD_CHOICES))),
+        policy=draw(st.sampled_from(POLICIES)),
+        combined_hard_body_radius=draw(
+            st.none() | st.floats(min_value=1e-3, max_value=1e4)
+        ),
+        thresholds=Thresholds(green_below=green, red_from=red),
+        target_pc=draw(_PROBABILITIES),
+    )
+
+
+@given(settings_files_hold())
+def test_any_settings_round_trip(settings: Settings) -> None:
+    _assert_same_settings(settings_from_data(settings_to_data(settings)), settings)
+
+
+@pytest.mark.parametrize(
+    ("settings", "field"),
+    [
+        (
+            Settings(compute=PcComputation("montecarlo", options={"seed": 1})),
+            "compute.options",
+        ),
+        (
+            Settings(
+                compute=PcComputation("hall3d", fallback=PcComputation("montecarlo"))
+            ),
+            "compute.fallback",
+        ),
+        (
+            Settings(thresholds=replace(DEFAULT_THRESHOLDS, basis="estimate")),
+            "thresholds.basis",
+        ),
+    ],
+)
+def test_settings_a_file_cannot_hold_are_refused(
+    settings: Settings, field: str
+) -> None:
+    with pytest.raises(ValueError, match=re.escape(field)):
+        settings_to_data(settings)

@@ -10,12 +10,14 @@ from __future__ import annotations
 import contextlib
 import multiprocessing
 import os
-from collections.abc import Generator, Mapping
 from concurrent.futures import ProcessPoolExecutor
 from types import MappingProxyType
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from keepout._validation import require_at_least
+
+if TYPE_CHECKING:
+    from collections.abc import Generator, Mapping
 
 __all__ = ["DEFAULT_WORKERS", "ONE_THREAD", "process_pool", "resolve_workers"]
 

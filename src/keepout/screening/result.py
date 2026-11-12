@@ -17,25 +17,29 @@ chronological order, and every element set it did not screen
 from __future__ import annotations
 
 import enum
-from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import cached_property
 from types import MappingProxyType
-from typing import Final, Self
+from typing import TYPE_CHECKING, Final, Self
 
 import astropy.units as u
-from astropy.time import Time
 
 from keepout._pickling import reduce_with_mappings
 from keepout._types import FloatArray, override, read_only
 from keepout.conjunction import Conjunction
 from keepout.conjunction import combined_hard_body_radius as combined_radius_of
-from keepout.covariance import Covariance
 from keepout.frames import relative_position_rtn
 from keepout.objects import ObjectState, require_same_epoch
-from keepout.omm import Omm
-from keepout.screening.volume import ScreeningVolume
 from keepout.state import RelativeMotion, StateVector, relative_motion, require_frame
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from astropy.time import Time
+
+    from keepout.covariance import Covariance
+    from keepout.omm import Omm
+    from keepout.screening.volume import ScreeningVolume
 
 __all__ = [
     "CloseApproach",

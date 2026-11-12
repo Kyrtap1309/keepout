@@ -9,12 +9,13 @@ section 4). The message readers and writers (:mod:`keepout.cdm.kvn`,
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING, Final, NamedTuple
 
 from keepout.ccsds.message import Located
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
+
     from keepout.ccsds.keywords import Keyword
     from keepout.ccsds.message import Family
 

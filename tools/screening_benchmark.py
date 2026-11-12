@@ -57,10 +57,9 @@ import statistics
 import subprocess
 import sys
 import tempfile
-from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final, Protocol, TypedDict, TypeVar
+from typing import TYPE_CHECKING, Any, Final, Protocol, TypedDict, TypeVar
 
 import screening_snapshot as snapshot
 import spacetrack_snapshot
@@ -81,7 +80,6 @@ from screening_timing import TimingOutput, select, timed
 
 from keepout._text import plural
 from keepout._workers import ONE_THREAD
-from keepout.omm import Omm
 from keepout.omm.celestrak import dumps_csv
 from keepout.screening import (
     DEFAULT_DURATION,
@@ -93,6 +91,11 @@ from keepout.screening import (
 )
 from keepout.screening.volume import SOCRATES_RADIUS
 from keepout.units import DAY, KM
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping, Sequence
+
+    from keepout.omm import Omm
 
 TIMING: Final = Path(__file__).resolve().with_name("screening_timing.py")
 TOOL: Final = "tools/screening_benchmark.py"

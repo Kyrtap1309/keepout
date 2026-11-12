@@ -9,7 +9,8 @@ says how to install it (:func:`open_cli_store`).
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Generator, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Final, NoReturn, TypeAlias
 
@@ -42,6 +43,7 @@ __all__ = [
     "StorePath",
     "Yes",
     "add_and_show",
+    "importing_store",
     "ingest_screened",
     "open_cli_store",
     "store_add",
@@ -82,6 +84,25 @@ def _without_extra(exc: ModuleNotFoundError) -> NoReturn:
     fail(STORE_HINT)
 
 
+@contextmanager
+def importing_store() -> Generator[None]:
+    """A block importing ``keepout.store`` or its modules, which a command
+    given a store runs: without the ``store`` extra, it ends the command
+    with :data:`STORE_HINT`.
+
+    Raises
+    ------
+    typer.Exit
+        If the block cannot import a package of the extra: status 1.
+    ModuleNotFoundError
+        If it cannot import another module.
+    """
+    try:
+        yield
+    except ModuleNotFoundError as exc:
+        _without_extra(exc)
+
+
 def _store_extra(ctx: typer.Context, value: Path | None) -> Path | None:
     """``--store``, checked to have the ``store`` extra to open it with.
 
@@ -91,10 +112,8 @@ def _store_extra(ctx: typer.Context, value: Path | None) -> Path | None:
         Without the extra: :data:`STORE_HINT`, status 1.
     """
     if value is not None and not ctx.resilient_parsing:
-        try:
+        with importing_store():
             import keepout.store  # noqa: F401 (the check)
-        except ModuleNotFoundError as exc:
-            _without_extra(exc)
     return value
 
 
@@ -180,10 +199,8 @@ def open_cli_store(path: Path, *, create: bool = True) -> Store:
         If the store cannot be opened, e.g. it was made by an older keepout
         (``keepout store upgrade``) or is missing and ``create`` is false.
     """
-    try:
+    with importing_store():
         from keepout.store import open_store
-    except ModuleNotFoundError as exc:
-        _without_extra(exc)
     return open_store(path, create=create)
 
 
@@ -319,10 +336,8 @@ def store_upgrade(*, store: StorePath, as_json: JsonFlag = False) -> None:
     A store made by an older keepout opens only once upgraded; one made by
     a newer keepout is left as it is.
     """
-    try:
+    with importing_store():
         from keepout.store import upgrade
-    except ModuleNotFoundError as exc:
-        _without_extra(exc)
     before, after = upgrade(store)
     text = (
         f"{store} is up to date (revision {after})."

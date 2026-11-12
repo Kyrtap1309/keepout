@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Final, NoReturn
+from typing import TYPE_CHECKING, Final, NoReturn
 
 from keepout.errors import OmmParseError, SourceFormatError
-from keepout.omm.model import Omm
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from keepout.omm.model import Omm
 
 __all__ = ["FORMAT_EXCERPT_BYTES", "omm_reader", "refuse_format"]
 

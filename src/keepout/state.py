@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Final, Literal, NamedTuple, TypeAlias, get_args
+from typing import TYPE_CHECKING, Final, Literal, NamedTuple, TypeAlias, get_args
 
 import numpy as np
 import numpy.typing as npt
-from astropy.time import Time
 
 from keepout._linalg import as_vector
-from keepout._types import FloatArray
 from keepout._validation import require_choice
 from keepout.errors import GeometryError, UnsupportedFrame
+
+if TYPE_CHECKING:
+    from astropy.time import Time
+
+    from keepout._types import FloatArray
 
 __all__ = [
     "REF_FRAMES",

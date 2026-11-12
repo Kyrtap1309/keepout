@@ -21,12 +21,14 @@ directories mirror the ``keepout`` subpackages (``cdm``, ``cli``, ``maneuver``,
 import os
 import urllib.request
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 from astropy.utils import iers
 from hypothesis import settings
 
 from keepout.sources import _store
+from keepout.store import Store, open_store
 
 # The CLI tests read plain text: Typer (on import) and Rich take these to
 # mean a colour terminal, and GitHub Actions sets GITHUB_ACTIONS.
@@ -97,3 +99,10 @@ def _forget_verified() -> Iterator[None]:
     _store.forget_verified()
     yield
     _store.forget_verified()
+
+
+@pytest.fixture
+def store(tmp_path: Path) -> Iterator[Store]:
+    """A new store, ``keepout.db`` in the test's folder."""
+    with open_store(tmp_path / "keepout.db") as opened:
+        yield opened

@@ -55,14 +55,18 @@ are widened by :data:`ROUNDING` (relative).
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
-from typing import Final, NamedTuple
+from typing import TYPE_CHECKING, Final, NamedTuple
 
 import numpy as np
-from sgp4.api import Satrec
 
-from keepout._types import BoolArray, FloatArray
 from keepout.units import KM
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from sgp4.api import Satrec
+
+    from keepout._types import BoolArray, FloatArray
 
 DEEP_SPACE_SAMPLING_MIN: Final = 360.0
 """Longest time [min] between the samples of a deep-space object's secular

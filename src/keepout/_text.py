@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from keepout.units import DAY, HOUR
+from keepout.units import DAY, HOUR, MINUTE
 
-__all__ = ["before_tca", "days_text", "pc_text", "plural"]
+__all__ = ["before_tca", "days_text", "duration_words", "pc_text", "plural"]
 
 
 def before_tca(seconds: float) -> str:
@@ -15,6 +15,20 @@ def before_tca(seconds: float) -> str:
 def days_text(seconds: float) -> str:
     """A duration in days, as keepout prints it: ``1.50 d``."""
     return f"{seconds / DAY:.2f} d"
+
+
+def duration_words(seconds: float) -> str:
+    """A whole number of the largest unit of days, hours and minutes that
+    ``seconds`` holds, in words: ``a day``, ``an hour``, ``10 minutes``
+    (else seconds, ``90 s``)."""
+    for unit, noun, one in ((DAY, "day", "a day"), (HOUR, "hour", "an hour")):
+        count = seconds / unit
+        if count >= 1.0 and count.is_integer():
+            return one if count == 1.0 else f"{count:g} {noun}s"
+    count = seconds / MINUTE
+    if count >= 1.0 and count.is_integer():
+        return "a minute" if count == 1.0 else f"{count:g} minutes"
+    return f"{seconds:g} s"
 
 
 def pc_text(pc: float | None) -> str:

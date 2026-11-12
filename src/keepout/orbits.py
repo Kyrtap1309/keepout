@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import math
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 import numpy as np
 
-from keepout.state import StateVector
+if TYPE_CHECKING:
+    from keepout.state import StateVector
 
 __all__ = ["EARTH_MU", "orbital_period", "perigee_radius"]
 

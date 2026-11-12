@@ -19,7 +19,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, TypeAlias
 
 import numpy as np
-from astropy.time import Time
 
 from keepout._linalg import symmetric_part
 from keepout._types import FloatArray, read_only
@@ -27,6 +26,8 @@ from keepout.errors import GeometryError
 from keepout.frames import PARALLEL_RTOL
 
 if TYPE_CHECKING:
+    from astropy.time import Time
+
     from keepout.conjunction import Conjunction
 
 __all__ = ["EncounterPlane", "Role", "encounter_plane", "sigma_along"]

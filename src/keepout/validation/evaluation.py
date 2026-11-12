@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from keepout._workers import process_pool, resolve_workers
 from keepout.pc import PcComputation
-from keepout.pc.result import Method, PcResult
-from keepout.validation.cases import Suite, ValidationCase
 from keepout.validation.criteria import Verdict
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from keepout.pc.result import Method, PcResult
+    from keepout.validation.cases import Suite, ValidationCase
 
 __all__ = [
     "MethodSummary",

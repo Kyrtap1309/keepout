@@ -27,12 +27,11 @@ diagnostic says so.
 from __future__ import annotations
 
 import math
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 import numpy as np
 
 from keepout._validation import require_positive
-from keepout.conjunction import Conjunction
 from keepout.errors import PcConvergenceError
 from keepout.pc._duration import encounter_duration, long_encounter
 from keepout.pc._encounters import (
@@ -42,10 +41,13 @@ from keepout.pc._encounters import (
 )
 from keepout.pc._plane import require_known_covariance
 from keepout.pc._quadrature import RateIntegral, integrate_segments
-from keepout.pc._rate import CollisionRate
 from keepout.pc._screen import reach
 from keepout.pc._timeline import RATE_FLOOR, negligible_note
 from keepout.pc.result import PcResult
+
+if TYPE_CHECKING:
+    from keepout.conjunction import Conjunction
+    from keepout.pc._rate import CollisionRate
 
 __all__ = [
     "HALL_RTOL",

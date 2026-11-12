@@ -41,11 +41,8 @@ anything shown from them.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Final
-
-from astropy.time import Time
+from typing import TYPE_CHECKING, Final
 
 from keepout._validation import require_single_time
 from keepout.ccsds.message import UNKNOWN
@@ -58,7 +55,6 @@ from keepout.cdm import (
     ObjectType,
     make_cdm,
 )
-from keepout.covariance import Policy
 from keepout.errors import FleetError
 from keepout.events import ConjunctionEvent
 from keepout.omm import Omm, deduplicate
@@ -83,7 +79,14 @@ from keepout.screening import (
     screen,
 )
 from keepout.synthetic.covariance_model import SyntheticCovarianceModel
-from keepout.synthetic.fleet import Fleet
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Mapping
+
+    from astropy.time import Time
+
+    from keepout.covariance import Policy
+    from keepout.synthetic.fleet import Fleet
 
 __all__ = [
     "DEFAULT_MODEL",

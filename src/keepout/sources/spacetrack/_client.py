@@ -7,12 +7,9 @@ import json
 import math
 import time
 import urllib.parse
-from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from http import HTTPStatus
-from pathlib import Path
-from types import TracebackType
-from typing import Final, Self, TypeVar
+from typing import TYPE_CHECKING, Final, Self, TypeVar
 
 from keepout._types import JsonValue, override
 from keepout.errors import (
@@ -22,7 +19,6 @@ from keepout.errors import (
     SourceUnavailable,
 )
 from keepout.omm.celestrak import loads_json
-from keepout.omm.model import Omm
 from keepout.sources._format import omm_reader
 from keepout.sources._store import cache_dir
 from keepout.sources.cache import cached_fetch
@@ -45,6 +41,13 @@ from keepout.sources.spacetrack._transport import (
 )
 from keepout.sources.spacetrack.public_cdm import PublicCdms, read_public_cdms
 from keepout.units import HOUR, MINUTE
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
+    from pathlib import Path
+    from types import TracebackType
+
+    from keepout.omm.model import Omm
 
 __all__ = [
     "SpaceTrackClient",

@@ -2,6 +2,7 @@ import dataclasses
 import io
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from astropy.time import Time
@@ -21,7 +22,6 @@ from sgp4 import omm as sgp4_omm
 
 from keepout.ccsds.epochs import parse_epoch
 from keepout.errors import OmmParseError
-from keepout.omm import Omm
 from keepout.omm.celestrak import (
     dumps_csv,
     dumps_json,
@@ -31,6 +31,9 @@ from keepout.omm.celestrak import (
     loads_json,
 )
 from keepout.propagation import satrec_of
+
+if TYPE_CHECKING:
+    from keepout.omm import Omm
 
 
 def test_the_sample_csv_is_read_in_file_order() -> None:

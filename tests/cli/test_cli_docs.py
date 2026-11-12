@@ -1,21 +1,20 @@
 """The walk-through of ``docs/cli.md``, run as written: each command's output
 is the block that follows it on the page."""
 
-import functools
 import re
 import shlex
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 import pytest
 from cli_builders import keepout
 
 from keepout.cli.output import ExitCode
-from keepout.maneuver import BurnGrid, plan_maneuver
+from keepout.events import ConjunctionEvent
+from keepout.maneuver import ManeuverPlan
 
 REPO: Final = Path(__file__).parents[2]
 PAGE: Final = REPO / "docs" / "cli.md"
-SMALL_GRID: Final = BurnGrid(steps_per_orbit=1, delta_v_per_direction=6)
 
 
 def documented(command: str) -> tuple[list[str], str]:
@@ -46,6 +45,7 @@ def run(arguments: list[str]) -> tuple[int, str]:
 
 
 @pytest.mark.slow
+@pytest.mark.timeout(300)
 def test_the_walk_through_prints_what_the_page_shows(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -63,13 +63,24 @@ def test_the_walk_through_prints_what_the_page_shows(
     assert run(maneuver) == (ExitCode.OK, planned)
     add, added = documented("store add")
     assert run(add) == (ExitCode.OK, added)
-    # The stored event the page plans, on a small grid: the plan is checked above.
-    small = functools.partial(plan_maneuver, grid=SMALL_GRID)
-    monkeypatch.setattr("keepout.maneuver.plan_maneuver", small)
+
+    # The stored event the page plans, queued and computed by the worker. Its
+    # child process imports keepout afresh and plans on the full default grid.
+    submit, queued = documented("maneuver --event")
+    assert run(submit) == (ExitCode.OK, queued)
+    worker, ran = documented("worker")
+    assert run(worker) == (ExitCode.OK, ran)
+
+    # Then shown from the store's cache: this process never plans it.
+    def unplanned(event: ConjunctionEvent, **settings: Any) -> ManeuverPlan:
+        raise AssertionError(f"{event.event_id} planned again, not read from the store")
+
+    monkeypatch.setattr("keepout.maneuver.outcome.plan_maneuver", unplanned)
     page = PAGE.read_text(encoding="utf-8")
     stored = re.search(r"`(keepout maneuver --event [^`]*)`", page)
     assert stored is not None
-    _, planned = run(shlex.split(stored[1])[1:])
+    status, planned = run(shlex.split(stored[1])[1:])
+    assert status == ExitCode.OK
     assert planned.startswith("Event 3befe6f1305d: 44476 / 55841, TCA 2026-10-08 12:03")
     assert "\nNot re-screened: nothing is known" in planned
     purge, purged = documented("store purge")

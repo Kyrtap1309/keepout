@@ -19,12 +19,8 @@ DOCTYPE declarations are refused, which rules out entity-expansion attacks.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
-from pathlib import Path
-from typing import Final
+from typing import TYPE_CHECKING, Final
 from xml.etree import ElementTree
-
-from astropy.time import Time
 
 from keepout.ccsds.message import COMMENT, UNKNOWN, KeywordValues
 from keepout.ccsds.xml import XSI, add_leaf, local, parse, single, tostring, values
@@ -37,7 +33,14 @@ from keepout.omm._io import (
     parse_record,
 )
 from keepout.omm.keywords import DEFAULTS, VERSION, VERSION_KEYWORD
-from keepout.omm.model import Omm
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+    from pathlib import Path
+
+    from astropy.time import Time
+
+    from keepout.omm.model import Omm
 
 __all__ = ["SCHEMA_LOCATION", "dumps", "load", "loads"]
 

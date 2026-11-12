@@ -23,9 +23,8 @@ import argparse
 import re
 import sys
 from collections import Counter
-from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Final, TypedDict
+from typing import TYPE_CHECKING, Final, TypedDict
 
 import screening_snapshot as snapshot
 from astropy.time import Time
@@ -63,6 +62,9 @@ from keepout.synthetic import (
 )
 from keepout.synthetic.operator import run
 from keepout.units import DAY, KM
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
 
 PAGE: Final = REPO / "docs/synthetic-operator.md"
 FLEET: Final = REPO / "examples/synthetic-operator/fleet.toml"

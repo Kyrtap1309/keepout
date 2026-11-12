@@ -3,9 +3,10 @@
 Every command is a function of a command module (:mod:`keepout.cli.fetch`,
 :mod:`keepout.cli.screen`, :mod:`keepout.cli.assess`,
 :mod:`keepout.cli.maneuver`, :mod:`keepout.cli.validate`,
-:mod:`keepout.cli.store`) registered here through
-:func:`~keepout.cli.output.reported`, so keepout's errors end the command
-with ``Error: ...`` and status 1 instead of a traceback.
+:mod:`keepout.cli.store`, :mod:`keepout.cli.jobs`, :mod:`keepout.cli.worker`)
+registered here through :func:`~keepout.cli.output.reported`, so keepout's
+errors end the command with ``Error: ...`` and status 1 instead of a
+traceback.
 """
 
 from __future__ import annotations
@@ -18,13 +19,15 @@ import typer
 import keepout
 from keepout.cli.assess import assess_command
 from keepout.cli.fetch import fetch_cara, fetch_catalog, fetch_cdm, fetch_kelvins
+from keepout.cli.jobs import jobs_cancel, jobs_list
 from keepout.cli.maneuver import maneuver_command
 from keepout.cli.output import reported
 from keepout.cli.screen import screen_command
 from keepout.cli.store import store_add, store_purge, store_rebuild, store_upgrade
 from keepout.cli.validate import validate_command
+from keepout.cli.worker import worker_command
 
-__all__ = ["app", "fetch_app", "run", "store_app"]
+__all__ = ["app", "fetch_app", "jobs_app", "run", "store_app"]
 
 app = typer.Typer(
     name="keepout",
@@ -55,6 +58,15 @@ store_app = typer.Typer(
 """``keepout store``: the conjunction store's commands."""
 
 app.add_typer(store_app)
+
+jobs_app = typer.Typer(
+    name="jobs",
+    help="List and cancel the store's background jobs (needs the store extra).",
+    no_args_is_help=True,
+)
+"""``keepout jobs``: the job queue's commands."""
+
+app.add_typer(jobs_app)
 
 
 def _print_version(*, value: bool) -> None:
@@ -92,10 +104,13 @@ _add(app, "screen", screen_command)
 _add(app, "assess", assess_command)
 _add(app, "maneuver", maneuver_command)
 _add(app, "validate", validate_command)
+_add(app, "worker", worker_command)
 _add(store_app, "add", store_add)
 _add(store_app, "upgrade", store_upgrade)
 _add(store_app, "rebuild", store_rebuild)
 _add(store_app, "purge", store_purge)
+_add(jobs_app, "list", jobs_list)
+_add(jobs_app, "cancel", jobs_cancel)
 
 
 def run() -> None:

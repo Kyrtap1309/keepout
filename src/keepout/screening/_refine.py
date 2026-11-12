@@ -7,15 +7,17 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Final, NamedTuple
+from typing import TYPE_CHECKING, Final, NamedTuple
 
 import numpy as np
 
-from keepout._types import FloatArray, IndexArray
 from keepout.propagation import NO_ERROR, ErrorArray, States
 from keepout.screening._sieve import dot
 from keepout.screening.search_result import ObjectFailure, RangeMinimum, keep_earliest
-from keepout.screening.volume import ScreeningVolume
+
+if TYPE_CHECKING:
+    from keepout._types import FloatArray, IndexArray
+    from keepout.screening.volume import ScreeningVolume
 
 __all__ = [
     "DERIVATIVE_STEP",

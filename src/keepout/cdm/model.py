@@ -10,10 +10,9 @@ from __future__ import annotations
 
 import enum
 import re
-from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import cached_property
-from typing import Final, assert_never
+from typing import TYPE_CHECKING, Final, assert_never
 
 import numpy as np
 from astropy.time import Time
@@ -37,6 +36,9 @@ from keepout.covariance import Covariance, Policy, make_covariance
 from keepout.errors import CdmParseError
 from keepout.objects import ObjectState, ReportedObject, gcrf_object_states
 from keepout.state import StateVector, as_ref_frame
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 __all__ = [
     "KEYWORD_PATTERN",

@@ -6,19 +6,22 @@ under Settings).
 Every key is optional; a missing one takes the library's default. No other
 key is allowed, so a typo is an error, not a silent default.
 :func:`load_settings` raises :class:`~keepout.errors.SettingsError` naming
-the file and the key at fault.
+the file and the key at fault. :func:`settings_to_data` and
+:func:`settings_from_data` turn settings into a settings file's tables
+(:class:`SettingsData`) and back, to store them, say, as JSON.
+:func:`plan_arguments` gives the arguments of
+:func:`~keepout.maneuver.plan_event` that settings hold.
 """
 
 from __future__ import annotations
 
 import tomllib
-from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Final, TypeVar
+from typing import TYPE_CHECKING, Final, NotRequired, TypedDict, TypeVar, cast
 
 from keepout._defaults import TARGET_PC
-from keepout._methods import METHOD_CHOICES
+from keepout._methods import METHOD_CHOICES, MethodChoice
 from keepout._validation import (
     positive_float,
     require_choice,
@@ -29,7 +32,22 @@ from keepout.errors import SettingsError
 from keepout.pc import AUTO, PcComputation
 from keepout.risk import DEFAULT_THRESHOLDS, Thresholds
 
-__all__ = ["SETTINGS_KEYS", "Settings", "load_settings"]
+if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
+
+__all__ = [
+    "SETTINGS_KEYS",
+    "ManeuverTable",
+    "PcTable",
+    "PlanArguments",
+    "RiskTable",
+    "Settings",
+    "SettingsData",
+    "load_settings",
+    "plan_arguments",
+    "settings_from_data",
+    "settings_to_data",
+]
 
 SETTINGS_KEYS: Final[Mapping[str, frozenset[str]]] = {
     "pc": frozenset({"method", "policy", "hbr_m"}),
@@ -86,6 +104,66 @@ class Settings:
         require_open_probability(self.target_pc, "target_pc")
 
 
+class PcTable(TypedDict):
+    """The ``[pc]`` table of :class:`SettingsData`."""
+
+    method: MethodChoice
+    policy: Policy
+    hbr_m: NotRequired[float]
+    """The combined hard-body radius [m]; only when it is set."""
+
+
+class RiskTable(TypedDict):
+    """The ``[risk]`` table of :class:`SettingsData`."""
+
+    green_below: float
+    red_from: float
+
+
+class ManeuverTable(TypedDict):
+    """The ``[maneuver]`` table of :class:`SettingsData`."""
+
+    target_pc: float
+
+
+class SettingsData(TypedDict):
+    """The tables of a settings file, as :func:`settings_to_data` gives
+    them."""
+
+    pc: PcTable
+    risk: RiskTable
+    maneuver: ManeuverTable
+
+
+class PlanArguments(TypedDict):
+    """The keyword arguments of :func:`~keepout.maneuver.plan_event` that
+    settings hold."""
+
+    target_pc: float
+    compute: PcComputation
+    policy: Policy
+    combined_hard_body_radius: float | None
+    thresholds: Thresholds
+
+
+def plan_arguments(settings: Settings) -> PlanArguments:
+    """The keyword arguments of :func:`~keepout.maneuver.plan_event` that
+    ``settings`` give.
+
+    Parameters
+    ----------
+    settings
+        The operator's settings.
+    """
+    return {
+        "target_pc": settings.target_pc,
+        "compute": settings.compute,
+        "policy": settings.policy,
+        "combined_hard_body_radius": settings.combined_hard_body_radius,
+        "thresholds": settings.thresholds,
+    }
+
+
 def _table(data: Mapping[str, object], name: str) -> Mapping[str, object]:
     """The table ``name`` of a settings file, empty if it is not there.
 
@@ -94,9 +172,10 @@ def _table(data: Mapping[str, object], name: str) -> Mapping[str, object]:
     SettingsError
         If it is not a table or has an unknown key.
     """
-    table = data.get(name, {})
-    if not isinstance(table, dict):
-        raise SettingsError(f"{name} must be a table ([{name}]), got {table!r}")
+    found = data.get(name, {})
+    if not isinstance(found, dict):
+        raise SettingsError(f"{name} must be a table ([{name}]), got {found!r}")
+    table = cast("dict[str, object]", found)  # a TOML table's keys are strings
     unknown = sorted(set(table) - SETTINGS_KEYS[name])
     if unknown:
         raise SettingsError(
@@ -151,9 +230,67 @@ def _checked(key: str, make: Callable[[], _C]) -> _C:
         raise SettingsError(f"{key}: {exc}") from exc
 
 
-def _settings(data: Mapping[str, object]) -> Settings:
-    """The settings of a settings file's TOML; a missing key keeps the
-    default of :class:`Settings`, which checks the ranges.
+def settings_to_data(settings: Settings) -> SettingsData:
+    """The tables of a settings file holding ``settings``, the inverse of
+    :func:`settings_from_data`.
+
+    Parameters
+    ----------
+    settings
+        The settings.
+
+    Returns
+    -------
+    SettingsData
+        The tables of :data:`SETTINGS_KEYS` with every key, but ``pc.hbr_m``
+        only when the radius is set.
+
+    Raises
+    ------
+    ValueError
+        If the settings file cannot hold ``settings``: ``compute`` has
+        options or a fallback, or ``thresholds.basis`` is not the default's;
+        the message names the field.
+    """
+    unexpressible: dict[str, object] = {
+        "compute.options": dict(settings.compute.options) or None,
+        "compute.fallback": settings.compute.fallback,
+        "thresholds.basis": (
+            None
+            if settings.thresholds.basis == DEFAULT_THRESHOLDS.basis
+            else settings.thresholds.basis
+        ),
+    }
+    for field, value in unexpressible.items():
+        if value is not None:
+            raise ValueError(f"a settings file cannot hold {field}, got {value!r}")
+    pc: PcTable = {"method": settings.compute.method, "policy": settings.policy}
+    if settings.combined_hard_body_radius is not None:
+        pc["hbr_m"] = settings.combined_hard_body_radius
+    return {
+        "pc": pc,
+        "risk": {
+            "green_below": settings.thresholds.green_below,
+            "red_from": settings.thresholds.red_from,
+        },
+        "maneuver": {"target_pc": settings.target_pc},
+    }
+
+
+def settings_from_data(data: Mapping[str, object]) -> Settings:
+    """The settings of a settings file's tables (its parsed TOML); a missing
+    key keeps the default of :class:`Settings`, which checks the ranges.
+
+    Parameters
+    ----------
+    data
+        The tables of :data:`SETTINGS_KEYS`, as :func:`tomllib.loads` or
+        :func:`settings_to_data` gives them.
+
+    Returns
+    -------
+    Settings
+        The settings.
 
     Raises
     ------
@@ -224,6 +361,6 @@ def load_settings(path: Path) -> Settings:
     except tomllib.TOMLDecodeError as exc:
         raise SettingsError(f"{path}: not TOML: {exc}") from exc
     try:
-        return _settings(data)
+        return settings_from_data(data)
     except SettingsError as exc:
         raise SettingsError(f"{path}: {exc}") from exc

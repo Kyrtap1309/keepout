@@ -67,10 +67,17 @@ import sys
 import tempfile
 import textwrap
 import time
-from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final, Literal, TypeAlias, TypedDict, TypeVar, get_args
+from typing import (
+    TYPE_CHECKING,
+    Final,
+    Literal,
+    TypeAlias,
+    TypedDict,
+    TypeVar,
+    get_args,
+)
 from urllib.parse import parse_qs, urlsplit
 
 import astropy.units as u
@@ -98,7 +105,6 @@ from keepout.screening import CloseApproach, ScreeningVolume, screen
 from keepout.screening.volume import SFS_DEEP_SPACE_PERIOD, SFS_ECCENTRICITY
 from keepout.sources._http import Downloader, http_download
 from keepout.sources._store import store_bytes
-from keepout.sources.catalog import Catalog
 from keepout.sources.celestrak import (
     GP_URL,
     PUBLIC_GROUPS,
@@ -110,6 +116,11 @@ from keepout.sources.celestrak import (
 from keepout.sources.socrates import SocratesApproach, epoch_matches, read_socrates
 from keepout.synthetic.covariance_model import LEO_UPPER_ALTITUDE
 from keepout.units import DAY, julian_seconds_between
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping, Sequence
+
+    from keepout.sources.catalog import Catalog
 
 TOOL: Final = "tools/screening_snapshot.py"
 DATA: Final = REPO / "tests/screening/data"

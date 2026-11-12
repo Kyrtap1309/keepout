@@ -1,5 +1,5 @@
 """CDMs for the store tests: the CCSDS annex example with its header, TCA
-and secondary object changed."""
+and secondary object changed; settings and row counts."""
 
 import re
 from pathlib import Path
@@ -7,10 +7,13 @@ from pathlib import Path
 import astropy.units as u
 from astropy.time import Time
 from builders import CDM_DATA
+from sqlalchemy import func, select
 
 import keepout.cdm
 from keepout.cdm import Cdm
-from keepout.store import CdmInput
+from keepout.pc import computation
+from keepout.settings import Settings
+from keepout.store import CdmInput, Store, models
 
 B1_TEXT = (CDM_DATA / "b1_example.kvn").read_text(encoding="utf-8")
 """Created 2010-03-12T22:31:12.000, TCA 2010-03-13T22:37:52.618, objects
@@ -18,6 +21,9 @@ B1_TEXT = (CDM_DATA / "b1_example.kvn").read_text(encoding="utf-8")
 
 TCA = Time("2010-03-13T22:37:52.618", scale="utc")
 """The example's TCA."""
+
+FOSTER = Settings(compute=computation("foster"), combined_hard_body_radius=20.0)
+"""Settings of a fast Pc, with the HBR the example lacks."""
 
 
 def _set(text: str, keyword: str, value: str) -> str:
@@ -93,3 +99,9 @@ def written(path: Path, text: str) -> Path:
     """``path`` with ``text`` written to it."""
     path.write_text(text, encoding="utf-8")
     return path
+
+
+def count_rows(store: Store, table: type[models.Base]) -> int:
+    """How many rows ``table`` of ``store`` has."""
+    with store.read() as session:
+        return session.scalar(select(func.count()).select_from(table)) or 0

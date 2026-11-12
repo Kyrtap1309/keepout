@@ -15,8 +15,7 @@ import datetime
 import math
 import re
 import warnings
-from collections.abc import Generator, Iterable, Sequence
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 import erfa
 import erfa.ufunc
@@ -24,6 +23,9 @@ from astropy.time import Time
 from erfa import ErfaWarning
 
 from keepout.units import DAY
+
+if TYPE_CHECKING:
+    from collections.abc import Generator, Iterable, Sequence
 
 __all__ = [
     "format_epoch",

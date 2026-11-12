@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from keepout._defaults import DECISION_POINT
 from keepout._text import days_text
@@ -22,6 +21,9 @@ from keepout.risk.trend import (
     analyse_trend,
 )
 from keepout.units import DAY
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
 
 __all__ = [
     "DEFAULT_DECISION_CONFIG",

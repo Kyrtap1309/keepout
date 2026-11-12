@@ -11,7 +11,7 @@ import astropy.units as u
 import numpy as np
 import pytest
 from astropy.time import Time
-from builders import approx
+from builders import SMALL_GRID, approx
 from scipy.stats import ncx2
 
 from keepout._defaults import DECISION_POINT
@@ -73,8 +73,6 @@ SIGMA: Final = 100.0
 MISS: Final = 150.0
 """Radial miss of :func:`leo_cdm` [m]."""
 FOSTER: Final = computation("foster")
-SMALL: Final = BurnGrid(steps_per_orbit=1, delta_v_per_direction=6)
-"""About 70 cells at 25 h, which take a fraction of a second."""
 
 
 def direction(angle: float) -> FloatArray:
@@ -187,7 +185,7 @@ def cell(plan: ManeuverPlan, option: ManeuverOption) -> tuple[int, int]:
 
 @pytest.fixture(scope="module", name="plan")
 def small_plan() -> ManeuverPlan:
-    return plan_maneuver(leo_event(), grid=SMALL)
+    return plan_maneuver(leo_event(), grid=SMALL_GRID)
 
 
 @dataclass(frozen=True, eq=False)
@@ -235,13 +233,13 @@ def test_baseline_applies_no_shift(monkeypatch: pytest.MonkeyPatch) -> None:
         return np.full(r.shape[:-1], np.nan)
 
     monkeypatch.setattr(planner, "closest_approach_shift", no_minimum)
-    plan = plan_maneuver(leo_event(), grid=SMALL)
+    plan = plan_maneuver(leo_event(), grid=SMALL_GRID)
     assert plan.baseline.pc == approx(compute_pc(plan.conjunction).value, rel=1e-6)
 
 
 def test_the_plan_reads_the_latest_cdm() -> None:
     older = as_cdm(leo_conjunction(), hours=40.0)
-    plan = plan_maneuver(event_of(older, as_cdm(leo_conjunction())), grid=SMALL)
+    plan = plan_maneuver(event_of(older, as_cdm(leo_conjunction())), grid=SMALL_GRID)
     assert plan.burn_leads[0] <= 25 * HOUR
 
 
@@ -304,7 +302,7 @@ def test_burn_window_stops_at_the_cdm_creation(plan: ManeuverPlan) -> None:
 
 
 def test_burn_window_starts_at_the_decision_point() -> None:
-    plan = plan_maneuver(leo_event(100.0), grid=SMALL)
+    plan = plan_maneuver(leo_event(100.0), grid=SMALL_GRID)
     assert plan.burn_leads[0] == DECISION_POINT
 
 
@@ -325,7 +323,7 @@ def test_cdm_too_close_to_tca_is_an_error() -> None:
 
 
 def test_a_cdm_at_the_last_burn_time_has_one_row() -> None:
-    plan = plan_maneuver(leo_event(6.0), grid=SMALL)
+    plan = plan_maneuver(leo_event(6.0), grid=SMALL_GRID)
     assert plan.burn_leads == pytest.approx([6 * HOUR], abs=1e-3)
 
 
@@ -355,7 +353,7 @@ def test_no_cell_meets_target_gives_none() -> None:
     # Foster's Pc is exactly 0 beyond 12 sigma, and 0 is below any target: only
     # covariances wider than the whole grid leave no such cell.
     event = event_of(as_cdm(leo_conjunction(1000 * KM)))
-    plan = plan_maneuver(event, target_pc=1e-300, grid=SMALL, compute=FOSTER)
+    plan = plan_maneuver(event, target_pc=1e-300, grid=SMALL_GRID, compute=FOSTER)
     assert np.all(plan.pc > 1e-300)
     assert plan.prograde is None
     assert plan.retrograde is None
@@ -364,7 +362,7 @@ def test_no_cell_meets_target_gives_none() -> None:
 def test_option_confirmed_by_event_method(plan: ManeuverPlan) -> None:
     # Calls: 1 is the baseline, 2 the first prograde candidate.
     compute = Scripted("foster", refused=frozenset({2}))
-    confirmed = plan_maneuver(leo_event(), grid=SMALL, compute=compute)
+    confirmed = plan_maneuver(leo_event(), grid=SMALL_GRID, compute=compute)
     assert plan.prograde is not None
     assert confirmed.prograde is not None
     row, column = cell(plan, plan.prograde)
@@ -382,7 +380,7 @@ def test_option_confirmed_by_event_method(plan: ManeuverPlan) -> None:
 
 def test_confirmation_keeps_the_grid_cell_conjunction(plan: ManeuverPlan) -> None:
     compute = Scripted("foster", refused=frozenset())
-    plan_maneuver(leo_event(), grid=SMALL, compute=compute)
+    plan_maneuver(leo_event(), grid=SMALL_GRID, compute=compute)
     assert plan.prograde is not None
     assert compute.seen[1].miss_distance == pytest.approx(
         plan.prograde.range_at_tca, rel=1e-9
@@ -392,7 +390,7 @@ def test_confirmation_keeps_the_grid_cell_conjunction(plan: ManeuverPlan) -> Non
 
 def test_confirmations_are_bounded() -> None:
     compute = Scripted("foster")
-    plan = plan_maneuver(leo_event(), grid=SMALL, compute=compute)
+    plan = plan_maneuver(leo_event(), grid=SMALL_GRID, compute=compute)
     assert plan.prograde is None
     assert plan.retrograde is None
     # MAX_CONFIRMATIONS for each direction, after the baseline.
@@ -408,11 +406,11 @@ def test_confirmations_are_bounded() -> None:
 def test_one_candidate_left_untested_is_singular(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    full = plan_maneuver(leo_event(), grid=SMALL, compute=Scripted("foster"))
+    full = plan_maneuver(leo_event(), grid=SMALL_GRID, compute=Scripted("foster"))
     below = int(np.count_nonzero(full.pc[:, full.delta_v > 0.0] < full.target_pc))
     module = importlib.import_module("keepout.maneuver.planner")
     monkeypatch.setattr(module, "MAX_CONFIRMATIONS", below - 1)
-    plan = plan_maneuver(leo_event(), grid=SMALL, compute=Scripted("foster"))
+    plan = plan_maneuver(leo_event(), grid=SMALL_GRID, compute=Scripted("foster"))
     (note,) = (n for n in plan.notes if n.startswith("prograde: of "))
     assert f"of {below} cells below the target" in note
     assert note.endswith(f"after {below - 1} tries with 1 candidate left untested")
@@ -420,14 +418,14 @@ def test_one_candidate_left_untested_is_singular(
 
 def test_a_search_that_ends_early_does_not_claim_untested_candidates() -> None:
     compute = Scripted("foster", refused=frozenset({2}))
-    plan = plan_maneuver(leo_event(), grid=SMALL, compute=compute)
+    plan = plan_maneuver(leo_event(), grid=SMALL_GRID, compute=compute)
     assert plan.prograde is not None
     assert not any("untested" in note for note in plan.notes)
 
 
 def test_a_failed_confirmation_moves_to_the_next_candidate(plan: ManeuverPlan) -> None:
     compute = Scripted("foster", refused=frozenset(), raising=frozenset({2}))
-    confirmed = plan_maneuver(leo_event(), grid=SMALL, compute=compute)
+    confirmed = plan_maneuver(leo_event(), grid=SMALL_GRID, compute=compute)
     assert plan.prograde is not None
     assert confirmed.prograde is not None
     assert confirmed.prograde.burn_lead > plan.prograde.burn_lead
@@ -453,12 +451,12 @@ def test_conservative_basis_decides_on_the_upper_end() -> None:
         def resolved(self, result: PcResult) -> PcComputation:
             return self
 
-    plan = plan_maneuver(leo_event(), grid=SMALL, compute=Wide("foster"))
+    plan = plan_maneuver(leo_event(), grid=SMALL_GRID, compute=Wide("foster"))
     assert plan.baseline.pc > 2.0 * TARGET_PC
     assert plan.prograde is None
     loose = plan_maneuver(
         leo_event(),
-        grid=SMALL,
+        grid=SMALL_GRID,
         compute=Wide("foster"),
         thresholds=Thresholds(basis="estimate"),
     )
@@ -487,7 +485,7 @@ def test_auto_fallback_keeps_its_seed_and_cap_in_confirmation(
     monkeypatch.setattr("keepout.pc._auto.AUTO_MC_SAMPLES", cap)
     monkeypatch.setattr(api, "_compute", spy)
     event = event_of(as_cdm(slow_conjunction()))
-    first = plan_maneuver(event, target_pc=1e-3, grid=SMALL)
+    first = plan_maneuver(event, target_pc=1e-3, grid=SMALL_GRID)
     assert first.baseline.method == "montecarlo"
     expected = {"max_samples": cap, "seed": AUTO_MC_SEED}
     assert first.confirmation.options == expected
@@ -530,7 +528,7 @@ def test_explicit_options_are_what_confirms_and_evaluates(
 
     monkeypatch.setattr(api, "_compute", spy)
     compute = Counted("foster", {"rtol": 1e-6})
-    plan = plan_maneuver(leo_event(), grid=SMALL, compute=compute)
+    plan = plan_maneuver(leo_event(), grid=SMALL_GRID, compute=compute)
     assert plan.confirmation is compute
     assert plan.prograde is not None
     # The baseline and a confirmation per direction at least; the grid's own
@@ -580,7 +578,7 @@ def test_a_hall3d_failure_on_a_candidate_falls_back_to_monte_carlo(
     spy = HallFails()
     monkeypatch.setattr(api, "_compute", spy)
     event = event_of(as_cdm(slow_conjunction()))
-    plan = plan_maneuver(event, target_pc=1e-3, grid=SMALL)
+    plan = plan_maneuver(event, target_pc=1e-3, grid=SMALL_GRID)
     assert plan.baseline.method == "hall3d"
     fallback = plan.confirmation.fallback
     assert fallback is not None
@@ -605,7 +603,7 @@ def test_an_explicit_hall3d_gets_no_fallback(monkeypatch: pytest.MonkeyPatch) ->
     spy = HallFails(skip=1)
     monkeypatch.setattr(api, "_compute", spy)
     event = event_of(as_cdm(slow_conjunction()))
-    plan = plan_maneuver(event, grid=SMALL, compute=computation("hall3d"))
+    plan = plan_maneuver(event, grid=SMALL_GRID, compute=computation("hall3d"))
     assert plan.confirmation.fallback is None
     assert "montecarlo" not in spy.runs
     assert plan.prograde is not None
@@ -637,7 +635,7 @@ def test_evaluate_burn_returns_the_burns_own_diagnostics() -> None:
             note = () if miss == pytest.approx(MISS) else (f"burnt {miss:.0f}",)
             return dataclasses.replace(result, diagnostics=("shared", *note))
 
-    plan = plan_maneuver(leo_event(), grid=SMALL, compute=Noting("foster"))
+    plan = plan_maneuver(leo_event(), grid=SMALL_GRID, compute=Noting("foster"))
     assert "shared" in plan.notes
     assert plan.baseline.notes == ()
     option = plan.prograde
@@ -649,10 +647,10 @@ def test_evaluate_burn_returns_the_burns_own_diagnostics() -> None:
 
 def test_assumed_covariance_is_carried() -> None:
     cdm = as_cdm(leo_conjunction(), method=CovarianceMethod.DEFAULT)
-    plan = plan_maneuver(event_of(cdm), grid=SMALL)
+    plan = plan_maneuver(event_of(cdm), grid=SMALL_GRID)
     assert plan.assumed_covariance
     assert any("assumed" in note for note in plan.notes)
-    calculated = plan_maneuver(leo_event(), grid=SMALL)
+    calculated = plan_maneuver(leo_event(), grid=SMALL_GRID)
     assert not calculated.assumed_covariance
     assert not any("assumed" in note for note in calculated.notes)
 
@@ -660,7 +658,7 @@ def test_assumed_covariance_is_carried() -> None:
 def test_position_only_covariance_stays_on_foster() -> None:
     # Slow, so that "auto" would go to Hall's 3-D method were velocities known.
     cdm = as_cdm(slow_conjunction(velocity_sigma=0.0))
-    plan = plan_maneuver(event_of(cdm), grid=SMALL)
+    plan = plan_maneuver(event_of(cdm), grid=SMALL_GRID)
     assert plan.baseline.method == "foster"
     assert any("only in position" in note for note in plan.notes)
 
@@ -670,7 +668,7 @@ def test_unknown_covariance_is_an_error() -> None:
     secondary = dataclasses.replace(conjunction.secondary, covariance=None)
     unknown = Conjunction(conjunction.primary, secondary, 20.0)
     with pytest.raises(ManeuverError, match=r"EVENT-7.*secondary \(2002\)"):
-        plan_maneuver(event_of(as_cdm(unknown)), grid=SMALL)
+        plan_maneuver(event_of(as_cdm(unknown)), grid=SMALL_GRID)
 
 
 def test_a_missing_hard_body_radius_is_said_as_elsewhere() -> None:
@@ -679,16 +677,18 @@ def test_a_missing_hard_body_radius_is_said_as_elsewhere() -> None:
     secondary = dataclasses.replace(conjunction.secondary, hard_body_radius=None)
     event = event_of(as_cdm(Conjunction(primary, secondary, 20.0)))
     with pytest.raises(HardBodyRadiusError):
-        plan_maneuver(event, grid=SMALL)
-    assert plan_maneuver(event, grid=SMALL, combined_hard_body_radius=20.0).prograde
+        plan_maneuver(event, grid=SMALL_GRID)
+    assert plan_maneuver(
+        event, grid=SMALL_GRID, combined_hard_body_radius=20.0
+    ).prograde
 
 
 def test_primary_that_cannot_manoeuvre_is_an_error() -> None:
     cdm = as_cdm(leo_conjunction(), maneuverable=Maneuverable.NO)
     with pytest.raises(ManeuverError, match=r"EVENT-7.*1001.*MANEUVERABLE = NO"):
-        plan_maneuver(event_of(cdm), grid=SMALL)
+        plan_maneuver(event_of(cdm), grid=SMALL_GRID)
     unknown = as_cdm(leo_conjunction(), maneuverable=Maneuverable.NOT_APPLICABLE)
-    assert plan_maneuver(event_of(unknown), grid=SMALL).prograde is not None
+    assert plan_maneuver(event_of(unknown), grid=SMALL_GRID).prograde is not None
 
 
 def test_primary_on_an_unbound_orbit_is_an_error() -> None:
@@ -699,7 +699,7 @@ def test_primary_on_an_unbound_orbit_is_an_error() -> None:
     fast = dataclasses.replace(conjunction.primary, state=state)
     event = event_of(as_cdm(Conjunction(fast, conjunction.secondary, 20.0)))
     with pytest.raises(ManeuverError, match=r"EVENT-7.*no orbital period"):
-        plan_maneuver(event, grid=SMALL)
+        plan_maneuver(event, grid=SMALL_GRID)
 
 
 def test_drag_used_only_with_cd_area_over_mass(
@@ -712,19 +712,19 @@ def test_drag_used_only_with_cd_area_over_mass(
         return burn_effects(*args)  # type: ignore[arg-type]
 
     monkeypatch.setattr(planner, "burn_effects", spy)
-    without = plan_maneuver(leo_event(), grid=SMALL)
+    without = plan_maneuver(leo_event(), grid=SMALL_GRID)
     assert sum("drag is off" in note for note in without.notes) == 1
     event = event_of(with_drag(as_cdm(leo_conjunction())))
-    dragged = plan_maneuver(event, grid=SMALL)
+    dragged = plan_maneuver(event, grid=SMALL_GRID)
     assert not any("drag is off" in note for note in dragged.notes)
     event = event_of(with_drag(as_cdm(leo_conjunction()), 0.0))
-    zero = plan_maneuver(event, grid=SMALL)
+    zero = plan_maneuver(event, grid=SMALL_GRID)
     assert sum("drag is off" in note for note in zero.notes) == 1
     assert terms == [None, 0.02, None]
 
 
 def drag_note(cdm: Cdm) -> str:
-    plan = plan_maneuver(event_of(cdm), grid=SMALL)
+    plan = plan_maneuver(event_of(cdm), grid=SMALL_GRID)
     (note,) = [note for note in plan.notes if "drag is off" in note]
     return note
 
@@ -759,14 +759,14 @@ def test_the_drag_warning_goes_by_perigee_not_by_altitude_at_tca() -> None:
 
 def test_drag_on_gives_no_warning_at_any_altitude() -> None:
     cdm = as_cdm(leo_conjunction(radius=EARTH_RADIUS + 400 * KM))
-    plan = plan_maneuver(event_of(with_drag(cdm)), grid=SMALL)
+    plan = plan_maneuver(event_of(with_drag(cdm)), grid=SMALL_GRID)
     assert not any("perigee" in note for note in plan.notes)
 
 
 def test_a_negative_drag_term_is_an_error() -> None:
     event = event_of(with_drag(as_cdm(leo_conjunction()), -0.02))
     with pytest.raises(ManeuverError, match=r"EVENT-7.*CD_AREA_OVER_MASS"):
-        plan_maneuver(event, grid=SMALL)
+        plan_maneuver(event, grid=SMALL_GRID)
 
 
 @pytest.mark.slow
@@ -796,13 +796,13 @@ def test_a_burn_into_the_earth_names_the_event(
 
     monkeypatch.setattr(planner, "burn_effects", falling)
     with pytest.raises(ManeuverError, match=r"EVENT-7.*below the Earth's surface"):
-        plan_maneuver(leo_event(), grid=SMALL)
+        plan_maneuver(leo_event(), grid=SMALL_GRID)
 
 
 INTO_THE_SURFACE: Final = BurnGrid(
     steps_per_orbit=1, delta_v_per_direction=6, largest_delta_v=500.0
 )
-""":data:`SMALL` up to 500 m/s, which retrograde takes the primary 1900 km
+""":data:`SMALL_GRID` up to 500 m/s, which retrograde takes the primary 1900 km
 below the surface; 36 m/s next to it takes 130 km off its perigee."""
 
 
@@ -846,7 +846,7 @@ def test_evaluate_burn_matches_the_grid_cell(plan: ManeuverPlan) -> None:
 
 def test_evaluate_burn_keeps_the_force_of_the_plan() -> None:
     event = event_of(with_drag(as_cdm(leo_conjunction())))
-    plan = plan_maneuver(event, grid=SMALL)
+    plan = plan_maneuver(event, grid=SMALL_GRID)
     option = plan.prograde
     assert option is not None
     evaluated = evaluate_burn(plan, burn_lead=option.burn_lead, delta_v=option.delta_v)
@@ -884,7 +884,7 @@ def test_evaluate_burn_rejects_a_burn_before_the_cdm(plan: ManeuverPlan) -> None
 
 def test_evaluate_burn_refuses_a_cell_without_a_minimum() -> None:
     plan = plan_maneuver(
-        event_of(as_cdm(slow_conjunction())), grid=SMALL, compute=FOSTER
+        event_of(as_cdm(slow_conjunction())), grid=SMALL_GRID, compute=FOSTER
     )
     row, column = np.argwhere(np.isnan(plan.pc))[0]
     with pytest.raises(ManeuverError, match=r"EVENT-7.*closest approach"):
@@ -898,12 +898,12 @@ def test_evaluate_burn_refuses_a_cell_without_a_minimum() -> None:
 @pytest.mark.parametrize("target", [0.0, 1.0, -1e-5, 1.5, math.nan, math.inf])
 def test_target_outside_zero_one_is_refused(target: float) -> None:
     with pytest.raises(ValueError, match="target_pc must be in"):
-        plan_maneuver(leo_event(), target_pc=target, grid=SMALL)
+        plan_maneuver(leo_event(), target_pc=target, grid=SMALL_GRID)
 
 
 def test_slow_encounter_cells_are_nan_and_noted() -> None:
     plan = plan_maneuver(
-        event_of(as_cdm(slow_conjunction())), grid=SMALL, compute=FOSTER
+        event_of(as_cdm(slow_conjunction())), grid=SMALL_GRID, compute=FOSTER
     )
     empty = int(np.count_nonzero(np.isnan(plan.pc)))
     assert 0 < empty <= plan.pc.size
@@ -921,7 +921,7 @@ def test_slow_encounter_cells_are_nan_and_noted() -> None:
 
 
 def test_a_slow_encounter_is_confirmed_by_its_own_method() -> None:
-    plan = plan_maneuver(event_of(as_cdm(slow_conjunction())), grid=SMALL)
+    plan = plan_maneuver(event_of(as_cdm(slow_conjunction())), grid=SMALL_GRID)
     assert plan.baseline.method == "hall3d"
     assert plan.prograde is not None
     assert plan.prograde.method == "hall3d"
@@ -941,7 +941,7 @@ def test_a_cell_without_a_minimum_is_never_an_option(
         return np.full(r.shape[:-1], np.nan)
 
     monkeypatch.setattr(planner, "closest_approach_shift", no_minimum)
-    plan = plan_maneuver(leo_event(), grid=SMALL)
+    plan = plan_maneuver(leo_event(), grid=SMALL_GRID)
     assert np.isnan(plan.pc).all()
     assert plan.prograde is None
     assert plan.retrograde is None
@@ -965,7 +965,7 @@ def test_a_cell_whose_pc_fails_is_nan_and_counted(
             return flaky(conjunction)
 
     monkeypatch.setattr(planner, "_CELL_PC", Flaky("foster"))
-    plan = plan_maneuver(leo_event(), grid=SMALL, compute=FOSTER)
+    plan = plan_maneuver(leo_event(), grid=SMALL_GRID, compute=FOSTER)
     assert np.count_nonzero(np.isnan(plan.pc)) == 3
     assert np.count_nonzero(np.isnan(plan.range_at_tca)) == 0
     assert sum(f"3 of {plan.pc.size}" in note for note in plan.notes) == 1
@@ -973,7 +973,7 @@ def test_a_cell_whose_pc_fails_is_nan_and_counted(
 
 def test_the_notes_repeat_what_the_baseline_says() -> None:
     cdm = as_cdm(slow_conjunction(velocity_sigma=0.0))
-    plan = plan_maneuver(event_of(cdm), grid=SMALL)
+    plan = plan_maneuver(event_of(cdm), grid=SMALL_GRID)
     diagnostics = compute_pc(plan.conjunction).diagnostics
     assert diagnostics
     assert set(diagnostics) <= set(plan.notes)
@@ -983,7 +983,7 @@ def test_a_synthetic_cdm_is_planned_and_says_what_it_rests_on() -> None:
     # As the synthetic operator writes it: assumed and position-only.
     conjunction = slow_conjunction(velocity_sigma=0.0)
     cdm = as_cdm(conjunction, method=CovarianceMethod.DEFAULT)
-    plan = plan_maneuver(event_of(cdm), grid=SMALL)
+    plan = plan_maneuver(event_of(cdm), grid=SMALL_GRID)
     assert plan.conjunction.position_only_covariance == ("primary", "secondary")
     assert plan.assumed_covariance
     assert plan.baseline.method == "foster"
@@ -1006,7 +1006,7 @@ def test_a_chosen_option_adds_its_own_diagnostics() -> None:
             note = () if miss == pytest.approx(MISS) else (f"burnt {miss:.0f}",)
             return dataclasses.replace(result, diagnostics=("shared", *note))
 
-    plan = plan_maneuver(leo_event(), grid=SMALL, compute=Noting("foster"))
+    plan = plan_maneuver(leo_event(), grid=SMALL_GRID, compute=Noting("foster"))
     assert plan.prograde is not None
     assert plan.retrograde is not None
     assert f"prograde: burnt {plan.prograde.range_at_tca:.0f}" in plan.notes

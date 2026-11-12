@@ -3,17 +3,19 @@
 
 from __future__ import annotations
 
-import email.message
 import http.client
 import http.cookiejar
 import urllib.error
 import urllib.request
-from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Literal, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 
 from keepout.errors import SourceUnavailable
 from keepout.sources._http import DOWNLOAD_TIMEOUT, gunzip, http_request, network_errors
+
+if TYPE_CHECKING:
+    import email.message
+    from collections.abc import Iterable
 
 __all__ = ["Request", "Response", "Transport", "UrllibTransport"]
 

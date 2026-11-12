@@ -13,8 +13,7 @@ from __future__ import annotations
 
 import re
 from functools import partial
-from pathlib import Path
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from astropy.time import Time
 
@@ -24,6 +23,9 @@ from keepout.errors import CaraFormatError, UnsupportedFrame
 from keepout.objects import ObjectState, ReportedObject, gcrf_object_states
 from keepout.state import StateVector, as_ref_frame
 from keepout.units import KM
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 __all__ = ["load_legacy_objects"]
 

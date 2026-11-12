@@ -5,12 +5,14 @@ from __future__ import annotations
 
 import re
 import urllib.parse
-from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Final, Literal, TypeAlias
+from typing import TYPE_CHECKING, Final, Literal, TypeAlias
 
 from keepout._defaults import CDM_PUBLIC_INTERVAL, GP_INTERVAL
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 __all__ = [
     "BASE_URL",

@@ -46,13 +46,11 @@ Practices Handbook, NASA/SP-20205011318 Rev. 2, Vol. 2, 2026, Appendix E.
 from __future__ import annotations
 
 import enum
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Final, NamedTuple, Self
+from typing import TYPE_CHECKING, Final, NamedTuple, Self
 
 import numpy as np
-from astropy.time import Time
 
 from keepout._pickling import reduce_with_mappings
 from keepout._types import override
@@ -62,9 +60,15 @@ from keepout._validation import (
     require_single_time,
 )
 from keepout.covariance import Covariance
-from keepout.omm import Omm
 from keepout.propagation import sgp4_shape
 from keepout.units import DAY, KM, julian_seconds_between
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from astropy.time import Time
+
+    from keepout.omm import Omm
 
 __all__ = [
     "FLOHRER_SIGMAS",
