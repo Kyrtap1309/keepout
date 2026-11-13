@@ -14,19 +14,15 @@ keepout needs Python 3.11 or later. It is not on PyPI yet, so install it
 from GitHub:
 
 ```bash
-pip install "keepout[cli] @ git+https://github.com/Kyrtap1309/keepout"
+pip install "keepout[cli,store] @ git+https://github.com/Kyrtap1309/keepout"
 ```
 
-Two extras add optional parts; without them you get the library only:
+The two extras add optional parts; without them you get the library only:
 
 | Extra | Adds | Needed for |
 |---|---|---|
 | `cli` | Typer and Rich | the `keepout` command |
 | `store` | SQLAlchemy and Alembic | the [conjunction store](store.md): `--store`, `keepout store`, `keepout jobs`, `keepout worker` |
-
-```bash
-pip install "keepout[cli,store] @ git+https://github.com/Kyrtap1309/keepout"
-```
 
 The examples on these pages read files committed to the repository: a
 sample CDM, the example fleet and the frozen catalogs. To run them, clone
@@ -39,26 +35,28 @@ uv sync --extra cli --extra store
 uv run keepout --help
 ```
 
-!!! tip "One thread per process"
-    NumPy and SciPy start a thread per CPU core by default, which makes
-    keepout's batched computations slower, not faster: the manoeuvre
-    planner, for one, uses 20 times the CPU time and takes longer. The
-    `keepout` command limits them to one thread itself
-    ([Threads](cli.md#threads)). In Python, set `OMP_NUM_THREADS=1` and
-    `OPENBLAS_NUM_THREADS=1` before starting it, and use the `workers=`
-    argument for parallel work.
-
 ## Where to start
 
 - **New to conjunction assessment?** [Concepts](concepts.md) explains the
   workflow and every term (Pc, TCA, HBR, CDM, ...) in one page.
-- **Have CDMs?** [Reading a CDM](#reading-a-cdm) →
+- **Have CDMs?** [Working with CDMs](cdm.md) →
   [2-D probability of collision](pc-2d.md) → [Risk assessment](risk.md).
 - **Only public data?** [Screening](screening.md) →
   [Synthetic operator](synthetic.md).
 - **Prefer a terminal?** [Command line](cli.md) walks through a week of
   a synthetic operator.
 - **Stuck?** [FAQ and troubleshooting](faq.md).
+
+## Performance
+
+!!! tip "One thread per process"
+    NumPy and SciPy start a thread per CPU core by default, which makes
+    keepout's batched computations slower, not faster. The manoeuvre
+    planner, for one, uses 20 times the CPU time and takes longer. The
+    `keepout` command limits them to one thread itself
+    ([Threads](cli.md#threads)). In Python, set `OMP_NUM_THREADS=1` and
+    `OPENBLAS_NUM_THREADS=1` before starting it, and use the `workers=`
+    argument for parallel work.
 
 ## Reading a CDM
 
@@ -83,26 +81,11 @@ print(primary.covariance.repairs)  # what was fixed in the CDM's covariance
 ()
 ```
 
-[Frames and units](frames-and-units.md) explains the frames keepout accepts,
+[Frames, units and covariances](frames-and-units.md) explains the frames keepout accepts,
 the units and how a CDM's covariance is checked and repaired.
 
-### Supported CDM versions
-
-- **CCSDS 508.0-B-1** (June 2013), including Technical Corrigendum 2, which
-  allows namespace-qualified `ndm:` XML. Every keyword is typed.
-- **CDM 2.0 as issued by TraCSS**, based on the 508.0-P-1.1 draft. It is
-  read and written. Keywords beyond 508.0-B-1 are kept as text, except
-  `HBR`, which is typed.
-- JSON and CSV variants are not supported.
-- Space-Track's public CDM summaries (`cdm_public`) are not CDMs. They carry
-  no states or covariances (see [Space-Track data](spacetrack.md#public-cdms)).
-- `keepout.cdm.make_cdm` writes CDMs of keepout's own. It writes version 2.0
-  when both objects have a hard-body radius, else 1.0. The
-  [synthetic operator](synthetic.md#the-cdms) issues them.
-
-The standards are CCSDS 508.0-B-1, *Conjunction Data Message*, Blue Book,
-2013 (Cor. 2, 2021), and the Office of Space Commerce's *TraCSS CDM
-Specification 001*, v2.1.
+[Working with CDMs](cdm.md) covers the CDM versions keepout reads,
+converting and writing CDMs, and grouping many CDMs into events.
 
 ## Probability of collision
 
@@ -139,8 +122,8 @@ Without `combined_hard_body_radius`, keepout uses the sum of both objects'
 ## Risk of an event
 
 An event is all the CDMs of one encounter. Here it has a single CDM;
-with your own, pass every CDM of the event, e.g.
-`[keepout.cdm.load(path) for path in Path("event").glob("*.kvn")]`.
+with your own, pass every CDM of the event. [Risk assessment](risk.md)
+starts with a sample event of three CDMs.
 
 ```python
 import keepout.cdm
@@ -173,12 +156,15 @@ from collections import Counter
 
 from astropy.time import Time
 
+import keepout.omm
 from keepout import screen
-from keepout.sources.celestrak import fetch_catalog
 
-catalog = fetch_catalog()  # CelesTrak's public catalog, cached for two hours
-iss = [omm for omm in catalog.omms if omm.catalog_number == 25544]
-result = screen(iss, catalog.omms, Time.now())  # the next 7 days, a 5 km sphere
+# CelesTrak's public catalog as it was on 2026-10-06, frozen in the repository.
+# For the live one: catalog = keepout.sources.celestrak.fetch_catalog().omms
+catalog = keepout.omm.load("tests/screening/data/celestrak-public.csv.gz")
+iss = [omm for omm in catalog if omm.catalog_number == 25544]
+start = Time("2026-10-06T00:00:00", scale="utc")  # or Time.now()
+result = screen(iss, catalog, start)  # the next 7 days, a 5 km sphere
 for approach in result.approaches:
     print(
         approach.tca.isot, approach.secondary_number, f"{approach.range_at_tca:.0f} m"
@@ -186,9 +172,18 @@ for approach in result.approaches:
 print(Counter(skipped.reason.value for skipped in result.skipped))  # sets left out
 ```
 
+```text
+2026-10-06T05:12:33.772 58180 4633 m
+2026-10-06T12:10:37.724 58180 4902 m
+2026-10-07T16:10:03.846 46275 4104 m
+2026-10-10T14:08:54.848 49773 2751 m
+Counter({'stale': 28})
+```
+
 Each approach holds both objects' GCRF states at TCA, the range at TCA, the
-miss vector in the primary's RTN frame and the relative velocity. Screening
-GP element sets finds geometry, not risk. The element sets have no
+miss vector in the primary's [RTN frame](frames-and-units.md#rtn-frame)
+(radial, transverse, normal) and the relative velocity. Screening GP
+element sets finds geometry, not risk. The element sets have no
 covariance and are kilometres off within days.
 
 [Screening](screening.md) explains the method, the three built-in screening
@@ -214,9 +209,9 @@ approach and assesses each event (12 approaches that week, 2 to monitor).
 
 !!! warning "Assumed covariances"
     GP data has no covariance, so these CDMs carry keepout's model of GP
-    element-set errors. The model is an explicit
-    [assumption](assumptions.md) from the literature, not orbit
-    determination. Its Pc values show what the model implies, not the
+    element-set errors, the
+    [synthetic covariance model](assumptions.md). It is an explicit
+    assumption from the literature, not orbit determination. Its Pc values show what the model implies, not the
     satellites' real risk.
 
 Other commands download data and check keepout against CARA:
@@ -313,25 +308,5 @@ tests is not covered by it:
   Agreement), downloaded on demand. Only numbers derived from them and the
   manoeuvre report's figure are committed.
 
-## Development
-
-```bash
-uv sync
-uv run pre-commit install     # every CI lint check, run on commit
-uv run pytest -n auto         # offline test suite, without the slow tests
-uv run pytest -n auto -m slow # the slow tests CI also runs (tens of seconds each)
-uv run pytest -m validation   # reference checks; downloads CARA and Kelvins data
-uv run pytest -n0 --inline-snapshot=fix   # update the CLI snapshots (not under -n)
-uv run python tools/validation_report.py   # regenerate the validation report
-uv run python tools/validation_report.py --monte-carlo   # Monte Carlo (slow)
-uv run python tools/risk_report.py   # Kelvins risk report (downloads 221 MB once)
-uv run python tools/screening_report.py   # SOCRATES screening report (offline)
-uv run python tools/screening_benchmark.py   # screening benchmark (offline, minutes)
-uv run python tools/screening_benchmark.py --source spacetrack   # on the full catalog
-uv run python tools/synthetic_operator_report.py   # synthetic operator report (offline)
-uv run python tools/maneuver_report.py   # manoeuvre report (downloads one CARA CDM)
-uv run python tools/spacetrack_snapshot.py verify   # frozen Space-Track catalog (offline)
-uv run ruff check && uv run ruff format --check
-uv run mypy && uv run basedpyright
-uv run mkdocs serve           # this documentation
-```
+Development commands (tests, reports, linting) are in
+[`CONTRIBUTING.md`](https://github.com/Kyrtap1309/keepout/blob/main/CONTRIBUTING.md).

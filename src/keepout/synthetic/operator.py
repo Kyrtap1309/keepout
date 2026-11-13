@@ -263,6 +263,7 @@ def run(
     from keepout import omm
     from keepout.synthetic import load_fleet, run
 
+    # Sample files in the repository.
     fleet = load_fleet("examples/synthetic-operator/fleet.toml")
     catalog = omm.load("tests/screening/data/celestrak-public.csv.gz")
     start = Time("2026-10-06T00:00:00", scale="utc")

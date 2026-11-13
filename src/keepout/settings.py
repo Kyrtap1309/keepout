@@ -191,6 +191,11 @@ def plan_arguments(settings: Settings) -> PlanArguments:
     ----------
     settings
         The operator's settings.
+
+    Returns
+    -------
+    PlanArguments
+        The keyword arguments, by name.
     """
     return {
         "target_pc": settings.target_pc,

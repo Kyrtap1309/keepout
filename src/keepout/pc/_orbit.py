@@ -70,7 +70,10 @@ class OrbitUncertainty:
             If the orbit is not elliptic.
         """
         if item.covariance is None:
-            raise CovarianceError(f"covariance of {item.object_id} is unknown")
+            raise CovarianceError(
+                f"covariance of {item.object_id} is unknown (use method 'auto', "
+                "'frisbee' or 'alfano' for a maximum Pc)"
+            )
         state = np.concatenate([item.state.r, item.state.v])
         fr = retrograde_factor(item.state.r, item.state.v)
         elements, to_elements = complex_step(lambda x: to_equinoctial(x, fr), state)

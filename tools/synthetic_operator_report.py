@@ -360,37 +360,48 @@ def _introduction(summary: Summary) -> list[str]:
     names = ", ".join(_object(s["catalog_number"], s["name"]) for s in fleet)
     return [
         (
-            "keepout ran as a conjunction assessment service for a small fleet: "
-            f"{len(fleet)} real satellites ({names}), named in the fleet file "
-            f"`{settings['fleet']}`. It screened them against the "
+            "This page is an end-to-end demonstration, not a validation. keepout "
+            "acts as the conjunction assessment service of a small fleet, from "
+            "screening public data to a decision on each approach. There is no "
+            "reference to compare with, and every covariance is assumed."
+        ),
+        "",
+        (
+            f"The fleet is {len(fleet)} real satellites ({names}), named in the "
+            f"fleet file `{settings['fleet']}`. keepout is not these satellites' "
+            "operator, and nothing here is advice about them."
+        ),
+        "",
+        (
+            "keepout screened the fleet against the "
             f"{catalog['element_sets']} element sets of the public GP catalog "
             f"({catalog['screened']} screened, {catalog['skipped']} left out by "
             "screening's rules), "
             f"{settings['days']:g} days from "
             f"{minute_text(settings['start'])} UTC with the "
-            f"{settings['volume']}. It then issued a CCSDS CDM for every close "
-            "approach, computed the Pc from each CDM and assessed each event with "
+            f"{settings['volume']}. For every close approach it then issued a "
+            "CCSDS CDM, computed the Pc from that CDM and assessed the event with "
             "keepout's default thresholds "
             f"({threshold_text(settings['green_below'], settings['red_from'])}, "
             f"{settings['basis']} basis) and "
             f"decision point ({settings['decision_point_days']:g} days before "
             "TCA). See [Synthetic operator](synthetic.md), [Screening](screening.md) "
-            "and [Risk assessment](risk.md). "
-            "keepout is not these satellites' operator, and nothing here is advice "
-            "about them."
+            "and [Risk assessment](risk.md)."
         ),
         "",
         '!!! warning "Assumed covariances"',
         (
             "    GP element sets carry no covariance. Every covariance here is "
-            "keepout's synthetic model (`keepout.synthetic.SyntheticCovarianceModel`): "
+            "keepout's synthetic model ([`SyntheticCovarianceModel`]"
+            "(reference/synthetic.md#keepout.synthetic.SyntheticCovarianceModel)): "
             "sigmas per orbit regime from the literature, the along-track sigma "
             "growing with the element set's age, times a safety factor of "
             f"{settings['safety_factor']:g}. It is an assumption, not orbit "
             "determination: the Pc values show what the model implies, not the "
             "real risk of these satellites. The CDMs say so in their comments "
-            "and give `COVARIANCE_METHOD = DEFAULT`. [Assumptions](assumptions.md) "
-            "gives the model's sources and limits."
+            "and give `COVARIANCE_METHOD = DEFAULT`. The "
+            "[synthetic covariance model](assumptions.md) gives its sources and "
+            "limits."
         ),
         "",
         (
@@ -436,27 +447,15 @@ def _fleet(summary: Summary) -> list[str]:
 def _model(summary: Summary) -> list[str]:
     events = summary["events"]
     factor = summary["settings"]["safety_factor"]
+    regimes = ", ".join(r["regime"] for r in summary["regimes"])
     lines = [
         (
-            "Each object's position covariance in its RTN frame is diagonal: "
-            "sigma_R = f sigma_R0, sigma_T = f (sigma_T0 + k |t - epoch|), "
-            f"sigma_N = f sigma_N0, with f = {factor:g} and the velocity block "
-            "zero (so `auto` keeps the 2-D Pc). The parameters per regime, before "
-            "f (epoch sigmas: Flohrer et al. 2009; k: Levit and Marshall 2011):"
-        ),
-        "",
-        *table(
-            ("Regime", "sigma_R0", "sigma_T0", "sigma_N0", "k"),
-            [
-                (
-                    r["regime"],
-                    f"{_km(r['radial'])} km",
-                    f"{_km(r['transverse'])} km",
-                    f"{_km(r['normal'])} km",
-                    f"{r['transverse_rate_per_day'] / KM:.3f} km/day",
-                )
-                for r in summary["regimes"]
-            ],
+            "Each object's covariance comes from the "
+            "[synthetic covariance model](assumptions.md#the-covariance-model): "
+            f"a diagonal position covariance in its RTN frame, with sigmas per "
+            f"orbit regime ({regimes}), the along-track sigma sigma_T growing with "
+            f"the element set's age, and a safety factor of {factor:g}. The "
+            "velocity block is zero, so `auto` keeps the 2-D Pc."
         ),
     ]
     sigmas = [sigma for e in events for sigma in e["transverse_sigmas"]]
@@ -532,7 +531,8 @@ def _approaches(summary: Summary) -> list[str]:
             "Pc: keepout's Pc from the CDM, as its recipient would compute it "
             "(method `auto`, which keeps the 2-D Pc for position-only covariances). "
             "Max Pc: the largest Pc over a scale factor of the combined covariance "
-            "(`keepout.pc.dilution`; Alfano 2005), and that factor: an upper "
+            "([`dilution`](reference/pc.md#keepout.pc.dilution); Alfano 2005), and "
+            "that factor: an upper "
             "bound that shows how far each Pc rests on the assumed size of the "
             "covariance."
         ),
@@ -576,9 +576,11 @@ def _example(summary: Summary, cdm: str | None) -> list[str]:
             f"{NOISE_FLOOR:g} (rounding noise) shown as 0.0:"
         ),
         "",
-        "```text",
-        *rounded(cdm).rstrip("\n").split("\n"),
-        "```",
+        '??? example "The CDM in KVN"',
+        "",
+        "    ```text",
+        *(f"    {line}" for line in rounded(cdm).rstrip("\n").split("\n")),
+        "    ```",
     ]
 
 

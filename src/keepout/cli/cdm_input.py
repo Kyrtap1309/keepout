@@ -25,6 +25,7 @@ CdmFiles: TypeAlias = Annotated[
     typer.Argument(
         exists=True,
         dir_okay=False,
+        metavar="CDM...",
         help="CDM files, KVN or XML, gzipped or not.",
     ),
 ]

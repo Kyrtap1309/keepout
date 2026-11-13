@@ -37,6 +37,7 @@ import datetime
 import math
 import os
 import platform
+import re
 import sys
 import time
 from pathlib import Path
@@ -509,10 +510,50 @@ def options_table(plan: Plan) -> list[str]:
     )
 
 
-def _notes(plan: Plan) -> list[str]:
+DIRECTION_NOTE: Final = re.compile(r"(?P<direction>prograde|retrograde): (?P<note>.*)")
+"""A plan's note about one direction's option, as the planner words it."""
+
+
+def _caveat_groups(notes: Sequence[str]) -> dict[str, list[tuple[str, str]]]:
+    """The notes by their lead (the text before the first colon, or the whole
+    note), each with what it is about (the event, or a direction's option)
+    and its text."""
+    groups: dict[str, list[tuple[str, str]]] = {}
+    for note in notes:
+        match = DIRECTION_NOTE.fullmatch(note)
+        about, text = (
+            (match["direction"], match["note"]) if match else ("without a burn", note)
+        )
+        lead = text.split(": ", 1)[0]
+        groups.setdefault(lead, []).append((about, text))
+    return groups
+
+
+def _caveats(plan: Plan) -> list[str]:
+    """The plan's notes as a list, a note repeated for several options given
+    once with what differs."""
     if not plan["notes"]:
         return []
-    return ["", "Notes of the plan:", "", *(f"- {note}." for note in plan["notes"])]
+    lines = ["", "Caveats:", ""]
+    for lead, members in _caveat_groups(plan["notes"]).items():
+        if len(members) == 1:
+            about, text = members[0]
+            prefix = "" if about == "without a burn" else f"{about}: "
+            lines.append(f"- {prefix}{text}.")
+            continue
+        details = [
+            text.split(": ", 1)[1] if ": " in text else text for _, text in members
+        ]
+        ends = {detail.rsplit("; ", 1)[-1] for detail in details}
+        shared = ends.pop() if len(ends) == 1 and "; " in details[0] else None
+        if shared is not None:
+            details = [detail.rsplit("; ", 1)[0] for detail in details]
+        lines.append(f"- {lead}" + (f" ({shared})" if shared else "") + ":")
+        lines += [
+            f"  - {about}: {detail}."
+            for (about, _), detail in zip(members, details, strict=True)
+        ]
+    return lines
 
 
 def _object(identifier: str, name: str) -> str:
@@ -544,29 +585,39 @@ def _event_table(plan: Plan) -> list[str]:
     )
 
 
+def _approach_text(a: Approach) -> str:
+    return (
+        f"range {a['range_at_tca']:.0f} m, {a['relative_speed']:.1f} m/s, assumed "
+        f"Pc {pc_text(a['pc'])}, {a['level']}"
+    )
+
+
 def _approach_lines(kind: str, approaches: Sequence[Approach]) -> list[str]:
     return [
-        (
-            f"  - {kind}: {a['secondary']} at {minute_text(a['tca'])} UTC, range "
-            f"{a['range_at_tca']:.0f} m, {a['relative_speed']:.1f} m/s, assumed Pc "
-            f"{pc_text(a['pc'])}, {a['level']}"
-        )
+        f"  - {kind}: {a['secondary']} at {minute_text(a['tca'])} UTC, "
+        + _approach_text(a)
         for a in approaches
     ]
 
 
-def _return_lines(item: Rescreen, target: float) -> list[str]:
+def _return_lines(item: Rescreen, pair: str, target: float) -> list[str]:
     return [
         (
-            f"  - **back above the target**: the burn brings this pair back at "
-            f"{minute_text(a['tca'])} UTC at Pc {pc_text(a['pc'])} (assumed), "
-            f"above the target {pc_text(target)}, so this option is not clean"
+            f"  - **back above the target**: the burn brings {pair} back together "
+            f"at {minute_text(a['tca'])} UTC, {_approach_text(a)}: above the "
+            f"target {pc_text(target)}, so this option is not clean"
         )
         for a in item["event_returns"]
     ]
 
 
-def _rescreen_lines(item: Rescreen, secondary: str, target: float) -> list[str]:
+def _key(approach: Approach) -> tuple[int, str]:
+    return approach["secondary"], approach["tca"]
+
+
+def _rescreen_lines(
+    item: Rescreen, secondary: str, pair: str, target: float
+) -> list[str]:
     view = (
         "on the element sets (SGP4, not the CDM's orbit) the event's "
         f"secondary {secondary}"
@@ -577,27 +628,36 @@ def _rescreen_lines(item: Rescreen, secondary: str, target: float) -> list[str]:
         event = f"{view} has no approach within {TOLERANCE} of the CDM's TCA"
     else:
         event = f"{view} passes at {item['event_range']:.0f} m"
-    found = len(item["new_approaches"]) + len(item["closer_approaches"])
-    closer = plural(
-        len(item["closer_approaches"]), "closer approach", "closer approaches"
-    )
+    # A return of the pair is also a new or closer approach: shown once.
+    returns = {_key(a) for a in item["event_returns"]}
+    new = [a for a in item["new_approaches"] if _key(a) not in returns]
+    closer = [a for a in item["closer_approaches"] if _key(a) not in returns]
+    if returns and not new and not closer:
+        found = "no other new or closer approach"
+    else:
+        other = "other " if returns else ""
+        found = (
+            f"{plural(len(new), f'{other}new approach', f'{other}new approaches')} "
+            f"and {plural(len(closer), 'closer approach', 'closer approaches')}"
+        )
+    status = "clean" if item["clean"] else "not clean"
+    listed = bool(returns or new or closer)
     return [
         (
-            f"- **{item['direction']}**: {item['catalog_objects']} objects screened "
-            f"from {minute_text(item['start'])} to {minute_text(item['end'])} UTC, "
+            f"- **{item['direction']}** ({status}): {item['catalog_objects']} "
+            f"objects screened from {minute_text(item['start'])} to "
+            f"{minute_text(item['end'])} UTC, "
             f"{plural(item['skipped_objects'], 'catalog object')} left out; {event}; "
-            f"{plural(len(item['new_approaches']), 'new approach', 'new approaches')} "
-            f"and {closer}"
-            f"{', one at red' if item['conflict'] else ', none at red'}"
-            f"{':' if found else '.'}"
+            f"{found}{', one at red' if item['conflict'] else ', none at red'}"
+            f"{':' if listed else '.'}"
         ),
-        *_return_lines(item, target),
-        *_approach_lines("new", item["new_approaches"]),
-        *_approach_lines("closer", item["closer_approaches"]),
+        *_return_lines(item, pair, target),
+        *_approach_lines("new", new),
+        *_approach_lines("closer", closer),
     ]
 
 
-def _outcome(demo: Demonstration, plan: Plan, secondary: str) -> list[str]:
+def _outcome(demo: Demonstration) -> list[str]:
     """What the re-screens make of the options, as ``keepout maneuver`` does."""
     rescreens = demo["rescreens"]
     returning = [item["direction"] for item in rescreens if item["event_returns"]]
@@ -606,29 +666,28 @@ def _outcome(demo: Demonstration, plan: Plan, secondary: str) -> list[str]:
     several = len(returning) > 1
     burns = f"{' and the '.join(returning)} burn{'s' if several else ''}"
     clean = [item["direction"] for item in rescreens if item["clean"]]
+    others = [item["direction"] for item in rescreens if not item["clean"]]
     if demo["recommendable"]:
         verdict = (
-            f"The {' and the '.join(clean)} option is clean, so "
-            "`keepout maneuver` exits with status 0 and shows both, the one "
-            "above as not clean."
+            f"Only the {' and the '.join(clean)} burn "
+            f"{'is' if len(clean) == 1 else 'are'} clean; `keepout maneuver` "
+            f"still lists the {' and the '.join(others)} "
+            f"{'one' if len(others) == 1 else 'ones'}, marked not clean."
         )
     else:
         verdict = (
-            "No option is clean, so `keepout maneuver` exits with status 4: "
-            "on this re-screen no burn it found clears the event and stays "
-            "clear of the pair."
+            "No burn is clean, so `keepout maneuver` exits with status 4: on "
+            "this re-screen no burn it found clears the event and stays clear of "
+            "the pair."
         )
     return [
         "",
         (
-            f"The {burns} clear{'' if several else 's'} the event at its TCA "
-            f"but bring{'' if several else 's'} the event's own secondary "
-            f"{secondary} back at another time, above the target "
-            f"{pc_text(plan['target_pc'])}. The planner looks for the new TCA "
-            "only near the old one, and in an "
-            f"encounter this slow ({plan['relative_speed']:.1f} m/s) a burn "
-            "moves the next close approach of the same two objects by hours: "
-            f"only the re-screen shows it. {verdict}"
+            f"{verdict} The {burns} clear{'' if several else 's'} the event at its "
+            "TCA, but the two objects meet again hours later, above the target. "
+            "The planner looks for the new TCA only near the old one (see the "
+            "slow-encounter caveat above), so only the re-screen finds such a "
+            "return."
         ),
     ]
 
@@ -650,8 +709,9 @@ def _demonstration(summary: Summary) -> list[str]:
     settings = summary["settings"]
     lines.append(
         "The [example synthetic operator](synthetic-operator.md) screened its "
-        f"fleet (`{demo['fleet']}`) against the public catalog frozen on "
-        f"{demo['retrieved']}, {demo['days']:g} days from "
+        f"fleet (`{demo['fleet']}`) against the public catalog as CelesTrak "
+        f"served it on {demo['retrieved']} (a copy kept in the repository, so "
+        f"the run repeats exactly), {demo['days']:g} days from "
         f"{minute_text(demo['start'])} UTC with the {demo['volume']}. Its "
         "highest-Pc yellow event is planned here, with the target set to the "
         f"green threshold ({settings['green_below']:.0e}), and each option is "
@@ -664,24 +724,27 @@ def _demonstration(summary: Summary) -> list[str]:
     lines += [
         "",
         (
-            f"Event {plan['event']}: Pc {pc_text(demo['pc'])}, {demo['level']}, "
-            f"action {demo['action']}."
+            f"{primary_text(plan)} and "
+            f"{_object(plan['secondary'], plan['secondary_name'])}: Pc "
+            f"{pc_text(demo['pc'])}, {demo['level']}, action {demo['action']} "
+            f"(event `{plan['event']}`)."
         ),
         "",
         *_event_table(plan),
         "",
         *options_table(plan),
-        *_notes(plan),
+        *_caveats(plan),
         "",
         "### Re-screen",
         "",
     ]
     if not demo["rescreens"]:
         return [*lines, "No option to re-screen."]
-    secondary = plan["secondary"].lstrip("0")
+    secondary = _object(plan["secondary"], plan["secondary_name"])
+    pair = f"{plan['primary_name']} and {plan['secondary_name']}"
     for item in demo["rescreens"]:
-        lines += _rescreen_lines(item, secondary, plan["target_pc"])
-    lines += _outcome(demo, plan, secondary)
+        lines += _rescreen_lines(item, secondary, pair, plan["target_pc"])
+    lines += _outcome(demo)
     lines += [
         "",
         (
@@ -717,7 +780,8 @@ def radius_text(settings: Settings, *, short: bool = False) -> str:
     )
 
 
-def _timing_line(timings: Timings | None, plan: Plan) -> str:
+def _timing_line(timings: Timings | None, plan: Plan, *, check_note: bool) -> str:
+    """The plan's timings; ``check_note`` adds that ``--check`` ignores them."""
     if timings is None:
         return "Not measured yet."
     threads = "one thread" if timings["one_thread"] else "their default threads"
@@ -727,8 +791,8 @@ def _timing_line(timings: Timings | None, plan: Plan) -> str:
         f"(CPU time {_span(timings['cpu'])}, numerical libraries on {threads}) "
         f"{'in 1 run' if runs == 1 else f'over {runs} runs'} "
         f"on {timings['date']}, {timings['cpu_model']} "
-        f"({timings['logical_cpus']} logical CPUs), Python {timings['python']}; "
-        "`--check` checks the numbers, not the times."
+        f"({timings['logical_cpus']} logical CPUs), Python {timings['python']}"
+        + ("; `--check` checks the numbers, not the times." if check_note else ".")
     )
 
 
@@ -751,7 +815,8 @@ def _caption(summary: Summary) -> str:
         "burn size (log scale; retrograde to the left) and hours before TCA, "
         f"{plan['burn_times']} burn times by "
         f"{2 * settings['grid']['delta_v_per_direction']} Δv. The CDM's "
-        f"covariances are used unchanged, with {radius_text(settings)}; gravity "
+        f"covariances are used unchanged, with HBR "
+        f"{settings['hard_body_radius']:g} m; gravity "
         f"to J6 and {drag}. Orange: the target "
         f"{settings['target_pc']:.0e}; dots: the smallest burn each way that "
         "meets it, confirmed with the event's own method." + gaps
@@ -811,15 +876,13 @@ def render_page(summary: Summary, images: str) -> str:
         "## Minimum burns",
         "",
         *options_table(plan),
-        *_notes(plan),
+        *_caveats(plan),
         "",
         (
             f"Cells below the target: {plan['below_target']['retrograde']} "
             f"retrograde and {plan['below_target']['prograde']} prograde of "
             f"{plan['cells']}."
         ),
-        "",
-        _timing_line(summary["timings"], plan),
         "",
         "## Re-screen demonstration",
         "",
@@ -837,6 +900,12 @@ def render_page(summary: Summary, images: str) -> str:
             "retrieved from CelesTrak (celestrak.org) (see "
             "`tests/screening/data/NOTICE`)."
         ),
+        "",
+        "## Timing",
+        "",
+        _timing_line(summary["timings"], plan, check_note=False),
+        "",
+        f"<!-- {TOOL} --check checks the numbers, not the times. -->",
     ]
     return "\n".join(lines) + "\n"
 
@@ -858,7 +927,7 @@ def render_summary(summary: Summary, images: str) -> str:
             "",
             *options_table(plan),
             "",
-            _timing_line(summary["timings"], plan),
+            _timing_line(summary["timings"], plan, check_note=True),
         ]
     )
 

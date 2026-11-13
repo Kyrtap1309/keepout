@@ -202,7 +202,8 @@ def _require_known(path: str | Path | None, schema: _Schema) -> None:
     """
     if schema.revision is not None and schema.revision not in _KNOWN:
         raise StoreError(
-            f"{path} was made by a newer keepout (revision {schema.revision})"
+            f"{path} was made by a newer keepout (revision {schema.revision}): "
+            "upgrade keepout to open it"
         )
 
 
@@ -373,6 +374,7 @@ def open_store(path: str | Path, *, create: bool = True) -> Store:
     from keepout.store import CdmInput, open_store
 
     with open_store("keepout.db") as store:  # created if missing
+        # A sample CDM in the repository.
         report = store.ingest([CdmInput.read(Path("tests/cdm/data/tracss_v2.kvn"))])
         print(report.added, report.new_events)
         # ('TRACSS-TEST-0001',) ('5ede3a14c345',)

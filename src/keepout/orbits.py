@@ -31,6 +31,11 @@ def orbital_period(state: StateVector) -> float | None:
     ----------
     state
         Position and velocity in an inertial frame (e.g. GCRF).
+
+    Returns
+    -------
+    float or None
+        The period [s], or ``None`` for an unbound orbit.
     """
     semi_major_axis = _semi_major_axis(state)
     if semi_major_axis is None:
@@ -45,6 +50,11 @@ def perigee_radius(state: StateVector) -> float | None:
     ----------
     state
         Position and velocity in an inertial frame (e.g. GCRF).
+
+    Returns
+    -------
+    float or None
+        The perigee radius [m], or ``None`` for an unbound orbit.
     """
     semi_major_axis = _semi_major_axis(state)
     if semi_major_axis is None:

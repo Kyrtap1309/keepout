@@ -194,6 +194,11 @@ def applicability(conjunction: Conjunction, duration: float) -> tuple[str, ...]:
         The conjunction at TCA.
     duration
         Its :func:`~keepout.pc.api.encounter_duration` [s].
+
+    Returns
+    -------
+    tuple of str
+        One warning per questionable assumption; empty if none.
     """
     warnings: list[str] = []
     fraction = long_encounter(conjunction, duration)

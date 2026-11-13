@@ -70,7 +70,8 @@ class SpaceTrackClient:
 
     Logs in on the first query that must go to Space-Track (a cached or
     refused one needs no credentials) and out when closed; use it as a
-    context manager. See the module notes for the limits it enforces.
+    context manager. See :mod:`keepout.sources.spacetrack` for the limits it
+    enforces.
 
     Parameters
     ----------
@@ -238,6 +239,11 @@ class SpaceTrackClient:
             Seconds a cached copy is used; the ``cdm_public`` interval of
             :data:`~keepout.sources.spacetrack.CLASS_INTERVALS` (8 h) if
             ``None``, and not less.
+
+        Returns
+        -------
+        PublicCdms
+            The summaries and their download.
 
         Raises
         ------
@@ -412,6 +418,16 @@ _read_gp: Final = omm_reader(loads_json, "Space-Track", "OMM JSON")
 def read_catalog(data: bytes) -> tuple[Omm, ...]:
     """The element sets of a Space-Track ``gp`` answer in JSON.
 
+    Parameters
+    ----------
+    data
+        The body of the answer, UTF-8 JSON.
+
+    Returns
+    -------
+    tuple of Omm
+        The element sets, in answer order.
+
     Raises
     ------
     SourceFormatError
@@ -451,6 +467,11 @@ def fetch_public_cdms(
         Sends the requests; a new :class:`UrllibTransport` if ``None``.
     now
         Gives the current Unix time [s].
+
+    Returns
+    -------
+    PublicCdms
+        The summaries and their download.
 
     Raises
     ------
@@ -494,6 +515,11 @@ def fetch_catalog(
         Sends the requests; a new :class:`UrllibTransport` if ``None``.
     now
         Gives the current Unix time [s].
+
+    Returns
+    -------
+    Catalog
+        One element set per object, and the download it came from.
 
     Raises
     ------

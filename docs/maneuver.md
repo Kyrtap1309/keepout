@@ -13,6 +13,23 @@ lists everything the planner leaves out, with measured numbers. The
 [report](maneuver-report.md) shows the planner on a CARA test event and the
 re-screen on the frozen public catalog.
 
+## Terms
+
+These terms are used on the rest of this page:
+
+- A **cell** is one burn of the grid: a burn time and a signed Δv.
+- A burn's **lead** (`burn_lead`) is the time from the burn to TCA, in
+  seconds.
+- The **baseline** is the event without a burn: the Pc of the latest CDM,
+  by the event's own method.
+- An **option** is the smallest burn in one direction that meets the
+  target, confirmed by the event's own method (see
+  [The options](#the-options)).
+- An **event return** is the event's own pair meeting again, away from its
+  TCA, at or above the target. Only a [re-screen](#re-screen) finds one.
+
+## Example
+
 From a clone of the repository, this plans the burns of
 `tests/cdm/data/tracss_v2.kvn`, a test CDM 2.0 with made-up states and
 covariances (`CALCULATED`), a manoeuvrable primary and a red Pc. It gives
@@ -51,6 +68,13 @@ confirmed by Hall 3D-Nc, the event's own method. The script took 6.1 to
 6.3 s over 3 runs on one thread, imports included (Intel Core i5-14600K;
 see [Time](#time)).
 
+!!! tip "Run the library on one thread"
+    From Python, set `OMP_NUM_THREADS=1` and `OPENBLAS_NUM_THREADS=1`
+    before starting the interpreter (e.g.
+    `OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 python plan.py`). The
+    `keepout` command does this itself, unless the variables are set (see
+    [Threads](cli.md#threads)).
+
 `evaluate_burn(plan, burn_lead=..., delta_v=...)` gives one burn of the
 plan's event, on the grid or off it, with the event's own Pc method. For a
 burn of your own, `prepare_maneuver(event)` gives the event's baseline
@@ -63,19 +87,7 @@ and re-screens its burns against the catalog the event was screened with
 
 ## The grid
 
-The planner computes the Pc of a grid of burns. These terms are used on the
-rest of this page:
-
-- A **cell** is one burn of the grid: a burn time and a signed Δv.
-- A burn's **lead** (`burn_lead`) is the time from the burn to TCA, in
-  seconds.
-- The **baseline** is the event without a burn: the Pc of the latest CDM,
-  by the event's own method.
-- An **option** is the smallest burn in one direction that meets the
-  target, confirmed by the event's own method (see
-  [The options](#the-options)).
-- An **event return** is the event's own pair meeting again, away from its
-  TCA, at or above the target. Only a [re-screen](#re-screen) finds one.
+The planner computes the Pc of a grid of cells (see [Terms](#terms)):
 
 | | Default |
 |---|---|
@@ -228,9 +240,9 @@ The result compares the two screenings:
   the pair back elsewhere above the bar it was planned to clear.
 - **The event's range** after the burn, if its secondary was screened.
 - **Coverage**: whether the event's secondary was screened at all, and how
-  many catalog objects screening left out. An analyst object is in no
-  public catalog. `secondary_screened` is then false, and the re-screen
-  says nothing of the event.
+  many catalog objects screening left out. The secondary may be missing
+  from the catalog given. `secondary_screened` is then false, and the
+  re-screen says nothing of the event.
 
 Each new or closer approach gets a Pc and a risk level. The Pc is the
 synthetic operator's: `auto` unless `compute` says otherwise, compared on
@@ -273,12 +285,21 @@ A `ManeuverOutcome` holds everything the command shows:
 `plan_event` evaluates a burn of one's own and plans no grid, as
 `--burn-before --dv` does.
 
+With `event` from the [first example](#example), and the combined
+hard-body radius in the settings since the CDM gives `HBR` for one object
+only:
+
 ```python
 from keepout.maneuver import plan_event
 from keepout.settings import Settings, plan_arguments
 
-outcome = plan_event(event, **plan_arguments(Settings()))  # no catalog: no re-screen
-print(outcome.verdict.recommendable, [burn.direction for burn in outcome.burns])
+settings = Settings(combined_hard_body_radius=20.0)  # [m]
+outcome = plan_event(event, **plan_arguments(settings))  # no catalog: no re-screen
+print(outcome.verdict.recommendable, [burn.direction.value for burn in outcome.burns])
+```
+
+```text
+True ['prograde', 'retrograde']
 ```
 
 The [conjunction store](store.md#background-jobs) caches an outcome as
@@ -296,14 +317,8 @@ All times were measured on an Intel Core i5-14600K, 3 runs each, on
 | The report's Metop-B event, 25.1 h (5 642 cells, the report's own runs) | 9.7 to 10.1 s | 12.3 to 16.2 s |
 
 Most of the time is the batched integration. With default threading the
-run uses about 20 times more CPU time and is still slower.
-
-!!! tip "Run the library on one thread"
-    From Python, set `OMP_NUM_THREADS=1` and `OPENBLAS_NUM_THREADS=1`
-    before starting the interpreter (e.g.
-    `OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 python plan.py`). The
-    `keepout` command does this itself, unless the variables are set (see
-    [Threads](cli.md#threads)).
+run uses about 20 times more CPU time and is still slower; run the library
+on one thread (see the tip under [Example](#example)).
 
 A confirmation by Hall 3D-Nc adds 0.1 to 0.2 s per candidate. A
 confirmation by Monte Carlo adds up to about a minute for a slow encounter.

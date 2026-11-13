@@ -72,7 +72,9 @@ TCA (UTC)         Objects        Miss (m)  CDMs        Pc  Level   Action
 2026-10-11 10:56  38771 / 30131      2019     1  2.67e-10  green   ignore
 2026-10-12 11:28  38771 / 35196       212     1  4.86e-06  yellow  monitor
 28 element sets left out (stale, future epochs, SGP4 failures; --json lists them).
-3befe6f1305d: monitor (latest Pc 7.38e-06 is yellow, 2.50 d before TCA; trend undetermined; diagnostic: 2-D Pc assumptions questionable: the encounter lasts about 2.51e+03 s, 2.9% of the primary's orbital period (limit 1%); a 3-D Pc may differ; diagnostic: the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used)
+3befe6f1305d: monitor (latest Pc 7.38e-06 is yellow, 2.50 d before TCA; trend undetermined)
+  diagnostic: 2-D Pc assumptions questionable: the encounter lasts about 2.51e+03 s, 2.9% of the primary's orbital period (limit 1%); a 3-D Pc may differ
+  diagnostic: the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used
 b815c689dc80: monitor (latest Pc 4.86e-06 is yellow, 6.48 d before TCA; trend undetermined)
 Covariances are assumed (keepout's model of GP element set errors), not orbit determination.
 12 CDMs written to cdms
@@ -92,8 +94,8 @@ and the first line says `Screened 2 of 3 fleet satellites`.
 !!! warning "Assumed covariances"
     Every Pc on this page that comes from `screen`, or from its CDMs, rests
     on keepout's model of GP element-set errors, not on orbit
-    determination. Read [Assumptions](assumptions.md) before reading
-    anything into these values.
+    determination. Read the [synthetic covariance model](assumptions.md)
+    before reading anything into these values.
 
 The CDMs are ordinary CCSDS messages that any CDM reader takes, and
 `assess` reads them back like CDMs from any other originator:
@@ -205,10 +207,11 @@ event.
 
 `keepout assess` reads CDM files: KVN or XML, CDM 1.0 or 2.0, gzipped or
 not (the shell expands `*.kvn`). It groups them into events, each the same
-two objects with TCAs within 10 minutes and one `CONJUNCTION_ID`, if any. It computes keepout's Pc of every
-CDM and assesses each event as in [Risk assessment](risk.md). The result is
-the risk level of the latest Pc, the trend over the event's CDMs and the
-action, decided as of the latest CDM's creation date.
+two objects with TCAs within 10 minutes and one `CONJUNCTION_ID`, if any.
+It computes keepout's Pc of every CDM and assesses each event as in
+[Risk assessment](risk.md). The result is the risk level of the latest
+Pc, the trend over the event's CDMs and the action, decided as of the
+latest CDM's creation date.
 
 - `--method` picks the Pc method. The default `auto` uses Foster, Hall
   3D-Nc or a maximum Pc, as [`compute_pc`](pc-3d.md#choosing-a-method)
@@ -233,6 +236,10 @@ is then not taken for one from tracking.
 
 The exit status is 3 when at least one event's action is `maneuver`,
 whether or not its covariances are assumed.
+
+An event whose Pc has diagnostics (a covariance repaired, a questionable
+assumption of the method) gets each on a line of its own, indented under
+the event's line, as under the table of `screen` above.
 
 ## `maneuver`
 
@@ -262,7 +269,7 @@ Note: 2-D Pc assumptions questionable: the encounter lasts about 2.51e+03 s, 2.9
 Note: the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used
 Note: every Pc rests on an assumed covariance (COVARIANCE_METHOD = DEFAULT)
 Note: drag is off: the CDM gives the primary no positive CD_AREA_OVER_MASS
-Note: relative speed 1.99 m/s is below 100 m/s: the planner looks for the new TCA only within 1/20 of an orbit of TCA, so after a burn the pair can meet again hours away, at a Pc no cell shows; only a re-screen shows it (inside that window the new TCA was measured up to 28 m off at 10 m/s)
+Note: slow encounter (1.99 m/s, below 100 m/s). The planner looks for the new TCA only within 1/20 of an orbit of TCA. After a burn the pair can meet again hours away, at a Pc no cell shows: only a re-screen shows it
 Note: 240 of 930 cells have no Pc and are never options: 240 without a closest approach to trust, 0 where Foster's Pc failed
 Note: prograde: 2-D Pc assumptions questionable: the encounter lasts about 8.4e+03 s, 9.7% of the primary's orbital period (limit 1%); a 3-D Pc may differ
 Note: retrograde: 2-D Pc assumptions questionable: the encounter lasts about 7.17e+03 s, 8.3% of the primary's orbital period (limit 1%); a 3-D Pc may differ
@@ -279,6 +286,8 @@ retrograde re-screened against 19879 objects (tests/screening/data/celestrak-pub
 ```
 
 It took 9.9 to 10.4 s over 3 runs (Intel Core i5-14600K).
+
+### Reading the plan
 
 The table gives the event without a burn and the smallest burn each way
 that meets the target. For each burn it shows the time before TCA, the
@@ -303,22 +312,56 @@ looks for the new TCA only within a twentieth of an orbit, so only the
 re-screen sees it, and that option is not clean. The retrograde burn is
 clean, so the command exits with status 0 and shows both.
 
-- **Target.** `--target-pc P` (default: the settings' `target_pc`, else
-  1e-5), compared on the conservative basis as in `assess`.
-- **One burn.** `--burn-before HOURS` and `--dv M/S`, given together,
-  report that burn with the event's method instead of the smallest burn
-  each way. The burn may be off the grid. The whole grid is still computed
-  first, so this takes as long as a plan.
-- **Radius and settings.** `--hbr METRES` and `--settings FILE` as for
-  `assess`; the settings also give the target.
-- **Re-screen.** `--catalog FILE` or `--source celestrak|spacetrack`
-  screens each burn against the catalog for 7 days from the burn. Both
-  work as for `screen`, with `--cache-dir` and `--workers`. The primary
-  must be in the catalog. The secondary need not be, since an analyst
-  object is in no public catalog, and the output then says in capitals
-  that the event was NOT screened. Without a catalog there is no
-  re-screen, and the output says that nothing is known of the approaches a
-  burn brings.
+### Options
+
+| Option | Meaning |
+|---|---|
+| `CDM...` | the CDM files of one event; or `--event ID` |
+| `--event ID` | plan a [stored event](#stored-events) instead of CDM files |
+| `--store FILE` | the store `--event` is read from (default `$KEEPOUT_STORE`) |
+| `--target-pc PC` | the Pc a burn must stay below (default: the settings' `target_pc`, else 1e-5), compared on the conservative basis as in `assess` |
+| `--burn-before HOURS`, `--dv M/S` | given together: report that one burn with the event's method instead of the smallest burn each way |
+| `--hbr METRES` | the combined hard-body radius, as for `assess` |
+| `--settings FILE` | the [operator settings](#settings), which also give the target |
+| `--catalog FILE` or `--source celestrak\|spacetrack` | re-screen each burn against this catalog for 7 days from the burn, as `screen` reads it |
+| `--workers N` | processes for the re-screen (default: one per CPU, at most 4) |
+| `--cache-dir DIR` | the cache root, as for `fetch` |
+| `--queue` | leave the plan of `--event` to a [background job](#jobs) |
+| `--json` | print the result as one JSON document |
+
+A burn given with `--burn-before` and `--dv` may be off the grid. The
+whole grid is still computed first, so this takes as long as a plan.
+
+For the re-screen, the primary must be in the catalog. The secondary need
+not be: it may be missing from the catalog given, e.g. an object tracked
+only by 18 SDS. The output then says in capitals that the event was NOT
+screened. Without a catalog
+there is no re-screen, and the output says that nothing is known of the
+approaches a burn brings.
+
+### Errors and exit status 4
+
+Planning takes tens of seconds on the default grid. Each candidate burn
+adds a run of the event's own method, up to a minute for a slow encounter
+on Monte Carlo ([Time](maneuver.md#time) has the measurements). These are
+errors (status 1):
+
+- a primary with `MANEUVERABLE = NO`;
+- a latest CDM created later than 6 h before TCA;
+- an unknown covariance;
+- a primary the re-screen cannot find or carry;
+- with `--event`, an id the store does not hold, or a stored catalog
+  copy deleted or changed.
+
+The exit status is 4 when no burn can be recommended:
+
+- no burn on the grid meets the target;
+- the burn given with `--burn-before` and `--dv` misses it;
+- every burn brings an approach at red, or brings the event's own pair
+  back above the target away from its TCA (found by the re-screen).
+
+The last line then says which. One burn that does neither is enough for
+status 0, and the others are shown with what they bring.
 
 ### Stored events
 
@@ -349,77 +392,15 @@ The exceptions:
   shown all the same, with `Warning: the plan was not cached:` and the
   reason on standard error.
 
-`--queue` leaves the plan to a [background job](store.md#background-jobs)
-instead of computing it in the command. For instance, this queues the
-plan of the Intelsat 39 event, in the store that
-[`store add`](#store) makes further down:
-
-```bash
-keepout maneuver --event 3befe6f1305d --store keepout.db --target-pc 1e-7 --queue
-```
-
-```text
-Job 1 queued for event 3befe6f1305d.
-```
-
-A worker computes the jobs queued, one at a time. With `--until-idle` it
-stops once the queue is empty, and says how many it ran (its log goes to
-standard error):
-
-```bash
-keepout worker --store keepout.db --until-idle
-```
-
-```text
-Ran 1 job.
-```
-
-The same command without `--queue` then shows the plan from the store,
-not re-screened, since `store add` stored no catalog:
-`keepout maneuver --event 3befe6f1305d --store keepout.db --target-pc 1e-7`.
-`keepout jobs list --store keepout.db` lists the jobs, the newest first,
-with their status and the error of a failed one; `keepout jobs cancel ID
---store keepout.db` cancels one.
-
-`--queue`:
-
-- needs `--event`;
-- takes `--target-pc`, `--hbr` and `--settings`;
-- refuses `--catalog`, `--source`, `--burn-before`, `--dv` and `--workers`
-  with a usage error (status 2). A job always plans on the default grid,
-  against the stored catalog, and `keepout worker --workers` sets its
-  processes;
-- queues nothing for a plan already cached, and says so;
-- prints the id of the same job when it is already queued or running.
-
-Planning takes tens of seconds on the default grid. Each candidate burn
-adds a run of the event's own method, up to a minute for a slow encounter
-on Monte Carlo ([Time](maneuver.md#time) has the measurements). These are
-errors (status 1):
-
-- a primary with `MANEUVERABLE = NO`;
-- a latest CDM created later than 6 h before TCA;
-- an unknown covariance;
-- a primary the re-screen cannot find or carry;
-- with `--event`, an id the store does not hold, or a stored catalog
-  copy deleted or changed.
-
-The exit status is 4 when no burn can be recommended:
-
-- no burn on the grid meets the target;
-- the burn given with `--burn-before` and `--dv` misses it;
-- every burn brings an approach at red, or brings the event's own pair
-  back above the target away from its TCA (found by the re-screen).
-
-The last line then says which. One burn that does neither is enough for
-status 0, and the others are shown with what they bring.
+`--queue` computes the plan in a [background job](#jobs) instead.
 
 ## `store`
 
 `keepout store` keeps CDMs, their events and their Pc in a
 [conjunction store](store.md), a SQLite file. It needs the `store` extra
-(`pip install "keepout[store]"`, or `uv sync --extra store`). Without it,
-any command that uses a store prints the line to install it and exits with
+(`pip install "keepout[cli,store] @ git+https://github.com/Kyrtap1309/keepout"`,
+or `uv sync --extra cli --extra store` in a clone). Without it, any
+command that uses a store prints the line to install it and exits with
 status 1. Every `store` command takes the file as `--store FILE`, or from
 `$KEEPOUT_STORE`, as `maneuver --event` does. `assess` and `screen` ignore
 the variable: they write to a store only when given `--store`. After the
@@ -449,7 +430,9 @@ TCA (UTC)         Objects        Miss (m)  CDMs        Pc  Level   Action
 12 of 12 events rest on assumed covariances (COVARIANCE_METHOD = DEFAULT), not orbit determination.
 12 CDMs added to keepout.db (0 already stored), 12 new events.
 Event ids, row by row: 026443d77699, ea4c6a976e3a, a351b16057ec, fd13fbdb9831, 6d45833fc2cc, 3f4c98d01163, 2aa19608e416, 3befe6f1305d, 527a3e2689d5, d604685adedc, 26151ac6b42f, b815c689dc80.
-3befe6f1305d: monitor (latest Pc 7.38e-06 is yellow, 2.50 d before TCA; trend undetermined; diagnostic: 2-D Pc assumptions questionable: the encounter lasts about 2.51e+03 s, 2.9% of the primary's orbital period (limit 1%); a 3-D Pc may differ; diagnostic: the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used)
+3befe6f1305d: monitor (latest Pc 7.38e-06 is yellow, 2.50 d before TCA; trend undetermined)
+  diagnostic: 2-D Pc assumptions questionable: the encounter lasts about 2.51e+03 s, 2.9% of the primary's orbital period (limit 1%); a 3-D Pc may differ
+  diagnostic: the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used
 b815c689dc80: monitor (latest Pc 4.86e-06 is yellow, 6.48 d before TCA; trend undetermined)
 ```
 
@@ -473,25 +456,89 @@ and whose trend runs over all of them. The exit status is that of
   `Upgraded keepout.db: base -> 0001.` Any other command refuses such a
   store and says to run it ([Upgrading](store.md#upgrading)).
 - **`store rebuild`** computes the Pc of every stored CDM that the store
-  lacks for the settings (`--settings FILE`), and prints how many. Without
-  `hbr_m` in the settings, it skips the CDMs without `HBR` and says how
-  many: `1 CDM without HBR skipped: set hbr_m in the settings file.`
+  lacks for the settings, and prints how many. It takes the settings only
+  from `--settings FILE`: it has no `--hbr`. Without `hbr_m` in the
+  settings, it skips the CDMs without `HBR` and says how many: `1 CDM without HBR skipped: set hbr_m in the settings file.`
 - **`store purge --before TIME`** deletes the events whose latest TCA is
   before `TIME` (ISO 8601 UTC), with their CDMs, their Pc and the catalog
   copies no other CDM needs. It asks `Delete N events with TCA before
   ...? [y/N]` first; `--yes` does not ask:
 
 ```bash
-keepout store purge --before 2026-10-09 --yes --store keepout.db
+keepout store purge --before 2026-10-08 --yes --store keepout.db
 ```
 
 ```text
-Deleted 8 events with TCA before 2026-10-09T00:00:00 UTC from keepout.db.
+Deleted 7 events with TCA before 2026-10-08T00:00:00 UTC from keepout.db.
 ```
 
 `screen --store` and `assess --store` add their CDMs to a store the same
 way, and show the store's ids too. [The conjunction store](store.md)
 explains what it keeps, and how to back it up.
+
+## `jobs`
+
+A manoeuvre plan takes tens of seconds, or minutes on a slow Pc method.
+`maneuver --event ID --queue` leaves it to a
+[background job](store.md#background-jobs) in the store instead of
+computing it in the command. A [worker](#worker) then computes it. For
+instance, this queues the plan of the Intelsat 39 event, in the store
+that [`store add`](#store) made above:
+
+```bash
+keepout maneuver --event 3befe6f1305d --store keepout.db --target-pc 1e-7 --queue
+```
+
+```text
+Job 1 queued for event 3befe6f1305d.
+```
+
+`--queue`:
+
+- needs `--event`;
+- takes `--target-pc`, `--hbr` and `--settings`;
+- refuses `--catalog`, `--source`, `--burn-before`, `--dv` and `--workers`
+  with a usage error (status 2). A job always plans on the default grid,
+  against the stored catalog, and `keepout worker --workers` sets its
+  processes;
+- queues nothing for a plan already cached, and says so;
+- prints the id of the same job when it is already queued or running.
+
+Two commands look after the queue. Both take the store as `--store FILE`
+or `$KEEPOUT_STORE`:
+
+- **`jobs list`** lists the jobs, the newest first, with their status and
+  the error of a failed one.
+- **`jobs cancel ID`** cancels a queued or running job. A running job's
+  worker stops computing it when it next checks in.
+
+[Background jobs](store.md#background-jobs) explains the statuses,
+the time limit and what happens to the job of a worker that dies.
+
+## `worker`
+
+`keepout worker --store FILE` computes the jobs queued, one at a time, and
+caches each plan in the store. It runs until stopped (SIGTERM or Ctrl+C):
+its job then goes back to the queue. With `--until-idle` it stops once the
+queue is empty, and says how many jobs it ran. Its log goes to standard
+error:
+
+```bash
+keepout worker --store keepout.db --until-idle
+```
+
+```text
+Ran 1 job.
+```
+
+The same command as above without `--queue` then shows the plan from the
+store, not re-screened, since `store add` stored no catalog:
+`keepout maneuver --event 3befe6f1305d --store keepout.db --target-pc 1e-7`.
+
+`--workers N` gives each re-screen N processes (default: one per CPU, at
+most 4). `keepout worker` has no `--json`. [Running a
+worker](store.md#running-a-worker) covers several workers on one store and
+running one in a container.
 
 ## `validate`
 
@@ -551,7 +598,7 @@ reads such a file into [`Settings`](reference/settings.md).
 | 0 | Done. |
 | 1 | An error in the data, a download or a file. One line `Error: ...` goes to standard error, with no traceback. A refused Space-Track query also gives status 1, with the time to wait. |
 | 2 | A usage error: an unknown option, a bad value, a missing file. |
-| 3 | `assess`: at least one event needs a manoeuvre. |
+| 3 | `assess`, `assess --store` and `store add`: at least one event needs a manoeuvre. |
 | 4 | `maneuver`: no burn can be recommended (see [`maneuver`](#maneuver)). |
 
 ## JSON output

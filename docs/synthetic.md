@@ -14,8 +14,8 @@ This is the *synthetic operator*.
     element-set errors. The model is a documented assumption from the
     literature, not orbit determination. Its Pc values show what the model
     implies, not the risk of the real satellites.
-    [Assumptions](assumptions.md) explains the model, its sources and its
-    limits.
+    The [synthetic covariance model](assumptions.md) page explains the
+    model, its sources and its limits.
 
 ```python
 from pathlib import Path
@@ -123,14 +123,16 @@ does what a conjunction assessment service does for an operator:
    matching CelesTrak's SOCRATES. Any `ScreeningVolume` or rule per
    satellite works.
 3. **Conjunctions.** At each approach's TCA both objects get the model's
-   covariance for their own element sets (by default `DEFAULT_MODEL`;
+   covariance for their own element sets (by default
+   `SyntheticCovarianceModel()`, the model with its default parameters;
    `model=` takes another). They also get their hard-body radii: a fleet
    satellite its own, any other object the fleet's
    `catalog_hard_body_radius`.
 4. **CDMs.** Each conjunction becomes a CDM (below).
 5. **Risk.** Each CDM is assessed as its recipient would assess it. The Pc
-   is computed from the message (`"auto"` by default; `compute=` takes a
-   `keepout.pc.computation`). The event is then assessed with keepout's
+   is computed from the message, `"auto"` by default. `compute=` picks
+   another method, e.g. `compute=computation("foster")` with
+   `from keepout.pc import computation`. The event is then assessed with keepout's
    [risk rules](risk.md), which `thresholds=` and `decision_config=`
    change.
 
@@ -141,42 +143,42 @@ lists the messages.
 
 **One event per approach.** Two close approaches of the same pair are two
 local minima of their range, however close in time, so each is its own
-event with a single CDM. With a single Pc the trend is undetermined. The
-decision rests on the Pc's risk level and the time from the CDM's creation
-to TCA. A red Pc within 2 days of TCA is `maneuver`, and a red Pc further
-ahead `prepare maneuver`. Two fleet satellites approaching each
+event with a single CDM. With a single Pc the trend is undetermined, so
+the decision follows the [decision rules](risk.md#decision) from the Pc's
+risk level and the time to TCA alone. Two fleet satellites approaching each
 other give two events, one CDM for each satellite, as a service sends each
 operator its own.
 
 ## The CDMs
 
-The messages are built by `keepout.cdm.make_cdm`. It turns any
+The messages are built by [`keepout.cdm.make_cdm`](cdm.md#building-a-cdm). It turns any
 `Conjunction` into a CDM and knows nothing of where its covariances come
 from. The messages read back to the same conjunction, also after a KVN or
-XML round trip. For the synthetic operator:
+XML round trip.
 
-- **Header.** `ORIGINATOR = KEEPOUT`; `MESSAGE_FOR` the fleet satellite's
-  name; `CREATION_DATE` the start of the window unless `created=` says
-  otherwise (no clock is read, so a run gives the same bytes again);
-  `MESSAGE_ID` both catalog numbers, the TCA and the creation time, e.g.
-  `38771_35196_20261012T112828.710Z_20261006T000000.000Z`; two `COMMENT`
-  lines saying the covariances are assumed.
-- **Relative metadata.** TCA (to the microsecond), miss distance, the
-  secondary's position and velocity relative to the fleet satellite in its
-  RTN frame, the screening period and the screening volume
-  (`SCREEN_VOLUME_X`, `_Y`, `_Z`, a comment saying they are semi-axes).
-- **Objects.** `OBJECT1` is the fleet satellite (`OBJECT_TYPE = PAYLOAD`,
-  `MANEUVERABLE = YES` or `NO` from the fleet file), `OBJECT2` the other
-  object (`MANEUVERABLE = N/A`; GP data has no object type).
-  `OBJECT_DESIGNATOR` is the catalog number, `CATALOG_NAME = SATCAT`,
-  `EPHEMERIS_NAME = NONE`, `REF_FRAME = GCRF`; a name or international
-  designator the element set lacks is `UNKNOWN`. Each object's `HBR` makes
-  the message CDM version 2.0.
-- **Covariance.** `COVARIANCE_METHOD = DEFAULT` (CCSDS's value for a
-  covariance not from orbit determination), and six `COMMENT` lines naming
-  the model, its parameters, the element set's epoch and age and the
-  resulting sigmas. The 6×6 RTN covariance has the model's position sigmas
-  on the diagonal and zeros elsewhere (the velocity block is unknown).
+??? info "The keywords of a synthetic operator's CDM"
+    - **Header.** `ORIGINATOR = KEEPOUT`; `MESSAGE_FOR` the fleet satellite's
+      name; `CREATION_DATE` the start of the window unless `created=` says
+      otherwise (no clock is read, so a run gives the same bytes again);
+      `MESSAGE_ID` both catalog numbers, the TCA and the creation time, e.g.
+      `38771_35196_20261012T112828.710Z_20261006T000000.000Z`; two `COMMENT`
+      lines saying the covariances are assumed.
+    - **Relative metadata.** TCA (to the microsecond), miss distance, the
+      secondary's position and velocity relative to the fleet satellite in its
+      RTN frame, the screening period and the screening volume
+      (`SCREEN_VOLUME_X`, `_Y`, `_Z`, a comment saying they are semi-axes).
+    - **Objects.** `OBJECT1` is the fleet satellite (`OBJECT_TYPE = PAYLOAD`,
+      `MANEUVERABLE = YES` or `NO` from the fleet file), `OBJECT2` the other
+      object (`MANEUVERABLE = N/A`; GP data has no object type).
+      `OBJECT_DESIGNATOR` is the catalog number, `CATALOG_NAME = SATCAT`,
+      `EPHEMERIS_NAME = NONE`, `REF_FRAME = GCRF`; a name or international
+      designator the element set lacks is `UNKNOWN`. Each object's `HBR` makes
+      the message CDM version 2.0.
+    - **Covariance.** `COVARIANCE_METHOD = DEFAULT` (CCSDS's value for a
+      covariance not from orbit determination), and six `COMMENT` lines naming
+      the model, its parameters, the element set's epoch and age and the
+      resulting sigmas. The 6×6 RTN covariance has the model's position sigmas
+      on the diagonal and zeros elsewhere (the velocity block is unknown).
 
 The [report](synthetic-operator.md#example-cdm) shows one in full.
 
@@ -195,4 +197,5 @@ TCA changes.
 - CCSDS 508.0-B-1, *Conjunction Data Message*, Blue Book, 2013.
 - NASA, *Spacecraft Conjunction Assessment and Collision Avoidance Best
   Practices Handbook*, NASA/SP-20205011318 Rev. 2.
-- The model's sources are listed under [Assumptions](assumptions.md#references).
+- The model's sources are listed under
+  [Synthetic covariance model](assumptions.md#references).

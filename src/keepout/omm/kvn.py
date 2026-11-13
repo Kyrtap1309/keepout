@@ -90,6 +90,11 @@ def load(path: str | Path) -> tuple[Omm, ...]:
     ----------
     path
         File to read.
+
+    Returns
+    -------
+    tuple of Omm
+        The element sets, in file order.
     """
     return OMM.load(path, loads)
 
@@ -114,6 +119,11 @@ def dumps(
     creation_date
         ``CREATION_DATE`` of every message; the current time (whole seconds)
         if not given.
+
+    Returns
+    -------
+    str
+        The KVN text of every message.
 
     Raises
     ------

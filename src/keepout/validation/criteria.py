@@ -64,6 +64,11 @@ class Criterion(Protocol):
         result_interval
             The result's confidence interval ``(low, high)``, if it has one (Monte
             Carlo).
+
+        Returns
+        -------
+        Verdict
+            The error, whether it is relative, and whether it passed.
         """
         ...
 
@@ -78,11 +83,22 @@ class Criterion(Protocol):
             The case's reference Pc.
         result_interval
             The result's confidence interval, if it has one.
+
+        Returns
+        -------
+        float
+            The allowed absolute difference.
         """
         ...
 
     def describe(self) -> str:
-        """The criterion in words, for the report."""
+        """The criterion in words, for the report.
+
+        Returns
+        -------
+        str
+            The description.
+        """
         ...
 
     def reproduces(
@@ -105,6 +121,11 @@ class Criterion(Protocol):
             The case's reference Pc, where the margin is taken.
         result_interval
             The result's confidence interval, if it has one.
+
+        Returns
+        -------
+        bool
+            ``True`` if ``current`` repeats ``previous``.
         """
         allowed = REPRODUCIBILITY_FRACTION * self.margin(reference, result_interval)
         return abs(current - previous) <= allowed
@@ -171,6 +192,11 @@ class BoundCriterion(Criterion):
         result_interval
             The result's confidence interval ``(low, high)``, if it has one (Monte
             Carlo).
+
+        Returns
+        -------
+        Verdict
+            The error, whether it is relative, and whether it passed.
         """
         del result_interval  # a bound does not depend on it
         difference = abs(value - reference)
@@ -194,6 +220,11 @@ class BoundCriterion(Criterion):
             The case's reference Pc.
         result_interval
             The result's confidence interval, if it has one.
+
+        Returns
+        -------
+        float
+            The allowed absolute difference.
         """
         del result_interval  # a bound does not depend on it
         relative = self._relative_at(reference)
@@ -209,7 +240,13 @@ class BoundCriterion(Criterion):
 
     @override
     def describe(self) -> str:
-        """The criterion in words, for the report."""
+        """The criterion in words, for the report.
+
+        Returns
+        -------
+        str
+            The description.
+        """
         if self.relative is None:
             return f"absolute error at most {self.absolute:g}"
         text = f"relative error at most {self.relative:g}"
@@ -249,6 +286,11 @@ class IntervalCriterion(Criterion):
         result_interval
             The result's confidence interval ``(low, high)``, if it has one (Monte
             Carlo).
+
+        Returns
+        -------
+        Verdict
+            The error, whether it is relative, and whether it passed.
         """
         difference = abs(value - reference)
         low, high = _required(result_interval)
@@ -267,6 +309,11 @@ class IntervalCriterion(Criterion):
             The case's reference Pc.
         result_interval
             The result's confidence interval, if it has one.
+
+        Returns
+        -------
+        float
+            The half-width.
         """
         del reference  # the interval does not depend on it
         low, high = _required(result_interval)
@@ -274,7 +321,13 @@ class IntervalCriterion(Criterion):
 
     @override
     def describe(self) -> str:
-        """The criterion in words, for the report."""
+        """The criterion in words, for the report.
+
+        Returns
+        -------
+        str
+            The description.
+        """
         return "CARA's value within keepout's confidence interval"
 
 

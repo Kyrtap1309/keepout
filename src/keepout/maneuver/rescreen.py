@@ -26,8 +26,9 @@ moves that TCA and a range is read within the tolerance. SGP4 must also carry
 the primary through the whole window: screening propagates only the objects of
 pairs its filter keeps, so on its own it would not see a primary fail.
 
-The event's secondary need not be screened: an analyst object is in no public
-catalog, and the other objects still deserve a check.
+The event's secondary need not be screened: it may be missing from the
+catalog given (or left out by screening), and the other objects still
+deserve a check.
 :attr:`RescreenResult.secondary_screened` says whether it was, and
 :attr:`RescreenResult.skipped_objects` how many catalog objects were left out.
 

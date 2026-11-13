@@ -91,6 +91,11 @@ def load_alfano_inputs(cache: Path | None = None) -> list[AlfanoInput]:
         :func:`keepout.sources.cara.commit_dir`); ``None`` for ``$KEEPOUT_CACHE_DIR``,
         else the user cache directory. Missing files are downloaded.
 
+    Returns
+    -------
+    list of AlfanoInput
+        One input per case, by case number.
+
     Raises
     ------
     CaraFormatError
@@ -123,6 +128,11 @@ def load_alfano_windows(cache: Path | None = None) -> dict[int, float]:
         The cache directory of the CARA files (see
         :func:`keepout.sources.cara.commit_dir`); ``None`` for ``$KEEPOUT_CACHE_DIR``,
         else the user cache directory. Missing files are downloaded.
+
+    Returns
+    -------
+    dict[int, float]
+        The half-width [s], by case number.
     """
     return {
         int(column_number(row, "CaseNumber")): column_number(row, "A09_FinalTime_s")
@@ -139,6 +149,11 @@ def load_pc_method_inputs(cache: Path | None = None) -> list[PcMethodInput]:
         The cache directory of the CARA files (see
         :func:`keepout.sources.cara.commit_dir`); ``None`` for ``$KEEPOUT_CACHE_DIR``,
         else the user cache directory. Missing files are downloaded.
+
+    Returns
+    -------
+    list of PcMethodInput
+        One input per conjunction, in table order.
 
     Raises
     ------
@@ -170,6 +185,11 @@ def alfano_objects(rows: Sequence[Sequence[Cell]]) -> tuple[ObjectState, ObjectS
     ----------
     rows
         The sheet's rows, as :func:`~keepout.sources.cara.load_xls_rows` reads them.
+
+    Returns
+    -------
+    tuple[ObjectState, ObjectState]
+        The primary and the secondary, in GCRF.
 
     Raises
     ------
@@ -218,6 +238,11 @@ def column_value(row: Mapping[str, Cell], name: str) -> Cell:
     name
         The column's name in the header row.
 
+    Returns
+    -------
+    Cell
+        The cell's value.
+
     Raises
     ------
     CaraFormatError
@@ -238,6 +263,11 @@ def column_number(row: Mapping[str, Cell], name: str) -> float:
         A row of a CARA table, by column name.
     name
         The column; its cell is a number or the text of one.
+
+    Returns
+    -------
+    float
+        The cell's value as a number.
 
     Raises
     ------

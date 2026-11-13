@@ -156,6 +156,11 @@ class PcObservation:
             Whether the message gives an object's covariance as assumed.
         notes
             Diagnostics of the message, after the result's.
+
+        Returns
+        -------
+        PcObservation
+            The observation, its value and kind taken from ``result``.
         """
         return cls(
             time_to_tca=time_to_tca,

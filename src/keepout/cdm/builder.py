@@ -234,6 +234,11 @@ def make_message_id(
         Time of closest approach.
     created
         Creation time of the message (its ``CREATION_DATE``).
+
+    Returns
+    -------
+    str
+        The ``MESSAGE_ID``, the same for the same inputs.
     """
     return f"{primary_id}_{secondary_id}_{_stamp(tca)}_{_stamp(created)}"
 

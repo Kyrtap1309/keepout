@@ -154,6 +154,11 @@ def similar_conjunction(
     covariance
         What makes a :class:`~keepout.covariance.Covariance` of a 6x6 GCRF matrix [m,
         m/s], e.g. with a repair policy.
+
+    Returns
+    -------
+    Conjunction
+        The conjunction.
     """
     primary, secondary = (
         ObjectState(name, StateVector(NOMINAL_EPOCH, r, v, "GCRF"), covariance(matrix))

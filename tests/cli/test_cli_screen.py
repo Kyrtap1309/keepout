@@ -61,7 +61,9 @@ TCA (UTC)         Objects        Miss (m)  CDMs        Pc  Level   Action \n\
 2026-10-06 19:36  52939 / 47826      1029     1  4.37e-08  green   ignore \n\
 2026-10-08 12:03  44476 / 55841      3647     1  7.38e-06  yellow  monitor
 5 element sets left out (stale, future epochs, SGP4 failures; --json lists them).
-3befe6f1305d: monitor (latest Pc 7.38e-06 is yellow, 2.50 d before TCA; trend undetermined; diagnostic: 2-D Pc assumptions questionable: the encounter lasts about 2.51e+03 s, 2.9% of the primary's orbital period (limit 1%); a 3-D Pc may differ; diagnostic: the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used)
+3befe6f1305d: monitor (latest Pc 7.38e-06 is yellow, 2.50 d before TCA; trend undetermined)
+  diagnostic: 2-D Pc assumptions questionable: the encounter lasts about 2.51e+03 s, 2.9% of the primary's orbital period (limit 1%); a 3-D Pc may differ
+  diagnostic: the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used
 Covariances are assumed (keepout's model of GP element set errors), not orbit determination.
 2 CDMs written to <tmp>/cdms
 """)

@@ -212,6 +212,11 @@ def monte_carlo_options(
         The case's id within the suite.
     reference
         CARA's Monte Carlo Pc of the case, which sizes the sample count.
+
+    Returns
+    -------
+    MonteCarloSizing
+        The number of samples and the seed.
     """
     wanted = MC_TARGET_HITS / reference if reference > 0.0 else MC_SAMPLES[1]
     samples = int(min(max(math.ceil(wanted), MC_SAMPLES[0]), MC_SAMPLES[1]))
@@ -262,6 +267,11 @@ def alfano_cases(alfano: Sequence[AlfanoInput]) -> list[ValidationCase]:
     alfano
         The Alfano (2009) cases, from
         :func:`~keepout.validation.cara_inputs.load_alfano_inputs`.
+
+    Returns
+    -------
+    list of ValidationCase
+        The cases.
     """
     cases: list[ValidationCase] = []
     for item in alfano:
@@ -297,6 +307,11 @@ def alfano_3d_cases(
     windows
         Half-width [s] of each case's window, by case number, from
         :func:`~keepout.validation.cara_inputs.load_alfano_windows`.
+
+    Returns
+    -------
+    list of ValidationCase
+        The cases.
     """
     return [
         ValidationCase(
@@ -325,6 +340,11 @@ def alfano_monte_carlo_cases(
     windows
         Half-width [s] of each case's window, by case number, from
         :func:`~keepout.validation.cara_inputs.load_alfano_windows`.
+
+    Returns
+    -------
+    list of ValidationCase
+        The cases.
     """
     return [
         _monte_carlo_case(
@@ -354,6 +374,11 @@ def pc_method_cases(pc_method: Sequence[PcMethodInput]) -> list[ValidationCase]:
     pc_method
         The conjunctions of CARA's Pc method test set, from
         :func:`~keepout.validation.cara_inputs.load_pc_method_inputs`.
+
+    Returns
+    -------
+    list of ValidationCase
+        The cases.
     """
     return [
         ValidationCase(
@@ -377,6 +402,11 @@ def pc_method_3d_cases(pc_method: Sequence[PcMethodInput]) -> list[ValidationCas
     pc_method
         The conjunctions of CARA's Pc method test set, from
         :func:`~keepout.validation.cara_inputs.load_pc_method_inputs`.
+
+    Returns
+    -------
+    list of ValidationCase
+        The cases.
     """
     return [
         ValidationCase(
@@ -402,6 +432,11 @@ def pc_method_monte_carlo_cases(
     pc_method
         The conjunctions of CARA's Pc method test set, from
         :func:`~keepout.validation.cara_inputs.load_pc_method_inputs`.
+
+    Returns
+    -------
+    list of ValidationCase
+        The cases.
     """
     return [
         _monte_carlo_case(
@@ -428,6 +463,11 @@ def load_non_pd_case(cache: Path | None = None) -> ValidationCase:
         The cache directory of the CARA files (see
         :func:`keepout.sources.cara.commit_dir`); ``None`` for ``$KEEPOUT_CACHE_DIR``,
         else the user cache directory. Missing files are downloaded.
+
+    Returns
+    -------
+    ValidationCase
+        The case.
     """
     path = cara.fetch(cara.NON_PD_CDM, cache=cache)
     conjunction = cdm.load(path).conjunction(combined_hard_body_radius=UNIT_TEST_HBR)
@@ -446,6 +486,11 @@ def elrod_similar_to_3d_case() -> ValidationCase:
     Numbers transcribed from ``DistributedMatlab/ProbabilityOfCollision/
     UnitTests/PcElrod_UnitTest.m`` lines 208-232 at the pinned commit
     (ECI, m, m/s, HBR 20 m); the reference has 8 significant digits.
+
+    Returns
+    -------
+    ValidationCase
+        The case.
     """
     conjunction = similar_conjunction(
         lambda matrix: Covariance.from_position(matrix[:3, :3], "GCRF", NOMINAL_EPOCH)
@@ -463,6 +508,11 @@ def hall_similar_to_2d_case() -> ValidationCase:
     ``DistributedMatlab/ProbabilityOfCollision/UnitTests/Pc3D_Hall_UnitTest.m``
     lines 131-145 at the pinned commit (ECI, m, m/s, HBR 20 m); the
     reference has 8 significant digits and CARA's tolerance is 1e-3.
+
+    Returns
+    -------
+    ValidationCase
+        The case.
     """
     conjunction = similar_conjunction(
         lambda matrix: make_covariance(matrix, "GCRF", NOMINAL_EPOCH)
@@ -492,6 +542,11 @@ def load_hall_2d3d_cases(cache: Path | None = None) -> list[ValidationCase]:
         The cache directory of the CARA files (see
         :func:`keepout.sources.cara.commit_dir`); ``None`` for ``$KEEPOUT_CACHE_DIR``,
         else the user cache directory. Missing files are downloaded.
+
+    Returns
+    -------
+    list of ValidationCase
+        The cases.
     """
     path = cara.fetch(cara.HALL_3D_CDM, cache=cache)
     conjunction = cdm.load(path).conjunction(combined_hard_body_radius=UNIT_TEST_HBR)
@@ -526,6 +581,11 @@ def load_max_pc_cases(cache: Path | None = None) -> list[ValidationCase]:
         The cache directory of the CARA files (see
         :func:`keepout.sources.cara.commit_dir`); ``None`` for ``$KEEPOUT_CACHE_DIR``,
         else the user cache directory. Missing files are downloaded.
+
+    Returns
+    -------
+    list of ValidationCase
+        The cases.
     """
     primary, secondary = load_legacy_objects(
         cara.fetch(cara.FRISBEE_CDM, cache=cache), known=(True, False)
@@ -565,6 +625,11 @@ def load_all(cache: Path | None = None) -> list[ValidationCase]:
         The cache directory of the CARA files (see
         :func:`keepout.sources.cara.commit_dir`); ``None`` for ``$KEEPOUT_CACHE_DIR``,
         else the user cache directory. Missing files are downloaded.
+
+    Returns
+    -------
+    list of ValidationCase
+        The cases, suite by suite.
     """
     cara.prefetch(cara.MANIFEST, cache=cache)
     alfano = load_alfano_inputs(cache)
@@ -593,6 +658,11 @@ def load_monte_carlo_cases(cache: Path | None = None) -> list[ValidationCase]:
         The cache directory of the CARA files (see
         :func:`keepout.sources.cara.commit_dir`); ``None`` for ``$KEEPOUT_CACHE_DIR``,
         else the user cache directory. Missing files are downloaded.
+
+    Returns
+    -------
+    list of ValidationCase
+        The cases, suite by suite.
     """
     cara.prefetch(cara.MANIFEST, cache=cache)
     cases = [

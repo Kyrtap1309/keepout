@@ -304,8 +304,8 @@ class ManeuveredPropagator:
         -------
         RadiusBounds
             The range of the radius after the burn at samples at most 10 s
-            apart, widened by a bound on its curvature between them (see
-            :meth:`_burned_radius`): within tens of metres of the true range.
+            apart, widened by a bound on its curvature between them: within tens
+            of metres of the true range.
             In a span where the base fails, the base's bounds moved out by the
             largest difference ``|d|`` instead, which most of a difference,
             along the track, leaves far wider. ``lowest`` is clipped at 0.

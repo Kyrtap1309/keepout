@@ -13,7 +13,8 @@ awareness data. keepout reads two of its classes:
   (CDMs) of approaches to come (see [Public CDMs](#public-cdms)).
 
 CelesTrak's catalog needs no account and is keepout's default; Space-Track
-needs one.
+needs one. The `keepout` commands on this page need the `cli` extra (see
+[Install](index.md#install)); the Python examples need only the library.
 
 ## Account and credentials
 
@@ -28,7 +29,10 @@ must be sent:
 | `SPACETRACK_PASSWORD` | its password |
 
 One way to keep them out of the shell history is a file only you can read,
-loaded into the environment of the command that needs it:
+loaded into the environment of the command that needs it. The snippet
+below creates the file, then runs one command in a subshell that exports
+each line of it as is. It does not use `source`, which would read the file
+as shell code (see below):
 
 ```bash
 mkdir -p ~/.config/keepout
@@ -116,7 +120,9 @@ retries:
 | Expired session | | after HTTP 401, one new login and the same query once more |
 
 Every answer is asked for gzipped and cached gzipped, each with a
-`.meta.json`:
+`.meta.json`, in keepout's cache directory, `<cache>` below. It is
+`--cache-dir` if given, else `$KEEPOUT_CACHE_DIR`, else the user cache
+directory (e.g. `~/.cache/keepout` on Linux):
 
 - `<cache>/spacetrack/gp/catalog.json.gz`, about 5 MB instead of 36 MB of
   JSON;
@@ -132,8 +138,7 @@ contacting Space-Track. If there is no cached copy, it raises
 wait, and the command line prints when to try again. `max_age` (the seconds
 a cached copy is used) can be longer than the interval, not shorter.
 
-The ledger is per cache directory (`--cache-dir`, `$KEEPOUT_CACHE_DIR` or
-the user cache). Processes sharing one share the limits, but two sending at
+The ledger is per cache directory. Processes sharing one share the limits, but two sending at
 the same instant could both send.
 
 Space-Track asks that a scheduled hourly `gp` query runs at a random minute,

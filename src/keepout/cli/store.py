@@ -54,7 +54,10 @@ __all__ = [
     "store_upgrade",
 ]
 
-STORE_HINT: Final = "--store needs the store extra: pip install 'keepout[store]'"
+STORE_HINT: Final = (
+    "--store needs the store extra: "
+    'pip install "keepout[cli,store] @ git+https://github.com/Kyrtap1309/keepout"'
+)
 """What a command given a store prints (exit status 1) when the extra is
 missing."""
 
@@ -126,7 +129,7 @@ StoreOption: TypeAlias = Annotated[
         callback=_store_extra,
         help=(
             f"{_STORE_HELP} (made if missing): add the CDMs to it, each in its "
-            "stored event (needs the store extra)."
+            f"stored event (needs the store extra; not read from ${STORE_VARIABLE})."
         ),
     ),
 ]

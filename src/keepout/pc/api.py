@@ -126,6 +126,11 @@ class MethodSpec:
             The conjunction at TCA.
         options
             Options of the method, by name; each must be in :attr:`options`.
+
+        Returns
+        -------
+        PcResult
+            The method's Pc of ``conjunction``.
         """
         if self.on_plane:
             return self.function(
@@ -258,7 +263,7 @@ def compute_pc(
         2. ``"alfano"`` if both covariances are unknown, ``"frisbee"`` if one
            is (maximum Pc: upper bounds);
         3. ``"hall3d"`` if a 2-D assumption is questionable (see
-           :func:`applicability`), both orbits are elliptic and both
+           :func:`keepout.pc.api.applicability`), both orbits are elliptic and both
            covariances have a velocity block, with the 2-D Pc kept in
            ``details["pc_2d"]``;
         4. ``"foster"`` otherwise, with a note when a 2-D assumption is
@@ -273,9 +278,11 @@ def compute_pc(
         When ``"hall3d"`` raises :class:`PcConvergenceError` after its
         encounter scan (the peak-overlap iteration failed where the rate
         matters, the rate cannot be computed at a quadrature node, or Nc is
-        not finite), ``"auto"`` falls back to ``"montecarlo"`` with at most
-        ``AUTO_MC_SAMPLES`` samples and the seed ``AUTO_MC_SEED``, so
-        ``"auto"`` is reproducible. A failure of the encounter scan itself
+        not finite), ``"auto"`` falls back to ``"montecarlo"`` with at most 1,000,000
+        samples and the seed 0
+        (:data:`~keepout.pc.api.AUTO_MC_SAMPLES`,
+        :data:`~keepout.pc.api.AUTO_MC_SEED`), so ``"auto"`` is
+        reproducible. A failure of the encounter scan itself
         is not covered: Monte Carlo reuses that scan, so its error
         propagates.
         The 2-D and maximum-Pc methods take milliseconds; ``"hall3d"`` about
@@ -331,6 +338,7 @@ def compute_pc(
     ```python
     from keepout import cdm, compute_pc
 
+    # A sample CDM in the repository.
     message = cdm.load("tests/cdm/data/tracss_v2.kvn")
     # The CDM gives no HBR for OBJECT2: give the combined radius [m].
     conjunction = message.conjunction(combined_hard_body_radius=20.0)
@@ -477,6 +485,16 @@ class PcComputation:
         """The Pc of ``conjunction`` (see :func:`compute_pc`), by the
         fallback where this method does not converge.
 
+        Parameters
+        ----------
+        conjunction
+            The conjunction at TCA.
+
+        Returns
+        -------
+        PcResult
+            The Pc, with a note if the fallback computed it.
+
         Raises
         ------
         PcConvergenceError
@@ -488,7 +506,11 @@ class PcComputation:
             if self.fallback is None:
                 raise
             result = self.fallback(conjunction)
-            note = f"{self.method} failed ({exc}); {result.method} used instead"
+            # The reason without the error's advice, which the fallback follows.
+            reason = (
+                exc.__cause__ if isinstance(exc.__cause__, PcConvergenceError) else exc
+            )
+            note = f"{self.method} failed ({reason}); {result.method} used instead"
             return dataclasses.replace(result, diagnostics=(*result.diagnostics, note))
 
     def resolved(self, result: PcResult) -> PcComputation:
@@ -501,6 +523,11 @@ class PcComputation:
         ----------
         result
             A result of this computation.
+
+        Returns
+        -------
+        PcComputation
+            The computation that reproduces ``result``.
 
         Raises
         ------
@@ -556,6 +583,11 @@ def computation(method: MethodChoice = "auto", **options: object) -> PcComputati
     **options
         The method's options (see :func:`compute_pc`).
 
+    Returns
+    -------
+    PcComputation
+        The method and its options, callable on a conjunction.
+
     Raises
     ------
     ValueError
@@ -570,6 +602,7 @@ def computation(method: MethodChoice = "auto", **options: object) -> PcComputati
     from keepout.pc import computation
 
     foster = computation("foster", rtol=1e-8)
+    # A sample CDM in the repository.
     conjunction = cdm.load("tests/cdm/data/tracss_v2.kvn").conjunction(
         combined_hard_body_radius=20.0
     )

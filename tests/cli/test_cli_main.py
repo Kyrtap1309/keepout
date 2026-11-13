@@ -57,7 +57,11 @@ def test_main_without_the_extra_says_how_to_install_it(
     with pytest.raises(SystemExit) as exit_:
         cli.main()
     assert exit_.value.code == cli.INSTALL_HINT
-    assert "pip install 'keepout[cli]'" in cli.INSTALL_HINT
+    # keepout is not on PyPI: the hint installs it from the repository.
+    assert (
+        'pip install "keepout[cli] @ git+https://github.com/Kyrtap1309/keepout"'
+        in cli.INSTALL_HINT
+    )
 
 
 def test_main_does_not_hide_other_missing_modules(

@@ -686,8 +686,8 @@ def test_help_gives_the_exit_status_and_the_library_defaults() -> None:
     assert result.exit_code == ExitCode.OK
     words = " ".join(result.stdout.split())
     for expected in (
-        "CDMS",
-        "--target-pc",
+        "[CDM...]",
+        "--target-pc PC",
         "--burn-before",
         "--dv",
         "--hbr",

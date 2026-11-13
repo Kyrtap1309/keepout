@@ -124,6 +124,11 @@ class Job:
         ----------
         row
             The job's row in the store.
+
+        Returns
+        -------
+        Job
+            The job.
         """
         return cls(
             id=row.id,
@@ -354,6 +359,11 @@ class JobQueue:
             The store's id of the event.
         settings
             The operator's settings of the plan.
+
+        Returns
+        -------
+        Submission
+            What became of the submission, and its job if there is one.
 
         Raises
         ------

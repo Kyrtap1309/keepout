@@ -86,6 +86,11 @@ class Thresholds:
         observation
             An observation with a Pc.
 
+        Returns
+        -------
+        float
+            The Pc or its upper bound that the thresholds apply to.
+
         Raises
         ------
         ValueError
@@ -103,6 +108,11 @@ class Thresholds:
         ----------
         result
             A result of a Pc method.
+
+        Returns
+        -------
+        float
+            The Pc or its upper bound that the thresholds apply to.
         """
         high = None if result.interval is None else result.interval[1]
         return self._compared(result.value, high)
@@ -120,6 +130,11 @@ class Thresholds:
         ----------
         value
             A Pc, e.g. from :meth:`value_of`.
+
+        Returns
+        -------
+        RiskLevel
+            The level that ``value`` reaches.
         """
         if value >= self.red_from:
             return RiskLevel.RED

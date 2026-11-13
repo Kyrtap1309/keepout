@@ -182,7 +182,10 @@ def integrate(
             atol=tolerance,
         )
         if solution.status < 0:
-            raise PropagationError(f"integration failed: {solution.message}")
+            raise PropagationError(
+                f"integration failed from t = {start:.1f} s to "
+                f"{float(ends[-1]):.1f} s ({count} object(s)): {solution.message}"
+            )
         if solution.status > 0 and not stop_at_surface:
             # Lists, not None: solve_ivp was given events.
             t_events: list[FloatArray] = solution.t_events or []

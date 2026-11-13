@@ -12,16 +12,17 @@ traceback.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated, Any, Final, TypeVar, cast
 
 import typer
+from typer.core import TyperCommand
 
 import keepout
 from keepout.cli.assess import assess_command
 from keepout.cli.fetch import fetch_cara, fetch_catalog, fetch_cdm, fetch_kelvins
 from keepout.cli.jobs import jobs_cancel, jobs_list
 from keepout.cli.maneuver import maneuver_command
-from keepout.cli.output import reported
+from keepout.cli.output import ExitCode, reported
 from keepout.cli.screen import screen_command
 from keepout.cli.store import store_add, store_purge, store_rebuild, store_upgrade
 from keepout.cli.validate import validate_command
@@ -29,9 +30,91 @@ from keepout.cli.worker import worker_command
 
 __all__ = ["app", "fetch_app", "jobs_app", "run", "store_app"]
 
+if TYPE_CHECKING:
+    from typing_extensions import override
+else:
+    # Not keepout._types.override: it loads NumPy, which --help need not.
+    _Method = TypeVar("_Method")
+
+    def override(method: _Method) -> _Method:
+        """The marker of a method overriding its base class's (checked
+        statically)."""
+        return method
+
+
+# The help is Rich markup: a square bracket in it is escaped (\[), and an
+# epilog keeps its line breaks.
+_EPILOG: Final = f"""Exit status:
+  {ExitCode.OK:d}  done
+  {ExitCode.ERROR:d}  an error in the data, a download or a file
+  {ExitCode.USAGE:d}  a usage error: an unknown option, a bad value, a missing file
+  {ExitCode.MANEUVER:d}  assess, store add: at least one event needs a manoeuvre
+  {ExitCode.NO_SAFE_BURN:d}  maneuver: no burn can be recommended
+
+Environment:
+  SPACETRACK_IDENTITY  the Space-Track account (--source spacetrack, fetch)
+  SPACETRACK_PASSWORD  its password
+  KEEPOUT_CACHE_DIR    the cache root, as --cache-dir
+  KEEPOUT_STORE        the store of store, jobs, worker and maneuver --event
+
+Commands and options spell maneuver the US way, as the CCSDS keywords do; the
+help text says manoeuvre. keepout COMMAND --help gives each command's options."""
+"""The end of ``keepout --help``: the exit statuses, the environment
+variables and the spelling."""
+
+_EXAMPLES: Final = {
+    "screen": (
+        "keepout screen --fleet fleet.toml --days 7 --cdm-dir cdms",
+        (
+            "keepout screen --fleet fleet.toml --catalog catalog.csv.gz "
+            "--start 2026-10-06 --store keepout.db"
+        ),
+    ),
+    "assess": (
+        "keepout assess cdms/*.kvn",
+        "keepout assess cdms/*.kvn --hbr 1000 --json",
+    ),
+    "maneuver": (
+        (
+            "keepout maneuver cdms/44476_55841_*.kvn --target-pc 1e-7 "
+            "--catalog catalog.csv.gz"
+        ),
+        "keepout maneuver --event 3befe6f1305d --store keepout.db --queue",
+    ),
+    "store add": ("keepout store add cdms/*.kvn --store keepout.db",),
+}
+"""Example command lines at the end of a command's help, by command."""
+
+
+def _examples(command: str) -> str | None:
+    """The epilog of ``command``'s help: its examples, if any."""
+    lines = _EXAMPLES.get(command)
+    if lines is None:
+        return None
+    # Unindented: Typer strips the indent common to the lines after the first.
+    return "\n".join(["Examples:", *lines])
+
+
+class _Command(TyperCommand):
+    """A command whose usage line names its arguments as the help does:
+    ``CDM...``, not Typer's ``{CDM...}`` for a required one."""
+
+    @override
+    def collect_usage_pieces(self, ctx: object) -> list[str]:
+        """The usage line after the command name, braces removed."""
+        # The context is of the Click that Typer vendors, which keepout does
+        # not import: typed as any object here, passed on as it came.
+        pieces: list[str] = super().collect_usage_pieces(cast("Any", ctx))
+        return [
+            piece[1:-1] if piece.startswith("{") and piece.endswith("}") else piece
+            for piece in pieces
+        ]
+
+
 app = typer.Typer(
     name="keepout",
     no_args_is_help=True,
+    epilog=_EPILOG,
     # Locals may hold credentials (Space-Track); a bug's traceback must not
     # print them.
     pretty_exceptions_show_locals=False,
@@ -93,7 +176,8 @@ def _keepout(
 
 
 def _add(group: typer.Typer, name: str, command: Callable[..., None]) -> None:
-    group.command(name)(reported(command))
+    full = name if group is app else f"{group.info.name} {name}"
+    group.command(name, cls=_Command, epilog=_examples(full))(reported(command))
 
 
 _add(fetch_app, "catalog", fetch_catalog)

@@ -42,6 +42,7 @@ from generated import (
 )
 from matplotlib.figure import Figure
 
+from keepout._text import plural
 from keepout.risk import (
     PC_FLOOR,
     Action,
@@ -126,7 +127,13 @@ class Settings(TypedDict):
 
 
 class Summary(TypedDict):
-    """The report's numbers, as written to the JSON file."""
+    """The report's numbers, as written to the JSON file.
+
+    ``high_risk_after_tca`` counts, by decision, the high-risk events whose
+    last CDM was issued after TCA (keepout decides without it);
+    ``high_risk_levels`` the high-risk events by decision and level of the
+    last CDM before TCA.
+    """
 
     doi: str
     settings: Settings
@@ -136,6 +143,8 @@ class Summary(TypedDict):
     directions: dict[Direction, int]
     decision_point_vs_final: dict[str, dict[str, int]]
     challenge_label: dict[str, dict[Label, int]]
+    high_risk_after_tca: dict[str, int]
+    high_risk_levels: dict[str, dict[str, int]]
     examples: dict[str, int]
 
 
@@ -165,6 +174,9 @@ class Example:
     key: str
     title: str
     pick: Callable[[Assessment], bool]
+    caption: str
+    """One line under the plot; ``{days}`` is the decision point [days] and
+    ``{steady}`` the steady band [decades per day]."""
 
 
 EXAMPLES: Final = (
@@ -172,11 +184,16 @@ EXAMPLES: Final = (
         "maneuver",
         "Red within the decision point: maneuver",
         lambda a: a.decision.action is Action.MANEUVER,
+        "The last CDM before TCA is red and at most {days:g} days before "
+        "TCA, so keepout decides to manoeuvre.",
     ),
     Example(
         "prepare",
         "Red before the decision point: monitor and prepare a manoeuvre",
         lambda a: a.decision.action is Action.PREPARE_MANEUVER,
+        "The last CDM before TCA is red but more than {days:g} days before TCA: "
+        "there is still time for more CDMs, so keepout monitors and prepares a "
+        "manoeuvre.",
     ),
     Example(
         "rising",
@@ -186,6 +203,8 @@ EXAMPLES: Final = (
             and a.trend.direction is Direction.RISING
             and a.decision.action is Action.MONITOR
         ),
+        "The last CDM is green, but the Pc rises by more than {steady:g} decades "
+        "per day, so keepout monitors the event.",
     ),
     Example(
         "falling",
@@ -194,6 +213,8 @@ EXAMPLES: Final = (
             a.decision.action is Action.IGNORE
             and a.trend.direction is Direction.FALLING
         ),
+        "The Pc falls and the last CDM before TCA is green, so keepout ignores "
+        "the event.",
     ),
 )
 """For each, the event it picks with the most CDMs before TCA (the lowest
@@ -219,13 +240,19 @@ def summarise(events: Sequence[KelvinsEvent]) -> Summary:
     assessed: dict[int, Assessment] = {}
     known: dict[str, Counter[str]] = {level: Counter() for level in LEVELS}
     labels: dict[str, Counter[Label]] = {action: Counter() for action in ACTIONS}
+    after_tca: Counter[str] = Counter()
+    high_levels: dict[str, Counter[str]] = {action: Counter() for action in ACTIONS}
     for event in events:
         observations = event.observations()
         assessment = assessed[event.event_id] = assess_with_settings(observations)
         final = level_label(assessment.level)
         known[level_label(at_decision_point(observations))][final] += 1
         high = event.column("risk")[-1] >= HIGH_RISK
-        labels[assessment.decision.action.label]["high" if high else "low"] += 1
+        action = assessment.decision.action.label
+        labels[action]["high" if high else "low"] += 1
+        if high:
+            high_levels[action][final] += 1
+            after_tca[action] += int(event.time_to_tca[-1] < 0.0)
     actions = Counter(a.decision.action.label for a in assessed.values())
     directions = Counter(a.trend.direction for a in assessed.values())
     return {
@@ -245,6 +272,11 @@ def summarise(events: Sequence[KelvinsEvent]) -> Summary:
         },
         "challenge_label": {
             action: {label: labels[action][label] for label in LABELS}
+            for action in ACTIONS
+        },
+        "high_risk_after_tca": {action: after_tca[action] for action in ACTIONS},
+        "high_risk_levels": {
+            action: {level: high_levels[action][level] for level in LEVELS}
             for action in ACTIONS
         },
         "examples": choose(EXAMPLES, assessed),
@@ -303,19 +335,25 @@ def render_page(summary: Summary, images: str) -> str:
         generated_notice(TOOL),
         "",
         (
-            f"keepout assessed every event of ESA's Collision Avoidance Challenge "
-            f"data set: {total} conjunction events of ESA missions from 2015 to 2019, "
-            f"{summary['cdms']} CDMs in all. Each CDM gives ESA's own Pc, which "
-            "keepout does not recompute (the data lacks absolute states and ESA's "
-            "method is not published); CDMs at ESA's floor of "
-            f"1e{kelvins.RISK_FLOOR:.0f} count as "
-            "below it."
+            "This page runs keepout's decision rules (risk level, trend and "
+            "decision point) on real sequences of CDMs. It uses ESA's Pc from "
+            "each CDM, not keepout's own Pc: the data has no absolute states, and "
+            "ESA's method is not published. There is no ground truth. Nobody "
+            "knows which of these events would have ended in a collision, so the "
+            "page shows what the rules decide, not whether they decide right."
+        ),
+        "",
+        (
+            "The data is ESA's Collision Avoidance Challenge set: "
+            f"{total} conjunction events of ESA missions from 2015 to 2019, "
+            f"{summary['cdms']} CDMs in all. A CDM at ESA's floor of "
+            f"1e{kelvins.RISK_FLOOR:.0f} counts as a Pc below the floor."
         ),
         "",
         (
             "Settings: "
             f"{threshold_text(settings['green_below'], settings['red_from'])} "
-            f"({settings['basis']} basis); trend over the "
+            f"([{settings['basis']} basis](risk.md#risk-levels)); trend over the "
             f"last {settings['trend_window']} CDMs, steady within "
             f"±{settings['steady_within']:g} decades per day; decision point "
             f"{settings['decision_point_days']:g} days before TCA. See "
@@ -369,17 +407,67 @@ def render_page(summary: Summary, images: str) -> str:
                 for action, counts in summary["challenge_label"].items()
             ],
         ),
+        *_label_notes(summary),
         "",
         "## Example events",
+        "",
+        (
+            "Each plot shows ESA's Pc of every CDM of one event against the days "
+            "to TCA, coloured by level (hollow: at ESA's floor). Dashed lines: "
+            "the thresholds; dotted line: the decision point."
+        ),
     ]
+    captions = {example.key: example.caption for example in EXAMPLES}
     for key, event_id in summary["examples"].items():
+        caption = captions[key].format(
+            days=settings["decision_point_days"], steady=settings["steady_within"]
+        )
         lines += [
             "",
             f"### {titles[key]}",
             "",
             f"![Kelvins event {event_id}]({images}/{image(event_id)})",
+            "",
+            caption,
         ]
     return "\n".join(lines) + "\n"
+
+
+def _label_notes(summary: Summary) -> list[str]:
+    """What the high-risk table says: the high-risk events keepout ignores
+    and those it only monitors."""
+    settings = summary["settings"]
+    label = summary["challenge_label"]
+    notes: list[str] = []
+    ignored = label[Action.IGNORE.label]["high"]
+    if ignored:
+        late = summary["high_risk_after_tca"][Action.IGNORE.label]
+        events = plural(ignored, "high-risk event")
+        if late == ignored:
+            whose = "its" if ignored == 1 else "their"
+            notes.append(
+                f"keepout ignores {events}: {whose} high-risk label comes from a "
+                "CDM issued after TCA, which keepout does not use."
+            )
+        else:
+            notes.append(
+                f"keepout ignores {events}; for {late} of them the high-risk "
+                "label comes from a CDM issued after TCA, which keepout does not "
+                "use."
+            )
+    monitored = label[Action.MONITOR.label]["high"]
+    if monitored:
+        yellow = summary["high_risk_levels"][Action.MONITOR.label][RiskLevel.YELLOW.key]
+        share = "All" if yellow == monitored else f"{yellow} of the"
+        notes.append(
+            f"{share} {monitored} high-risk events keepout monitors are yellow at "
+            "the last CDM before TCA. The challenge's line, a Pc of "
+            f"1e{HIGH_RISK:.0f}, lies inside keepout's yellow band "
+            f"({threshold_text(settings['green_below'], settings['red_from'])}): "
+            "such an event is watched for more CDMs, and a manoeuvre is "
+            "considered only when its Pc reaches red."
+        )
+    return [line for note in notes for line in ("", note)]
 
 
 def plot(event: KelvinsEvent, assessment: Assessment, path: Path) -> None:

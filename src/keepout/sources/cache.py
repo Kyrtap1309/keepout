@@ -91,6 +91,11 @@ def meta_path(target: Path) -> Path:
     ----------
     target
         The cached download's file.
+
+    Returns
+    -------
+    pathlib.Path
+        The path of the metadata file.
     """
     return target.with_name(f"{target.name}.meta.json")
 
@@ -107,6 +112,11 @@ def read_copy(target: Path, url: str) -> CachedCopy | None:
         The cached download's file.
     url
         The URL the copy must come from.
+
+    Returns
+    -------
+    CachedCopy or None
+        The bytes and their metadata, or None if there is no intact copy.
     """
     try:
         record: JsonValue = json.loads(meta_path(target).read_bytes())

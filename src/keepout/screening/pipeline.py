@@ -210,6 +210,7 @@ def screen(
 
     from keepout import omm, screen
 
+    # A sample catalog in the repository.
     catalog = omm.load("tests/screening/data/celestrak-public.csv.gz")
     iss = [item for item in catalog if item.catalog_number == 25544]
     start = Time("2026-10-06T00:00:00", scale="utc")

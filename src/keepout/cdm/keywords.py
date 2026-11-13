@@ -125,6 +125,11 @@ def covariance_entries(dimension: int) -> tuple[tuple[str, int, int], ...]:
     dimension
         Block size, 1 to 9 (6 = position-velocity, 9 = with drag/SRP/thrust).
 
+    Returns
+    -------
+    tuple[tuple[str, int, int], ...]
+        Each keyword with its row and column.
+
     Raises
     ------
     ValueError
@@ -148,6 +153,11 @@ def covariance_matrix(dimension: int, value_of: Callable[[str], float]) -> Float
         Block size, as in :func:`covariance_entries`.
     value_of
         Value of a covariance keyword.
+
+    Returns
+    -------
+    FloatArray
+        The symmetric matrix, in the units of the values given.
     """
     matrix = np.zeros((dimension, dimension))
     for name, row, column in covariance_entries(dimension):
@@ -162,6 +172,11 @@ def covariance_names(dimension: int) -> tuple[str, ...]:
     ----------
     dimension
         Block size, 1 to 9.
+
+    Returns
+    -------
+    tuple of str
+        The keywords, row by row.
     """
     return tuple(name for name, _, _ in covariance_entries(dimension))
 

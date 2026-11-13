@@ -21,7 +21,8 @@ states its own assumptions under
 
 ## The covariance model
 
-`keepout.synthetic.SyntheticCovarianceModel` gives an element set a
+[`SyntheticCovarianceModel`](reference/synthetic.md#keepout.synthetic.SyntheticCovarianceModel)
+gives an element set a
 diagonal **position** covariance at a time `t`, such as the TCA of an
 approach. The covariance is in the object's RTN frame: radial, transverse
 (along-track) and normal (cross-track).
@@ -66,9 +67,9 @@ zero.
   growth is 3 km/day, the top of Levit and Marshall's range.
 
 With these numbers a LEO element set four days old has an along-track
-sigma of about 13 km. In the
-[report's week](synthetic-operator.md#covariance-model) the along-track
-sigmas at the TCAs range from 1.0 to 20.4 km. Every parameter can be
+sigma of about 13 km. The
+[synthetic operator report](synthetic-operator.md#covariance-model) gives
+the along-track sigmas at the TCAs of its week. Every parameter can be
 replaced:
 
 ```python
@@ -104,7 +105,9 @@ Sigmas: R 0.204 km, T 12.899 km, N 0.252 km
 
 Each object of a synthetic CDM carries these six comment lines after
 `COVARIANCE_METHOD = DEFAULT`, so the message itself says how its
-covariance was made. `covariance(omm, time)` gives the `Covariance` at
+covariance was made.
+[`covariance(omm, time)`](reference/synthetic.md#keepout.synthetic.SyntheticCovarianceModel.covariance)
+gives the `Covariance` at
 `time`, in RTN and in m².
 
 ## Orbit regimes
@@ -136,8 +139,11 @@ regime their name does not suggest:
   845 × 2 496 km) is HEO. Its sigmas are then about 1 km instead of LEO's
   0.1 to 0.5 km.
 
-Of the 19 914 element sets of the frozen public catalog, 19 032 are LEO,
-182 MEO, 27 GTO, 87 HEO and 586 GEO.
+The repository keeps a copy of CelesTrak's public GP catalog, downloaded
+on 2026-10-06 and never updated since
+(`tests/screening/data/celestrak-public.csv.gz`), so that the tests and
+reports repeat exactly. Of its 19 914 element sets, 19 032 are LEO, 182
+MEO, 27 GTO, 87 HEO and 586 GEO.
 
 ## What the model is for
 
@@ -146,7 +152,7 @@ covariance only. The velocity block is zero because the velocity
 uncertainty is not modelled. A zero velocity block tells a 3-D method that
 the velocities are exact, so keepout guards against it:
 
-- `compute_pc(..., "auto")` keeps the 2-D Pc, with a note, when a 2-D
+- [`compute_pc(..., "auto")`](reference/pc.md#keepout.pc.compute_pc) keeps the 2-D Pc, with a note, when a 2-D
   assumption is questionable (a long or slow encounter) and a covariance is
   known only in position. With velocity blocks it would choose Hall 3D-Nc
   (see [Choosing a method](pc-3d.md#choosing-a-method)).
@@ -154,45 +160,47 @@ the velocities are exact, so keepout guards against it:
   zero relative velocity, where no 2-D Pc exists. They then add a
   diagnostic that they take the velocity of such an object as exact.
 - A CDM records the model as `COVARIANCE_METHOD = DEFAULT`. Read back,
-  `Cdm.assumed_covariance`, `ConjunctionEvent.assumed_covariance` and each
+  [`Cdm.assumed_covariance`](reference/cdm.md#keepout.cdm.Cdm.assumed_covariance),
+  [`ConjunctionEvent.assumed_covariance`](reference/events.md#keepout.events.ConjunctionEvent.assumed_covariance)
+  and each
   `PcObservation.assumed_covariance` say that its Pc rests on it.
 
-The effect was measured on approaches of the screening fixture, its 222
-objects screened against each other for a week with the model's
-covariances. Hall 3D-Nc and Monte Carlo accept the zero velocity block.
-
-- On 8 sampled fast approaches (1 to 14 km/s), Hall agrees with Foster
-  within 0.02 to 7 %.
-- On 8 sampled slow ones (0.2 to 1.1 m/s, mostly satellites flying in
-  formation), Hall gives 1.3 to 2 times Foster's Pc on five. On the other
-  three its peak-overlap iteration does not converge, and Monte Carlo fails
-  on the same scan.
-- Given a plausible velocity uncertainty instead, Hall converges on those
-  three but gives 13 times Foster's Pc.
-
 A 3-D Pc of a slow encounter depends on the velocity uncertainty, which the
-model does not know.
+model does not know. A result of `hall3d` or `montecarlo` chosen explicitly
+therefore rests on exact velocities as well as on the assumed positions.
 
-A result of `hall3d` or `montecarlo` chosen explicitly therefore rests on
-exact velocities as well as on the assumed positions.
+??? details "How much the zero velocity block matters"
+    The effect was measured on approaches between the 222 objects of the
+    screening fixture (`tests/screening/data/celestrak-fixture.csv`, a
+    sample of the copied catalog from LEO to HEO that the screening tests
+    use). They were screened against each other for a week with the model's
+    covariances. Hall 3D-Nc and Monte Carlo accept the zero velocity block.
+
+    - On 8 sampled fast approaches (1 to 14 km/s), Hall agrees with Foster
+      within 0.02 to 7 %.
+    - On 8 sampled slow ones (0.2 to 1.1 m/s, mostly satellites flying in
+      formation), Hall gives 1.3 to 2 times Foster's Pc on five. On the
+      other three its peak-overlap iteration does not converge, and Monte
+      Carlo fails on the same scan.
+    - Given a plausible velocity uncertainty instead, Hall converges on
+      those three but gives 13 times Foster's Pc.
 
 ## What the Pc values mean
 
 A Pc computed from an assumed covariance depends on the covariance's size
-in two opposite ways. The [report](synthetic-operator.md#approaches) shows
-both. For each approach it gives the maximum Pc over a scale factor of the
-combined covariance (Alfano 2005):
+in two opposite ways. The maximum Pc over a scale factor of the combined
+covariance (Alfano 2005) shows which way applies:
 
 - **Dilution region.** When the covariance is large against the miss
   distance, a smaller covariance (a better-known orbit) would *raise* the
-  Pc. In the report's week this holds for 2 of the 12 approaches, the two
-  yellow ones (scale factors 0.72 and 0.10 at the maximum).
-- **Far from the hard body.** For the other 10 the maximum needs a
-  covariance 10 to 129 times larger. Their miss lies far from the hard body
-  against the covariance's narrow radial and normal sigmas (0.17 to
-  0.72 km). Their tiny Pc values would rise steeply, up to 2.8e-5, if the
-  covariance were larger.
+  Pc. The maximum then needs a scale factor below 1.
+- **Far from the hard body.** When the miss lies far from the hard body
+  against the covariance's narrow directions (its radial and normal
+  sigmas), the Pc is tiny, and it would rise steeply if the covariance were
+  larger. The maximum then needs a scale factor above 1.
 
+The [synthetic operator report](synthetic-operator.md#approaches) gives
+both for each of its approaches: the maximum Pc and its scale factor.
 Either way the decisions hold only as far as the model does.
 
 ## Limits
@@ -234,13 +242,6 @@ emergency-reportable events and may not be redistributed.
 - **GP data.** The states at TCA come from SGP4 and GP element sets, with
   the [limits of GP data](screening.md#limits-of-gp-data). The screening
   volume decides which approaches exist at all.
-
-## Manoeuvre planning
-
-The manoeuvre planner's assumptions apply to any CDM, not only to synthetic
-ones. They are listed under
-[Assumptions and limits](maneuver.md#assumptions-and-limits) on the
-manoeuvre planning page.
 
 ## References
 

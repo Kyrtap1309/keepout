@@ -115,6 +115,11 @@ class ManeuverGrid:
         ----------
         plan
             The plan, from :func:`~keepout.maneuver.plan_maneuver`.
+
+        Returns
+        -------
+        ManeuverGrid
+            The lead times and Δv of the plan's grid.
         """
         return cls(
             burn_leads=plan.burn_leads,
@@ -197,6 +202,11 @@ class ManeuverOutcome:
         grid
             The Pc grid the burns were found on (:meth:`ManeuverGrid.of` a
             plan); ``None`` for burns of one's own.
+
+        Returns
+        -------
+        ManeuverOutcome
+            The outcome of the burns, without the event.
         """
         return cls(
             event=context.event,
@@ -278,6 +288,7 @@ def plan_event(
     from keepout.maneuver import plan_event
     from keepout.pc import computation
 
+    # A sample CDM in the repository.
     event = ConjunctionEvent.from_cdms([cdm.load("tests/cdm/data/tracss_v2.kvn")])
     outcome = plan_event(
         event,

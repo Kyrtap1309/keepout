@@ -410,6 +410,11 @@ def montecarlo_over_scan(
         As for :func:`montecarlo`.
     workers
         Number of processes, at least 1 (``None`` already resolved).
+
+    Returns
+    -------
+    PcResult
+        The Monte Carlo Pc and its confidence interval.
     """
     scan = encounters.scan
     # A peak-overlap failure inside a segment could have narrowed the

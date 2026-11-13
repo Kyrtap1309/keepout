@@ -381,6 +381,11 @@ class Covariance:
         ----------
         epoch
             The new epoch.
+
+        Returns
+        -------
+        Covariance
+            The same matrix, frame and repairs, at ``epoch``.
         """
         moved = object.__new__(Covariance)
         for name in ("matrix", "frame", "repairs"):
@@ -402,6 +407,11 @@ class Covariance:
             ``"RTN"`` or ``"GCRF"``.
         epoch
             Epoch the covariance refers to.
+
+        Returns
+        -------
+        Covariance
+            The 6x6 covariance with a zero velocity block [m^2, m^2/s, m^2/s^2].
 
         Raises
         ------
@@ -433,6 +443,11 @@ class Covariance:
         ----------
         state
             GCRF state of the object; defines the RTN axes.
+
+        Returns
+        -------
+        Covariance
+            The covariance in GCRF [m^2, m^2/s, m^2/s^2], at the same epoch.
         """
         return self._in_frame("GCRF", state, rtn_to_inertial_covariance)
 
@@ -443,6 +458,12 @@ class Covariance:
         ----------
         state
             GCRF state of the object; defines the RTN axes.
+
+        Returns
+        -------
+        Covariance
+            The covariance in the object's RTN frame [m^2, m^2/s, m^2/s^2], at the same
+            epoch.
         """
         return self._in_frame("RTN", state, inertial_to_rtn_covariance)
 
@@ -481,6 +502,11 @@ def make_covariance(
         invalid matrix; ``"repair"`` (default, as in operational practice)
         symmetrises it and clips negative eigenvalues, recording what it did
         in :attr:`Covariance.repairs`.
+
+    Returns
+    -------
+    Covariance
+        The validated covariance; its repairs, if any, in ``repairs``.
 
     Raises
     ------

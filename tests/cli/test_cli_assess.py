@@ -45,7 +45,9 @@ TCA (UTC)         Objects        Miss (m)  CDMs        Pc  Level   Action \n\
 2026-10-08 12:03  44476 / 55841      3647     1  7.38e-06  yellow  monitor
 2 events from 2 CDMs: 1 monitor, 1 ignore.
 2 of 2 events rest on assumed covariances (COVARIANCE_METHOD = DEFAULT), not orbit determination.
-3befe6f1305d: monitor (latest Pc 7.38e-06 is yellow, 2.50 d before TCA; trend undetermined; diagnostic: 2-D Pc assumptions questionable: the encounter lasts about 2.51e+03 s, 2.9% of the primary's orbital period (limit 1%); a 3-D Pc may differ; diagnostic: the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used)
+3befe6f1305d: monitor (latest Pc 7.38e-06 is yellow, 2.50 d before TCA; trend undetermined)
+  diagnostic: 2-D Pc assumptions questionable: the encounter lasts about 2.51e+03 s, 2.9% of the primary's orbital period (limit 1%); a 3-D Pc may differ
+  diagnostic: the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used
 """)
 
 
@@ -64,7 +66,9 @@ TCA (UTC)         Objects        Miss (m)  CDMs        Pc  Level  Action        
 2 events from 2 CDMs: 1 maneuver, 1 prepare maneuver.
 2 of 2 events rest on assumed covariances (COVARIANCE_METHOD = DEFAULT), not orbit determination.
 2a85ed50c4e6: maneuver (latest Pc 4.25e-02 is red, 0.82 d before TCA; trend undetermined; within the decision point (2.00 d before TCA))
-3befe6f1305d: prepare maneuver (latest Pc 1.73e-02 is red, 2.50 d before TCA; trend undetermined; before the decision point (2.00 d before TCA): prepare a manoeuvre; diagnostic: 2-D Pc assumptions questionable: the encounter lasts about 3.5e+03 s, 4.1% of the primary's orbital period (limit 1%); a 3-D Pc may differ; diagnostic: the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used)
+3befe6f1305d: prepare maneuver (latest Pc 1.73e-02 is red, 2.50 d before TCA; trend undetermined; before the decision point (2.00 d before TCA): prepare a manoeuvre)
+  diagnostic: 2-D Pc assumptions questionable: the encounter lasts about 3.5e+03 s, 4.1% of the primary's orbital period (limit 1%); a 3-D Pc may differ
+  diagnostic: the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used
 At least one event needs a manoeuvre (exit status 3).
 """)
     assert result.stderr == ""
@@ -145,7 +149,7 @@ def test_assess_needs_both_hard_body_radii_or_hbr(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("args", "expected"),
     [
-        ((), "Missing argument 'files'"),
+        ((), "Missing argument 'CDM...'"),
         (("missing.kvn",), "does not exist"),
         ((".",), "is a directory"),
         (("green.kvn", "--hbr", "0"), "must be a positive number"),
@@ -205,7 +209,7 @@ TCA (UTC)         Objects        Miss (m)  CDMs      Pc  Level  Action \n\
 2026-10-08 12:03  44476 / 55841      3647     1       -  -      monitor
 2 events from 2 CDMs: 2 monitor.
 2 of 2 events rest on assumed covariances (COVARIANCE_METHOD = DEFAULT), not orbit determination.
-2a85ed50c4e6: monitor (latest observation has no Pc: GeometryError: relative velocity is zero: the encounter plane is undefined)
+2a85ed50c4e6: monitor (latest observation has no Pc: GeometryError: relative velocity is zero: the encounter plane is undefined; use method 'hall3d' or 'auto', which need both covariances)
 3befe6f1305d: monitor (no observation before TCA: nothing to decide on)
 """)
     payload = json.loads(keepout("assess", late, "--json").stdout)

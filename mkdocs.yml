@@ -55,22 +55,24 @@ extra_javascript:
 nav:
   - Getting started: index.md
   - Concepts and glossary: concepts.md
+  - FAQ and troubleshooting: faq.md
   - Guides:
+      - Working with CDMs: cdm.md
       - Screening: screening.md
-      - Synthetic operator: synthetic.md
       - 2-D probability of collision: pc-2d.md
       - 3-D, Monte Carlo and maximum Pc: pc-3d.md
       - Risk assessment: risk.md
+      - Synthetic operator: synthetic.md
       - Manoeuvre planning: maneuver.md
       - Command line: cli.md
       - JSON output: cli-json.md
       - Conjunction store: store.md
       - Space-Track data: spacetrack.md
-      - FAQ and troubleshooting: faq.md
   - Background:
       - Synthetic covariance model: assumptions.md
-      - Frames and units: frames-and-units.md
+      - Frames, units and covariances: frames-and-units.md
   - Reports:
+      - Reports overview: reports.md
       - Validation report: validation.md
       - Monte Carlo validation report: validation-monte-carlo.md
       - Risk on ESA's Kelvins data: risk-kelvins.md

@@ -52,6 +52,8 @@ def test_main_writes_then_checks(tmp_path: Path) -> None:
     assert (tmp_path / "docs" / "img" / "event-5490.svg").exists()
     page = (tmp_path / "docs" / "risk-kelvins.md").read_text(encoding="utf-8")
     assert "![Kelvins event 5490](img/event-5490.svg)" in page
+    assert "([conservative basis](risk.md#risk-levels))" in page
+    assert "There is no ground truth." in page
     readme = (tmp_path / "README.md").read_text(encoding="utf-8")
     assert "| maneuver | 1 | 16.7% |" in readme
     assert "(docs/img/event-5490.svg)" in readme
@@ -150,3 +152,24 @@ def test_plots_use_the_reports_settings(
     assert "within the decision point (5.00 d before TCA)" in (
         plotted[5490].decision.reasons
     )
+
+
+def test_the_high_risk_table_is_explained(tmp_path: Path) -> None:
+    assert report.main(paths(tmp_path)) == 0
+    page = tmp_path / "docs" / "risk-kelvins.md"
+    summary: report.Summary = json.loads(
+        page.with_suffix(".json").read_text(encoding="utf-8")
+    )
+    summary["challenge_label"]["ignore"]["high"] = 2
+    summary["high_risk_after_tca"]["ignore"] = 1
+    summary["challenge_label"]["monitor"]["high"] = 3
+    summary["high_risk_levels"]["monitor"]["yellow"] = 3
+    text = report.render_page(summary, "img")
+    assert (
+        "keepout ignores 2 high-risk events; for 1 of them the high-risk label "
+        "comes from a CDM issued after TCA"
+    ) in text
+    assert "All 3 high-risk events keepout monitors are yellow" in text
+    summary["challenge_label"]["ignore"]["high"] = 1
+    text = report.render_page(summary, "img")
+    assert "keepout ignores 1 high-risk event: its high-risk label comes" in text

@@ -87,6 +87,11 @@ def satrec_of(omm: Omm) -> Satrec:
     omm
         The element set.
 
+    Returns
+    -------
+    sgp4.api.Satrec
+        The satellite record, initialised from ``omm``.
+
     Raises
     ------
     UnsupportedElements
@@ -184,6 +189,12 @@ def sgp4_shape(omm: Omm) -> Sgp4Shape:
     ----------
     omm
         The element set.
+
+    Returns
+    -------
+    Sgp4Shape
+        Perigee and apogee altitudes [Earth radii], the Earth radius [km] and the mean
+        motion [rad/min].
 
     Raises
     ------

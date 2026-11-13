@@ -139,6 +139,11 @@ class CdmInput:
         path
             The CDM file, KVN or XML; its path is the origin.
 
+        Returns
+        -------
+        CdmInput
+            The parsed CDM, its text, format and origin.
+
         Raises
         ------
         CdmParseError
@@ -161,6 +166,11 @@ class CdmInput:
             The message, e.g. from :func:`~keepout.cdm.make_cdm`.
         origin
             Where it came from, e.g. ``"screen"``.
+
+        Returns
+        -------
+        CdmInput
+            The CDM, its KVN text and its origin.
         """
         return cls(cdm, keepout.cdm.kvn.dumps(cdm), "kvn", origin)
 
@@ -644,6 +654,7 @@ class Store:
     from keepout.store import CdmInput, open_store
 
     with open_store("keepout.db") as store:  # a new store if missing
+        # A sample CDM in the repository.
         report = store.ingest([CdmInput.read(Path("tests/cdm/data/tracss_v2.kvn"))])
         print(report.added, report.new_events)
         # ('TRACSS-TEST-0001',) ('5ede3a14c345',)
@@ -871,10 +882,10 @@ class Store:
         Settings with the same :func:`~keepout.store.codec.result_key` share
         their observations. Each CDM is parsed just before its Pc is computed,
         outside any transaction (in ``"auto"`` mode it can take up to a
-        minute). The observations are written in short transactions of
-        :data:`_BATCH_SIZE` observations or :data:`_BATCH_SECONDS` of
-        computing, whichever comes first, so that an interrupted refresh
-        keeps most of what it computed and other processes are not held up.
+        minute). The observations are written in short transactions of 100
+        observations or 1 s of computing, whichever comes first, so that an
+        interrupted refresh keeps most of what it computed and other
+        processes are not held up.
         One that another process cached meanwhile, or of a CDM purged
         meanwhile, is not written.
 
@@ -1066,6 +1077,11 @@ class Store:
         event_id
             The store's id of the event.
 
+        Returns
+        -------
+        ConjunctionEvent
+            The event and its CDMs.
+
         Raises
         ------
         StoreError
@@ -1088,6 +1104,11 @@ class Store:
         ----------
         event_ids
             The events to list (only their CDMs are read); all if ``None``.
+
+        Returns
+        -------
+        list of ConjunctionEvent
+            The events, by first TCA then id.
 
         Raises
         ------
@@ -1132,6 +1153,11 @@ class Store:
         settings
             The settings they were computed with (by their
             :func:`~keepout.store.codec.result_key`).
+
+        Returns
+        -------
+        tuple of PcObservation
+            One observation per CDM, oldest CDM first.
 
         Raises
         ------
@@ -1271,6 +1297,11 @@ class Store:
         ----------
         before
             The time; an event whose latest TCA is at it is not counted.
+
+        Returns
+        -------
+        int
+            The number of events.
 
         Raises
         ------

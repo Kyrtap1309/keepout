@@ -11,12 +11,38 @@ from pathlib import Path
 import keepout.cdm
 from keepout import ConjunctionEvent, assess
 
-cdms = [keepout.cdm.load(path) for path in Path("event").glob("*.cdm")]
-event = ConjunctionEvent.from_cdms(cdms)
-assessment = assess(event.observations(combined_hard_body_radius=20.0))
-print(assessment.decision.action.name)  # e.g. MONITOR
+# Three CDMs of one sample encounter; use the CDMs of your own event instead.
+paths = Path("tests/cdm/data/event").glob("*.kvn")
+event = ConjunctionEvent.from_cdms(keepout.cdm.load(path) for path in paths)
+observations = event.observations(combined_hard_body_radius=20.0)  # [m]
+for observation in observations:  # oldest first
+    days = observation.time_to_tca / 86400
+    print(f"{days:.2f} d before TCA: Pc {observation.pc:.2e}")
+assessment = assess(observations)
+print(assessment.decision.action.name)
 for reason in assessment.decision.reasons:
     print("-", reason)
+```
+
+```text
+4.01 d before TCA: Pc 6.41e-05
+2.51 d before TCA: Pc 2.53e-03
+0.84 d before TCA: Pc 4.50e-02
+MANEUVER
+- latest Pc 4.50e-02 is red, 0.84 d before TCA
+- trend rising (+0.90 decades per day)
+- within the decision point (2.00 d before TCA)
+- diagnostic: states are 300 m from closest approach along the relative velocity; 2-D Pc uses the straight-line closest approach
+```
+
+The sample event's CDMs are made up from the repository's sample CDM: its
+covariances shrink from one CDM to the next, so the Pc rises
+(`tests/cdm/data/event/README.md` says how they were made). On the command
+line, [`keepout assess`](cli.md#assess) does the same for CDM files, and
+its `--json` output is described in [JSON output](cli-json.md#screen-and-assess):
+
+```bash
+keepout assess tests/cdm/data/event/*.kvn  # exit status 3: a manoeuvre
 ```
 
 ## Events and observations
@@ -31,10 +57,21 @@ or starts a new one, so CDMs of different `CONJUNCTION_ID` make different
 events. A CDM without one that fits two events is an error.
 
 `event.observations()` computes keepout's own Pc for every CDM with
-`compute_pc`. The method is `"auto"` by default. `compute=computation("elrod")`
-picks another method, and `computation("montecarlo", samples=100_000, seed=1)`
-a method with options. The originator's `COLLISION_PROBABILITY` is kept
-next to keepout's Pc in `reported_pc`.
+`compute_pc`. The method is `"auto"` by default. `compute=` picks another
+method, with its options:
+
+```python
+from keepout.pc import computation
+
+event.observations(compute=computation("elrod"), combined_hard_body_radius=20.0)
+event.observations(
+    compute=computation("montecarlo", samples=100_000, seed=1),
+    combined_hard_body_radius=20.0,
+)
+```
+
+The originator's `COLLISION_PROBABILITY` is kept next to keepout's Pc in
+`reported_pc`.
 
 Each result becomes a `PcObservation`: the time from the CDM's creation to
 TCA, the Pc, what kind of value it is, and the diagnostics. A CDM whose Pc

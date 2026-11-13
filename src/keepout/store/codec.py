@@ -75,6 +75,11 @@ def observation_to_json(observation: PcObservation) -> dict[str, JsonValue]:
     ----------
     observation
         The observation, e.g. of :meth:`~keepout.events.ConjunctionEvent.observations`.
+
+    Returns
+    -------
+    dict[str, JsonValue]
+        The JSON object.
     """
     return {
         "time_to_tca": observation.time_to_tca,
@@ -143,6 +148,11 @@ def observation_from_json(data: Mapping[str, object]) -> PcObservation:
     data
         The JSON, as :func:`json.loads` returns it.
 
+    Returns
+    -------
+    PcObservation
+        The observation.
+
     Raises
     ------
     StoreError
@@ -207,6 +217,11 @@ def result_key(settings: Settings) -> str:
     ----------
     settings
         The operator's settings.
+
+    Returns
+    -------
+    str
+        The key, lower-case hexadecimal.
     """
     compute, radius = settings.compute, settings.combined_hard_body_radius
     return _key(
@@ -234,6 +249,11 @@ def maneuver_key(settings: Settings, catalog: CatalogReference | None) -> str:
         The settings of the plan.
     catalog
         The catalog the burns are re-screened against; ``None``: none.
+
+    Returns
+    -------
+    str
+        The key, lower-case hexadecimal.
 
     Raises
     ------

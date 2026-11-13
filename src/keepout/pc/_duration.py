@@ -56,6 +56,16 @@ def encounter_duration(conjunction: Conjunction) -> float:
     ``2 (SIGMA_EXTENT * sigma_along + HBR) / |v_rel|``, with ``sigma_along`` the
     standard deviation of the combined 3x3 position covariance along the
     relative velocity: only that extent is crossed during the encounter.
+
+    Parameters
+    ----------
+    conjunction
+        The conjunction at TCA; both covariances must be known.
+
+    Returns
+    -------
+    float
+        The encounter duration [s].
     """
     plane = conjunction.plane
     return 2.0 * straight_line_half_window(

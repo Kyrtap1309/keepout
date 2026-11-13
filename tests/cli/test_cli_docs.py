@@ -1,6 +1,8 @@
 """The walk-through of ``docs/cli.md``, run as written: each command's output
 is the block that follows it on the page."""
 
+import json
+import math
 import re
 import shlex
 from pathlib import Path
@@ -85,3 +87,36 @@ def test_the_walk_through_prints_what_the_page_shows(
     assert "\nNot re-screened: nothing is known" in planned
     purge, purged = documented("store purge")
     assert run(purge) == (ExitCode.OK, purged)
+
+
+JSON_PAGE: Final = REPO / "docs" / "cli-json.md"
+
+
+def _close(found: object, shown: object) -> bool:
+    """Whether ``found`` is the JSON value ``shown``, numbers to 1e-9
+    relative (a Pc's last digits may differ between machines)."""
+    if isinstance(shown, float) and isinstance(found, float):
+        return math.isclose(found, shown, rel_tol=1e-9)
+    if isinstance(shown, dict) and isinstance(found, dict):
+        return found.keys() == shown.keys() and all(
+            _close(found[key], shown[key]) for key in shown
+        )
+    if isinstance(shown, list) and isinstance(found, list):
+        return len(found) == len(shown) and all(
+            _close(a, b) for a, b in zip(found, shown, strict=True)
+        )
+    return found == shown
+
+
+def test_the_json_sample_is_what_assess_prints(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = JSON_PAGE.read_text(encoding="utf-8")
+    found = re.search(
+        r"`(keepout assess --json [^`]*)`.*?```json\n(.*?)```", page, re.DOTALL
+    )
+    assert found is not None, f"no JSON sample of keepout assess in {JSON_PAGE}"
+    monkeypatch.chdir(REPO)
+    result = keepout(*shlex.split(found[1])[1:])
+    assert result.exit_code == ExitCode.MANEUVER
+    assert _close(json.loads(result.stdout), json.loads(found[2]))

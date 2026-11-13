@@ -15,7 +15,8 @@ from keepout._workers import ONE_THREAD
 __all__ = ["EXTRA_MODULES", "INSTALL_HINT", "main"]
 
 INSTALL_HINT: Final = (
-    "keepout's command line needs the 'cli' extra: pip install 'keepout[cli]'"
+    "keepout's command line needs the 'cli' extra: "
+    'pip install "keepout[cli] @ git+https://github.com/Kyrtap1309/keepout"'
 )
 """What ``keepout`` prints (exit status 1) when the extra is missing."""
 

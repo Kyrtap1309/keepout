@@ -199,12 +199,14 @@ def test_a_known_cause_explains_a_difference(
         comparison,
         matches=(report.Match(moved, match.keepout), *comparison.matches[1:]),
     )
-    known = {moved.primary_number: "Its element set differs."}
+    known = {moved.primary_number: report.Cause("its own element set", "It differs.")}
     summary = report.summarise(changed, inputs, START, known)
     assert [d["cause"] for d in summary["differences"]] == [moved.primary_number]
     assert report.problems(summary, known) == []
     page = report.render_page(summary, known)
-    assert f"- **{moved.primary_number}**: Its element set differs." in page
+    assert "- **its own element set**: It differs." in page
+    assert "| its own element set |" in page
+    assert "; the 1 other traces to 1 object whose element sets differ" in page
     assert "1 approach outside tolerance involve 1 object" in report.render_summary(
         summary, "page.md"
     )
@@ -214,7 +216,7 @@ def test_a_known_cause_that_no_longer_shows_fails(
     comparison: report.Comparison, inputs: report.Inputs
 ) -> None:
     summary = report.summarise(comparison, inputs, START, {})
-    assert report.problems(summary, {47834: "gone"}) == [
+    assert report.problems(summary, {47834: report.Cause("gone", "gone")}) == [
         "47834 is a known difference but none of its approaches differs"
     ]
 

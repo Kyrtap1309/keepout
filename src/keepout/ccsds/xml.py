@@ -51,6 +51,11 @@ def parse(text: str, family: Family) -> ElementTree.Element:
     family
         The message family.
 
+    Returns
+    -------
+    xml.etree.ElementTree.Element
+        The root element.
+
     Raises
     ------
     CcsdsParseError
@@ -75,6 +80,11 @@ def local(tag: str) -> str:
     ----------
     tag
         An element's tag, e.g. ``{urn:ccsds:schema:ndmxml}cdm``.
+
+    Returns
+    -------
+    str
+        The name without its ``{namespace}`` prefix.
     """
     return tag.rsplit("}", 1)[-1]
 
@@ -101,6 +111,11 @@ def single(
         The message family.
     record
         Position of the message in its document, for errors.
+
+    Returns
+    -------
+    tuple[xml.etree.ElementTree.Element, str]
+        The child and its path.
 
     Raises
     ------
@@ -133,6 +148,11 @@ def leaves(
     groups
         Names of grouping elements: they are walked into, never yielded,
         even when empty.
+
+    Yields
+    ------
+    tuple[xml.etree.ElementTree.Element, str]
+        Each element without children and its path.
     """
     for child in element:
         name = local(child.tag)
@@ -163,6 +183,11 @@ def keyword(
         The message family.
     record
         Position of the message in its document, for errors.
+
+    Returns
+    -------
+    str
+        The element's keyword.
 
     Raises
     ------
@@ -208,6 +233,11 @@ def values(
     record
         Position of the message in its document, for errors.
 
+    Yields
+    ------
+    tuple[str, Located]
+        Each keyword and its value.
+
     Raises
     ------
     CcsdsParseError
@@ -249,6 +279,11 @@ def add_leaf(
     attributes
         Further attributes of the new element.
 
+    Returns
+    -------
+    xml.etree.ElementTree.Element
+        The new element.
+
     Raises
     ------
     KeepoutError
@@ -273,6 +308,11 @@ def tostring(root: ElementTree.Element) -> str:
     ----------
     root
         The document's root element.
+
+    Returns
+    -------
+    str
+        The document's text.
     """
     ElementTree.indent(root)
     declaration = '<?xml version="1.0" encoding="UTF-8"?>\n'

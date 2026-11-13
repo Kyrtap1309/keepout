@@ -25,6 +25,11 @@ def strip_bom(text: str) -> str:
     ----------
     text
         Decoded file text.
+
+    Returns
+    -------
+    str
+        ``text`` without a leading byte-order mark.
     """
     return text.removeprefix(BOM)
 
@@ -41,6 +46,11 @@ def read_file(path: str | Path, family: Family) -> str:
         File to read.
     family
         The message family, whose parse error a broken file raises.
+
+    Returns
+    -------
+    str
+        The file's text, without a byte-order mark.
 
     Raises
     ------
@@ -61,6 +71,11 @@ def decode_file(data: bytes, path: str | Path, family: Family) -> str:
         The file, for the error message.
     family
         The message family, whose parse error broken data raises.
+
+    Returns
+    -------
+    str
+        The decoded text.
 
     Raises
     ------

@@ -129,7 +129,13 @@ class SearchResult:
 
     @classmethod
     def empty(cls) -> SearchResult:
-        """A result with no minima and no failures."""
+        """A result with no minima and no failures.
+
+        Returns
+        -------
+        SearchResult
+            An empty result.
+        """
         return cls((), {}, {})
 
     @classmethod
@@ -144,6 +150,11 @@ class SearchResult:
         results
             The results of searches over parts of one catalog, numbering the objects
             alike.
+
+        Returns
+        -------
+        SearchResult
+            The minima and failures of every part.
         """
         minima: list[RangeMinimum] = []
         primary: dict[int, ObjectFailure] = {}

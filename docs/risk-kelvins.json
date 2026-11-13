@@ -66,6 +66,38 @@
       "low": 0
     }
   },
+  "high_risk_after_tca": {
+    "ignore": 1,
+    "monitor": 11,
+    "prepare maneuver": 1,
+    "maneuver": 2
+  },
+  "high_risk_levels": {
+    "ignore": {
+      "green": 1,
+      "yellow": 0,
+      "red": 0,
+      "none": 0
+    },
+    "monitor": {
+      "green": 0,
+      "yellow": 484,
+      "red": 0,
+      "none": 0
+    },
+    "prepare maneuver": {
+      "green": 0,
+      "yellow": 0,
+      "red": 6,
+      "none": 0
+    },
+    "maneuver": {
+      "green": 0,
+      "yellow": 0,
+      "red": 24,
+      "none": 0
+    }
+  },
   "examples": {
     "maneuver": 734,
     "prepare": 17487,

@@ -27,6 +27,7 @@ CatalogFile: TypeAlias = Annotated[
         "--catalog",
         exists=True,
         dir_okay=False,
+        metavar="FILE",
         help=(
             "Screen against the element sets in this file (OMM KVN or XML, "
             "CelesTrak CSV or JSON, TLE; gzipped or not) instead of a source."

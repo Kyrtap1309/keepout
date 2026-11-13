@@ -254,6 +254,11 @@ def analyse_trend(
     config
         How the direction is decided.
 
+    Returns
+    -------
+    Trend
+        The observations, the direction of the Pc and the fitted slope.
+
     Raises
     ------
     ValueError

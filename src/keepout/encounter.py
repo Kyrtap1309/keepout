@@ -121,6 +121,11 @@ def sigma_along(direction: FloatArray, covariance: FloatArray) -> float:
         A unit vector, shape ``(3,)``, in the covariance's frame.
     covariance
         A 3x3 position covariance [m^2].
+
+    Returns
+    -------
+    float
+        The standard deviation along the vector [m].
     """
     return float(np.sqrt(max(float(direction @ covariance @ direction), 0.0)))
 
@@ -143,6 +148,11 @@ def encounter_plane(conjunction: Conjunction) -> EncounterPlane:
     conjunction
         Both objects' states at TCA, and their covariances where known.
 
+    Returns
+    -------
+    EncounterPlane
+        The miss vector [m] and combined covariance [m^2] on the encounter plane.
+
     Raises
     ------
     GeometryError
@@ -153,7 +163,8 @@ def encounter_plane(conjunction: Conjunction) -> EncounterPlane:
     speed = float(np.linalg.norm(v))
     if speed == 0.0:
         raise GeometryError(
-            "relative velocity is zero: the encounter plane is undefined"
+            "relative velocity is zero: the encounter plane is undefined; use "
+            "method 'hall3d' or 'auto', which need both covariances"
         )
     y = v / speed
     r_perp = r - float(r @ y) * y

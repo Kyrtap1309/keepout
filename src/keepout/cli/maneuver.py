@@ -111,7 +111,7 @@ Cdms: TypeAlias = Annotated[
     typer.Argument(
         exists=True,
         dir_okay=False,
-        metavar="CDMS",
+        metavar="CDM...",
         show_default=False,
         help=(
             "The CDM files of one event, KVN or XML, gzipped or not (or --event "
@@ -140,6 +140,7 @@ TargetPc: TypeAlias = Annotated[
     typer.Option(
         "--target-pc",
         callback=_probability,
+        metavar="PC",
         help=(
             "The Pc a burn must stay below (default: the settings' target_pc, "
             f"else {TARGET_PC:g})."

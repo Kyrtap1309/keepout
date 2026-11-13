@@ -107,6 +107,11 @@ class ScreeningVolume:
         label
             Where the volume comes from, for reports.
 
+        Returns
+        -------
+        ScreeningVolume
+            A volume with all three semi-axes equal to ``radius`` [m].
+
         Raises
         ------
         ValueError
@@ -122,6 +127,11 @@ class ScreeningVolume:
         SGP4) against screenings on precision orbits finds that a miss
         distance threshold of about 10 km is needed to catch 95 % of the
         high-Pc events, because of the errors of GP data.
+
+        Returns
+        -------
+        ScreeningVolume
+            A sphere of radius 10 km.
 
         References
         ----------
@@ -157,6 +167,11 @@ class ScreeningVolume:
         ----------
         primary
             Element set of the primary.
+
+        Returns
+        -------
+        ScreeningVolume
+            The RTN ellipsoid of the primary's regime [m].
 
         Raises
         ------
@@ -234,6 +249,11 @@ class ScreeningVolume:
         r_secondary
             Inertial positions of the secondaries [m], ``(..., 3)``.
 
+        Returns
+        -------
+        BoolArray
+            One flag per secondary: ``True`` if it lies in the volume.
+
         Raises
         ------
         ValueError
@@ -268,6 +288,11 @@ def volume_for(volume: ScreeningVolume | VolumeRule, primary: Omm) -> ScreeningV
     primary
         Element set of the primary.
 
+    Returns
+    -------
+    ScreeningVolume
+        The volume [m] that ``primary`` is screened with.
+
     Raises
     ------
     TypeError
@@ -294,6 +319,11 @@ def per_primary(
         A volume for every primary, or one per primary.
     count
         Number of primaries.
+
+    Returns
+    -------
+    tuple of ScreeningVolume
+        One volume per primary, in order.
 
     Raises
     ------
@@ -390,6 +420,11 @@ def sfs_regime(primary: Omm) -> SfsRegime:
     ----------
     primary
         Element set of the primary.
+
+    Returns
+    -------
+    SfsRegime
+        The regime of the element set.
 
     Raises
     ------

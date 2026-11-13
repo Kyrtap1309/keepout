@@ -1,42 +1,69 @@
-# Frames and units
+# Frames, units and covariances
+
+This page states the units, time scales and reference frames keepout works
+in, how it converts what CDMs and OMMs give, and how it checks and repairs
+covariances.
 
 ## Units
 
 Every keepout type uses SI units: metres, metres per second, seconds and
-kilograms. CDM files give the state vector in km and km/s and OD spans in
-days; the readers convert on input and the writers convert back on output.
+kilograms. CDM files give the state vector in km and km/s and the OD spans
+(`RECOMMENDED_OD_SPAN` and `ACTUAL_OD_SPAN`, the time span of the tracking
+data used to determine the orbit) in days. The readers convert on input and
+the writers convert back on output.
+
+- **Times** are astropy `Time` objects. CDM and OMM epochs are UTC, the time
+  system these messages use, and keepout reads and writes them in UTC.
+  Durations, such as the time to TCA, are in seconds;
+  [`elapsed_seconds`](reference/units.md#keepout.units.elapsed_seconds)
+  counts leap seconds.
+- **Angles** are in radians. An OMM gives its angles in degrees and its mean
+  motion in revolutions per day; the reader converts them to radians and
+  radians per second.
 
 ## Reference frames
 
 | CDM `REF_FRAME` | Treatment in keepout |
 |-----------------|----------------------|
 | `GCRF` | used as is |
-| `EME2000` | rotated to GCRF by the IAU 2006 frame bias (about 23 mas, ≈0.8 m at 7000 km), so a CDM whose objects use different frames stays consistent. |
+| `EME2000` | rotated to GCRF by the IAU 2006 frame bias (about 23 mas, ≈0.8 m at 7000 km) |
 | `ITRF` | converted to GCRF with astropy (ITRS → GCRS), including the Earth-rotation term ω × r of the velocity |
-| `TEME` | rotated to GCRF with ERFA (`keepout.frames.teme_to_gcrf`); see below |
+| `TEME` | rotated to GCRF with ERFA ([`teme_to_gcrf`](reference/frames.md#keepout.frames.teme_to_gcrf)); see below |
+
+Every state ends up in GCRF, so a CDM whose two objects use different
+frames stays consistent.
 
 TEME (true equator, mean equinox of date) is the frame of SGP4 output, and
-so of every OMM and TLE. Following Vallado et al. (2006), keepout turns it
-to the pseudo-Earth-fixed frame by GMST (IAU 1982). From there it goes
-through ITRF to GCRF by the IAU 2006/2000A model. As one rotation,
-r_GCRF = Cᵀ R₃(GMST82 − ERA) r_TEME, where C is the GCRS → CIRS matrix and
-ERA the Earth rotation angle.
+so of every OMM and TLE. keepout converts it to GCRF without any
+Earth-orientation data, for any epoch. The result reproduces the example of
+Vallado et al. (2006, Appendix C) to about 3 mm and 0.5 mm/s.
 
-In this rotation polar motion cancels. UT1 − UTC changes the result by
-less than 0.3 mm at GEO, so keepout uses UTC for UT1 and needs no
-Earth-orientation data, for any epoch. The velocity includes the slow turn
-of the frame (precession and nutation, up to 5·10⁻⁴ m/s at GEO). The result
-reproduces the paper's Appendix C example to 3 mm and 0.5 mm/s. It agrees
-with astropy's TEME → GCRS, which reads IERS data, to 10⁻¹⁰ of the radius.
+??? note "How"
+    Following Vallado et al. (2006), keepout turns TEME to the
+    pseudo-Earth-fixed frame by GMST (IAU 1982). From there it goes through
+    ITRF to GCRF by the IAU 2006/2000A model. As one rotation,
+    r_GCRF = Cᵀ R₃(GMST82 − ERA) r_TEME, where C is the GCRS → CIRS matrix
+    and ERA the Earth rotation angle.
 
-- `teme_to_gcrf` converts arrays of states at one or many epochs in one
-  call.
-- `to_gcrf_all` converts all TEME `StateVector`s of a list together.
-- `frame_to_gcrf` converts arrays of states in any one frame, as a
-  propagator gives them. TEME goes through `teme_to_gcrf`.
+    In this rotation polar motion cancels. UT1 − UTC changes the result by
+    less than 0.3 mm at GEO, so keepout uses UTC for UT1. The velocity
+    includes the slow turn of the frame (precession and nutation, up to
+    5·10⁻⁴ m/s at GEO). The result agrees with astropy's TEME → GCRS, which
+    reads IERS data, to 10⁻¹⁰ of the radius.
 
-Any other frame is rejected with `UnsupportedFrame`, a `GeometryError` that
-is also a `ValueError`. A covariance in a frame outside `COVARIANCE_FRAMES`
+- [`teme_to_gcrf`](reference/frames.md#keepout.frames.teme_to_gcrf)
+  converts arrays of states at one or many epochs in one call.
+- [`to_gcrf_all`](reference/frames.md#keepout.frames.to_gcrf_all) converts
+  all TEME `StateVector`s of a list together.
+- [`frame_to_gcrf`](reference/frames.md#keepout.frames.frame_to_gcrf)
+  converts arrays of states in any one frame, as a propagator gives them.
+  TEME goes through `teme_to_gcrf`.
+
+Any other frame is rejected with
+[`UnsupportedFrame`](reference/errors.md#keepout.errors.UnsupportedFrame), a
+[`GeometryError`](reference/errors.md#keepout.errors.GeometryError) that is
+also a `ValueError`. A covariance in a frame outside
+[`COVARIANCE_FRAMES`](reference/covariance.md#keepout.covariance.COVARIANCE_FRAMES)
 is rejected the same way.
 
 ### Earth-orientation (IERS) data
@@ -74,16 +101,22 @@ The plane is spanned by (x, z); the miss vector is (|r⊥|, 0) and the combined
 position covariance C₁ + C₂ is projected onto it. When r is parallel to v, x is
 any unit vector perpendicular to v. Pc does not depend on that choice.
 
+These axes are the convention of NASA CARA's 2-D Pc code and of Chan
+(2008): y along the relative velocity, x towards the miss. Other texts name
+the axes differently; the Pc is the same.
+
 ## Covariance validation and repair
 
-A `Covariance` must be symmetric and positive semi-definite. Both are judged
+A [`Covariance`](reference/covariance.md#keepout.covariance.Covariance) must be symmetric and positive semi-definite. Both are judged
 on the correlation matrix `D⁻¹ C D⁻¹`, `D = diag(sqrt|Cᵢᵢ|)`. Every block is
 thus checked at its own scale, such as a mm/s velocity variance next to a
 km position variance. `Cᵢⱼ` and `Cⱼᵢ` may differ by 1e-9 of
 `sqrt|Cᵢᵢ Cⱼⱼ|`, and no correlation-matrix eigenvalue may be below −1e-10.
 
-Operational CDMs often violate this, so `CdmObject.covariance()` and
-`Cdm.object_states()` default to `policy="repair"`:
+Operational CDMs often violate this, so
+[`CdmObject.covariance()`](reference/cdm.md#keepout.cdm.CdmObject.covariance)
+and [`Cdm.object_states()`](reference/cdm.md#keepout.cdm.Cdm.object_states)
+default to `policy="repair"`:
 
 - The matrix is symmetrised.
 - A negative eigenvalue is clipped to zero where it lies. If the 3×3
@@ -92,10 +125,13 @@ Operational CDMs often violate this, so `CdmObject.covariance()` and
   so a defect in the velocity terms never changes the position block or
   the 2-D Pc.
 
-Each change is recorded in `Covariance.repairs`. `Conjunction.diagnostics`
+Each change is recorded in `Covariance.repairs`.
+[`Conjunction.diagnostics`](reference/conjunction.md#keepout.conjunction.Conjunction.diagnostics)
 lists both objects' repairs (e.g. `primary (12345): clipped 1 negative
 position-block eigenvalue(s) ...`), and every Pc result repeats them.
-`policy="raise"` raises `CovarianceError` instead.
+`policy="raise"` raises
+[`CovarianceError`](reference/errors.md#keepout.errors.CovarianceError)
+instead.
 
 ## References
 
