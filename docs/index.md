@@ -72,15 +72,14 @@ from keepout import Conjunction
 cdm = keepout.cdm.load("tests/cdm/data/tracss_v2.kvn")  # KVN or XML, CDM 1.0 or 2.0
 primary, secondary = cdm.object_states()  # GCRF, SI units
 plane = Conjunction(primary, secondary, combined_hard_body_radius=20.0).plane
-print(plane.miss_distance)  # metres, on the encounter plane
-print(plane.covariance)  # the combined 2x2 covariance on the plane [m²]
+print(f"{plane.miss_distance:.1f} m")  # on the encounter plane
+print(plane.covariance.round(1).tolist())  # combined 2x2 covariance [m²]
 print(primary.covariance.repairs)  # what was fixed in the CDM's covariance
 ```
 
 ```text
-100.00000000184745
-[[1.94620108e+04 7.58118981e-01]
- [7.58118981e-01 5.00000036e+02]]
+100.0 m
+[[19462.0, 0.8], [0.8, 500.0]]
 ()
 ```
 
@@ -114,21 +113,22 @@ from keepout import compute_pc
 cdm = keepout.cdm.load("tests/cdm/data/tracss_v2.kvn")
 conjunction = cdm.conjunction(combined_hard_body_radius=20.0)  # [m]
 result = compute_pc(conjunction)  # picks Foster, Hall 3D-Nc or a maximum Pc
-print(result.method, result.value)
+print(result.method, f"{result.value:.4e}")
 print(result.diagnostics)  # why the result may need a closer look
-print(compute_pc(conjunction, "foster").value)  # a method by name
+print(f"{compute_pc(conjunction, 'foster').value:.4e}")  # a method by name
 mc = compute_pc(conjunction, "montecarlo", samples=100_000, seed=1)
-print(mc.value, mc.interval)  # with its 99% confidence interval
+low, high = mc.interval  # its 99% confidence interval
+print(f"{mc.value:.4e} ({low:.4e} to {high:.4e})")
 ```
 
 Here `auto` chose Hall's 3-D method, because the CDM's states are not
 exactly at the closest approach:
 
 ```text
-hall3d 0.045044354503398956
+hall3d 4.5044e-02
 ('states are 300 m from closest approach along the relative velocity; 2-D Pc uses the straight-line closest approach',)
-0.04502836467786191
-0.04495 (0.04327898883992029, 0.04666447805443355)
+4.5028e-02
+4.4950e-02 (4.3279e-02 to 4.6664e-02)
 ```
 
 Without `combined_hard_body_radius`, keepout uses the sum of both objects'
