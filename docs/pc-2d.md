@@ -18,7 +18,7 @@ from keepout import compute_pc
 
 cdm = keepout.cdm.load("tests/cdm/data/tracss_v2.kvn")
 conjunction = cdm.conjunction(combined_hard_body_radius=20.0)  # [m]
-print(compute_pc(conjunction, "foster").value)  # 0.04502836467786191
+print(f"{compute_pc(conjunction, 'foster').value:.2e}")  # 4.50e-02
 ```
 
 ## Model
