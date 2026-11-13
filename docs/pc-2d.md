@@ -18,8 +18,38 @@ from keepout import compute_pc
 
 cdm = keepout.cdm.load("tests/cdm/data/tracss_v2.kvn")
 conjunction = cdm.conjunction(combined_hard_body_radius=20.0)  # [m]
-print(f"{compute_pc(conjunction, 'foster').value:.2e}")  # 4.50e-02
+result = compute_pc(conjunction, "foster")
+print(f"{result.value:.2e}", result.method, result.kind)
+print(result.diagnostics)
+auto = compute_pc(conjunction)  # this CDM's states are off TCA: auto picks hall3d
+print(auto.method, f"{auto.value:.2e}")
 ```
+
+```text
+4.50e-02 foster estimate
+('states are 300 m from closest approach along the relative velocity; 2-D Pc uses the straight-line closest approach',)
+hall3d 4.50e-02
+```
+
+A `PcResult` holds:
+
+- `value`: the Pc, in [0, 1];
+- `method`: the method that gave it, which `"auto"` reports too;
+- `kind`: `"estimate"`, or `"upper_bound"` for a maximum Pc;
+- `diagnostics`: warnings about the value, such as a repaired covariance or
+  a questionable 2-D assumption; empty when there is nothing to report;
+- `details`: method-specific numbers, e.g. Foster's `error_estimate`.
+
+This page's CDM gives states 300 m from the straight-line closest
+approach, so Foster warns and `"auto"` uses Hall's 3-D method instead
+([Choosing a method](pc-3d.md#choosing-a-method)).
+
+A conjunction need not come from a CDM: `Conjunction(primary, secondary,
+combined_hard_body_radius)` takes two `ObjectState`s of your own, in GCRF
+([Working with CDMs](cdm.md#building-a-cdm) builds them from states and
+RTN covariances). keepout never assumes a hard-body radius.
+`cdm.conjunction()` without `combined_hard_body_radius` adds both objects'
+`HBR` (CDM 2.0), and raises `HardBodyRadiusError` when an object has none.
 
 ## Model
 
@@ -73,9 +103,7 @@ are placed where a thin narrow axis makes the chord mass a step.
 to 65535), each step evaluating only the new nodes. It stops when two
 orders agree to 1e-10. `order=` fixes the order (CARA uses 64).
 
-`compute_pc(conjunction, "auto")` uses Foster when the 2-D assumptions hold
-(see [3-D, Monte Carlo and maximum Pc](pc-3d.md) for the other cases). Both
-methods agree with the NASA CARA reference values to better than 1e-7
+Both methods agree with the NASA CARA reference values to better than 1e-7
 relative (see the [validation report](validation.md)).
 
 ## When 2-D Pc is questionable
@@ -87,9 +115,8 @@ plus the HBR, on each side. It warns when that exceeds 1% of the primary's
 orbital period. A 3-D method may then give a different Pc (Alfano 2009,
 cases 1, 2, 4 and 8).
 
-`compute_pc` in `auto` mode then uses [Hall's 3D-Nc](pc-3d.md) if both
-covariances are known and both orbits are elliptic. Otherwise it stays on
-Foster, or uses a maximum Pc when a covariance is unknown.
+`compute_pc` in `auto` mode then moves to a 3-D method where it can (see
+[Choosing a method](pc-3d.md#choosing-a-method)).
 
 ## Degenerate covariances
 

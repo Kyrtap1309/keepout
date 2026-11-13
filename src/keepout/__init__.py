@@ -53,6 +53,7 @@ Examples
 import keepout
 from keepout import cdm, compute_pc
 
+# A sample CDM in the repository.
 message = cdm.load("tests/cdm/data/tracss_v2.kvn")
 result = compute_pc(message.conjunction(combined_hard_body_radius=20.0))  # [m]
 print(result.method, f"{result.value:.3e}")
@@ -143,8 +144,21 @@ need them)."""
 if not TYPE_CHECKING:
 
     def __getattr__(name: str) -> object:
-        """A name of :data:`_LAZY`, imported on first use (PEP 562), or
-        ``__version__``, read from the metadata on first use.
+        """Import the public names on first use (PEP 562).
+
+        A public name is imported from the module that defines it the first
+        time it is read; ``__version__`` is read from the distribution's
+        metadata the first time.
+
+        Parameters
+        ----------
+        name
+            The attribute asked for.
+
+        Returns
+        -------
+        object
+            The public name's value.
 
         Raises
         ------
@@ -166,6 +180,13 @@ if not TYPE_CHECKING:
         return value
 
     def __dir__() -> list[str]:
+        """The package's names, with the public names not imported yet.
+
+        Returns
+        -------
+        list[str]
+            Every name, sorted.
+        """
         return sorted({*globals(), *_LAZY, "__version__"})
 
 

@@ -24,7 +24,15 @@ import sys
 from collections import defaultdict
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Final, Literal, TypeAlias, TypedDict, get_args
+from typing import (
+    TYPE_CHECKING,
+    Final,
+    Literal,
+    NamedTuple,
+    TypeAlias,
+    TypedDict,
+    get_args,
+)
 
 import screening_snapshot as snapshot
 from astropy.time import Time
@@ -117,19 +125,37 @@ the TCA of a fast approach 0.5 ms more, of a slow one 0.5 s, as the range of
 a slow pair hardly changes for seconds around its minimum (the report gives
 the range change over each difference)."""
 
-KNOWN_DIFFERENCES: Final[Mapping[int, str]] = {
-    47834: (
+
+class Cause(NamedTuple):
+    """Why the approaches of an object differ from SOCRATES's.
+
+    Parameters
+    ----------
+    label
+        A few words for the table's cause column.
+    text
+        The explanation, under the table.
+    """
+
+    label: str
+    text: str
+
+
+KNOWN_DIFFERENCES: Final[Mapping[int, Cause]] = {
+    47834: Cause(
+        "other element set of STARLINK-2424",
         "STARLINK-2424 (47834) has one comparable approach, with FENGYUN 1C DEB "
         "(38513), and it differs; the ten other comparable approaches of 38513 "
         "agree. SOCRATES used an element set of 47834 with the same epoch (to "
-        "DSE's 43 s resolution) but evidently different elements."
+        "DSE's 43 s resolution) but evidently different elements.",
     ),
-    100379: (
+    100379: Cause(
+        "other element set of STARLINK-38284",
         "All four comparable approaches of STARLINK-38284 (100379) differ, by a "
         "TCA growing with the time since its epoch (0.21 s after 6.3 days, 0.31 s "
         "after 7.8 days). A B* 3.4 % lower than the snapshot's reproduces all four "
         "to 2.3 ms and 2.8 m: SOCRATES used an element set with the same epoch "
-        "(to DSE's 43 s resolution) but different elements."
+        "(to DSE's 43 s resolution) but different elements.",
     ),
 }
 """Objects whose element set in the snapshot is evidently not the one
@@ -466,7 +492,7 @@ def _values(approach: CloseApproach, tca: Time) -> Values:
     }
 
 
-def _cause(approach: SocratesApproach, known: Mapping[int, str]) -> int | None:
+def _cause(approach: SocratesApproach, known: Mapping[int, Cause]) -> int | None:
     return next(
         (n for n in (approach.primary_number, approach.secondary_number) if n in known),
         None,
@@ -504,7 +530,7 @@ def _nearest_other(
 
 
 def _list_differences(
-    comparison: Comparison, inputs: Inputs, known: Mapping[int, str]
+    comparison: Comparison, inputs: Inputs, known: Mapping[int, Cause]
 ) -> list[Difference]:
     by_number = {omm.catalog_number: omm for omm in inputs.catalog}
     differences: list[Difference] = []
@@ -590,7 +616,7 @@ def summarise(
     comparison: Comparison,
     inputs: Inputs,
     start: Time,
-    known: Mapping[int, str] = KNOWN_DIFFERENCES,
+    known: Mapping[int, Cause] = KNOWN_DIFFERENCES,
 ) -> Summary:
     """The report's numbers."""
     whole = inputs.socrates
@@ -617,14 +643,14 @@ def summarise(
     }
 
 
-def known_differences(approaches: Sequence[SocratesApproach]) -> dict[int, str]:
+def known_differences(approaches: Sequence[SocratesApproach]) -> dict[int, Cause]:
     """The :data:`KNOWN_DIFFERENCES` of the objects of ``approaches``."""
     numbers = objects(approaches)
     return {n: text for n, text in KNOWN_DIFFERENCES.items() if n in numbers}
 
 
 def problems(
-    summary: Summary, known: Mapping[int, str] = KNOWN_DIFFERENCES
+    summary: Summary, known: Mapping[int, Cause] = KNOWN_DIFFERENCES
 ) -> list[str]:
     """Differences without a known cause, and known causes that no longer
     show."""
@@ -732,7 +758,7 @@ def render_summary(summary: Summary, page: str) -> str:
     )
 
 
-def _differences(summary: Summary, known: Mapping[int, str]) -> list[str]:
+def _differences(summary: Summary, known: Mapping[int, Cause]) -> list[str]:
     if not summary["differences"]:
         return ["None."]
     rows = []
@@ -756,7 +782,7 @@ def _differences(summary: Summary, known: Mapping[int, str]) -> list[str]:
                 f"{d['range_at_tca']:.0f} m",
                 f"{d['relative_speed']:.0f} m/s",
                 *cells,
-                "unexplained" if d["cause"] is None else d["cause"],
+                "unexplained" if d["cause"] is None else known[d["cause"]].label,
             )
         )
     causes = sorted(
@@ -777,7 +803,7 @@ def _differences(summary: Summary, known: Mapping[int, str]) -> list[str]:
             rows,
         ),
         "",
-        *[f"- **{number}**: {known[number]}" for number in causes],
+        *[f"- **{known[number].label}**: {known[number].text}" for number in causes],
     ]
 
 
@@ -838,45 +864,106 @@ def _skipped(summary: Summary) -> list[str]:
     ]
 
 
+def _verdict(summary: Summary) -> str:
+    """How many compared approaches agree, and why the others do not."""
+    groups = summary["groups"].values()
+    compared = sum(g["compared"] for g in groups)
+    agree = sum(g["agree"] for g in groups)
+    differences = summary["differences"]
+    causes = {d["cause"] for d in differences if d["cause"] is not None}
+    unexplained = sum(d["cause"] is None for d in differences)
+    text = (
+        f"**{agree} of {compared} compared approaches agree with SOCRATES within "
+        "tolerance"
+    )
+    if causes:
+        explained = len(differences) - unexplained
+        others = "other traces" if explained == 1 else "others trace"
+        the = "" if unexplained else "the "
+        text += (
+            f"; {the}{explained} {others} to "
+            f"{plural(len(causes), 'object')} whose element sets differ from the "
+            "ones SOCRATES used"
+        )
+    if unexplained:
+        text += (
+            f"; {plural(unexplained, 'approach differs', 'approaches differ')} "
+            "without a known cause"
+        )
+    return text + ".**"
+
+
 def _introduction(summary: Summary) -> list[str]:
-    settings = summary["settings"]
-    socrates = summary["socrates"]
     return [
         (
             "CelesTrak's [SOCRATES](https://celestrak.org/SOCRATES/) lists, for a "
-            "week, the approaches within 5 km of the objects it screens, from SGP4 "
-            "on the GP element sets of its time. keepout screened the same element "
-            "sets with `keepout.screening.screen` and its defaults: the "
-            f"{settings['volume']}, {settings['days']:g} days from "
-            f"{minute_text(settings['start'])} UTC (SOCRATES's window), "
-            f"element sets at most {settings['max_age_days']:g} days older than the "
-            f"window's end and {settings['max_lead_days']:g} days newer than its "
-            "start."
+            "week, the approaches within 5 km of the objects it screens, from "
+            "SGP4 on the GP element sets of its time. "
+            "This page compares keepout's screening of the same element sets with "
+            "SOCRATES's list. SOCRATES is an independent implementation, so an "
+            "approach both find with the same TCA, range and speed is a check of "
+            "keepout's propagation, search and TCA refinement."
         ),
         "",
-        (
-            "SOCRATES gives each object's epoch only as days from it to TCA (DSE, "
-            "three decimals: 43 s), and CelesTrak serves only the latest element "
-            f"sets. Of the {socrates['approaches']} approaches of SOCRATES's report "
-            f"(TCA {minute_text(socrates['first_tca'])} to "
-            f"{minute_text(socrates['last_tca'])} UTC), "
-            f"{socrates['comparable']} have both objects in the public catalog with "
-            "the epochs SOCRATES used; these are compared. The "
-            f"{settings['primaries']} objects that SOCRATES lists first in a pair "
-            "are screened as primaries against all "
-            f"{settings['objects']} objects (an approach depends on its own pair "
-            "only, so the rest of the catalog changes nothing). Each "
-            "SOCRATES approach is matched with keepout's approach of the same pair "
-            f"whose TCA is nearest, within {settings['match_window']:g} s. "
-            f"*Fast* approaches are those of {settings['fast_from'] / KM:g} km/s or "
-            "more by SOCRATES; the others, mostly formation flyers, are *slow*."
-        ),
+        _verdict(summary),
         "",
         (
             "Data: USSPACECOM/18 SDS via Space-Track.org, retrieved from CelesTrak "
             f"(celestrak.org) on {summary['retrieved']}; the public catalog and the "
             "SOCRATES report sorted by minimum range (see "
             "`tests/screening/data/NOTICE`)."
+        ),
+    ]
+
+
+def _method(summary: Summary) -> list[str]:
+    settings = summary["settings"]
+    socrates = summary["socrates"]
+    groups = summary["groups"].values()
+    compared = sum(g["compared"] for g in groups)
+    left_out = len(summary["not_compared"]["skipped"])
+    split = f"{compared} are compared"
+    if left_out:
+        split += (
+            f" and {left_out} {'is' if left_out == 1 else 'are'} left out, as "
+            "screening drops an element set of "
+            f"{'its' if left_out == 1 else 'their'} pair (see "
+            "[Not compared](#not-compared))"
+        )
+    return [
+        (
+            "keepout screened with "
+            "[`screen`](reference/screening.md#keepout.screening.screen) "
+            f"and its defaults: the {settings['volume']}, "
+            f"{settings['days']:g} days from {minute_text(settings['start'])} UTC "
+            "(SOCRATES's window), element sets at most "
+            f"{settings['max_age_days']:g} days older than the window's end and "
+            f"{settings['max_lead_days']:g} days newer than its start."
+        ),
+        "",
+        (
+            "SOCRATES gives each object's epoch only as days from it to TCA (DSE, "
+            "three decimals: 43 s), and CelesTrak serves only the latest element "
+            "sets, so only some approaches can be compared. Of the "
+            f"{socrates['approaches']} approaches of SOCRATES's report (TCA "
+            f"{minute_text(socrates['first_tca'])} to "
+            f"{minute_text(socrates['last_tca'])} UTC), {socrates['comparable']} "
+            "have both objects in the public catalog with the epochs SOCRATES "
+            f"used. Of these, {split}."
+        ),
+        "",
+        (
+            f"The {settings['primaries']} objects that SOCRATES lists first in a "
+            f"pair are screened as primaries against all {settings['objects']} "
+            "objects of those approaches. An approach depends on its own pair "
+            "only, so the rest of the catalog changes nothing."
+        ),
+        "",
+        (
+            "Each SOCRATES approach is matched with keepout's approach of the same "
+            f"pair whose TCA is nearest, within {settings['match_window']:g} s. "
+            f"*Fast* approaches are those of {settings['fast_from'] / KM:g} km/s "
+            "or more by SOCRATES; the others, mostly formation flyers, are *slow*."
         ),
     ]
 
@@ -942,7 +1029,9 @@ def _not_compared(summary: Summary) -> list[str]:
     ]
 
 
-def render_page(summary: Summary, known: Mapping[int, str] = KNOWN_DIFFERENCES) -> str:
+def render_page(
+    summary: Summary, known: Mapping[int, Cause] = KNOWN_DIFFERENCES
+) -> str:
     """The report page."""
     lines = [
         "# Screening against CelesTrak's SOCRATES",
@@ -950,6 +1039,14 @@ def render_page(summary: Summary, known: Mapping[int, str] = KNOWN_DIFFERENCES) 
         generated_notice(TOOL),
         "",
         *_introduction(summary),
+        "",
+        "## How the comparison was made",
+        "",
+        *_method(summary),
+        "",
+        "## Tolerances",
+        "",
+        *_tolerances(summary),
         "",
         "## Agreement",
         "",
@@ -962,10 +1059,6 @@ def render_page(summary: Summary, known: Mapping[int, str] = KNOWN_DIFFERENCES) 
             "the range at keepout's minimum). The approaches outside tolerance are "
             "under [Differences](#differences)."
         ),
-        "",
-        "## Tolerances",
-        "",
-        *_tolerances(summary),
         "",
         "## Differences",
         "",

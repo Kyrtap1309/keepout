@@ -49,6 +49,11 @@ def time_to_tca(cdm: Cdm) -> float:
     ----------
     cdm
         The message; its ``CREATION_DATE`` and ``TCA`` are used.
+
+    Returns
+    -------
+    float
+        Seconds from ``CREATION_DATE`` to ``TCA`` [s].
     """
     return elapsed_seconds(cdm.creation_date, cdm.tca)
 
@@ -62,6 +67,11 @@ def without_hard_body_radius(cdms: Iterable[Cdm]) -> tuple[str, ...]:
     ----------
     cdms
         The CDMs to check, in any order.
+
+    Returns
+    -------
+    tuple of str
+        The ``MESSAGE_ID`` of each such CDM; empty if none.
     """
     return tuple(cdm.message_id for cdm in cdms if _without_hbr(cdm))
 
@@ -112,6 +122,11 @@ def stable_event_id(message_id: str) -> str:
     ----------
     message_id
         ``MESSAGE_ID`` of the event's first CDM (by ``CREATION_DATE``).
+
+    Returns
+    -------
+    str
+        The event id, lower-case hexadecimal.
     """
     digest = hashlib.sha256(message_id.encode("utf-8")).hexdigest()
     return digest[:EVENT_ID_LENGTH]
@@ -238,6 +253,7 @@ class ConjunctionEvent:
         from keepout import assess, cdm
         from keepout.events import ConjunctionEvent
 
+        # A sample CDM in the repository.
         event = ConjunctionEvent.from_cdms([cdm.load("tests/cdm/data/tracss_v2.kvn")])
         print(event.event_id, event.primary_id, event.secondary_id)
         # 5ede3a14c345 12345 30337
@@ -417,6 +433,11 @@ class EventBounds:
         ----------
         cdm
             The event's first CDM.
+
+        Returns
+        -------
+        EventBounds
+            The bounds of a one-CDM event.
         """
         return cls(_pair(cdm), cdm.tca, cdm.tca, cdm.conjunction_id)
 
@@ -432,6 +453,11 @@ class EventBounds:
         ----------
         cdm
             A CDM about the event's objects.
+
+        Returns
+        -------
+        EventBounds
+            The bounds with ``cdm``'s TCA and ids added.
         """
         first, last = self.first_tca, self.last_tca
         if elapsed_seconds(first, cdm.tca) < 0.0:
@@ -453,6 +479,11 @@ class EventBounds:
         tca_tolerance
             Largest spread [s] of the TCAs of one event; :data:`DEFAULT_TCA_TOLERANCE`
             by default.
+
+        Returns
+        -------
+        bool
+            ``True`` if ``cdm`` belongs to the event.
         """
         given = (self.conjunction_id, cdm.conjunction_id)
         return (
@@ -501,6 +532,7 @@ def group_events(
     from keepout import cdm
     from keepout.events import group_events
 
+    # Sample CDMs in the repository.
     messages = [
         cdm.load("tests/cdm/data/tracss_v2.kvn"),
         cdm.load("tests/cdm/data/b1_example.kvn"),  # same objects, TCA in 2010

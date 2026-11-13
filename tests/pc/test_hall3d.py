@@ -279,7 +279,9 @@ def test_failure_inside_the_encounter_raises(
     # of its peak: inside the encounter segment, but a fallback there stays
     # below the relative tolerance of FALLBACK_TOLERANCE.
     overlap_failing_where(monkeypatch, lambda t: (t >= 4.2e-4) & (t <= 5.0e-4), failure)
-    with pytest.raises(PcConvergenceError, match="did not converge"):
+    with pytest.raises(
+        PcConvergenceError, match=r"did not converge.*; try method 'montecarlo'"
+    ):
         hall3d(TYPICAL_HEAD_ON)
 
 

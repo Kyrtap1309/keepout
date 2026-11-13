@@ -72,6 +72,11 @@ def normalize_unit(unit: str) -> str:
     ----------
     unit
         Unit text as written in a message.
+
+    Returns
+    -------
+    str
+        The unit in canonical form.
     """
     return unit.strip().lower().replace(" ", "").replace("**", "").replace("^", "")
 
@@ -87,6 +92,11 @@ def parse_value(keyword: Keyword, text: str, unit: str | None) -> FieldValue:
         Value text, without the unit.
     unit
         Unit given in the message, if any.
+
+    Returns
+    -------
+    FieldValue
+        The value, in SI units for a number.
 
     Raises
     ------
@@ -145,6 +155,11 @@ def format_value(keyword: Keyword, value: FieldValue) -> tuple[str, str | None]:
     value
         Stored (SI) value.
 
+    Returns
+    -------
+    tuple[str, str | None]
+        The value's text and its unit, or None if the keyword has none.
+
     Raises
     ------
     TypeError
@@ -192,6 +207,11 @@ def message_number(value: float, scale: float) -> float:
         Stored (SI) value.
     scale
         Factor converting the message value to SI (:attr:`Keyword.scale`).
+
+    Returns
+    -------
+    float
+        The value in the message's unit.
     """
     if scale == 1.0:
         # The shortest decimal that reads back as ``value`` is its repr.

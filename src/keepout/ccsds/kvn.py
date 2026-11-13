@@ -62,6 +62,11 @@ def comment(line: str) -> str | None:
     ----------
     line
         One line of a message, without surrounding blanks.
+
+    Returns
+    -------
+    str or None
+        The comment's text, or None.
     """
     match = _COMMENT.match(line)
     if match is None:
@@ -78,6 +83,11 @@ def split_unit(text: str) -> tuple[str, str | None]:
     ----------
     text
         The value of an assignment.
+
+    Returns
+    -------
+    tuple[str, str | None]
+        The value's text and its unit, or None if it has none.
     """
     match = _UNIT.match(text)
     if match is None:
@@ -115,6 +125,11 @@ def read_lines(
     record
         The 1-based message being read when a line is malformed, for the
         error, in a text of several messages.
+
+    Yields
+    ------
+    KvnLine
+        Each comment and assignment, in order.
 
     Raises
     ------
@@ -188,6 +203,11 @@ def located_value(
     family
         The message family; a keyword without a table entry has a text
         value if its :attr:`~keepout.ccsds.message.Family.unknown_is_text`.
+
+    Returns
+    -------
+    Located
+        The value's text and unit, with where it was read.
     """
     if (spec is None and family.unknown_is_text) or (
         spec is not None and spec.kind == "str"
@@ -211,6 +231,11 @@ def format_line(keyword: str, value: str, unit: str | None, family: Family) -> s
         Its unit, or None to write none.
     family
         The message family.
+
+    Returns
+    -------
+    str
+        The KVN line, without a line ending.
 
     Raises
     ------

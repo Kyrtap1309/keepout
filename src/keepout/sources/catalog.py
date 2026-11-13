@@ -93,6 +93,11 @@ class Retrieval:
             The cached copy.
         meta
             Its metadata, from :func:`~keepout.sources.cache.read_copy`.
+
+        Returns
+        -------
+        Retrieval
+            The URL, time and digest of the download.
         """
         from astropy.time import Time
 
@@ -226,6 +231,11 @@ class CatalogReference:
         path
             The catalog file, as given to :func:`keepout.omm.load`; made absolute.
 
+        Returns
+        -------
+        CatalogReference
+            The reference of the file.
+
         Raises
         ------
         SourceUnavailable
@@ -287,6 +297,11 @@ def load_reference(reference: CatalogReference) -> tuple[Omm, ...]:
     reference
         The catalog's files.
 
+    Returns
+    -------
+    tuple of Omm
+        One element set per object, by catalog number.
+
     Raises
     ------
     SourceUnavailable
@@ -335,6 +350,11 @@ class Catalog:
         ----------
         parts
             The downloads of the catalog, e.g. one per CelesTrak group.
+
+        Returns
+        -------
+        Catalog
+            The catalog, one element set per object.
         """
         downloads = tuple(parts)
         kept, dropped = _newest(omm for part in downloads for omm in part.omms)
@@ -354,6 +374,11 @@ class Catalog:
         ----------
         label
             What the catalog is, e.g. its source's name.
+
+        Returns
+        -------
+        CatalogReference
+            The files and their digests.
 
         Raises
         ------
@@ -415,6 +440,11 @@ class CatalogSource:
         cache
             The cache directory; ``None`` for ``$KEEPOUT_CACHE_DIR``, else the user
             cache directory.
+
+        Returns
+        -------
+        Catalog
+            One element set per object, and the downloads it came from.
 
         Raises
         ------

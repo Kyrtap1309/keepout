@@ -55,6 +55,11 @@ def format_of(text: str) -> CdmFormat:
     ----------
     text
         A CDM's text, as read from its file.
+
+    Returns
+    -------
+    {"kvn", "xml"}
+        The format of ``text``.
     """
     return "xml" if strip_bom(text).lstrip().startswith("<") else "kvn"
 
@@ -88,6 +93,7 @@ def loads(text: str) -> Cdm:
 
     from keepout import cdm
 
+    # A sample CDM in the repository.
     message = cdm.loads(Path("tests/cdm/data/tracss_v2.kvn").read_text())
     print(message.message_id, message.tca.isot, message.miss_distance)
     # TRACSS-TEST-0001 2025-06-02T08:15:30.123456 412.5
@@ -123,6 +129,7 @@ def load(path: str | Path) -> Cdm:
     ```python
     from keepout import cdm
 
+    # A sample CDM in the repository.
     message = cdm.load("tests/cdm/data/tracss_v2.kvn")
     print(message.object1.object_id, message.object2.object_id)
     # 12345 30337
@@ -141,6 +148,11 @@ def read_text(path: str | Path) -> str:
     ----------
     path
         File to read (UTF-8, gzip-compressed or not).
+
+    Returns
+    -------
+    str
+        The file's text.
 
     Raises
     ------

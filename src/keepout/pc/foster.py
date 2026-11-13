@@ -144,6 +144,11 @@ def gaussian_pc(gaussian: PlaneGaussian, *, rtol: float = FOSTER_RTOL) -> PcResu
         radius.
     rtol
         Relative tolerance of the quadrature, as for :func:`foster`.
+
+    Returns
+    -------
+    PcResult
+        The 2-D Pc.
     """
     diagnostics = list(gaussian.diagnostics)
     band = _band(gaussian)

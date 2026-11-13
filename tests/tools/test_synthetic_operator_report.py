@@ -1,6 +1,7 @@
 import copy
 import dataclasses
 import shutil
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -139,7 +140,8 @@ def test_the_page_states_the_assumption_and_shows_the_closest_cdm(
     ) in text
     assert "COVARIANCE_METHOD              = DEFAULT" in text
     assert "CT_R                           = 0.0 [m**2]" in text
-    assert text.endswith("```\n")
+    assert '??? example "The CDM in KVN"' in text
+    assert text.endswith("    ```\n")
 
 
 def test_check_fails_when_a_file_is_out_of_date(
@@ -205,7 +207,8 @@ def test_rounded_shortens_real_values_only() -> None:
 
 def test_a_rounded_cdm_still_reads(generated: Path) -> None:
     text = page(generated)
-    cdm = text.split("```text\n", 1)[1].split("```", 1)[0]
+    block = text.split("```text\n", 1)[1].split("```", 1)[0]
+    cdm = textwrap.dedent(block)
     message = kvn.loads(cdm)
     assert message.message_id == "52939_47826_20261006T193642.717Z_20261006T000000.000Z"
     assert message.miss_distance == pytest.approx(1029.0, abs=1.0)

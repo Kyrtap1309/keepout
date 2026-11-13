@@ -68,6 +68,7 @@ def loads(text: str) -> tuple[Omm, ...]:
 
     from keepout import omm
 
+    # A sample OMM in the repository.
     text = Path("tests/omm/data/ccsds_omm_g7.kvn").read_text()
     (elements,) = omm.loads(text)  # CCSDS KVN, recognised by CCSDS_OMM_VERS
     print(elements.object_name, elements.catalog_number, elements.epoch.isot)
@@ -119,6 +120,7 @@ def load(path: str | Path) -> tuple[Omm, ...]:
     ```python
     from keepout import omm
 
+    # A sample catalog in the repository.
     catalog = omm.load("tests/screening/data/celestrak-public.csv.gz")
     print(len(catalog), catalog[0].object_name, catalog[0].catalog_number)
     # 19914 CALSPHERE 1 900
@@ -136,6 +138,11 @@ def load_data(data: bytes, path: str | Path) -> tuple[Omm, ...]:
         The file's bytes: UTF-8 text, gzip-compressed or not.
     path
         The file, for error messages.
+
+    Returns
+    -------
+    tuple of Omm
+        The element sets, in file order.
 
     Raises
     ------

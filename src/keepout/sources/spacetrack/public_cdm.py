@@ -157,6 +157,11 @@ def read_public_cdms(data: bytes) -> tuple[PublicCdm, ...]:
     data
         The body of the answer, as Space-Track sent it.
 
+    Returns
+    -------
+    tuple of PublicCdm
+        The rows, in answer order.
+
     Raises
     ------
     SourceFormatError

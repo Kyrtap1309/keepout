@@ -80,9 +80,12 @@
 
 **`compute_pc` takes a minute on some conjunctions**
 :   In `auto` mode a slow encounter uses Hall's 3-D method (seconds to a
-    minute) and may fall back to Monte Carlo. For a batch, choose a method:
-    `computation("foster")` takes milliseconds
-    ([Choosing a method](pc-3d.md#choosing-a-method)).
+    minute) and may fall back to Monte Carlo. For a batch, choose a method.
+    Foster takes milliseconds: `compute_pc(conjunction, "foster")` for one
+    conjunction, or for every CDM of an event
+    `event.observations(compute=computation("foster"))` with
+    `from keepout.pc import computation`; `keepout assess --method foster`
+    on the command line ([Choosing a method](pc-3d.md#choosing-a-method)).
 
 **Manoeuvre planning uses every CPU core and is still slow**
 :   The numerical libraries start a thread per core by default, which slows

@@ -12,6 +12,44 @@ when that does not hold, or when a covariance is missing:
 | Dilution | `dilution` | both covariances known but perhaps too large: the maximum over their scale |
 | Alfano | `alfano` | no covariance at all: the maximum over every covariance |
 
+## Example
+
+The sample CDM's states are 300 m from the straight-line closest
+approach, so `auto` chooses Hall 3D-Nc for it. Each method can also be
+named:
+
+```python
+import keepout.cdm
+from keepout import compute_pc
+
+cdm = keepout.cdm.load("tests/cdm/data/tracss_v2.kvn")
+conjunction = cdm.conjunction(combined_hard_body_radius=20.0)  # [m]
+
+hall = compute_pc(conjunction, "hall3d")
+print(hall.method, f"{hall.value:.4e}", hall.kind)
+print(f"Nc {hall.details['nc']:.4e}, {hall.details['encounters']:.0f} encounter")
+
+mc = compute_pc(conjunction, "montecarlo", samples=100_000, seed=1)  # about 8 s
+low, high = mc.interval  # Clopper-Pearson, at the level of details["confidence"]
+print(mc.method, f"{mc.value:.4e} ({low:.4e} to {high:.4e})", mc.details["confidence"])
+
+bound = compute_pc(conjunction, "dilution")  # the maximum over the covariance's scale
+print(bound.method, f"{bound.value:.4e}", bound.kind, bound.diluted)
+```
+
+```text
+hall3d 4.5044e-02 estimate
+Nc 4.5044e-02, 1 encounter
+montecarlo 4.4950e-02 (4.3279e-02 to 4.6664e-02) 0.99
+dilution 6.8982e-02 upper_bound True
+```
+
+Hall's Pc is its expected number of collisions `Nc`, here one short
+encounter. The Monte Carlo estimate's 99% interval contains it. Dilution
+gives an upper bound: scaling the covariances down would raise the Pc to
+6.9e-2, so the conjunction is *diluted* (see [Maximum Pc](#maximum-pc)).
+`kind` tells an estimate from an upper bound.
+
 ## Choosing a method
 
 `compute_pc(conjunction)` (`method="auto"`) chooses by these rules, in
@@ -36,25 +74,25 @@ in position. They take that object's velocity as exact.
 
 **Fallback to Monte Carlo.** When `auto` chose `hall3d` and Hall's
 integral fails, `auto` falls back to `montecarlo`. It uses at most
-`AUTO_MC_SAMPLES` (1 000 000) samples and the fixed seed `AUTO_MC_SEED`
-(0), so the same conjunction always gives the same result. The diagnostic
-says so.
+1 000 000 samples and the fixed seed 0, so the same conjunction always
+gives the same result. The diagnostic says so. A failure of Hall's
+encounter scan itself is not covered: its `PcConvergenceError` propagates
+from `compute_pc` even in `auto` mode.
 
-The fallback covers a `PcConvergenceError` that `hall3d` raises after its
-encounter scan:
+??? note "Which failures fall back"
+    The fallback covers a `PcConvergenceError` that `hall3d` raises after its
+    encounter scan:
 
-- the peak-overlap iteration failed where the rate matters;
-- the rate cannot be computed at a quadrature node;
-- `Nc` is not finite.
+    - the peak-overlap iteration failed where the rate matters;
+    - the rate cannot be computed at a quadrature node;
+    - `Nc` is not finite.
 
-A failure of the scan itself is not covered, and the `PcConvergenceError`
-propagates from `compute_pc` even in `auto` mode. The scan fails when:
+    The scan itself fails, and nothing falls back, when:
 
-- its encounters need more than 20 001 detection points;
-- the rate is significant where the screen ruled it negligible;
-- the rate cannot be computed on the scan grid.
+    - its encounters need more than 20 001 detection points;
+    - the rate is significant where the screen ruled it negligible;
+    - the rate cannot be computed on the scan grid.
 
-??? note "Implementation: why the scan is not covered"
     The fallback reuses Hall's encounter scan rather than repeating it,
     and searches the samples in the segments Hall found. When the scan
     itself fails, Monte Carlo has no scan to reuse and would need the same
@@ -63,25 +101,26 @@ propagates from `compute_pc` even in `auto` mode. The scan fails when:
 **Applicability warnings.** A warning of the 2-D assumptions, such as
 "states are ... m from closest approach along the relative velocity; 2-D
 Pc uses the straight-line closest approach", is attached to the result
-whenever it fires, in `auto` and with an explicit method alike. The
-exceptions:
+whenever it fires, in `auto` and with an explicit method alike.
 
-- At zero relative velocity there is no encounter plane, and no such
-  warning.
-- With a covariance unknown (the maximum-Pc methods), the warnings still
-  apply. A duration warning then says "at least about", since a duration
-  from the known covariance alone is a lower bound on the true one.
-- `details["encounter_duration_s"]` is attached only when both
-  covariances are known.
+??? note "Exceptions"
+    - At zero relative velocity there is no encounter plane, and no such
+      warning.
+    - With a covariance unknown (the maximum-Pc methods), the warnings still
+      apply. A duration warning then says "at least about", since a duration
+      from the known covariance alone is a lower bound on the true one.
+    - `details["encounter_duration_s"]` is attached only when both
+      covariances are known.
 
-The distance from closest approach along the relative velocity does not
-depend on the covariances, so that warning needs none.
+    The distance from closest approach along the relative velocity does not
+    depend on the covariances, so that warning needs none.
 
 **Cost.** The 2-D and maximum-Pc methods take milliseconds, `hall3d` about
 1-60 s and the Monte Carlo fallback up to about a minute. For a batch of
-conjunctions, check `result.method` or choose a method explicitly.
-`computation` makes a `PcComputation` to call on each conjunction, and
-checks its options once, when it is made:
+conjunctions, choose a method explicitly. `computation` makes a
+`PcComputation` that checks its options once, when it is made;
+`event.observations(compute=...)` and the synthetic operator's `run`
+take one:
 
 ```python
 from keepout.pc import computation
@@ -336,30 +375,31 @@ different windows). Hall's 3D-Nc and the Monte Carlo estimates agree.
 
 ## Validation
 
-The [validation report](validation.md) compares Hall with CARA's 3D-Nc on the
-twelve Alfano (2009) cases, CARA's 53-CDM test set and two unit-test cases,
-and the maximum-Pc methods with CARA's Frisbee and dilution unit tests. The
-[Monte Carlo report](validation-monte-carlo.md) (checked nightly) checks
-that CARA's two-body Monte Carlo value lies within keepout's interval.
+The [validation report](validation.md) compares every method here with
+CARA's reference values, and the [Monte Carlo report](validation-monte-carlo.md)
+(checked nightly) checks that CARA's Monte Carlo value lies within
+keepout's interval. The tolerances follow CARA's own tests; the note below
+explains the looser one for Hall on CARA's 53-CDM test set.
 
-**Tolerances.** CARA's own `Pc3D_Hall_UnitTest.m` reproduces its Alfano 3-D
-values to 1e-3, which is the criterion here. keepout agrees to 5.5e-4 or
-better (7.1e-4 on the two unit-test cases).
+??? note "Tolerances and the 53-CDM set"
+    **Tolerances.** CARA's own `Pc3D_Hall_UnitTest.m` reproduces its Alfano 3-D
+    values to 1e-3, which is the criterion here. keepout agrees to 5.5e-4 or
+    better (7.1e-4 on the two unit-test cases).
 
-On the 53-CDM set, CARA's `Nc3D` sits systematically above its own `Nc2D`
-where the encounter is nearly straight-line and the two should agree.
-Consider the 18 cases where keepout's 3D-Nc and 2-D Pc agree within 1e-3:
+    On the 53-CDM set, CARA's `Nc3D` sits systematically above its own `Nc2D`
+    where the encounter is nearly straight-line and the two should agree.
+    Consider the 18 cases where keepout's 3D-Nc and 2-D Pc agree within 1e-3:
 
-- CARA's `Nc3D / Nc2D - 1` averages +8.2e-4, and all 18 lie between
-  +7.6e-4 and +8.7e-4. Against its `Pc2D`, 15 of the 18 lie between
-  +6.7e-4 and +9.1e-4.
-- keepout's Hall / Foster - 1 is spread from -7.7e-4 to +7.0e-4 around a
-  mean of -3e-5 (median magnitude 2.3e-4; within 1e-5 in 3 cases).
+    - CARA's `Nc3D / Nc2D - 1` averages +8.2e-4, and all 18 lie between
+      +7.6e-4 and +8.7e-4. Against its `Pc2D`, 15 of the 18 lie between
+      +6.7e-4 and +9.1e-4.
+    - keepout's Hall / Foster - 1 is spread from -7.7e-4 to +7.0e-4 around a
+      mean of -3e-5 (median magnitude 2.3e-4; within 1e-5 in 3 cases).
 
-keepout agrees with CARA's `Nc3D` to 2.1e-3 (criterion 3e-3). Frisbee
-agrees with Frisbee's published example to 5e-7 absolute (CARA's
-criterion). Dilution agrees with CARA's unit tests to 1.0e-3 relative
-(criterion 5e-3).
+    keepout agrees with CARA's `Nc3D` to 2.1e-3 (criterion 3e-3). Frisbee
+    agrees with Frisbee's published example to 5e-7 absolute (CARA's
+    criterion). Dilution agrees with CARA's unit tests to 1.0e-3 relative
+    (criterion 5e-3).
 
 ## References
 

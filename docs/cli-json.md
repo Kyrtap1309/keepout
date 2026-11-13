@@ -1,7 +1,8 @@
 # JSON output of the command line
 
-Every `keepout` command that takes `--json` prints one JSON document on
-standard output instead of tables, for scripts and other tools. It is
+Every `keepout` command but `worker` takes `--json`. It then prints one
+JSON document on standard output instead of tables, for scripts and other
+tools. It is
 strict JSON, with no `NaN`. Errors still go to standard error with the
 same exit status as without `--json` (see
 [Exit status](cli.md#exit-status)). Every time is UTC, in ISO 8601. This
@@ -69,6 +70,64 @@ At the top level, `assess` gives:
 | `maneuver` | boolean | true when the command exits with status 3 |
 | `store` | object or `null` | what `--store` did (below); `null` without it |
 
+For instance, `keepout assess --json tests/cdm/data/tracss_v2.kvn --hbr 20`,
+from a clone of the repository, prints this (exit status 3):
+
+```json
+{
+  "cdm_count": 1,
+  "events": [
+    {
+      "event_id": "5ede3a14c345",
+      "tca": "2025-06-02T08:15:30.123456",
+      "object1": {
+        "object_id": "12345",
+        "name": "SATELLITE A"
+      },
+      "object2": {
+        "object_id": "30337",
+        "name": "FENGYUN 1C DEB"
+      },
+      "miss_distance_m": 412.5,
+      "cdms": [
+        "TRACSS-TEST-0001"
+      ],
+      "pc": 0.045044354503398956,
+      "level": "red",
+      "trend": "undetermined",
+      "action": "maneuver",
+      "reasons": [
+        "latest Pc 4.50e-02 is red, 0.84 d before TCA",
+        "trend undetermined",
+        "within the decision point (2.00 d before TCA)",
+        "diagnostic: states are 300 m from closest approach along the relative velocity; 2-D Pc uses the straight-line closest approach"
+      ],
+      "notes": [
+        "fewer than 2 observations with a Pc before TCA: direction undetermined"
+      ],
+      "observations": [
+        {
+          "message_id": "TRACSS-TEST-0001",
+          "time_to_tca_s": 72930.123456,
+          "pc": 0.045044354503398956,
+          "method": "hall3d",
+          "error": null,
+          "reported_pc": 1.2e-05,
+          "diagnostics": [
+            "states are 300 m from closest approach along the relative velocity; 2-D Pc uses the straight-line closest approach"
+          ],
+          "assumed_covariance": false
+        }
+      ],
+      "assumed_covariance": false
+    }
+  ],
+  "assumed_covariance_events": 0,
+  "maneuver": true,
+  "store": null
+}
+```
+
 `keepout store add` gives the same keys as `assess`, with `store` always
 set. A `store` has these keys:
 
@@ -92,6 +151,66 @@ Each gives `path`, the store's file, and:
 | `store rebuild` | `skipped` | array of strings | the `MESSAGE_ID`s of the CDMs skipped for lack of `HBR` |
 | `store purge` | `before` | string | the time given |
 | `store purge` | `deleted` | number | the events deleted |
+
+## `validate`
+
+| Key | Type | Meaning |
+|---|---|---|
+| `cara_commit` | string | the commit of CARA's files compared with |
+| `monte_carlo` | boolean | whether `--monte-carlo` was given |
+| `comparisons` | number | the comparisons made: one per case and method |
+| `failed` | number | the comparisons that failed (status 1 if any) |
+| `summary` | array of objects | per suite and method: `suite`, `method`, `passed`, `total` and `worst_relative_error` (`null` when no case is judged by a relative bound) |
+| `outcomes` | array of objects | one per comparison (below) |
+
+Each outcome has these keys:
+
+| Key | Type | Meaning |
+|---|---|---|
+| `suite`, `case_id` | string | the case |
+| `method` | string | keepout's method |
+| `reference` | number | CARA's Pc |
+| `value` | number | keepout's Pc |
+| `error` | number | the error: relative if `relative`, else absolute |
+| `relative` | boolean | whether the case is judged by a relative bound |
+| `passed` | boolean | whether the value meets the case's criterion |
+| `ci` | array of 2 numbers or `null` | a Monte Carlo Pc's confidence interval |
+
+## `fetch`
+
+`fetch cara` gives `source` (`"cara"`), `commit`, the pinned commit of
+CARA's repository, `files`, the number of files, and `directory`, where
+they are in the cache.
+
+`fetch kelvins` gives `source` (`"kelvins"`), `doi`, the data set's
+Zenodo DOI, and `path`, the cached raw table.
+
+`fetch catalog` gives:
+
+| Key | Type | Meaning |
+|---|---|---|
+| `source` | string | `celestrak` or `spacetrack` |
+| `objects` | number | the objects, one element set each |
+| `duplicates` | number | the older element sets of the same objects left out |
+| `parts` | array of objects | one per download (a CelesTrak group, Space-Track's `gp` query): `name`, `objects` and the retrieval keys below |
+
+`fetch cdm` gives `source` (`"spacetrack"`), `retrieval`, with the
+retrieval keys below, and `cdms`, the summaries in TCA order, each with
+these keys:
+
+| Key | Type | Meaning |
+|---|---|---|
+| `cdm_id` | number | the CDM's number at Space-Track |
+| `created` | string | when the CDM was made |
+| `tca` | string | TCA |
+| `emergency_reportable` | boolean | whether the approach meets 18 SDS's emergency reporting criteria |
+| `range_at_tca_m` | number | range at TCA [m] |
+| `pc` | number or `null` | the Pc Space-Track reports |
+| `object1`, `object2` | object | `catalog_number` (number), and `name`, `object_type`, `rcs_size` and `exclusion_volume` (strings or `null`) |
+
+A retrieval has `url`, where the copy came from, `path`, the cached copy,
+`retrieved`, when the source sent it, and `checked`, when the source last
+confirmed it current.
 
 ## `maneuver`
 

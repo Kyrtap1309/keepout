@@ -196,6 +196,11 @@ def commit_dir(cache: Path | None = None) -> Path:
     cache
         The cache directory; ``None`` for ``$KEEPOUT_CACHE_DIR``, else the user cache
         directory.
+
+    Returns
+    -------
+    pathlib.Path
+        The folder, which may not exist yet.
     """
     return cache_dir(cache) / "cara" / CARA_COMMIT
 
@@ -221,6 +226,11 @@ def fetch(
         The cache directory, as for :func:`commit_dir`.
     download
         What downloads a URL's bytes; HTTPS with retries by default.
+
+    Returns
+    -------
+    pathlib.Path
+        The path of the verified copy.
 
     Raises
     ------
@@ -283,6 +293,11 @@ def load_csv(path: Path) -> list[dict[str, str]]:
     path
         The CSV file, UTF-8 (with or without a byte-order mark).
 
+    Returns
+    -------
+    list[dict[str, str]]
+        One dict per row, by column name.
+
     Raises
     ------
     CaraFormatError
@@ -311,6 +326,11 @@ def load_xlsx(path: Path) -> list[dict[str, Cell]]:
     ----------
     path
         The .xlsx workbook.
+
+    Returns
+    -------
+    list[dict[str, Cell]]
+        One dict per row, by column name.
 
     Raises
     ------
@@ -354,6 +374,11 @@ def load_xls_rows(path: Path) -> list[list[Cell]]:
     ----------
     path
         The .xls workbook.
+
+    Returns
+    -------
+    list[list[Cell]]
+        The cells of each row.
 
     Raises
     ------

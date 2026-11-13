@@ -158,6 +158,11 @@ class Fleet:
         ----------
         catalog_number
             NORAD catalog number of the satellite.
+
+        Returns
+        -------
+        FleetSatellite or None
+            The satellite, or ``None``.
         """
         for satellite in self.satellites:
             if satellite.catalog_number == catalog_number:
@@ -228,6 +233,11 @@ def read_fleet(text: str) -> Fleet:
     ----------
     text
         The fleet file's text.
+
+    Returns
+    -------
+    Fleet
+        The fleet's satellites.
 
     Raises
     ------

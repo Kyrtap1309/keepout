@@ -66,9 +66,11 @@ MethodOption: TypeAlias = Annotated[
     typer.Option(
         "--method",
         show_default=False,
+        metavar="METHOD",
         help=(
-            "Pc method; auto picks one per CDM (a 3-D Pc can take a minute) "
-            "[default: the settings' method, else auto]."
+            f"Pc method: {', '.join(METHOD_CHOICES)}. auto picks one per CDM (a "
+            "3-D Pc can take a minute) \\[default: the settings' method, else "
+            "auto]."
         ),
     ),
 ]

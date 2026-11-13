@@ -101,6 +101,11 @@ class BurnDirection(enum.StrEnum):
         delta_v
             Signed Δv along the velocity [m/s].
 
+        Returns
+        -------
+        BurnDirection
+            Along the velocity for a positive Δv, against it for a negative one.
+
         Raises
         ------
         ValueError
@@ -354,6 +359,11 @@ class ManeuverPlan(ManeuverContext):
         ----------
         direction
             Prograde or retrograde.
+
+        Returns
+        -------
+        ManeuverOption or None
+            The option along ``direction``, or ``None``.
         """
         return self.prograde if direction is BurnDirection.PROGRADE else self.retrograde
 
@@ -666,13 +676,11 @@ def _notes(baseline: PcResult, cdm: Cdm, conjunction: Conjunction) -> tuple[str,
         notes.append(_drag_off_note(conjunction.primary.state))
     if conjunction.relative_speed < _SLOW_ENCOUNTER:
         notes.append(
-            f"relative speed {conjunction.relative_speed:.3g} m/s is below "
-            f"{_SLOW_ENCOUNTER:g} m/s: the planner looks for the new TCA only within "
-            f"1/{round(1.0 / _SHIFT_LIMIT)} of an orbit of TCA, so after a burn the "
-            "pair can meet "
-            "again hours away, at a Pc no cell shows; only a re-screen shows "
-            "it (inside that window the new TCA was measured up to 28 m off at "
-            "10 m/s)"
+            f"slow encounter ({conjunction.relative_speed:.3g} m/s, below "
+            f"{_SLOW_ENCOUNTER:g} m/s). The planner looks for the new TCA only "
+            f"within 1/{round(1.0 / _SHIFT_LIMIT)} of an orbit of TCA. After a "
+            "burn the pair can meet again hours away, at a Pc no cell shows: "
+            "only a re-screen shows it"
         )
     return tuple(notes)
 
@@ -803,6 +811,11 @@ def prepare_maneuver(
         Whose :attr:`~keepout.risk.Thresholds.basis` turns a result into the
         Pc compared with ``target_pc``.
 
+    Returns
+    -------
+    ManeuverContext
+        The event's baseline, ready for :func:`evaluate_burn`.
+
     Raises
     ------
     ValueError
@@ -895,6 +908,7 @@ def plan_maneuver(
     from keepout.maneuver import plan_maneuver
     from keepout.pc import computation
 
+    # A sample CDM in the repository.
     event = ConjunctionEvent.from_cdms([cdm.load("tests/cdm/data/tracss_v2.kvn")])
     plan = plan_maneuver(  # Foster's Pc for every confirmation, for speed
         event, combined_hard_body_radius=20.0, compute=computation("foster")

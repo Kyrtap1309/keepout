@@ -208,7 +208,10 @@ def test_store_without_the_extra_prints_the_install_hint(
 
 
 def test_the_hint_names_the_extra() -> None:
-    assert STORE_HINT == "--store needs the store extra: pip install 'keepout[store]'"
+    assert STORE_HINT == (
+        "--store needs the store extra: pip install "
+        '"keepout[cli,store] @ git+https://github.com/Kyrtap1309/keepout"'
+    )
 
 
 @pytest.mark.parametrize("module", ["sqlalchemy", "alembic"])

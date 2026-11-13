@@ -151,6 +151,11 @@ def fetch_raw(
     download
         Downloads the archive.
 
+    Returns
+    -------
+    pathlib.Path
+        The path of the verified copy.
+
     Raises
     ------
     SourceUnavailable
@@ -247,6 +252,11 @@ class KelvinsEvent:
         name
             A feature of :data:`FEATURES`, e.g. ``"risk"``.
 
+        Returns
+        -------
+        FloatArray
+            One value per CDM, in order.
+
         Raises
         ------
         KeyError
@@ -267,6 +277,11 @@ class KelvinsEvent:
         A CDM at :data:`RISK_FLOOR` gives a ``"below_floor"`` observation of
         1e-30. keepout does not recompute the Pc: the table lacks absolute
         states, and ESA's method is not published.
+
+        Returns
+        -------
+        tuple of PcObservation
+            One observation per CDM, in order.
         """
         observations: list[PcObservation] = []
         for index, (seconds, risk) in enumerate(

@@ -55,6 +55,7 @@ FleetFile: TypeAlias = Annotated[
         "--fleet",
         exists=True,
         dir_okay=False,
+        metavar="FILE",
         help="The fleet: a TOML file of the satellites to protect.",
     ),
 ]
@@ -62,7 +63,12 @@ FleetFile: TypeAlias = Annotated[
 
 Days: TypeAlias = Annotated[
     float,
-    typer.Option("--days", callback=positive, help="Length of the window in days."),
+    typer.Option(
+        "--days",
+        callback=positive,
+        metavar="DAYS",
+        help="Length of the window in days.",
+    ),
 ]
 """``--days``: the length of the screening window."""
 
@@ -82,6 +88,7 @@ CdmDir: TypeAlias = Annotated[
     typer.Option(
         "--cdm-dir",
         file_okay=False,
+        metavar="DIR",
         help="Write each approach's CDM (KVN) to this directory.",
     ),
 ]

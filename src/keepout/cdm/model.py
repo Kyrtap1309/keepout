@@ -121,6 +121,11 @@ def parse_field(kind: SectionKind, keyword: str, text: str, unit: str | None) ->
     unit
         Unit given in the message, if any.
 
+    Returns
+    -------
+    Field
+        The field, its value in SI units if the keyword is known.
+
     Raises
     ------
     ValueError
@@ -141,6 +146,11 @@ def format_field(kind: SectionKind, field: Field) -> tuple[str, str | None]:
         Section the field belongs to.
     field
         Field to write.
+
+    Returns
+    -------
+    tuple[str, str | None]
+        The field's text and its unit, or None if it has none.
     """
     spec = KEYWORDS[kind].get(field.keyword)
     if spec is None:
@@ -223,6 +233,11 @@ class Section:
         ----------
         keyword
             Keyword to look up (not ``COMMENT``; see :attr:`comments`).
+
+        Returns
+        -------
+        FieldValue or None
+            The field's value, or None if the section lacks it.
         """
         return self._values.get(keyword)
 
@@ -242,7 +257,13 @@ class Section:
         }
 
     def missing(self) -> tuple[str, ...]:
-        """Required keywords absent from this section or given no value."""
+        """Required keywords absent from this section or given no value.
+
+        Returns
+        -------
+        tuple of str
+            The missing keywords, in the order they are required in; empty if none.
+        """
         return tuple(k for k in REQUIRED[self.kind] if self.get(k) in (None, ""))
 
 
@@ -284,6 +305,11 @@ def covariance_dimension(section: Section) -> int:
     ----------
     section
         An object section.
+
+    Returns
+    -------
+    int
+        The size of the covariance block present: 6, 7, 8 or 9.
 
     Raises
     ------
@@ -416,6 +442,11 @@ class CdmObject:
     def state(self) -> StateVector:
         """State vector at TCA in ``ref_frame``.
 
+        Returns
+        -------
+        StateVector
+            The state at TCA [m, m/s], in ``ref_frame``.
+
         Raises
         ------
         UnsupportedFrame
@@ -434,6 +465,11 @@ class CdmObject:
         policy
             ``"repair"`` (default) or ``"raise"``; see
             :func:`keepout.covariance.make_covariance`.
+
+        Returns
+        -------
+        Covariance
+            The 6x6 RTN covariance at TCA [m^2, m^2/s, m^2/s^2].
         """
         return make_covariance(
             self.state_covariance_rtn, "RTN", self.tca, policy=policy
@@ -453,6 +489,11 @@ class CdmObject:
 
         The covariance is ``None`` when the CDM gives an all-zero matrix
         (see :attr:`has_covariance`).
+
+        Returns
+        -------
+        ReportedObject
+            The state in ``ref_frame`` and the RTN covariance, as reported.
 
         Raises
         ------
@@ -475,6 +516,11 @@ class CdmObject:
         ----------
         policy
             Covariance policy, as in :meth:`covariance`.
+
+        Returns
+        -------
+        ObjectState
+            The state and covariance at TCA, in GCRF.
         """
         (state,) = gcrf_object_states([self.reported()], policy=policy)
         return state
@@ -613,6 +659,11 @@ class Cdm:
         ----------
         policy
             Covariance policy; see :func:`keepout.covariance.make_covariance`.
+
+        Returns
+        -------
+        tuple[ObjectState, ObjectState]
+            The primary and the secondary, states and covariances in GCRF.
         """
         primary, secondary = gcrf_object_states(
             [self.object1.reported(), self.object2.reported()], policy=policy
@@ -634,6 +685,11 @@ class Cdm:
             (CDM 2.0).
         policy
             Covariance policy; see :func:`keepout.covariance.make_covariance`.
+
+        Returns
+        -------
+        Conjunction
+            The two objects at TCA, in GCRF, and the combined hard-body radius [m].
 
         Raises
         ------

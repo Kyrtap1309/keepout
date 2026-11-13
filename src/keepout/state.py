@@ -42,6 +42,11 @@ def as_ref_frame(name: str | None) -> RefFrame:
     name
         Frame name, e.g. a CDM ``REF_FRAME`` value; ``None`` if absent.
 
+    Returns
+    -------
+    RefFrame
+        The frame.
+
     Raises
     ------
     UnsupportedFrame
@@ -137,6 +142,11 @@ def relative_motion(primary: StateVector, secondary: StateVector) -> RelativeMot
     ----------
     primary, secondary
         The two states.
+
+    Returns
+    -------
+    RelativeMotion
+        The relative position [m] and velocity [m/s], in the frame of the states.
     """
     position: FloatArray = secondary.r - primary.r
     velocity: FloatArray = secondary.v - primary.v

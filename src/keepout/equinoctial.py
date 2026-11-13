@@ -103,6 +103,11 @@ def retrograde_factor(r: npt.ArrayLike, v: npt.ArrayLike) -> RetrogradeFactor:
         Position [m], shape ``(3,)``; a complex-step perturbation is ignored.
     v
         Velocity [m/s], shape ``(3,)``; likewise.
+
+    Returns
+    -------
+    RetrogradeFactor
+        ``+1`` or ``-1``.
     """
     h = np.cross(np.real(np.asarray(r)), np.real(np.asarray(v)))
     return 1 if h[2] >= 0.0 else -1
@@ -242,6 +247,11 @@ def semi_major_axis(n: _Number, mu: float = EARTH_MU) -> _Number:
         Mean motion [rad/s], a number or an array.
     mu
         Gravitational parameter [m^3/s^2]; the Earth's by default.
+
+    Returns
+    -------
+    float or numpy.ndarray
+        The semi-major axis [m].
     """
     a: _Number = (mu / (n * n)) ** (1.0 / 3.0)  # pyright: ignore[reportAssignmentType]
     return a
@@ -393,6 +403,11 @@ class Orbits:
             retrograde ones (see :func:`retrograde_factor`).
         mu
             Gravitational parameter [m^3/s^2].
+
+        Returns
+        -------
+        Orbits
+            The orbits, with their constants computed.
         """
         elements = np.asarray(elements, dtype=np.float64)
         n, af, ag, chi, psi = (elements[:, k] for k in range(5))
@@ -416,6 +431,11 @@ class Orbits:
         ----------
         rows
             The orbits kept: a slice or an array of indices.
+
+        Returns
+        -------
+        Orbits
+            The orbits of ``rows``.
         """
         return Orbits(
             self.elements[rows],
@@ -441,6 +461,11 @@ class Orbits:
             ``rows``.
         rows
             The orbits to propagate: a slice or an array of indices; all by default.
+
+        Returns
+        -------
+        FloatArray
+            Shape ``(k, 6)``: position [m] and velocity [m/s] of each orbit.
         """
         n, af, ag = self.n[rows], self.af[rows], self.ag[rows]
         lam = self.elements[rows, 5] + n * np.asarray(t)
@@ -466,6 +491,11 @@ def propagate(elements: _Array, dt: npt.ArrayLike) -> _Array:
         Elements, shape ``(6,)`` or ``(m, 6)``.
     dt
         Time step [s], a scalar or shape ``(m,)``.
+
+    Returns
+    -------
+    numpy.ndarray
+        The elements after ``dt``, shaped like ``elements``.
     """
     propagated = np.array(elements, dtype=np.result_type(np.asarray(elements), float))
     propagated[..., 5] = propagated[..., 5] + propagated[..., 0] * np.asarray(dt)
@@ -479,6 +509,11 @@ def wrap_angle(angle: _Real) -> _Real:
     ----------
     angle
         An angle or angle difference [rad], a number or a real array.
+
+    Returns
+    -------
+    float or numpy.ndarray
+        The angle in ``[-pi, pi)`` [rad].
     """
     return (angle + math.pi) % (2.0 * math.pi) - math.pi
 

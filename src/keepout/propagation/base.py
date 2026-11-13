@@ -334,6 +334,11 @@ class Propagator(Protocol):
         indices
             Positions of the objects to keep, in the order wanted; a
             one-dimensional array of integers in ``[0, len(self))``.
+
+        Returns
+        -------
+        Self
+            A propagator of the objects ``rows``.
         """
         ...
 
@@ -346,6 +351,11 @@ class Propagator(Protocol):
             Reference epoch; one time, in any time scale.
         offsets
             Seconds elapsed since ``epoch``; see :func:`time_offsets`.
+
+        Returns
+        -------
+        Ephemeris
+            The states [m, m/s] in GCRF, one row per object and offset.
         """
         ...
 
@@ -362,6 +372,11 @@ class Propagator(Protocol):
             Start of the span; one time, in any time scale.
         duration
             Length of the span [s], finite and >= 0.
+
+        Returns
+        -------
+        RadiusBounds
+            The lowest and highest radius of each object over the span [m].
         """
         ...
 
@@ -441,6 +456,11 @@ def pair_sampler(primary: Propagator, secondary: Propagator, start: Time) -> Sta
         Propagator of the secondary alone.
     start
         The time the offsets count from.
+
+    Returns
+    -------
+    States
+        The pair's states [m, m/s] in GCRF.
     """
 
     def states(offsets: FloatArray) -> tuple[ErrorArray, FloatArray, FloatArray]:

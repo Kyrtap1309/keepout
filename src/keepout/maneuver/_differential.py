@@ -303,8 +303,7 @@ def closest_approach_shift(
     """Time of the nearest minimum of the range along a parabola, if any.
 
     Newton from time 0 on half the slope of the squared range, ``p · dp/dt``
-    of ``p = r + v t + a t²/2``, until it converges, for at most
-    :data:`_MAX_NEWTON_ITERATIONS` iterations.
+    of ``p = r + v t + a t²/2``, until it converges, for at most 8 iterations.
     In a slow, nearly co-orbital encounter the curvature ``|dp/dt|² + p · a``
     is near 0 or negative, Newton jumps far along a parabola that no longer
     holds, or to a maximum: such a cell gets NaN, never a time that is not a

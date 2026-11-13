@@ -98,6 +98,11 @@ def read_socrates(text: str) -> tuple[SocratesApproach, ...]:
         The report as CelesTrak sends it: a header of :data:`COLUMNS`, which
         may start with a byte-order mark, and one line per approach.
 
+    Returns
+    -------
+    tuple of SocratesApproach
+        The approaches, in file order.
+
     Raises
     ------
     SourceFormatError
@@ -167,6 +172,11 @@ def epoch_matches(approach: SocratesApproach, primary: Omm, secondary: Omm) -> b
         A row of the report.
     primary, secondary
         Element sets of its two objects.
+
+    Returns
+    -------
+    bool
+        ``True`` if the epochs match.
     """
     return all(
         abs(julian_seconds_between(omm.epoch, approach.tca) - since)

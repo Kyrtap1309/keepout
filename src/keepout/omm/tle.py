@@ -90,6 +90,11 @@ def checksum(line: str) -> int:
     ----------
     line
         The line; only its first 68 columns count.
+
+    Returns
+    -------
+    int
+        The checksum, 0 to 9.
     """
     return compute_checksum(line)
 
@@ -301,5 +306,10 @@ def load(path: str | Path) -> tuple[Omm, ...]:
     ----------
     path
         File to read.
+
+    Returns
+    -------
+    tuple of Omm
+        The element sets, in file order.
     """
     return OMM.load(path, loads)

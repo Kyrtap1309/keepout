@@ -40,9 +40,9 @@ def validate_command(
     Downloads CARA's files at the pinned commit on first use, runs every
     case (2-D, 3-D and maximum Pc; with --monte-carlo the Monte Carlo
     cases) and prints, per suite and method, the cases passed and the worst
-    relative error. Exits with status 1 if a case fails. The repository's
-    tools/validation_report.py publishes the same comparison as
-    docs/validation.md.
+    relative error. Exits with status 1 if a case fails. In a clone of the
+    repository, tools/validation_report.py writes the same comparison as
+    the documentation's validation report.
     """
     # Imported here: keepout --help need not load the numerical libraries.
     from keepout.sources.cara import CARA_COMMIT

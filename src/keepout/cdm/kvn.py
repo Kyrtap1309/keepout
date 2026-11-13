@@ -63,6 +63,11 @@ def loads(text: str) -> Cdm:
     text
         The message: one CDM as KVN, version 1.0 or 2.0.
 
+    Returns
+    -------
+    Cdm
+        The message in ``text``.
+
     Raises
     ------
     CdmParseError
@@ -106,6 +111,11 @@ def dumps(cdm: Cdm) -> str:
         The message, e.g. from :func:`~keepout.cdm.load` or
         :func:`~keepout.cdm.make_cdm`.
 
+    Returns
+    -------
+    str
+        The KVN text of the message.
+
     Raises
     ------
     CdmWriteError
@@ -134,6 +144,11 @@ def load(path: str | Path) -> Cdm:
     ----------
     path
         File to read.
+
+    Returns
+    -------
+    Cdm
+        The message in the file.
     """
     return CDM.load(path, loads)
 

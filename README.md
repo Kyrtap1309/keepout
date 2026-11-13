@@ -45,6 +45,21 @@ result = compute_pc(conjunction)  # picks Foster, Hall 3D-Nc or a maximum Pc
 print(result.method, f"{result.value:.2e}")  # hall3d 4.50e-02
 ```
 
+The same from the command line: screen three real satellites against the
+public catalog frozen in the repository, write a CDM per close approach,
+then assess them.
+
+```bash
+keepout screen --fleet examples/synthetic-operator/fleet.toml \
+    --catalog tests/screening/data/celestrak-public.csv.gz \
+    --start 2026-10-06 --days 7 --cdm-dir cdms
+keepout assess cdms/*.kvn   # exit status 3 if an event needs a manoeuvre
+```
+
+GP data has no covariance, so these CDMs carry keepout's
+[synthetic covariance model](docs/assumptions.md): their Pc shows what the
+model implies, not the satellites' real risk.
+
 New to conjunction assessment? [Concepts](docs/concepts.md) explains
 the workflow and the terms (Pc, TCA, HBR, CDM, ...).
 
@@ -55,9 +70,11 @@ it as a website, with the API reference generated from the docstrings.
 
 - [Getting started](docs/index.md): install, where to start and a tour of
   every feature; [Concepts](docs/concepts.md) and the glossary.
+- [Working with CDMs](docs/cdm.md): reading, converting, writing and
+  grouping CDMs.
 - [Screening](docs/screening.md) and the
   [synthetic operator](docs/synthetic.md), with its
-  [assumed covariances](docs/assumptions.md).
+  [synthetic covariance model](docs/assumptions.md).
 - [2-D probability of collision](docs/pc-2d.md) and
   [3-D, Monte Carlo and maximum Pc](docs/pc-3d.md).
 - [Risk assessment](docs/risk.md) and
@@ -192,6 +209,7 @@ MIT. The third-party data committed for tests is not covered:
   Space-Track.org on 2026-10-15; see its `NOTICE`);
 - the Kelvins excerpt in `tests/sources/data/` (see its `README.md`).
 
-Development commands are listed in the
-[documentation](docs/index.md#development). To cite keepout, see
-[Citing keepout](docs/index.md#citing-keepout).
+See [`LICENSE`](LICENSE) for the licence text and
+[Data and licences](docs/index.md#data-and-licences) for the data's
+sources. Development commands are in [`CONTRIBUTING.md`](CONTRIBUTING.md).
+To cite keepout, see [Citing keepout](docs/index.md#citing-keepout).

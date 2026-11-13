@@ -195,6 +195,11 @@ class Omm:
             (0 to 9) instead, rounded: :data:`SGP4_EPOCH_DIGITS` for the
             microseconds :func:`sgp4.omm.initialize` and CelesTrak's formats
             take.
+
+        Returns
+        -------
+        dict[str, str]
+            Each keyword's text, by keyword.
         """
         values = {
             keyword.name: format_value(keyword, getattr(self, attribute))[0]

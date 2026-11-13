@@ -189,6 +189,11 @@ def rtn_to_inertial_covariance(
         Inertial position defining the RTN axes [m].
     v
         Inertial velocity defining the RTN axes [m/s].
+
+    Returns
+    -------
+    FloatArray
+        The 6x6 covariance in the inertial frame, in the units given.
     """
     return _rotate_covariance(covariance, rtn_rotation(r, v).T)
 
@@ -206,6 +211,11 @@ def inertial_to_rtn_covariance(
         Inertial position defining the RTN axes [m].
     v
         Inertial velocity defining the RTN axes [m/s].
+
+    Returns
+    -------
+    FloatArray
+        The 6x6 covariance in RTN, in the units given.
     """
     return _rotate_covariance(covariance, rtn_rotation(r, v))
 

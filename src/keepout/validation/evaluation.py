@@ -35,6 +35,11 @@ def judge(case: ValidationCase, result: PcResult) -> Verdict:
         The validation case.
     result
         keepout's result on the case.
+
+    Returns
+    -------
+    Verdict
+        The error, whether it is relative, and whether it passed.
     """
     return case.criterion.judge(result.value, case.reference, result.interval)
 
@@ -81,6 +86,11 @@ def run(case: ValidationCase, method: Method) -> PcResult:
         The validation case, with the options of its methods.
     method
         One of the case's methods.
+
+    Returns
+    -------
+    PcResult
+        The result.
     """
     return PcComputation(method, case.options)(case.conjunction)
 
@@ -98,6 +108,11 @@ def evaluate(
         Processes to run them in; 1 runs them in this one, ``None`` one per
         CPU, at most 4. The results do not depend on it (Monte Carlo cases
         have their own seeds).
+
+    Returns
+    -------
+    list of Outcome
+        One outcome per case and method.
 
     Raises
     ------
@@ -155,6 +170,11 @@ def summarise(outcomes: Iterable[Outcome]) -> tuple[MethodSummary, ...]:
     ----------
     outcomes
         The outcomes, e.g. of :func:`evaluate`.
+
+    Returns
+    -------
+    tuple of MethodSummary
+        One summary per suite and method.
     """
     suites: dict[Suite, dict[Method, list[Outcome]]] = {}
     for outcome in outcomes:

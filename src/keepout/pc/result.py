@@ -113,6 +113,11 @@ class PcResult:
         diluted
             For the dilution method, whether the conjunction is in its dilution region;
             ``None`` for the others.
+
+        Returns
+        -------
+        PcResult
+            The same result with ``value`` in ``[0, 1]``.
         """
         return cls(
             min(max(value, 0.0), 1.0),

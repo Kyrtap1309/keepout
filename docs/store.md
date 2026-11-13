@@ -9,10 +9,11 @@ The command line uses it with `--store FILE` (see
 [`keepout store`](cli.md#store)). The library uses `keepout.store`.
 
 ```bash
-pip install "keepout[store] @ git+https://github.com/Kyrtap1309/keepout"
+pip install "keepout[cli,store] @ git+https://github.com/Kyrtap1309/keepout"
 ```
 
-The `store` extra installs [SQLAlchemy](https://www.sqlalchemy.org/) and
+The `cli` extra adds the `keepout` command; `keepout[store]` alone is
+enough to use the store from Python. The `store` extra installs [SQLAlchemy](https://www.sqlalchemy.org/) and
 [Alembic](https://alembic.sqlalchemy.org/). `import keepout` loads
 neither, and neither does `keepout --help`. Without the extra, a command
 given `--store` prints `--store needs the store extra: pip install
@@ -30,14 +31,11 @@ error naming its version.
   same message given again, in KVN or in XML, is reported as already
   stored. A different message under a stored `MESSAGE_ID` is an error,
   never a silent replacement.
-- **Events.** Each CDM joins the stored event of the same `OBJECT1` and
-  `OBJECT2` whose TCAs, with its own, spread over no more than 10 minutes
-  (and whose `CONJUNCTION_ID`, if both give one, is the same), or starts a
-  new event. This is the rule of `keepout assess` and
-  [`group_events`](reference/events.md), applied one CDM at a time as
-  they arrive (`group_events` takes them in TCA order). A CDM
-  that fits two stored events is an error naming both, never a silent
-  merge.
+- **Events.** Each CDM joins the stored event it belongs to, or starts a
+  new one, by the rule of `keepout assess` and `group_events` (see
+  [Events and observations](risk.md#events-and-observations)), applied one
+  CDM at a time as they arrive. A CDM that fits two stored events is an
+  error naming both, never a silent merge.
 - **Pc observations**, one per CDM and per way of computing Pc: the
   method, the covariance policy and the hard-body radius. Settings that
   differ only in risk thresholds or target share them, because the risk
@@ -89,7 +87,8 @@ with.
 The CDMs are stored before their Pc is computed. If the Pc fails, e.g.
 `assess --store` on a CDM without `HBR`, the CDMs stay stored, and the
 same command run again (with `--hbr`) computes their Pc. `keepout store
-rebuild` without `hbr_m` skips the CDMs without `HBR`, computes the rest
+rebuild` without `hbr_m` in the [settings file](cli.md#settings) (it has
+no `--hbr`) skips the CDMs without `HBR`, computes the rest
 and says how many it skipped.
 
 ## Upgrading
@@ -242,6 +241,10 @@ Copy the catalogs after the database: a copy of a newer catalog does no
 harm, while a missing one makes its events fail to re-screen.
 
 ## From Python
+
+This adds the CDMs in `cdms/`, the folder the
+[synthetic operator's run](cli.md#a-week-of-a-synthetic-operator) writes
+(`keepout screen ... --cdm-dir cdms`), to a store and assesses their events:
 
 ```python
 from pathlib import Path

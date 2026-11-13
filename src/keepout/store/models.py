@@ -102,7 +102,20 @@ class UtcTime(TypeDecorator[Time]):
         value: Time | None,
         dialect: Dialect,  # noqa: ARG002 (SQLite only)
     ) -> str | None:
-        """The text of a time, rounded to the nanosecond."""
+        """The text of a time, rounded to the nanosecond.
+
+        Parameters
+        ----------
+        value
+            The time to store, or None.
+        dialect
+            The database dialect (not used).
+
+        Returns
+        -------
+        str or None
+            The time as UTC ISO text, or None for None.
+        """
         if value is None:
             return None
         # A scalar time's isot is a str (astropy types it array-or-scalar).
@@ -114,14 +127,38 @@ class UtcTime(TypeDecorator[Time]):
         value: str | None,
         dialect: Dialect,  # noqa: ARG002 (SQLite only)
     ) -> Time | None:
-        """The time of a text."""
+        """The time of a text.
+
+        Parameters
+        ----------
+        value
+            The stored text, or None.
+        dialect
+            The database dialect (not used).
+
+        Returns
+        -------
+        astropy.time.Time or None
+            The time, in the UTC scale, or None for None.
+        """
         if value is None:
             return None
         return Time(value, format="isot", scale="utc")
 
     @override
     def compare_values(self, x: Time | None, y: Time | None) -> bool:
-        """Whether two times are the same instant (a changed one is written)."""
+        """Whether two times are the same instant (a changed one is written).
+
+        Parameters
+        ----------
+        x, y
+            The times to compare, or None.
+
+        Returns
+        -------
+        bool
+            ``True`` if the times are equal.
+        """
         if x is None or y is None:
             return x is y
         return elapsed_seconds(x, y) == 0.0
@@ -139,7 +176,20 @@ class JobStatusText(TypeDecorator[JobStatus]):
         value: JobStatus | None,
         dialect: Dialect,  # noqa: ARG002 (SQLite only)
     ) -> str | None:
-        """The text of a status."""
+        """The text of a status.
+
+        Parameters
+        ----------
+        value
+            The status to store, or None.
+        dialect
+            The database dialect (not used).
+
+        Returns
+        -------
+        str or None
+            The status's text, or None for None.
+        """
         return None if value is None else JobStatus(value).value
 
     @override
@@ -148,7 +198,20 @@ class JobStatusText(TypeDecorator[JobStatus]):
         value: str | None,
         dialect: Dialect,  # noqa: ARG002 (SQLite only)
     ) -> JobStatus | None:
-        """The status of a text."""
+        """The status of a text.
+
+        Parameters
+        ----------
+        value
+            The stored text, or None.
+        dialect
+            The database dialect (not used).
+
+        Returns
+        -------
+        JobStatus or None
+            The status, or None for None.
+        """
         return None if value is None else JobStatus(value)
 
 

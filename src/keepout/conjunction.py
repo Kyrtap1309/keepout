@@ -162,6 +162,11 @@ class Conjunction:
         ----------
         role
             ``"primary"`` or ``"secondary"``.
+
+        Returns
+        -------
+        ObjectState
+            The primary or the secondary.
         """
         return self.primary if role == "primary" else self.secondary
 
@@ -172,6 +177,11 @@ class Conjunction:
         ----------
         role
             ``"primary"`` or ``"secondary"``.
+
+        Returns
+        -------
+        str
+            The role and object id, e.g. ``"primary (12345)"``.
         """
         return f"{role} ({self.object_of(role).object_id})"
 

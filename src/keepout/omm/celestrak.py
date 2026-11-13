@@ -177,6 +177,11 @@ def load_csv(path: str | Path) -> tuple[Omm, ...]:
     ----------
     path
         File to read.
+
+    Returns
+    -------
+    tuple of Omm
+        The element sets, in file order.
     """
     return OMM.load(path, loads_csv)
 
@@ -188,6 +193,11 @@ def load_json(path: str | Path) -> tuple[Omm, ...]:
     ----------
     path
         File to read.
+
+    Returns
+    -------
+    tuple of Omm
+        The element sets, in file order.
     """
     return OMM.load(path, loads_json)
 
@@ -195,12 +205,17 @@ def load_json(path: str | Path) -> tuple[Omm, ...]:
 def dumps_csv(omms: Iterable[Omm]) -> str:
     """OMMs as CelesTrak CSV: the header, then one row per object.
 
-    Epochs are written to the microsecond (see the module notes).
+    Epochs are written to the microsecond (see :mod:`keepout.omm.celestrak`).
 
     Parameters
     ----------
     omms
         The objects, written in order.
+
+    Returns
+    -------
+    str
+        The CSV text.
     """
     stream = io.StringIO()
     writer = csv.writer(stream, lineterminator="\n")
@@ -212,12 +227,17 @@ def dumps_csv(omms: Iterable[Omm]) -> str:
 def dumps_json(omms: Iterable[Omm]) -> str:
     """OMMs as CelesTrak JSON: an array of objects, numbers as JSON numbers.
 
-    Epochs are written to the microsecond (see the module notes).
+    Epochs are written to the microsecond (see :mod:`keepout.omm.celestrak`).
 
     Parameters
     ----------
     omms
         The objects, written in order.
+
+    Returns
+    -------
+    str
+        The JSON text.
     """
     return json.dumps([_json_object(omm) for omm in omms])
 

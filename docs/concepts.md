@@ -73,9 +73,21 @@ that assumption implies, not the real risk
     maneuver* or *maneuver* ([Decision](risk.md#decision)).
 
 **Alfano, Frisbee, dilution**
-:   The three [maximum-Pc](pc-3d.md#maximum-pc) methods keepout implements, for no
-    covariance, one covariance, and two covariances that may be too large
+:   The three maximum-Pc methods keepout implements, for no covariance, one
+    covariance, and two covariances that may be too large
     ([Maximum Pc](pc-3d.md#maximum-pc)).
+
+**Analyst object**
+:   A tracked object that 18 SDS has not yet identified. CelesTrak's
+    public catalog includes its `analyst` group, but a CDM's secondary may
+    be an analyst object missing from the catalog given to a re-screen
+    ([Re-screen](maneuver.md#re-screen)).
+
+**Basis (conservative, estimate)**
+:   How a Pc is compared with the risk thresholds and the manoeuvre target.
+    On the default *conservative* basis a Monte Carlo Pc counts by the upper
+    end of its confidence interval; on the *estimate* basis by the estimate
+    itself ([Risk levels](risk.md#risk-levels)).
 
 **Burn, Δv, prograde, retrograde**
 :   A burn changes a satellite's velocity by Δv (m/s). Prograde is along
@@ -112,6 +124,16 @@ that assumption implies, not the real risk
     velocity, from orbit determination. keepout checks it and, by default,
     repairs small defects ([Covariance validation and repair](frames-and-units.md#covariance-validation-and-repair)).
 
+**Decision point**
+:   The time before TCA (2 days by default) after which a red event's
+    action is *maneuver* rather than *prepare maneuver*. It leaves time to
+    plan the manoeuvre and screen the new orbit ([Decision](risk.md#decision)).
+
+**Diagnostic**
+:   A warning attached to a Pc: a repaired covariance, a questionable 2-D
+    assumption, a quadrature problem. A green Pc with a diagnostic is
+    monitored, never ignored ([Decision](risk.md#decision)).
+
 **Encounter plane**
 :   The plane through the primary perpendicular to the relative velocity
     at TCA. The 2-D Pc is computed on it ([Frames and units](frames-and-units.md#encounter-plane)).
@@ -124,13 +146,17 @@ that assumption implies, not the real risk
 **GCRF, EME2000, ITRF, TEME**
 :   Reference frames. GCRF is keepout's inertial frame for every state.
     EME2000 is nearly the same; ITRF rotates with the Earth; TEME is the
-    frame of SGP4's output ([Frames and units](frames-and-units.md)).
+    frame of SGP4's output ([Frames, units and covariances](frames-and-units.md)).
 
 **GP element set, OMM, TLE**
 :   *General perturbations* element sets: mean orbital elements that
     18 SDS fits for every catalogued object, propagated with SGP4. They are
     published as CCSDS Orbit Mean-elements Messages (OMM) or in the older
     two-line element (TLE) format. They have no covariance.
+
+**Grid cell**
+:   One burn of the manoeuvre planner's grid: a burn time and a signed Δv,
+    with the Pc that burn gives ([Manoeuvre planning](maneuver.md#terms)).
 
 **HBR (hard-body radius)**
 :   The radius of a sphere enclosing an object. A collision is the
@@ -169,6 +195,12 @@ that assumption implies, not the real risk
 :   The primary is the satellite being protected (the CDM's `OBJECT1`), the
     secondary the other object (`OBJECT2`).
 
+**Re-screen**
+:   Screening the primary again after a planned burn, for 7 days from the
+    burn, and comparing with the run without it. It finds the approaches
+    the burn brings, which the Pc grid cannot see
+    ([Re-screen](maneuver.md#re-screen)).
+
 **Risk level**
 :   *Green*, *yellow* or *red*, from the Pc and two thresholds (by default
     1e-7 and 1e-4) ([Risk levels](risk.md#risk-levels)).
@@ -193,6 +225,11 @@ that assumption implies, not the real risk
 :   18 SDS's website for GP element sets (the full catalog, about 32 000
     objects) and public CDM summaries, with a free account
     ([Space-Track data](spacetrack.md)).
+
+**Stale element set**
+:   An element set whose epoch is more than `max_age` (30 days by default)
+    before the end of the screening window. Screening leaves it out, since
+    its errors are too large by then ([Element age](screening.md#element-age)).
 
 **Store, job, worker**
 :   The conjunction store is a SQLite file keeping events, their CDMs and

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Final, Protocol
 
 import typer
 from rich.table import Table
@@ -85,15 +85,26 @@ def events_table(events: Sequence[Assessed], title: str) -> Table:
     return rows
 
 
+_DIAGNOSTIC: Final = "diagnostic: "
+"""How :func:`keepout.risk.decide` starts a reason that is a Pc diagnostic."""
+
+
 def reasons(events: Sequence[Assessed], least: Action) -> list[str]:
-    """Why each event with an action of at least ``least`` got it, a line
-    per event."""
-    return [
-        f"{item.event.event_id}: {decision.action.label} "
-        f"({'; '.join(decision.reasons)})"
-        for item in events
-        if (decision := item.assessment.decision).action >= least
-    ]
+    """Why each event with an action of at least ``least`` got it: a line
+    per event, then each diagnostic of its Pc on a line of its own,
+    indented."""
+    lines = []
+    for item in events:
+        decision = item.assessment.decision
+        if decision.action < least:
+            continue
+        diagnostics = [r for r in decision.reasons if r.startswith(_DIAGNOSTIC)]
+        others = [r for r in decision.reasons if not r.startswith(_DIAGNOSTIC)]
+        lines.append(
+            f"{item.event.event_id}: {decision.action.label} ({'; '.join(others)})"
+        )
+        lines += (f"  {diagnostic}" for diagnostic in diagnostics)
+    return lines
 
 
 def _cdm_object_json(cdm_object: CdmObject) -> dict[str, JsonOut]:

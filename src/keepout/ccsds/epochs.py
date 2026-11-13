@@ -84,6 +84,11 @@ def parse_epoch(text: str) -> Time:
     text
         Epoch as written in the message.
 
+    Returns
+    -------
+    astropy.time.Time
+        The epoch, in the UTC scale.
+
     Raises
     ------
     ValueError
@@ -118,6 +123,11 @@ def parse_epochs(texts: Iterable[str]) -> list[Time]:
     texts
         Epochs as written in a message.
 
+    Returns
+    -------
+    list[astropy.time.Time]
+        One time per text, in the order given, in the UTC scale.
+
     Raises
     ------
     ValueError
@@ -149,6 +159,11 @@ def preparse_epochs(texts: Sequence[str]) -> list[Time | None]:
     ----------
     texts
         Epochs as written in a message.
+
+    Returns
+    -------
+    list[astropy.time.Time | None]
+        One entry per text: its time (UTC) if it is a common epoch, else None.
     """
     epochs: list[Time | None] = [None] * len(texts)
     groups: dict[tuple[str, int], list[tuple[int, re.Match[str], str]]] = {}
@@ -187,13 +202,20 @@ def format_epoch(epoch: Time) -> str:
     Years outside ERFA's leap-second table are written without a warning
     (see :func:`parse_epoch`). On the eleven days before 1972 that end in a
     UTC step of a fraction of a second (1960-12-31 to 1971-12-31) the time
-    is written right, where astropy's ``isot`` is off by up to 0.1 s (see
-    ``_utc_isot``).
+    is written right, where astropy's ``isot`` is off by up to 0.1 s.
+    ERFA counts such a day as one unit of Julian date and writes its
+    clock time scaled by ``86400 / (86400 + s)`` for a step of ``s``
+    seconds; keepout scales it back.
 
     Parameters
     ----------
     epoch
         Epoch to write; its precision sets the number of fractional digits.
+
+    Returns
+    -------
+    str
+        The epoch as ``YYYY-MM-DDThh:mm:ss[.f]``, UTC.
     """
     with _dubious_years_allowed():
         return _utc_isot(epoch)
@@ -209,7 +231,7 @@ def utc_fields(
     precision=digits))``, many times faster. None where that text is not
     plain ``YYYY-MM-DDThh:mm:ss[.f]`` from ERFA alone: a year outside 1000
     to 9999, the years about the days before 1972 that end in a UTC step
-    (see ``_utc_isot``), a masked, non-scalar or invalid epoch or one with
+    (see :func:`format_epoch`), a masked, non-scalar or invalid epoch or one with
     another ``out_subfmt``. A leap second is given as second 60.
 
     Parameters
@@ -218,6 +240,11 @@ def utc_fields(
         A scalar epoch.
     digits
         Number of fractional-second digits, 0 to 9.
+
+    Returns
+    -------
+    tuple[int, ...] or None
+        Year, month, day, hour, minute, second and fraction, or None.
     """
     utc = epoch.utc
     if utc.masked or not utc.isscalar or utc.out_subfmt != "*":

@@ -86,6 +86,11 @@ def load_legacy_objects(
         Whether each object's covariance is used; ``False`` gives ``None``,
         as when a test passes a zero covariance.
 
+    Returns
+    -------
+    tuple[ObjectState, ObjectState]
+        The primary and the secondary, in GCRF.
+
     Raises
     ------
     CaraFormatError

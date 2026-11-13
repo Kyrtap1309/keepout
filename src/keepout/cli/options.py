@@ -96,6 +96,7 @@ CacheDir: TypeAlias = Annotated[
         "--cache-dir",
         envvar="KEEPOUT_CACHE_DIR",
         file_okay=False,
+        metavar="DIR",
         help="Cache root for downloaded data (default: the user cache directory).",
     ),
 ]
@@ -107,6 +108,7 @@ Workers: TypeAlias = Annotated[
     typer.Option(
         "--workers",
         min=1,
+        metavar="N",
         help="Processes to use (default: one per CPU, at most 4).",
     ),
 ]
@@ -117,6 +119,7 @@ SourceOption: TypeAlias = Annotated[
     CatalogSourceName | None,
     typer.Option(
         "--source",
+        metavar="SOURCE",
         help=" ".join(
             [
                 *(
@@ -157,7 +160,7 @@ HardBodyRadius: TypeAlias = Annotated[
         callback=positive,
         metavar="METRES",
         help=(
-            "Combined hard-body radius [m] (default: the settings' hbr_m, else "
+            "Combined hard-body radius \\[m] (default: the settings' hbr_m, else "
             "the sum of the CDMs' HBR)."
         ),
     ),
@@ -173,8 +176,8 @@ SettingsFile: TypeAlias = Annotated[
         dir_okay=False,
         metavar="FILE",
         help=(
-            "Operator settings, TOML: [pc] method, policy, hbr_m; [risk] "
-            "green_below, red_from; [maneuver] target_pc (default: the "
+            "Operator settings, TOML: \\[pc] method, policy, hbr_m; \\[risk] "
+            "green_below, red_from; \\[maneuver] target_pc (default: the "
             "library's). Where the command has --method, --hbr or "
             "--target-pc, that option wins over the file."
         ),

@@ -61,6 +61,9 @@ HALL_RTOL: Final = 1e-6
 """Default relative tolerance of the time integral: the agreement of two
 nested Clenshaw-Curtis rules."""
 
+# What hall3d suggests when it does not converge after its scan.
+_MONTE_CARLO_HINT: Final = "try method 'montecarlo', or 'auto', which falls back to it"
+
 QUIET_DISAGREEMENT: Final = 1e-4
 """Time-integral disagreement below which a missed ``rtol`` is not reported. It
 is per piece (the last two Clenshaw-Curtis rules of one piece of an
@@ -152,7 +155,11 @@ def hall3d(
     require_positive(rtol, "rtol")
     require_known_covariance(conjunction.unknown_covariance, "hall3d")
     encounters = Encounters.locate(conjunction, window)
-    return hall3d_over_scan(conjunction, encounters, rtol=rtol)
+    try:
+        return hall3d_over_scan(conjunction, encounters, rtol=rtol)
+    except PcConvergenceError as exc:
+        # Not for a failed scan above: Monte Carlo shares it.
+        raise PcConvergenceError(f"{exc}; {_MONTE_CARLO_HINT}") from exc
 
 
 def is_long(conjunction: Conjunction) -> bool:
@@ -165,6 +172,11 @@ def is_long(conjunction: Conjunction) -> bool:
     conjunction
         The conjunction; without an encounter plane (zero relative velocity) the
         encounter is not called long.
+
+    Returns
+    -------
+    bool
+        ``True`` if the encounter is long.
     """
     if not conjunction.has_plane:
         return False
@@ -194,6 +206,11 @@ def hall3d_over_scan(
         :func:`~keepout.pc.compute_pc`.
     rtol
         Relative tolerance of the time integral, as for :func:`hall3d`.
+
+    Returns
+    -------
+    PcResult
+        Hall's 3D-Nc Pc.
 
     Raises
     ------

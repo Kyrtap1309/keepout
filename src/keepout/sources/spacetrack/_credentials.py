@@ -74,6 +74,11 @@ class Credentials:
         environ
             The environment; :data:`os.environ` if ``None``.
 
+        Returns
+        -------
+        Credentials
+            The identity and password.
+
         Raises
         ------
         AuthError
@@ -95,7 +100,18 @@ class Credentials:
 
     def redact(self, text: str) -> str:
         """``text`` with the identity and password, as typed or URL-encoded,
-        replaced by ``<hidden>``."""
+        replaced by ``<hidden>``.
+
+        Parameters
+        ----------
+        text
+            Any text, e.g. an error message or a response body.
+
+        Returns
+        -------
+        str
+            The text with the credentials hidden.
+        """
         # Longest first, so a secret inside another is not left half-shown.
         forms = sorted(_secret_forms(self), key=len, reverse=True)
         return re.sub("|".join(map(re.escape, forms)), HIDDEN, text)

@@ -139,6 +139,11 @@ def orbit_regime(omm: Omm) -> OrbitRegime:
     omm
         Element set of the object.
 
+    Returns
+    -------
+    OrbitRegime
+        The regime of the element set.
+
     Raises
     ------
     UnsupportedElements
@@ -308,6 +313,11 @@ class SyntheticCovarianceModel:
         ----------
         regime
             An orbit regime.
+
+        Returns
+        -------
+        RegimeParameters
+            The regime's parameters.
         """
         return self.regimes[regime]
 
@@ -321,6 +331,11 @@ class SyntheticCovarianceModel:
         time
             When the covariance is wanted (e.g. a TCA); one time, before or
             after the element epoch.
+
+        Returns
+        -------
+        RtnSigmas
+            The radial, transverse and normal sigmas [m].
 
         Raises
         ------
@@ -382,6 +397,11 @@ class SyntheticCovarianceModel:
             Element set of the object.
         time
             When the covariance is wanted (e.g. a TCA); one time.
+
+        Returns
+        -------
+        tuple of str
+            The lines, for a CDM's ``COMMENT``.
 
         Raises
         ------

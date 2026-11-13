@@ -65,7 +65,18 @@ class Transport(Protocol):
     """
 
     def __call__(self, request: Request, /) -> Response:
-        """The answer to ``request``, once sent."""
+        """The answer to ``request``, once sent.
+
+        Parameters
+        ----------
+        request
+            The HTTP request to send.
+
+        Returns
+        -------
+        Response
+            The status, headers and body of the answer.
+        """
         ...
 
 
@@ -105,6 +116,16 @@ class UrllibTransport:
 
     def __call__(self, request: Request, /) -> Response:
         """The answer to ``request``, once sent.
+
+        Parameters
+        ----------
+        request
+            The HTTP request to send.
+
+        Returns
+        -------
+        Response
+            The status, headers and body of the answer.
 
         Raises
         ------

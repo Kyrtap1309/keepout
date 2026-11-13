@@ -78,14 +78,14 @@ def worker_command(
     until_idle: UntilIdle = False,
     workers: Workers = None,
 ) -> None:
-    """Compute the store's queued manoeuvre plans, one at a time, until
-    stopped (needs the store extra).
+    """Compute the store's queued manoeuvre plans, one at a time, until stopped.
 
-    Each job is computed in a child process and its plan cached on the CDM
-    it was queued for, where keepout maneuver --event finds it. SIGTERM or
-    Ctrl+C stops the worker: its job goes back to the queue, not counted as
-    an attempt, and the worker exits with status 0. Its log is on standard
-    error; the number of jobs it ran is printed on exit.
+    Needs the store extra. Each job is computed in a child process and its
+    plan cached on the CDM it was queued for, where keepout maneuver
+    --event finds it. SIGTERM or Ctrl+C stops the worker: its job goes back
+    to the queue, not counted as an attempt, and the worker exits with
+    status 0. Its log is on standard error; the number of jobs it ran is
+    printed on exit.
     """
     with importing_store():
         from keepout.store import planning

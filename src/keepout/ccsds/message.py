@@ -87,6 +87,11 @@ class Family:
         loads
             The family's reader of a message's text.
 
+        Returns
+        -------
+        object
+            The message, as ``loads`` returns it.
+
         Raises
         ------
         CcsdsParseError

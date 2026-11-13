@@ -31,6 +31,11 @@ def elapsed_seconds(start: Time, end: Time) -> float:
         The earlier time, in any scale.
     end
         The later time; before ``start``, the result is negative.
+
+    Returns
+    -------
+    float
+        The elapsed time [s].
     """
     return float((end - start).to_value("s"))
 
@@ -49,5 +54,10 @@ def julian_seconds_between(start: Time, end: Time) -> float:
         The first time.
     end
         The second time, in the same scale as ``start`` for an exact result.
+
+    Returns
+    -------
+    float
+        The difference [s].
     """
     return float((end.jd1 - start.jd1) * DAY + (end.jd2 - start.jd2) * DAY)

@@ -120,6 +120,11 @@ def download_once(url: str) -> bytes:
     url
         A CelesTrak URL, e.g. of :func:`group_url`.
 
+    Returns
+    -------
+    bytes
+        The response body.
+
     Raises
     ------
     HttpStatusError
@@ -148,6 +153,11 @@ class SocratesReport:
     def approaches(self) -> tuple[SocratesApproach, ...]:
         """The approaches of the report, in its order (read anew each call).
 
+        Returns
+        -------
+        tuple of SocratesApproach
+            The approaches, in report order.
+
         Raises
         ------
         SourceFormatError
@@ -164,6 +174,11 @@ def group_url(name: str) -> str:
     ----------
     name
         The name of a CelesTrak GP group, e.g. ``active`` or ``stations``.
+
+    Returns
+    -------
+    str
+        The URL of the group's CSV.
 
     Raises
     ------
@@ -201,6 +216,11 @@ def fetch_group(
         Downloads a URL; :func:`download_once` (no retries) by default.
     now
         Gives the current Unix time [s], by which cached copies age.
+
+    Returns
+    -------
+    CatalogPart
+        The group's element sets and their download.
 
     Raises
     ------
@@ -256,6 +276,11 @@ def fetch_catalog(
     now
         Gives the current Unix time [s], by which cached copies age.
 
+    Returns
+    -------
+    Catalog
+        One element set per object, and the downloads it came from.
+
     Raises
     ------
     TypeError
@@ -303,6 +328,11 @@ def fetch_socrates(
         Downloads a URL; :func:`download_once` (no retries) by default.
     now
         Gives the current Unix time [s], by which cached copies age.
+
+    Returns
+    -------
+    SocratesReport
+        The report and its download.
 
     Raises
     ------

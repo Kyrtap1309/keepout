@@ -146,6 +146,11 @@ def outcome_to_json(outcome: ManeuverOutcome) -> dict[str, JsonValue]:
     ----------
     outcome
         The outcome, from :func:`~keepout.maneuver.plan_event`.
+
+    Returns
+    -------
+    dict[str, JsonValue]
+        The JSON object.
     """
     return {
         "target_pc": _number(outcome.target_pc),
@@ -319,6 +324,11 @@ def outcome_from_json(data: object, event: ConjunctionEvent) -> ManeuverOutcome:
     event
         The event planned, which the JSON does not hold.
 
+    Returns
+    -------
+    ManeuverOutcome
+        The outcome.
+
     Raises
     ------
     StoreError
@@ -328,4 +338,7 @@ def outcome_from_json(data: object, event: ConjunctionEvent) -> ManeuverOutcome:
     try:
         return _outcome(data, event)
     except _UNREADABLE as exc:
-        raise StoreError(f"cached manoeuvre unreadable: {exc}") from exc
+        raise StoreError(
+            f"cached manoeuvre unreadable: {exc}; plan the event from its CDM "
+            "files instead of the store"
+        ) from exc

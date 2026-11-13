@@ -306,15 +306,25 @@ def with_returns(summary: report.Summary, directions: set[str]) -> str:
 
 
 def test_a_burn_bringing_the_pair_back_is_not_clean(generated: Path) -> None:
-    text = with_returns(written(generated), {"prograde"})
+    summary = written(generated)
+    text = with_returns(summary, {"prograde"})
+    demo = summary["demonstration"]
+    assert demo is not None
+    plan = demo["plan"]
+    assert plan is not None
+    pair = f"{plan['primary_name']} and {plan['secondary_name']}"
     assert (
-        "  - **back above the target**: the burn brings this pair back at "
-        "2026-10-09 00:07 UTC at Pc 9.87e-06 (assumed), above the target "
-        "1.00e-07, so this option is not clean"
+        f"  - **back above the target**: the burn brings {pair} "
+        "back together at 2026-10-09 00:07 UTC, range 4113 m, 2.0 m/s, assumed "
+        "Pc 9.87e-06, yellow: above the target 1.00e-07, so this option is not "
+        "clean"
     ) in text
-    assert "The prograde burn clears the event at its TCA but brings" in text
-    assert "The retrograde option is clean, so `keepout maneuver` exits with " in text
-    assert "status 0" in text
+    assert "- **prograde** (not clean): " in text
+    assert "- **retrograde** (clean): " in text
+    assert (
+        "Only the retrograde burn is clean; `keepout maneuver` still lists the "
+        "prograde one, marked not clean. The prograde burn clears the event"
+    ) in text
 
 
 def test_every_burn_bringing_the_pair_back_exits_four_on_the_page(
@@ -323,20 +333,20 @@ def test_every_burn_bringing_the_pair_back_exits_four_on_the_page(
     text = with_returns(written(generated), {"prograde", "retrograde"})
     assert text.count("**back above the target**") == 2
     assert "The prograde and the retrograde burns clear the event" in text
-    assert "No option is clean, so `keepout maneuver` exits with status 4" in text
+    assert "No burn is clean, so `keepout maneuver` exits with status 4" in text
 
 
 def test_no_return_no_outcome_paragraph(generated: Path) -> None:
     text = with_returns(written(generated), set())
     assert "**back above the target**" not in text
-    assert "in an encounter this slow" not in text
+    assert "only the re-screen finds such a return" not in text
 
 
 def test_the_page_states_the_assumptions_and_the_sources(generated: Path) -> None:
     text = page(generated)
     assert text.startswith("# Manoeuvre planning on a CARA test event\n")
     assert "Combined hard-body radius: HBR 10 m, given with `--hbr`." in text
-    assert "with HBR 10 m, given with `--hbr`; gravity" in text
+    assert "with HBR 10 m; gravity" in text
     assert "(keepout's default: ten times below the red threshold, 1e-04)" in text
     assert f"CARA test CDM `{NAME}`" in text
     assert f"commit `{CARA_COMMIT}`" in text
@@ -349,7 +359,8 @@ def test_the_page_states_the_assumptions_and_the_sources(generated: Path) -> Non
     assert f"![{alt}](img/maneuver/heatmap.svg)" in (text)
     assert '!!! note "A demonstration of the mechanism, not a recommendation"' in text
     assert "| none | - | - |" in text
-    assert "`--check` checks the numbers, not the times." in text
+    assert "--check checks the numbers, not the times. -->" in text
+    assert text.index("## Timing") > text.index("## Data")
 
 
 def test_the_readme_block_has_the_heatmap_and_the_options(generated: Path) -> None:
@@ -468,3 +479,23 @@ def test_delta_v_keeps_three_figures_both_ways() -> None:
     assert report.delta_v_text(-0.0019953) == "-0.00200"
     assert report.delta_v_text(0.003981) == "+0.00398"
     assert report.delta_v_text(0.0794) == "+0.0794"
+
+
+def test_a_note_repeated_for_the_options_is_one_caveat(generated: Path) -> None:
+    plan = copy.deepcopy(written(generated)["event"])
+    plan["notes"] = [
+        "2-D Pc assumptions questionable: lasts 1 s; a 3-D Pc may differ",
+        "drag is off: no CD_AREA_OVER_MASS",
+        "prograde: 2-D Pc assumptions questionable: lasts 2 s; a 3-D Pc may differ",
+        "retrograde: covariance repaired",
+    ]
+    assert report._caveats(plan) == [
+        "",
+        "Caveats:",
+        "",
+        "- 2-D Pc assumptions questionable (a 3-D Pc may differ):",
+        "  - without a burn: lasts 1 s.",
+        "  - prograde: lasts 2 s.",
+        "- drag is off: no CD_AREA_OVER_MASS.",
+        "- retrograde: covariance repaired.",
+    ]

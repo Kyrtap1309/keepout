@@ -27,7 +27,7 @@ def main() -> None:
     start = Time("2026-10-06T00:00:00", scale="utc")
     result = screen(iss, catalog, start, workers=4)  # 7 days, 5 km sphere
     for approach in result.approaches:
-        radial, transverse, normal = approach.miss_rtn
+        radial, transverse, normal = approach.miss_rtn  # in the primary's RTN [m]
         print(
             approach.tca.isot,
             approach.secondary_number,
@@ -49,6 +49,12 @@ if __name__ == "__main__":  # needed for workers > 1
 2026-10-10T14:08:54.848 49773 2751 m (R -2365, T -957, N 1030) 11225 m/s
 Counter({'stale': 28})
 ```
+
+`miss_rtn` is the miss vector in the primary's
+[RTN frame](frames-and-units.md#rtn-frame): radial (away from the Earth),
+transverse (along the track) and normal (perpendicular to the orbit
+plane), in metres. The `Counter` counts the element sets left out, by
+reason (see [Skipped element sets](#skipped-element-sets)).
 
 On live data, download the catalog and start the window now. A window
 must end within 30 days of an element set's epoch, or the set is left out
@@ -115,13 +121,151 @@ that ignore it:
 Only what is in the public catalog can be screened this way; see
 [The public catalog](#the-public-catalog).
 
+## Screening volumes
+
+A `ScreeningVolume` is an ellipsoid centred on the primary with radial,
+transverse (in-track) and normal (cross-track) semi-axes along the primary's
+RTN axes. A sphere is three equal semi-axes. `screen` takes one volume for
+every primary, or a rule choosing each primary's own. A rule
+(`VolumeRule`) is a function of the primary's `Omm`. It refuses a primary
+by raising a `KeepoutError`, and the primary is then skipped as
+`NO_VOLUME`. Any other exception is taken for a bug in the rule and
+propagates.
+
+| Volume | Size | Source |
+|---|---|---|
+| `DEFAULT_VOLUME` | 5 km sphere | the threshold of CelesTrak's SOCRATES reports |
+| `ScreeningVolume.nasa_gp_data()` | 10 km sphere | NASA CA Best Practices Handbook, Rev. 2, Appendix E |
+| `ScreeningVolume.sfs_handbook` (a rule) | by orbit regime, below | USSPACECOM Spaceflight Safety Handbook for Satellite Operators, v1.7, Table 3 |
+| `ScreeningVolume.sphere(radius)`, `ScreeningVolume(radial, transverse, normal)` | your own | |
+
+```python
+from keepout import ScreeningVolume
+from keepout.screening import DEFAULT_VOLUME
+
+print(DEFAULT_VOLUME.label, DEFAULT_VOLUME.radial)  # semi-axes in metres
+print(ScreeningVolume.nasa_gp_data().label)
+flat = ScreeningVolume(400.0, 25_000.0, 25_000.0, label="flat")  # R, T, N [m]
+```
+
+```text
+5 km sphere (as in CelesTrak's SOCRATES) 5000.0
+10 km sphere (NASA CA Handbook Rev. 2, App. E, GP data)
+```
+
+Pass a volume or a rule as `screen`'s `volume` argument, e.g.
+`screen(primaries, catalog, start, volume=ScreeningVolume.sfs_handbook)`.
+
+**5 km**, the default, makes the results comparable with SOCRATES. It is
+not a safety margin for GP data.
+
+**10 km.** NASA's analysis of screenings on GP data against screenings on
+precision orbits finds that a miss-distance threshold of about 10 km is
+needed to catch 95 % of the high-Pc events, because of the errors of GP
+data (NASA Spacecraft Conjunction Assessment and Collision Avoidance Best
+Practices Handbook, NASA/SP-20205011318 Rev. 2, 2026, Appendix E).
+
+**Spaceflight Safety Handbook, Table 3** ("HAC screening volumes"), radial ×
+in-track × cross-track:
+
+| Regime (`SfsRegime`) | Orbit | Volume |
+|---|---|---|
+| LEO 1 | perigee altitude up to 500 km | 0.4 × 44 × 51 km |
+| LEO 2 | perigee above 500 km, up to 750 km | 0.4 × 25 × 25 km |
+| LEO 3 | perigee above 750 km, up to 1200 km | 0.4 × 12 × 12 km |
+| LEO 4 | perigee above 1200 km, up to 2000 km | 0.4 × 2 × 2 km |
+| Deep Space | period between 1300 and 1800 min, inclination below 35° | 10 × 10 × 10 km |
+| outside Table 3 | anything else (MEO, HEO, inclined geosynchronous) | 10 × 10 × 10 km |
+
+Every row of the table also needs an eccentricity below 0.25. keepout makes
+three choices the table leaves open:
+
+- **Semi-axes.** The table does not say whether its sizes are semi-axes or
+  full extents. keepout reads them as semi-axes, the larger of the two
+  readings, so no approach the handbook would report is missed.
+- **Fixed ellipsoids.** The LEO rows are covariance screenings, for which
+  the 18th Space Defense Squadron builds a volume from both objects'
+  covariances. GP data has none, so keepout uses the rows' sizes as fixed
+  ellipsoids.
+- **Outside the table.** An orbit in no row gets the deep-space volume,
+  which the table labels "Deep Space (GEO/HEO/MEO)". Its regime is
+  `SfsRegime.OUTSIDE`, so the classification stays honest.
+
+The regime comes from SGP4's own mean elements (its perigee and un-Kozai'd
+period, with the WGS 72 constants). A two-body reading of the element set's
+mean motion would put LEO perigees 3 km lower to 6 km higher, enough to move
+some orbits across a regime boundary.
+
+## From an approach to a Pc
+
+A `CloseApproach` holds the catalog numbers and both GCRF states at TCA.
+The range at TCA (`range_at_tca`), the miss vector in the primary's RTN
+frame (`miss_rtn`), the relative velocity and the speed follow from them.
+
+`to_conjunction` turns an approach into a `Conjunction` for `compute_pc`.
+It takes a hard-body radius, either the combined one or each object's
+(`primary_radius` and `secondary_radius`). It also takes covariances at
+TCA from elsewhere, such as your own orbit determination or a CDM. Without
+covariances only the maximum-Pc methods apply, which give an upper bound,
+not an estimate. The [synthetic operator](synthetic.md) supplies assumed
+covariances from a model of GP errors instead, and turns each approach into
+a CDM.
+
+```python
+from astropy.time import Time
+
+import keepout.omm
+from keepout import ScreeningVolume, compute_pc, screen
+
+catalog = keepout.omm.load("catalog.csv")  # OMM KVN/XML, CelesTrak CSV/JSON, TLE
+primaries = [omm for omm in catalog if omm.catalog_number in {63216, 58509}]
+start = Time("2026-10-06T00:00:00", scale="utc")
+result = screen(primaries, catalog, start, volume=ScreeningVolume.sfs_handbook)
+for number, volume in result.volumes.items():
+    print(number, volume.label)
+closest = min(result.approaches, key=lambda approach: approach.range_at_tca)
+print(closest.tca.isot, closest.secondary_number, f"{closest.range_at_tca:.0f} m")
+conjunction = closest.to_conjunction(combined_hard_body_radius=10.0)  # no covariance
+pc = compute_pc(conjunction)
+print(pc.method, f"{pc.value:.1e}")
+```
+
+With the 222 element sets of `tests/screening/data/celestrak-fixture.csv`
+as `catalog.csv`:
+
+```text
+58509 SFS Handbook v1.7 Table 3, LEO 1
+63216 SFS Handbook v1.7 Table 3, LEO 1
+2026-10-06T08:34:04.437 57062 671 m
+alfano 7.2e-03
+```
+
 ## How `screen` works
 
-`screen(primaries, catalog, start, duration=7 days, volume=DEFAULT_VOLUME)`
-returns a `ScreeningResult`. It holds the `CloseApproach`es in
+`screen` returns a `ScreeningResult`. It holds the `CloseApproach`es in
 chronological order, the element sets it left out (`skipped`), the window
-and the volume of each primary. The window has no default start, so
-`start` is always given.
+and the volume of each primary. Its arguments, with their defaults (times
+in seconds):
+
+```python
+from keepout.screening import DEFAULT_VOLUME
+
+result = screen(
+    primaries,  # element sets of your satellites
+    catalog,  # element sets to screen them against
+    start,  # astropy Time; no default
+    duration=7 * 86400.0,  # the window is (start, start + duration]
+    volume=DEFAULT_VOLUME,  # a ScreeningVolume or a rule
+    workers=1,  # processes; None for one per CPU, at most 4 (see Workers)
+    max_age=30 * 86400.0,  # see Element age
+    max_lead=3 * 86400.0,
+)
+```
+
+Two more keyword arguments are rarely needed: `max_states` bounds the
+memory of a process, and `adjust_primaries` replaces the primaries'
+propagator (the [re-screen](maneuver.md#re-screen) of a manoeuvre uses
+it).
 
 1. **Element sets.** Of several element sets of one object, the newest is
    screened; the others are skipped. An element set is also skipped when it
@@ -172,11 +316,16 @@ An element set is screened only near its epoch:
 Inside these limits the search finds every approach (next section),
 except for an object re-entering the atmosphere. GP data loses accuracy
 much sooner than 30 days, so a smaller `max_age` may suit your
-application better.
+application better. In the first example, this leaves out the sets more
+than 7 days old at the end of the window:
+
+```python
+result = screen(iss, catalog, start, max_age=7 * 86400.0, workers=4)
+```
 
 ??? note "Implementation: why 30 days and 3 days"
     The search's guarantee assumes that every acceleration beyond the
-    point mass and J2 stays below 1 m/s² (`PERTURBATION`). On the public
+    point mass and J2 stays below 1 m/s². On the public
     catalog of October 2026, SGP4 stays below 0.2 m/s² from 3 days before
     to 38 days after each element epoch. Further away some objects leave
     the bound, from 39 days after the epoch and by orders of magnitude.
@@ -189,10 +338,10 @@ application better.
 
 ### The search and its guarantee
 
-Both objects are sampled every `step` (120 s by default). Sieves rule out
+Both objects are sampled on a time grid of 120 s. Sieves rule out
 the grid intervals in which the pair cannot come inside the volume, and
 every minimum of the range in the other intervals is found, with its TCA
-to 1 µs. The sieves hold for any step, so the step changes the time
+to 1 µs. The sieves hold for any grid step, so the step changes the time
 screening takes, not what it finds. In a co-orbital or formation-flying
 pair, a minimum and a maximum of the range less than 10 s apart are not
 told apart.
@@ -210,7 +359,7 @@ filter or sieve drops an approach the brute-force search finds.
       in between.
     - **Chord sieve.** With *A* a bound on the relative acceleration (the
       gravity gradient over the largest range, 5 % added for the zonal terms,
-      plus twice `PERTURBATION`), the relative position stays within *A h*²/8
+      plus twice the 1 m/s² bound on the other accelerations), the relative position stays within *A h*²/8
       of the straight line between its two end points; if that line does not
       come within *R* + *A h*²/8 of the primary, neither does the pair.
 
@@ -223,7 +372,7 @@ filter or sieve drops an approach the brute-force search finds.
 
     The range of a co-orbital or formation-flying pair can change too slowly
     over an interval for the grid to decide. Such an interval is resampled
-    every 10 s (`SLOW_STEP`). A minimum and a maximum of the range less than
+    every 10 s. A minimum and a maximum of the range less than
     10 s apart are not told apart there.
 
 ### What counts as an approach
@@ -252,108 +401,6 @@ The processes are started with `spawn` on every platform, which imports the
 main module again. A script must therefore call `screen` with `workers`
 above 1 under `if __name__ == "__main__":`, as in the example above. A
 script read from standard input (`python -`) cannot use workers.
-
-### From an approach to a Pc
-
-A `CloseApproach` holds the catalog numbers and both GCRF states at TCA.
-The range at TCA (`range_at_tca`), the miss vector in the primary's RTN
-frame (`miss_rtn`), the relative velocity and the speed follow from them.
-
-`to_conjunction` turns an approach into a `Conjunction` for `compute_pc`.
-It takes a hard-body radius, either the combined one or each object's
-(`primary_radius` and `secondary_radius`). It also takes covariances at
-TCA from elsewhere, such as your own orbit determination or a CDM. Without
-covariances only the maximum-Pc methods apply, which give an upper bound,
-not an estimate. The [synthetic operator](synthetic.md) supplies assumed
-covariances from a model of GP errors instead, and turns each approach into
-a CDM.
-
-```python
-from astropy.time import Time
-
-import keepout.omm
-from keepout import ScreeningVolume, compute_pc, screen
-
-catalog = keepout.omm.load("catalog.csv")  # OMM KVN/XML, CelesTrak CSV/JSON, TLE
-primaries = [omm for omm in catalog if omm.catalog_number in {63216, 58509}]
-start = Time("2026-10-06T00:00:00", scale="utc")
-result = screen(primaries, catalog, start, volume=ScreeningVolume.sfs_handbook)
-for number, volume in result.volumes.items():
-    print(number, volume.label)
-closest = min(result.approaches, key=lambda approach: approach.range_at_tca)
-print(closest.tca.isot, closest.secondary_number, f"{closest.range_at_tca:.0f} m")
-conjunction = closest.to_conjunction(combined_hard_body_radius=10.0)  # no covariance
-pc = compute_pc(conjunction)
-print(pc.method, f"{pc.value:.1e}")
-```
-
-With the 222 element sets of `tests/screening/data/celestrak-fixture.csv`
-as `catalog.csv`:
-
-```text
-58509 SFS Handbook v1.7 Table 3, LEO 1
-63216 SFS Handbook v1.7 Table 3, LEO 1
-2026-10-06T08:34:04.437 57062 671 m
-alfano 7.2e-03
-```
-
-## Screening volumes
-
-A `ScreeningVolume` is an ellipsoid centred on the primary with radial,
-transverse (in-track) and normal (cross-track) semi-axes along the primary's
-RTN axes. A sphere is three equal semi-axes. `screen` takes one volume for
-every primary, or a rule choosing each primary's own. A rule
-(`VolumeRule`) is a function of the primary's `Omm`. It refuses a primary
-by raising a `KeepoutError`, and the primary is then skipped as
-`NO_VOLUME`. Any other exception is taken for a bug in the rule and
-propagates.
-
-| Volume | Size | Source |
-|---|---|---|
-| `DEFAULT_VOLUME` | 5 km sphere | the threshold of CelesTrak's SOCRATES reports |
-| `ScreeningVolume.nasa_gp_data()` | 10 km sphere | NASA CA Best Practices Handbook, Rev. 2, Appendix E |
-| `ScreeningVolume.sfs_handbook` (a rule) | by orbit regime, below | USSPACECOM Spaceflight Safety Handbook for Satellite Operators, v1.7, Table 3 |
-| `ScreeningVolume.sphere(radius)`, `ScreeningVolume(radial, transverse, normal)` | your own | |
-
-**5 km**, the default, makes the results comparable with SOCRATES. It is
-not a safety margin for GP data.
-
-**10 km.** NASA's analysis of screenings on GP data against screenings on
-precision orbits finds that a miss-distance threshold of about 10 km is
-needed to catch 95 % of the high-Pc events, because of the errors of GP
-data (NASA Spacecraft Conjunction Assessment and Collision Avoidance Best
-Practices Handbook, NASA/SP-20205011318 Rev. 2, 2026, Appendix E).
-
-**Spaceflight Safety Handbook, Table 3** ("HAC screening volumes"), radial ×
-in-track × cross-track:
-
-| Regime (`SfsRegime`) | Orbit | Volume |
-|---|---|---|
-| LEO 1 | perigee altitude up to 500 km | 0.4 × 44 × 51 km |
-| LEO 2 | perigee above 500 km, up to 750 km | 0.4 × 25 × 25 km |
-| LEO 3 | perigee above 750 km, up to 1200 km | 0.4 × 12 × 12 km |
-| LEO 4 | perigee above 1200 km, up to 2000 km | 0.4 × 2 × 2 km |
-| Deep Space | period between 1300 and 1800 min, inclination below 35° | 10 × 10 × 10 km |
-| outside Table 3 | anything else (MEO, HEO, inclined geosynchronous) | 10 × 10 × 10 km |
-
-Every row of the table also needs an eccentricity below 0.25. keepout makes
-three choices the table leaves open:
-
-- **Semi-axes.** The table does not say whether its sizes are semi-axes or
-  full extents. keepout reads them as semi-axes, the larger of the two
-  readings, so no approach the handbook would report is missed.
-- **Fixed ellipsoids.** The LEO rows are covariance screenings, for which
-  the 18th Space Defense Squadron builds a volume from both objects'
-  covariances. GP data has none, so keepout uses the rows' sizes as fixed
-  ellipsoids.
-- **Outside the table.** An orbit in no row gets the deep-space volume,
-  which the table labels "Deep Space (GEO/HEO/MEO)". Its regime is
-  `SfsRegime.OUTSIDE`, so the classification stays honest.
-
-The regime comes from SGP4's own mean elements (its perigee and un-Kozai'd
-period, with the WGS 72 constants). A two-body reading of the element set's
-mean motion would put LEO perigees 3 km lower to 6 km higher, enough to move
-some orbits across a regime boundary.
 
 ## Limits of GP data
 
