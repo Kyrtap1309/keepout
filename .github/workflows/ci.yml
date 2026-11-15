@@ -163,3 +163,29 @@ jobs:
         with:
           name: docs-site
           path: site
+
+  e2e:
+    # docker compose up as a user runs it: the image built from the lock, the
+    # demo's store, the dashboard healthy and answering, the data kept across
+    # a restart.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: docker compose build
+      - run: docker compose up --wait --wait-timeout 180
+      - name: Smoke test
+        run: |
+          curl -fsS http://127.0.0.1:8501/_stcore/health
+          curl -fsS -o /dev/null http://127.0.0.1:8501/
+      - name: Restart keeps the store
+        run: |
+          docker compose down
+          docker compose up --wait --wait-timeout 180
+          docker compose logs init | grep -q "store kept: /data/keepout.db"
+      - if: failure()
+        run: docker compose logs
+      - if: always()
+        run: docker compose down -v
