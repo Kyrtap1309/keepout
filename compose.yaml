@@ -1,0 +1,67 @@
+# keepout's dashboard and worker on the demo's store: docker compose up,
+# then http://127.0.0.1:8501 (this machine only: the dashboard has no
+# authentication). See docs/deployment.md.
+
+# One image for every service, built once (by init's build); the others
+# never pull it.
+x-keepout: &keepout
+  image: keepout:local
+  pull_policy: never
+  volumes:
+    - data:/data
+
+services:
+  # Gives the volume the demo's store unless it has a store already.
+  init:
+    <<: *keepout
+    build: .
+    command: ["/opt/keepout/init-store.sh"]
+
+  dashboard:
+    <<: *keepout
+    command:
+      - keepout
+      - dashboard
+      - --store
+      - /data/keepout.db
+      - --settings
+      - /opt/keepout/settings.toml
+      # All addresses inside the container; the host publishes the port on
+      # its 127.0.0.1 only (ports, below).
+      - --host
+      - 0.0.0.0
+      # The demo's fixed time; remove these two items for your own data.
+      - --as-of
+      - "2026-10-07T18:00:00Z"
+    ports:
+      # The host's 127.0.0.1 only; KEEPOUT_PORT picks another port there.
+      - "127.0.0.1:${KEEPOUT_PORT:-8501}:8501"
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=3)"
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+  # Computes the queued jobs: Pc refreshes after an upload, manoeuvre plans.
+  worker:
+    <<: *keepout
+    command: ["keepout", "worker", "--store", "/data/keepout.db"]
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    # keepout worker puts its job back in the queue on SIGTERM.
+    stop_signal: SIGTERM
+    stop_grace_period: 30s
+
+volumes:
+  data: {}
