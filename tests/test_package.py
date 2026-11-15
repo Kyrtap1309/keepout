@@ -53,10 +53,15 @@ def test_every_error_and_method_type_is_exported_from_the_package() -> None:
     assert keepout.MethodChoice is MethodChoice
 
 
+DASHBOARD_SCRIPTS = ("keepout.dashboard.app", "keepout.dashboard.views.")
+"""The dashboard's entry script and pages: Streamlit runs them, nothing
+imports them (an import would run them)."""
+
 PUBLIC_MODULES = sorted(
     module.name
     for module in pkgutil.walk_packages(keepout.__path__, "keepout.")
     if not any(part.startswith("_") for part in module.name.split("."))
+    and not module.name.startswith(DASHBOARD_SCRIPTS)
 )
 
 
@@ -89,6 +94,21 @@ def test_importing_keepout_loads_no_sqlalchemy() -> None:
     code = (
         "import sys, keepout; "
         "print(sorted(m for m in ('sqlalchemy', 'alembic', 'keepout.store') "
+        "if m in sys.modules))"
+    )
+    loaded = subprocess.run(  # noqa: S603 (this interpreter, fixed code)
+        [sys.executable, "-c", code], capture_output=True, text=True, check=True
+    )
+    assert loaded.stdout == "[]\n"
+
+
+def test_importing_the_store_loads_no_figures_or_screening() -> None:
+    # Every command and worker opening a store imports it: the presentation
+    # layer and the synthetic operator (screening, SGP4) stay unloaded.
+    code = (
+        "import sys, keepout.store; "
+        "print(sorted(m for m in ('keepout.figures', 'keepout.maneuver', "
+        "'keepout.synthetic.operator', 'keepout.screening', 'sgp4') "
         "if m in sys.modules))"
     )
     loaded = subprocess.run(  # noqa: S603 (this interpreter, fixed code)

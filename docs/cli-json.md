@@ -271,8 +271,9 @@ newest first, each with these keys:
 | Key | Type | Meaning |
 |---|---|---|
 | `job` | number | the job's id |
+| `kind` | string | `maneuver` (a manoeuvre plan) or `refresh` (the Pc its event lacks, queued by the [dashboard](dashboard.md#jobs)) |
 | `event` | string | the event's id |
-| `cdm` | string | the `MESSAGE_ID` of the CDM it plans from |
+| `cdm` | string | the `MESSAGE_ID` of the CDM it is pinned to: the one it plans from, or the latest whose Pc it computes |
 | `status` | string | `queued`, `running`, `succeeded`, `failed` or `cancelled` |
 | `attempt` | number | how many times a worker took it (a stop does not count) |
 | `worker` | string or `null` | the worker running it, or the one that ended it. `null` while it is queued, if it was cancelled while queued, or if it failed after two workers stopped without an answer |

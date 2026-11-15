@@ -41,7 +41,7 @@ import re
 import sys
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Final, Literal, NamedTuple, TypedDict
+from typing import TYPE_CHECKING, Final, Literal, TypedDict
 
 import matplotlib as mpl
 import numpy as np
@@ -77,10 +77,16 @@ from keepout._text import pc_text, plural
 from keepout._workers import DEFAULT_WORKERS, ONE_THREAD
 from keepout.cdm import Cdm, load
 from keepout.events import ConjunctionEvent, group_events, time_to_tca
+from keepout.figures import (
+    LOWEST_LOG_PC,
+    NO_PC,
+    SEQUENTIAL,
+    TARGET_COLOUR,
+    grid_figure,
+)
 from keepout.maneuver import (
     DEFAULT_BURN_GRID,
     TARGET_PC,
-    BurnDirection,
     ManeuverOption,
     ManeuverPlan,
     NewApproach,
@@ -104,7 +110,7 @@ if TYPE_CHECKING:
     from matplotlib.axes import Axes
     from matplotlib.collections import QuadMesh
 
-    from keepout._types import FloatArray
+    from keepout.figures import GridFigure, GridPanel
     from keepout.omm import Omm
 
 PAGE: Final = REPO / "docs/maneuver-report.md"
@@ -128,24 +134,6 @@ DEMONSTRATION_TARGET: Final = THRESHOLDS.green_below
 TOLERANCE: Final = f"{TCA_TOLERANCE / MINUTE:g} minutes"
 """How far apart the TCAs of one approach may be, for the page."""
 
-LOWEST_LOG_PC: Final = -12.0
-"""The heatmap's colour scale stops here: lower Pc share its lightest colour."""
-
-RAMP: Final = (
-    "#cde2fb",
-    "#9ec5f4",
-    "#6da7ec",
-    "#3987e5",
-    "#256abf",
-    "#184f95",
-    "#0d366b",
-)
-"""A sequential blue ramp, light to dark: a higher Pc is darker."""
-
-NO_PC: Final = "#e4e2dc"
-"""Cells without a Pc (no closest approach to trust): a neutral grey."""
-
-TARGET_COLOUR: Final = "#eb6834"
 INK: Final = "#0b0b0b"
 MUTED: Final = "#52514e"
 RULE: Final = "#c3c2b7"
@@ -932,51 +920,12 @@ def render_summary(summary: Summary, images: str) -> str:
     )
 
 
-def _edges(centres: FloatArray, *, geometric: bool) -> FloatArray:
-    """Cell edges around ascending ``centres``: midway between them, in log
-    if ``geometric``, and as far beyond the ends."""
-    values = np.log(centres) if geometric else np.asarray(centres, dtype=np.float64)
-    if len(values) == 1:
-        inner: FloatArray = np.empty(0)
-        first, last = values[0] - 0.5, values[0] + 0.5
-    else:
-        inner = (values[1:] + values[:-1]) / 2.0
-        first = 2.0 * values[0] - inner[0]
-        last = 2.0 * values[-1] - inner[-1]
-    edges: FloatArray = np.concatenate(([first], inner, [last]))
-    return np.exp(edges) if geometric else edges
-
-
-class _Scale(NamedTuple):
-    """What both panels of a heatmap share."""
-
-    hours: FloatArray
-    """Burn times before TCA [h], ascending."""
-    log_pc: FloatArray
-    """log10 Pc, a row per burn time; NaN where a cell has no Pc."""
-    top: float
-    """The top of the colour scale."""
-    target: float
-    """log10 of the target Pc."""
-
-
-def _scale(plan: ManeuverPlan) -> _Scale:
-    hours = plan.burn_leads[::-1] / HOUR
-    with np.errstate(divide="ignore"):
-        log_pc = np.log10(plan.pc[::-1])
-    # A Pc of 0 is below the scale, like any Pc under LOWEST_LOG_PC.
-    log_pc = np.where(np.isneginf(log_pc), LOWEST_LOG_PC - 1.0, log_pc)
-    top = float(np.ceil(np.nanmax(log_pc))) if np.isfinite(log_pc).any() else -1.0
-    return _Scale(
-        hours, log_pc, max(top, LOWEST_LOG_PC + 1.0), float(np.log10(plan.target_pc))
-    )
-
-
-def _mark(axes: Axes, option: ManeuverOption, direction: BurnDirection) -> None:
+def _mark(axes: Axes, panel: GridPanel) -> None:
     """The option of a panel: a ringed dot and its label."""
-    sign = direction.sign
-    lead = option.burn_lead / HOUR
-    size = abs(option.delta_v)
+    if panel.minimum is None:
+        return
+    sign = panel.direction.sign
+    lead, size = panel.minimum
     axes.scatter(
         [size],
         [lead],
@@ -987,7 +936,7 @@ def _mark(axes: Axes, option: ManeuverOption, direction: BurnDirection) -> None:
         zorder=3,
     )
     axes.annotate(
-        f"{delta_v_text(option.delta_v)} m/s\n{lead:.1f} h before TCA",
+        f"{delta_v_text(sign * size)} m/s\n{lead:.1f} h before TCA",
         (size, lead),
         xytext=(10 * sign, -10),
         textcoords="offset points",
@@ -1000,49 +949,34 @@ def _mark(axes: Axes, option: ManeuverOption, direction: BurnDirection) -> None:
 
 
 def _panel(
-    axes: Axes,
-    plan: ManeuverPlan,
-    scale: _Scale,
-    direction: BurnDirection,
-    cmap: Colormap,
+    axes: Axes, figure: GridFigure, panel: GridPanel, cmap: Colormap
 ) -> QuadMesh:
     """One direction's cells, the target contour and the option."""
-    columns = np.flatnonzero(np.sign(plan.delta_v) == direction.sign)
-    columns = columns[np.argsort(np.abs(plan.delta_v[columns]))]
-    magnitudes = np.abs(plan.delta_v[columns])
-    values = scale.log_pc[:, columns]
+    values = panel.log_pc
     mesh = axes.pcolormesh(
-        _edges(magnitudes, geometric=True),
-        _edges(scale.hours, geometric=False),
+        panel.delta_v,
+        panel.hours_before_tca,
         np.ma.masked_invalid(values),
         cmap=cmap,
         vmin=LOWEST_LOG_PC,
-        vmax=scale.top,
+        vmax=figure.top_log_pc,
         shading="flat",
         edgecolors="none",
         rasterized=True,
     )
-    # The contour stops at cells without a Pc: none is below the target.
-    known = values[np.isfinite(values)]
-    if (
-        min(values.shape) > 1
-        and known.size
-        and known.min() < scale.target < known.max()
-    ):
+    if panel.crosses(figure.target_log_pc):
         axes.contour(
-            magnitudes,
-            scale.hours,
+            panel.delta_v_centres,
+            panel.hour_centres,
             np.ma.masked_invalid(values),
-            levels=[scale.target],
+            levels=[figure.target_log_pc],
             colors=TARGET_COLOUR,
             linewidths=2.0,
             linestyles="solid",
         )
-    option = plan.option(direction)
-    if option is not None:
-        _mark(axes, option, direction)
+    _mark(axes, panel)
     axes.set_xscale("log")
-    axes.set_title(direction, color=INK)
+    axes.set_title(panel.direction, color=INK)
     axes.set_xlabel("|Δv| along the velocity (m/s)", color=MUTED)
     axes.tick_params(colors=MUTED)
     for spine in axes.spines.values():
@@ -1050,7 +984,7 @@ def _panel(
     return mesh
 
 
-def _legend(figure: Figure, plan: ManeuverPlan) -> None:
+def _legend(drawing: Figure, figure: GridFigure) -> None:
     handles: list[Artist] = [
         Line2D([], [], color=TARGET_COLOUR, linewidth=2.0),
         Line2D(
@@ -1063,11 +997,11 @@ def _legend(figure: Figure, plan: ManeuverPlan) -> None:
             markeredgecolor="white",
         ),
     ]
-    labels = [f"target Pc {plan.target_pc:.0e}", "smallest burn meeting it"]
-    if np.isnan(plan.pc).any():
+    labels = [f"target Pc {figure.target_pc:.0e}", "smallest burn meeting it"]
+    if any(np.isnan(panel.log_pc).any() for panel in figure.directions):
         handles.append(Patch(facecolor=NO_PC))
         labels.append("no Pc (no minimum to trust)")
-    figure.legend(
+    drawing.legend(
         handles,
         labels,
         loc="lower center",
@@ -1078,32 +1012,40 @@ def _legend(figure: Figure, plan: ManeuverPlan) -> None:
     )
 
 
-def plot(plan: ManeuverPlan, title: str, path: Path) -> None:
-    """The heatmap of a plan, drawn as a reproducible SVG: log10 Pc over |Δv|
-    (retrograde mirrored to the left) and hours before TCA."""
-    cmap = LinearSegmentedColormap.from_list("pc", RAMP).with_extremes(bad=NO_PC)
-    scale = _scale(plan)
+def heatmap_figure(figure: GridFigure, title: str) -> Figure:
+    """The heatmap of a plan: log10 Pc over |Δv| (retrograde mirrored to the
+    left) and hours before TCA."""
+    cmap = LinearSegmentedColormap.from_list("pc", SEQUENTIAL).with_extremes(bad=NO_PC)
+    retrograde, prograde = figure.directions
     with mpl.rc_context({"svg.hashsalt": "keepout", "svg.fonttype": "none"}):
-        figure = Figure(figsize=(9.0, 4.8))
-        grid = figure.add_gridspec(1, 3, width_ratios=(1.0, 1.0, 0.05), wspace=0.12)
-        left = figure.add_subplot(grid[0, 0])
-        right = figure.add_subplot(grid[0, 1], sharey=left)
-        _panel(left, plan, scale, BurnDirection.RETROGRADE, cmap)
-        mesh = _panel(right, plan, scale, BurnDirection.PROGRADE, cmap)
+        drawing = Figure(figsize=(9.0, 4.8))
+        grid = drawing.add_gridspec(1, 3, width_ratios=(1.0, 1.0, 0.05), wspace=0.12)
+        left = drawing.add_subplot(grid[0, 0])
+        right = drawing.add_subplot(grid[0, 1], sharey=left)
+        _panel(left, figure, retrograde, cmap)
+        mesh = _panel(right, figure, prograde, cmap)
         left.invert_xaxis()
         left.set_ylabel("burn time before TCA (h)", color=MUTED)
         right.tick_params(labelleft=False)
-        colourbar = figure.colorbar(
-            mesh, cax=figure.add_subplot(grid[0, 2]), extend="min"
+        colourbar = drawing.colorbar(
+            mesh, cax=drawing.add_subplot(grid[0, 2]), extend="min"
         )
         colourbar.set_label("log10 Pc (Foster)", color=MUTED)
-        colourbar.ax.axhline(scale.target, color=TARGET_COLOUR, linewidth=2.0)
+        colourbar.ax.axhline(figure.target_log_pc, color=TARGET_COLOUR, linewidth=2.0)
         colourbar.ax.tick_params(colors=MUTED)
         colourbar.outline.set_edgecolor(RULE)
-        _legend(figure, plan)
-        figure.suptitle(title, color=INK, fontsize=11)
-        figure.subplots_adjust(left=0.08, right=0.93, top=0.84, bottom=0.2)
-        figure.savefig(
+        _legend(drawing, figure)
+        drawing.suptitle(title, color=INK, fontsize=11)
+        drawing.subplots_adjust(left=0.08, right=0.93, top=0.84, bottom=0.2)
+    return drawing
+
+
+def plot(figure: GridFigure, title: str, path: Path) -> None:
+    """The heatmap of a plan (:func:`heatmap_figure`), saved as a
+    reproducible SVG."""
+    drawing = heatmap_figure(figure, title)
+    with mpl.rc_context({"svg.hashsalt": "keepout", "svg.fonttype": "none"}):
+        drawing.savefig(
             path, format="svg", metadata={"Date": None}, facecolor="white", dpi=200
         )
 
@@ -1307,7 +1249,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             status = 1
         return status
     args.images.mkdir(parents=True, exist_ok=True)
-    plot(plan, heatmap_title(summary["event"]), heatmap)
+    plot(grid_figure(plan), heatmap_title(summary["event"]), heatmap)
     print(f"wrote {heatmap}")
     return status
 

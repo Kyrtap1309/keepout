@@ -44,17 +44,21 @@ from worker_jobs import (
 import keepout.cdm
 import keepout.maneuver.outcome
 from keepout._text import duration_words
+from keepout._types import JsonValue
 from keepout._workers import ONE_THREAD
+from keepout.errors import HardBodyRadiusError
 from keepout.maneuver import plan_event
 from keepout.pc import computation
 from keepout.settings import Settings
 from keepout.sources.catalog import CatalogReference
-from keepout.store import CdmInput, Store, models
+from keepout.store import CdmInput, JobKind, Store, models, open_store, planning
+from keepout.store.codec import observation_to_json
 from keepout.store.jobs import Job, JobQueue, JobStatus, SubmissionOutcome
 from keepout.store.maneuver_codec import outcome_from_json, outcome_to_json
-from keepout.store.planning import run_maneuver_job
+from keepout.store.planning import run_job, run_maneuver_job, run_refresh_job
 from keepout.store.worker import (
     TIME_LIMIT_SECONDS,
+    Compute,
     _Answer,
     _Failure,
     _next_step,
@@ -625,3 +629,87 @@ def test_real_maneuver_job(store: Store, path: str) -> None:
     decoded = outcome_from_json(payload, event)
     inline = plan_event(event, compute=settings.compute, grid=SMALL_GRID)
     assert outcome_to_json(decoded) == outcome_to_json(inline) == payload
+
+
+def test_refresh_job_writes_observations(
+    store: Store, path: str, tmp_path: Path
+) -> None:
+    messages = [message("A"), message("B", tca=1.0, created=-60.0)]
+    (event_id,) = store.ingest(messages).events
+    submitted = JobQueue(store).submit_refresh(event_id, FOSTER).job
+    assert submitted is not None
+    # The default computation runs a job of either kind.
+    assert run_worker(path, until_idle=True, **FAST) == 1
+    assert JobQueue(store).job(submitted.id).status is JobStatus.SUCCEEDED
+    with open_store(tmp_path / "sync.db") as synchronous:
+        synchronous.ingest(messages)
+        assert synchronous.refresh(FOSTER).computed == 2
+        expected = synchronous.observations(event_id, FOSTER)
+    observations = store.observations(event_id, FOSTER)
+    assert [observation_to_json(o) for o in observations] == [
+        observation_to_json(o) for o in expected
+    ]
+
+
+def test_refresh_job_without_hbr_fails(store: Store, path: str) -> None:
+    (event_id,) = store.ingest([message("A")]).events
+    settings = Settings(compute=computation("foster"))
+    submitted = JobQueue(store).submit_refresh(event_id, settings).job
+    assert submitted is not None
+    assert run_worker(path, until_idle=True, **FAST) == 1
+    failed = JobQueue(store).job(submitted.id)
+    assert failed.status is JobStatus.FAILED
+    with pytest.raises(HardBodyRadiusError) as raised:
+        store.refresh(settings, event_ids=[event_id])
+    assert failed.error == str(raised.value)
+    assert "HBR" in str(raised.value) or "hard-body" in str(raised.value)
+    assert count_rows(store, models.Result) == 0
+
+
+def test_run_job_plans_a_maneuver_job(
+    path: str, job: Job, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert job.kind is JobKind.MANEUVER
+    monkeypatch.setattr(planning, "run_maneuver_job", workers_given)
+    assert run_job(path, job, 3) == {"workers": 3}
+
+
+def test_run_job_of_an_unknown_kind_is_a_bug(path: str, job: Job) -> None:
+    # Every kind is dispatched: a new one without its computation fails loud.
+    unknown = dataclasses.replace(job, kind="audit")  # type: ignore[arg-type]
+    with pytest.raises(AssertionError):
+        run_job(path, unknown, None)
+
+
+def no_observations(path: str, job: Job, workers: int | None) -> dict[str, JsonValue]:
+    """A refresh's result without its observations."""
+    return {"ok": True}
+
+
+def mislabelled(path: str, job: Job, workers: int | None) -> dict[str, JsonValue]:
+    """A refresh's result with A's observation given as B's."""
+    observations = run_refresh_job(path, job, workers)["observations"]
+    assert isinstance(observations, dict)
+    return {"observations": {"B": observations["A"]}}
+
+
+@pytest.mark.parametrize("compute", [no_observations, mislabelled])
+def test_a_malformed_refresh_result_fails_the_job(
+    store: Store,
+    path: str,
+    compute: Compute,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    (event_id,) = store.ingest(
+        [message("A"), message("B", tca=1.0, created=-60.0)]
+    ).events
+    submitted = JobQueue(store).submit_refresh(event_id, FOSTER).job
+    assert submitted is not None
+    # The worker goes on: until_idle returns once the queue is empty.
+    assert run_worker(path, compute=compute, until_idle=True, **FAST) == 1
+    failed = JobQueue(store).job(submitted.id)
+    assert failed.status is JobStatus.FAILED
+    assert failed.error is not None
+    assert failed.error.startswith("a refresh job's")
+    assert f"job {submitted.id} failed: {failed.error}" in caplog.text
+    assert count_rows(store, models.Result) == 0

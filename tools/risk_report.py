@@ -43,8 +43,8 @@ from generated import (
 from matplotlib.figure import Figure
 
 from keepout._text import plural
+from keepout.figures import FIT_COLOUR, RISK_COLOURS, THRESHOLD_LABELS, trend_figure
 from keepout.risk import (
-    PC_FLOOR,
     Action,
     Assessment,
     Basis,
@@ -57,11 +57,12 @@ from keepout.risk import (
     assess,
 )
 from keepout.sources import kelvins
-from keepout.units import DAY
+from keepout.units import DAY, HOUR
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping, Sequence
 
+    from keepout.figures import TrendFigure
     from keepout.sources.kelvins import KelvinsEvent
 
 PAGE: Final = REPO / "docs/risk-kelvins.md"
@@ -102,12 +103,6 @@ PLOT_DAYS: Final = 7.5
 
 LOWEST_AXIS: Final = 1e-12
 """The Pc axis reaches at least this low (lower if an event needs it)."""
-
-COLOURS: Final[Mapping[RiskLevel, str]] = {
-    RiskLevel.GREEN: "#2e7d32",
-    RiskLevel.YELLOW: "#e6a700",
-    RiskLevel.RED: "#c62828",
-}
 
 
 def level_label(level: RiskLevel | None) -> str:
@@ -470,19 +465,30 @@ def _label_notes(summary: Summary) -> list[str]:
     return [line for note in notes for line in ("", note)]
 
 
-def plot(event: KelvinsEvent, assessment: Assessment, path: Path) -> None:
-    """An event's Pc against the time to TCA, drawn as a reproducible SVG."""
+def plot_title(event: KelvinsEvent, assessment: Assessment) -> str:
+    """The title of an event's plot: its action and trend."""
+    return (
+        f"Kelvins event {event.event_id} (mission {event.mission_id}): "
+        f"{assessment.decision.action.label}, trend {assessment.trend.direction}"
+    )
+
+
+def trend_plot(figure: TrendFigure, title: str) -> Figure:
+    """An event's Pc against the time to TCA; a point below the source's
+    floor is drawn hollow."""
+    days = figure.hours_to_tca * HOUR / DAY
     with mpl.rc_context({"svg.hashsalt": "keepout", "svg.fonttype": "none"}):
-        figure = Figure(figsize=(8.5, 3.6))
-        axes = figure.subplots()
-        days = [point.time_to_tca / DAY for point in assessment.trend.points]
-        values = [max(point.value, PC_FLOOR) for point in assessment.trend.points]
-        axes.plot(days, values, color="#757575", linewidth=1.0, zorder=1)
-        for point, day, value in zip(
-            assessment.trend.points, days, values, strict=True
+        drawing = Figure(figsize=(8.5, 3.6))
+        axes = drawing.subplots()
+        if figure.fit is not None:
+            hours, values = figure.fit
+            axes.plot(
+                hours * HOUR / DAY, values, color=FIT_COLOUR, linewidth=1.0, zorder=1
+            )
+        for day, value, level, floored in zip(
+            days, figure.pc, figure.levels, figure.below_floor, strict=True
         ):
-            floored = point.observation.kind == "below_floor"
-            colour = COLOURS[point.level]
+            colour = RISK_COLOURS[level]
             axes.scatter(
                 [day],
                 [value],
@@ -491,18 +497,13 @@ def plot(event: KelvinsEvent, assessment: Assessment, path: Path) -> None:
                 facecolors="none" if floored else colour,
                 edgecolors=colour,
             )
-        axes.axhline(
-            THRESHOLDS.red_from,
-            color=COLOURS[RiskLevel.RED],
-            linestyle="--",
-            label=f"red from {THRESHOLDS.red_from:.0e}",
-        )
-        axes.axhline(
-            THRESHOLDS.green_below,
-            color=COLOURS[RiskLevel.YELLOW],
-            linestyle="--",
-            label=f"green below {THRESHOLDS.green_below:.0e}",
-        )
+        for value, level in reversed(figure.thresholds):
+            axes.axhline(
+                value,
+                color=RISK_COLOURS[level],
+                linestyle="--",
+                label=f"{THRESHOLD_LABELS[level]} {value:.0e}",
+            )
         axes.axvline(
             DECISION.decision_point / DAY,
             color="#424242",
@@ -510,18 +511,22 @@ def plot(event: KelvinsEvent, assessment: Assessment, path: Path) -> None:
             label="decision point",
         )
         axes.set_yscale("log")
-        axes.set_ylim(min([LOWEST_AXIS, *values]) / 10, 1.0)
+        axes.set_ylim(min([LOWEST_AXIS, *figure.pc]) / 10, 1.0)
         axes.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), fontsize="small")
         axes.set_xlim(PLOT_DAYS, 0.0)
         axes.set_xlabel("days to TCA")
         axes.set_ylabel("Pc (ESA)")
-        axes.set_title(
-            f"Kelvins event {event.event_id} (mission {event.mission_id}): "
-            f"{assessment.decision.action.label}, trend {assessment.trend.direction}"
-        )
+        axes.set_title(title)
         axes.grid(visible=True, which="major", alpha=0.3)
-        figure.tight_layout()
-        figure.savefig(path, format="svg", metadata={"Date": None})
+        drawing.tight_layout()
+    return drawing
+
+
+def plot(figure: TrendFigure, title: str, path: Path) -> None:
+    """An event's plot (:func:`trend_plot`), saved as a reproducible SVG."""
+    drawing = trend_plot(figure, title)
+    with mpl.rc_context({"svg.hashsalt": "keepout", "svg.fonttype": "none"}):
+        drawing.savefig(path, format="svg", metadata={"Date": None})
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -571,7 +576,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             continue
         args.images.mkdir(parents=True, exist_ok=True)
         event = by_id[event_id]
-        plot(event, assess_with_settings(event.observations()), path)
+        assessment = assess_with_settings(event.observations())
+        plot(
+            trend_figure(assessment, THRESHOLDS),
+            plot_title(event, assessment),
+            path,
+        )
         print(f"wrote {path}")
     return status
 

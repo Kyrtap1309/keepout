@@ -3,7 +3,8 @@
 Every command is a function of a command module (:mod:`keepout.cli.fetch`,
 :mod:`keepout.cli.screen`, :mod:`keepout.cli.assess`,
 :mod:`keepout.cli.maneuver`, :mod:`keepout.cli.validate`,
-:mod:`keepout.cli.store`, :mod:`keepout.cli.jobs`, :mod:`keepout.cli.worker`)
+:mod:`keepout.cli.store`, :mod:`keepout.cli.jobs`, :mod:`keepout.cli.worker`,
+:mod:`keepout.cli.dashboard`)
 registered here through :func:`~keepout.cli.output.reported`, so keepout's
 errors end the command with ``Error: ...`` and status 1 instead of a
 traceback.
@@ -19,6 +20,7 @@ from typer.core import TyperCommand
 
 import keepout
 from keepout.cli.assess import assess_command
+from keepout.cli.dashboard import dashboard_command
 from keepout.cli.fetch import fetch_cara, fetch_catalog, fetch_cdm, fetch_kelvins
 from keepout.cli.jobs import jobs_cancel, jobs_list
 from keepout.cli.maneuver import maneuver_command
@@ -55,7 +57,8 @@ Environment:
   SPACETRACK_IDENTITY  the Space-Track account (--source spacetrack, fetch)
   SPACETRACK_PASSWORD  its password
   KEEPOUT_CACHE_DIR    the cache root, as --cache-dir
-  KEEPOUT_STORE        the store of store, jobs, worker and maneuver --event
+  KEEPOUT_STORE        the store of store, jobs, worker, dashboard and maneuver
+                       --event
 
 Commands and options spell maneuver the US way, as the CCSDS keywords do; the
 help text says manoeuvre. keepout COMMAND --help gives each command's options."""
@@ -82,6 +85,10 @@ _EXAMPLES: Final = {
         "keepout maneuver --event 3befe6f1305d --store keepout.db --queue",
     ),
     "store add": ("keepout store add cdms/*.kvn --store keepout.db",),
+    "dashboard": (
+        "keepout dashboard --store keepout.db",
+        "keepout dashboard --store keepout.db --as-of 2026-10-07T12:00 --port 8502",
+    ),
 }
 """Example command lines at the end of a command's help, by command."""
 
@@ -189,6 +196,7 @@ _add(app, "assess", assess_command)
 _add(app, "maneuver", maneuver_command)
 _add(app, "validate", validate_command)
 _add(app, "worker", worker_command)
+_add(app, "dashboard", dashboard_command)
 _add(store_app, "add", store_add)
 _add(store_app, "upgrade", store_upgrade)
 _add(store_app, "rebuild", store_rebuild)

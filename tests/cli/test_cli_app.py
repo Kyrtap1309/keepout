@@ -55,6 +55,7 @@ def test_help_lists_the_commands() -> None:
         "maneuver",
         "validate",
         "worker",
+        "dashboard",
         "fetch",
         "store",
         "jobs",

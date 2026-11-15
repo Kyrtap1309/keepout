@@ -17,12 +17,13 @@ from GitHub:
 pip install "keepout[cli,store] @ git+https://github.com/Kyrtap1309/keepout"
 ```
 
-The two extras add optional parts; without them you get the library only:
+The extras add optional parts; without them you get the library only:
 
 | Extra | Adds | Needed for |
 |---|---|---|
 | `cli` | Typer and Rich | the `keepout` command |
 | `store` | SQLAlchemy and Alembic | the [conjunction store](store.md): `--store`, `keepout store`, `keepout jobs`, `keepout worker` |
+| `dashboard` | Streamlit and Plotly, and the `store` extra | the [dashboard](dashboard.md): `keepout dashboard` |
 
 The examples on these pages read files committed to the repository: a
 sample CDM, the example fleet and the frozen catalogs. To run them, clone
@@ -45,6 +46,8 @@ uv run keepout --help
   [Synthetic operator](synthetic.md).
 - **Prefer a terminal?** [Command line](cli.md) walks through a week of
   a synthetic operator.
+- **Prefer a browser?** [The dashboard](dashboard.md) shows a store's
+  events, their trends and manoeuvre plans.
 - **Stuck?** [FAQ and troubleshooting](faq.md).
 
 ## Performance
@@ -226,6 +229,8 @@ local SQLite file. `screen` and `assess` use it with `--store`, as do
 `keepout store add` and `keepout maneuver --event ID`. Each event has a
 stable id of 12 hexadecimal characters. `keepout worker` computes queued
 manoeuvre plans in the background. See [The conjunction store](store.md).
+`keepout dashboard` shows a store in the browser, on this machine only
+(the `dashboard` extra, see [The dashboard](dashboard.md)).
 
 See [Synthetic operator](synthetic.md) for what a run does,
 [Command line](cli.md) for every command,

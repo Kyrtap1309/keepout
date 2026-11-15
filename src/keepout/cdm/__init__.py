@@ -8,7 +8,7 @@ and :mod:`keepout.cdm.xml` read and write a specific one.
 from pathlib import Path
 from typing import Literal, TypeAlias
 
-from keepout.ccsds.files import read_file, strip_bom
+from keepout.ccsds.files import decode_file, read_file, strip_bom
 from keepout.cdm import kvn, xml
 from keepout.cdm._io import CDM
 from keepout.cdm.builder import (
@@ -32,6 +32,7 @@ __all__ = [
     "ObjectMetadata",
     "ObjectType",
     "Section",
+    "decode_text",
     "format_of",
     "kvn",
     "load",
@@ -162,3 +163,31 @@ def read_text(path: str | Path) -> str:
         If it cannot be read.
     """
     return read_file(path, CDM)
+
+
+def decode_text(data: bytes, name: str, *, max_bytes: int | None = None) -> str:
+    """The text of a CDM file's bytes, as :func:`read_text` reads the file:
+    decompressed if it is gzip data, without a byte-order mark.
+
+    Parameters
+    ----------
+    data
+        The file's bytes (UTF-8, gzip-compressed or not), e.g. as uploaded.
+    name
+        The file's name, which an error message starts with.
+    max_bytes
+        Most bytes the file, and its data once decompressed, may hold;
+        ``None`` for no limit. gzip data is inflated no further than it.
+
+    Returns
+    -------
+    str
+        The file's text.
+
+    Raises
+    ------
+    CdmParseError
+        If the data is broken gzip data, not UTF-8 text, or larger than
+        ``max_bytes`` (before or after decompression).
+    """
+    return decode_file(data, name, CDM, max_bytes=max_bytes)

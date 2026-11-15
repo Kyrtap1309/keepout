@@ -18,6 +18,7 @@ import screening_snapshot as snapshot
 import snapshot_files
 import spacetrack_snapshot
 from astropy.time import Time
+from benchmark_runs import Comparison
 from generated import README, json_text, read_json
 from report_builders import assert_writes_then_checks, fixture_data, readme_with_markers
 from screening_data import fixture_by_number, load_fixture
@@ -488,27 +489,12 @@ def run(cpu: float) -> benchmark.Run:
     return benchmark.Run(wall=cpu + 0.5, cpu=cpu, approaches=7)
 
 
-class Fake:
-    """Timed runs from lists of CPU times, recording the calls."""
-
-    def __init__(self, head: list[float] | None, base: list[float] | None) -> None:
-        self.cpu = {"head": head, "base": base}
-        self.calls: list[str] = []
-
-    def __call__(self, command: Sequence[str]) -> benchmark.Run:
-        side = command[0]
-        self.calls.append(side)
-        times = self.cpu[side]
-        if times is None:
-            raise benchmark.TimingFailed("ModuleNotFoundError: keepout.screening")
-        return run(times.pop(0))
+def runs(*cpu: float) -> tuple[benchmark.Run, ...]:
+    return tuple(run(value) for value in cpu)
 
 
-def test_compare_alternates_and_takes_medians() -> None:
-    fake = Fake([1.0, 1.1, 5.0, 1.05], [1.0, 1.0, 0.95, 4.0])
-    comparison = benchmark.compare(["head"], ["base"], repeat=4, run=fake)
-    assert fake.calls == ["head", "base", "base", "head"] * 2
-    assert comparison.change == pytest.approx(1.075 / 1.0 - 1.0, rel=1e-12)
+def test_render_comparison_takes_medians() -> None:
+    comparison = Comparison(runs(1.0, 1.1, 5.0, 1.05), runs(1.0, 1.0, 0.95, 4.0))
     text, regression = benchmark.render_comparison(comparison, "setting", 0.2)
     assert not regression
     assert "| base | 1.00 s | 0.95 - 4.00 s | 1.50 s | 7 |" in text
@@ -516,36 +502,22 @@ def test_compare_alternates_and_takes_medians() -> None:
     assert text.endswith("CPU time change: +7.5% (limit +20%): within the limit.")
 
 
-def test_compare_finds_a_regression() -> None:
-    fake = Fake([1.3, 1.25, 1.2], [1.0, 1.0, 1.0])
-    comparison = benchmark.compare(["head"], ["base"], repeat=3, run=fake)
+def test_render_comparison_finds_a_regression() -> None:
+    comparison = Comparison(runs(1.3, 1.25, 1.2), runs(1.0, 1.0, 1.0))
     text, regression = benchmark.render_comparison(comparison, "setting", 0.2)
     assert regression
     assert "+25.0% (limit +20%): slower than allowed." in text
 
 
-def test_compare_skips_a_base_that_cannot_run() -> None:
-    fake = Fake([1.0, 1.0], None)
-    comparison = benchmark.compare(["head"], ["base"], repeat=2, run=fake)
-    assert fake.calls == ["head", "base"]
-    assert comparison.base == ()
+def test_render_comparison_of_a_skipped_base() -> None:
+    comparison = Comparison(runs(1.0), (), "ModuleNotFoundError: keepout.screening")
     text, regression = benchmark.render_comparison(comparison, "setting", 0.2)
     assert not regression
-    assert "The base cannot run the benchmark" in text
-    assert "ModuleNotFoundError: keepout.screening" in text
-
-
-def test_compare_fails_when_this_tree_cannot_run() -> None:
-    fake = Fake(None, [1.0])
-    with pytest.raises(benchmark.TimingFailed):
-        benchmark.compare(["head"], ["base"], repeat=1, run=fake)
-
-
-def test_run_timing_reports_failures() -> None:
-    with pytest.raises(benchmark.TimingFailed, match="exit status 3"):
-        benchmark.run_timing([sys.executable, "-c", "raise SystemExit(3)"])
-    with pytest.raises(benchmark.TimingFailed, match="No such file"):
-        benchmark.run_timing(["/nonexistent/python"])
+    assert text == (
+        "Screening benchmark: setting.\n\n"
+        "The base cannot run the benchmark, so there is no comparison:\n\n"
+        "```text\nModuleNotFoundError: keepout.screening\n```"
+    )
 
 
 def compare_arguments(tmp_path: Path, base_python: str) -> list[str]:
@@ -613,14 +585,7 @@ def test_compare_main_screens_the_chosen_source(
         commands.append(command)
         return run(1.0)
 
-    real = benchmark.compare
-
-    def compare(
-        head: Sequence[str], base: Sequence[str], *, repeat: int
-    ) -> benchmark.Comparison:
-        return real(head, base, repeat=repeat, run=recorded)
-
-    monkeypatch.setattr(benchmark, "compare", compare)
+    monkeypatch.setattr(benchmark, "run_timing", recorded)
     args = compare_arguments(tmp_path, "base-python")
     args[args.index("--data") + 1] = str(spacetrack_data(tmp_path))
     assert benchmark.main(["--source", "spacetrack", *args]) == 0

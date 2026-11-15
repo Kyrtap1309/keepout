@@ -54,7 +54,6 @@ import gzip
 import os
 import platform
 import statistics
-import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -64,6 +63,16 @@ from typing import TYPE_CHECKING, Any, Final, Protocol, TypedDict, TypeVar
 import screening_snapshot as snapshot
 import spacetrack_snapshot
 from astropy.time import Time
+from benchmark_runs import (
+    Comparison,
+    TimingFailed,
+    alternate,
+    cpu_change,
+    run_process,
+    skipped_lines,
+    verdict_line,
+    write_step_summary,
+)
 from generated import (
     README,
     REPO,
@@ -79,7 +88,6 @@ from generated import (
 from screening_timing import TimingOutput, select, timed
 
 from keepout._text import plural
-from keepout._workers import ONE_THREAD
 from keepout.omm.celestrak import dumps_csv
 from keepout.screening import (
     DEFAULT_DURATION,
@@ -93,9 +101,18 @@ from keepout.screening.volume import SOCRATES_RADIUS
 from keepout.units import DAY, KM
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
+    from collections.abc import Mapping, Sequence
 
     from keepout.omm import Omm
+
+__all__ = [
+    "Run",
+    "TimingFailed",
+    "cpu_model",
+    "main",
+    "render_comparison",
+    "run_timing",
+]
 
 TIMING: Final = Path(__file__).resolve().with_name("screening_timing.py")
 TOOL: Final = "tools/screening_benchmark.py"
@@ -541,10 +558,6 @@ class Run:
     approaches: int
 
 
-class TimingFailed(Exception):
-    """A timed screening could not run; the message says why."""
-
-
 def run_timing(command: Sequence[str]) -> Run:
     """The result read from a measurement process run as ``command``.
 
@@ -555,93 +568,21 @@ def run_timing(command: Sequence[str]) -> Run:
     ValueError
         If it prints something other than a measurement.
     """
-    try:
-        done = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            env={**os.environ, **ONE_THREAD},
-            check=False,
-        )
-    except OSError as error:
-        raise TimingFailed(f"{command[0]}: {error}") from error
-    if done.returncode != 0:
-        lines = done.stderr.strip().splitlines()[-5:]
-        raise TimingFailed("\n".join(lines) or f"exit status {done.returncode}")
-    output = parse_json(done.stdout, TimingOutput, f"the output of {command[0]}")
+    output = parse_json(
+        run_process(command), TimingOutput, f"the output of {command[0]}"
+    )
     return Run(wall=output["wall"], cpu=output["cpu"], approaches=output["approaches"])
 
 
-@dataclass(frozen=True, slots=True)
-class Comparison:
-    """The runs of this tree and of the base.
-
-    Parameters
-    ----------
-    head
-        This tree's runs.
-    base
-        The base's runs; empty if it could not run.
-    skipped
-        Why the base could not run (empty if it did).
-    """
-
-    head: tuple[Run, ...]
-    base: tuple[Run, ...]
-    skipped: str = ""
-
-    @property
-    def change(self) -> float:
-        """Relative change of the median CPU time from the base to this tree."""
-        return _median_cpu(self.head) / _median_cpu(self.base) - 1.0
-
-
-def _median_cpu(runs: Sequence[Run]) -> float:
-    return statistics.median(run.cpu for run in runs)
-
-
-def compare(
-    head: Sequence[str],
-    base: Sequence[str],
-    *,
-    repeat: int,
-    run: Callable[[Sequence[str]], Run] = run_timing,
-) -> Comparison:
-    """Timings of ``head`` and ``base`` commands, ``repeat`` times each, alternately.
-
-    The order alternates (head, base, base, head, ...) so drift of the
-    machine's speed affects both alike. This tree runs first, and its
-    failure is an error; if the base fails, the comparison stops there.
-
-    Raises
-    ------
-    TimingFailed
-        If a run of this tree fails.
-    """
-    runs: dict[str, list[Run]] = {"head": [], "base": []}
-    commands = {"head": head, "base": base}
-    for index in range(repeat):
-        order = ("head", "base") if index % 2 == 0 else ("base", "head")
-        for side in order:
-            try:
-                runs[side].append(run(commands[side]))
-            except TimingFailed as error:
-                if side == "head":
-                    raise
-                return Comparison(tuple(runs["head"]), (), str(error))
-    return Comparison(tuple(runs["head"]), tuple(runs["base"]))
-
-
 def render_comparison(
-    comparison: Comparison, setting: str, threshold: float
+    comparison: Comparison[Run], setting: str, threshold: float
 ) -> tuple[str, bool]:
     """The comparison as Markdown, and whether it is a regression."""
     lines = [f"Screening benchmark: {setting}.", ""]
     if comparison.skipped:
-        lines.append("The base cannot run the benchmark, so there is no comparison:")
-        lines += ["", "```text", comparison.skipped, "```"]
+        lines += skipped_lines(comparison.skipped)
         return "\n".join(lines), False
-    rows = []
+    rows: list[tuple[str, ...]] = []
     for name, runs in (("base", comparison.base), ("this", comparison.head)):
         cpu = [run.cpu for run in runs]
         approaches = sorted({run.approaches for run in runs})
@@ -662,15 +603,11 @@ def render_comparison(
         "Approaches",
     )
     lines += table(header, rows)
-    regression = comparison.change > threshold
-    verdict = "slower than allowed" if regression else "within the limit"
-    lines += [
-        "",
-        (
-            f"CPU time change: {comparison.change:+.1%} (limit {threshold:+.0%}): "
-            f"{verdict}."
-        ),
-    ]
+    change = cpu_change(
+        (run.cpu for run in comparison.head), (run.cpu for run in comparison.base)
+    )
+    text, regression = verdict_line("CPU time change:", change, threshold)
+    lines += ["", text]
     return "\n".join(lines), regression
 
 
@@ -702,10 +639,11 @@ def compare_main(args: argparse.Namespace) -> int:
             "--workers",
             "1",
         ]
-        comparison = compare(
+        comparison = alternate(
             [sys.executable, *arguments],
             [args.base_python, *arguments],
             repeat=args.repeat,
+            run=run_timing,
         )
     setting = (
         f"{len(args.primaries)} primaries x {len(reduced)} objects x "
@@ -714,10 +652,7 @@ def compare_main(args: argparse.Namespace) -> int:
     )
     text, regression = render_comparison(comparison, setting, args.threshold)
     print(text)
-    summary = os.environ.get("GITHUB_STEP_SUMMARY")
-    if summary:
-        with Path(summary).open("a", encoding="utf-8") as stream:
-            stream.write(text + "\n")
+    write_step_summary(text)
     return 1 if regression else 0
 
 

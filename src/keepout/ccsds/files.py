@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import gzip
 import zlib
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
@@ -13,6 +12,9 @@ if TYPE_CHECKING:
 __all__ = ["BOM", "decode_file", "read_file", "strip_bom"]
 
 _GZIP_MAGIC: Final = b"\x1f\x8b"
+
+_GZIP_WBITS: Final = 16 + zlib.MAX_WBITS
+"""zlib's window bits for gzip data (header and trailer)."""
 
 BOM: Final = "\ufeff"
 """The Unicode byte-order mark, which some files start with."""
@@ -60,7 +62,44 @@ def read_file(path: str | Path, family: Family) -> str:
     return decode_file(Path(path).read_bytes(), path, family)
 
 
-def decode_file(data: bytes, path: str | Path, family: Family) -> str:
+def _gunzip(
+    data: bytes, path: str | Path, family: Family, max_bytes: int | None
+) -> bytes:
+    """Gzip ``data`` decompressed, refused once it grows past ``max_bytes``
+    (nothing more is inflated); ``None`` for no limit.
+
+    Raises
+    ------
+    CcsdsParseError
+        The family's, if the data is broken gzip data or decompresses to more
+        than ``max_bytes``.
+    """
+    out = bytearray()
+    rest = data
+    while rest:
+        if not rest.startswith(_GZIP_MAGIC):
+            raise family.parse_error(f"{path}: invalid gzip data: trailing bytes")
+        unpacker = zlib.decompressobj(_GZIP_WBITS)
+        try:
+            # A max_length of 0 inflates it all.
+            limit = 0 if max_bytes is None else max_bytes + 1 - len(out)
+            out += unpacker.decompress(rest, limit)
+        except zlib.error as exc:
+            raise family.parse_error(f"{path}: invalid gzip data: {exc}") from exc
+        if max_bytes is not None and len(out) > max_bytes:
+            raise family.parse_error(
+                f"{path}: larger than {max_bytes} bytes once decompressed"
+            )
+        if not unpacker.eof:
+            raise family.parse_error(f"{path}: invalid gzip data: truncated")
+        # Zero padding after a member is allowed, as gzip.decompress allows it.
+        rest = unpacker.unused_data.lstrip(b"\x00")
+    return bytes(out)
+
+
+def decode_file(
+    data: bytes, path: str | Path, family: Family, *, max_bytes: int | None = None
+) -> str:
     """The text of a file's bytes, as :func:`read_file` reads them.
 
     Parameters
@@ -71,6 +110,10 @@ def decode_file(data: bytes, path: str | Path, family: Family) -> str:
         The file, for the error message.
     family
         The message family, whose parse error broken data raises.
+    max_bytes
+        Most bytes the file, and its data once decompressed if it is gzip
+        data, may hold; ``None`` for no limit. With a limit, gzip data is
+        inflated no further than it.
 
     Returns
     -------
@@ -80,13 +123,13 @@ def decode_file(data: bytes, path: str | Path, family: Family) -> str:
     Raises
     ------
     CcsdsParseError
-        The family's, if the data is broken gzip data or not UTF-8 text.
+        The family's, if the data is broken gzip data, not UTF-8 text, or
+        larger than ``max_bytes`` (before or after decompression).
     """
+    if max_bytes is not None and len(data) > max_bytes:
+        raise family.parse_error(f"{path}: larger than {max_bytes} bytes")
     if data.startswith(_GZIP_MAGIC):
-        try:
-            data = gzip.decompress(data)
-        except (OSError, EOFError, zlib.error) as exc:
-            raise family.parse_error(f"{path}: invalid gzip data: {exc}") from exc
+        data = _gunzip(data, path, family, max_bytes)
     try:
         return data.decode("utf-8-sig")
     except UnicodeDecodeError as exc:

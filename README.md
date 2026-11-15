@@ -79,7 +79,8 @@ it as a website, with the API reference generated from the docstrings.
   [3-D, Monte Carlo and maximum Pc](docs/pc-3d.md).
 - [Risk assessment](docs/risk.md) and
   [manoeuvre planning](docs/maneuver.md).
-- [Command line](docs/cli.md), [the conjunction store](docs/store.md) and
+- [Command line](docs/cli.md), [the conjunction store](docs/store.md),
+  [the dashboard](docs/dashboard.md) and
   [Space-Track data](docs/spacetrack.md).
 - [FAQ](docs/faq.md) and [changelog](docs/changelog.md).
 

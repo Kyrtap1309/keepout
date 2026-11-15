@@ -15,7 +15,6 @@ from keepout._defaults import (
     MIN_BURN_LEAD,
     SCREENING_DURATION,
     TARGET_PC,
-    TCA_TOLERANCE,
 )
 from keepout._validation import require_open_probability
 from keepout.cli.catalog_input import (
@@ -47,11 +46,10 @@ from keepout.cli.output import (
     plural,
     show,
     table,
-    utc,
 )
 from keepout.cli.store import EventStore, importing_store, open_cli_store
 from keepout.errors import ManeuverError, StoreError
-from keepout.units import HOUR, MINUTE
+from keepout.units import HOUR
 
 # The library is imported where it is used: keepout --help need not load the
 # numerical libraries.
@@ -576,36 +574,9 @@ def _one_event(events: Sequence[ConjunctionEvent]) -> ConjunctionEvent:
 
 def _refusal(outcome: ManeuverOutcome) -> str:
     """The line saying why no burn can be recommended."""
-    verdict = outcome.verdict
-    target = f"the target Pc {pc_text(outcome.target_pc)}"
-    if not verdict.burns:
-        reason = f"No burn on the grid meets {target}"
-    elif verdict.missed_target:
-        reason = f"This burn misses {target}"
-    else:
-        brought = []
-        if verdict.brings_red:
-            brought.append("an approach at red")
-        if verdict.brings_pair_back:
-            brought.append(f"this pair back above {target}")
-        burns = "Every burn" if verdict.burns > 1 else "This burn"
-        reason = f"{burns} brings {' or '.join(brought)}"
-    return f"{reason} (exit status {int(ExitCode.NO_SAFE_BURN)})."
+    from keepout.maneuver._words import refusal
 
-
-def _gaps(outcome: ManeuverOutcome) -> list[str]:
-    """The line of the direction without an option, if the other has one;
-    none for a burn of one's own (no grid)."""
-    from keepout.maneuver import BurnDirection
-
-    if outcome.grid is None:
-        return []
-    found = {burn.direction for burn in outcome.burns}
-    return [
-        f"No {direction} burn on the grid meets the target."
-        for direction in BurnDirection
-        if found and direction not in found
-    ]
+    return f"{refusal(outcome)} (exit status {int(ExitCode.NO_SAFE_BURN)})."
 
 
 def _option_json(option: ManeuverOption) -> dict[str, JsonOut]:
@@ -707,42 +678,6 @@ def _burns_table(outcome: ManeuverOutcome) -> Table:
     return rows
 
 
-def _event_line(result: RescreenResult, secondary: str) -> str:
-    """What the re-screen says of the event: possibly nothing. It screens
-    element sets with SGP4, not the CDM's orbits, so it says so."""
-    if not result.secondary_screened:
-        return (
-            f"Event secondary {secondary} was NOT screened: this re-screen says "
-            "nothing of the event."
-        )
-    view = (
-        f"Event secondary {secondary} on the element sets (SGP4, not the CDM's orbit)"
-    )
-    if result.event_range is None:
-        return (
-            f"{view}: no approach within {TCA_TOLERANCE / MINUTE:g} min of the "
-            "CDM's TCA after the burn."
-        )
-    return f"{view}: range {result.event_range:.0f} m after the burn."
-
-
-def _conflict_line(result: RescreenResult) -> str:
-    if result.conflict:
-        return "CONFLICT: a new or closer approach is at red."
-    return "No new or closer approach at red among the objects screened."
-
-
-def _return_lines(result: RescreenResult) -> list[str]:
-    """The times the burn brings the event's pair back above the target."""
-    return [
-        (
-            f"The burn brings this pair back at {minute(item.approach.tca)} UTC at "
-            f"Pc {pc_text(item.pc)} (assumed), above the target."
-        )
-        for item in result.event_returns
-    ]
-
-
 def _approach_lines(
     approaches: Sequence[NewApproach], noun: str, nouns: str
 ) -> list[str]:
@@ -772,8 +707,13 @@ def _rescreen_lines(
     direction: BurnDirection, result: RescreenResult, secondary: str, label: str
 ) -> list[str]:
     """What the re-screen of a burn found, for people."""
-    start, end = result.window
-    left_out = plural(result.skipped_objects, "catalog object")
+    from keepout.maneuver._words import (
+        conflict_line,
+        event_line,
+        rescreen_head,
+        return_lines,
+    )
+
     approaches = [
         *_approach_lines(result.new_approaches, "new approach", "new approaches"),
         *_approach_lines(
@@ -781,21 +721,14 @@ def _rescreen_lines(
         ),
     ]
     body = [
-        _event_line(result, secondary),
-        _conflict_line(result),
-        *_return_lines(result),
+        event_line(result, secondary),
+        conflict_line(result),
+        *return_lines(result),
         *approaches,
     ]
     if approaches or result.event_returns:
         body.append(ASSUMED_COVARIANCES)
-    return [
-        (
-            f"{direction} re-screened against "
-            f"{plural(result.catalog_objects, 'object')} ({label}) from {utc(start)} "
-            f"to {utc(end)} UTC; {left_out} left out (not checked)."
-        ),
-        *(f"  {line}" for line in body),
-    ]
+    return [rescreen_head(direction, result, label), *(f"  {line}" for line in body)]
 
 
 def _summary(outcome: ManeuverOutcome) -> list[RenderableType]:
@@ -826,4 +759,6 @@ def _summary(outcome: ManeuverOutcome) -> list[RenderableType]:
                 burn.direction, burn.rescreen, secondary, catalog_label
             )
         ]
-    return [head, _burns_table(outcome), *_gaps(outcome), *notes, *rescreens]
+    from keepout.maneuver._words import gap_lines
+
+    return [head, _burns_table(outcome), *gap_lines(outcome), *notes, *rescreens]

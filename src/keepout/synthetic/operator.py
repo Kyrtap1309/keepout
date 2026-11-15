@@ -69,6 +69,7 @@ from keepout.risk import (
     Thresholds,
     assess,
 )
+from keepout.risk.provenance import HEADER_COMMENTS
 from keepout.screening import (
     DEFAULT_DURATION,
     DEFAULT_VOLUME,
@@ -99,12 +100,6 @@ __all__ = [
 DEFAULT_MODEL: Final = SyntheticCovarianceModel()
 """The covariance model unless told otherwise: the published parameters
 with the default safety factor."""
-
-HEADER_COMMENTS: Final = (
-    "keepout synthetic operator: screening of public GP data with SGP4",
-    "Covariances are assumed (a model, not orbit determination)",
-)
-"""Header comments of the operator's CDMs."""
 
 
 @dataclass(frozen=True, eq=False, slots=True)

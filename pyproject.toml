@@ -39,6 +39,11 @@ store = [
     "alembic>=1.20.1",
     "sqlalchemy>=2.1.8",
 ]
+dashboard = [
+    "keepout[store]",
+    "plotly>=7.1.0",
+    "streamlit>=1.67.0",
+]
 
 [build-system]
 requires = ["uv_build>=0.13.5,<0.14"]
@@ -96,7 +101,7 @@ runtime-evaluated-base-classes = ["keepout.store.models.Base", "typing.TypedDict
 # Inline snapshots hold the commands' output line for line.
 "tests/cli/test_cli_{assess,screen,maneuver}.py" = ["E501"]
 # A command's docstring is its --help text, which states its exit statuses.
-"src/keepout/cli/{assess,maneuver,screen}.py" = ["DOC501"]
+"src/keepout/cli/{assess,dashboard,maneuver,screen}.py" = ["DOC501"]
 # Typer reads the commands' annotations (Annotated options) at runtime.
 "src/keepout/cli/**" = ["TC"]
 # The tools run git and Python with arguments they build themselves.
@@ -151,10 +156,14 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["keepout", "tools"]
-omit = ["*/keepout/dashboard/*"]
+# Directories, not the package's name: AppTest runs the dashboard's pages as
+# scripts (__main__), which a package source would not measure.
+source = ["src/keepout", "tools"]
 
 [tool.coverage.report]
+# The dashboard is measured (AppTest runs it in-process) but left out of the
+# threshold, which is the core's; CI holds it to its own (85 %).
+omit = ["*/keepout/dashboard/*"]
 fail_under = 90
 exclude_also = ["assert_never\\("]
 show_missing = true
@@ -167,7 +176,7 @@ dev = [
     "hypothesis>=6.170.9",
     "import-linter>=2.15",
     "inline-snapshot>=0.36.1",
-    "keepout[cli,validation,store]",
+    "keepout[cli,validation,store,dashboard]",
     "matplotlib>=3.11.2",
     "mkdocs>=1.6,<2",
     "mkdocs-material>=9.8.0",
@@ -201,8 +210,11 @@ typeCheckingMode = "standard"
 reportImplicitOverride = "error"
 reportDeprecated = "error"
 # The store and the settings hold untyped data (JSON, SQL rows, the
-# environment): there, every value has a known type.
+# environment): there, every value has a known type. So in the dashboard
+# (st.session_state holds Any), but for the members of Streamlit, whose own
+# signatures are partly unknown.
 executionEnvironments = [
+    { root = "src/keepout/dashboard", extraPaths = ["src"], reportUnknownVariableType = "error", reportUnknownArgumentType = "error", reportAny = "error" },
     { root = "src/keepout/store", extraPaths = ["src"], reportUnknownVariableType = "error", reportUnknownArgumentType = "error", reportUnknownMemberType = "error", reportAny = "error", reportUnnecessaryIsInstance = "error", reportUnnecessaryComparison = "error" },
     { root = "src/keepout/settings.py", extraPaths = ["src"], reportUnknownVariableType = "error", reportUnknownArgumentType = "error", reportUnknownMemberType = "error", reportAny = "error", reportUnnecessaryIsInstance = "error", reportUnnecessaryComparison = "error" },
     { root = ".", extraPaths = ["tests", "tools"] },
@@ -215,6 +227,11 @@ known_first_party = ["keepout"]
 [tool.deptry.package_module_name_map]
 pyerfa = "erfa"
 
+[tool.deptry.per_rule_ignores]
+# The dashboard extra names keepout[store] (the store it reads): keepout
+# itself, not a package to import.
+DEP002 = ["keepout"]
+
 [tool.importlinter]
 root_package = "keepout"
 exclude_type_checking_imports = true
@@ -224,9 +241,9 @@ include_external_packages = true
 name = "Layers: data sources and formats above the geometry they build"
 type = "layers"
 layers = [
-    "keepout.cli",
+    "keepout.cli | keepout.dashboard",
     "keepout.store",
-    "keepout.validation | keepout.settings",
+    "keepout.validation | keepout.settings | keepout.figures",
     "keepout.maneuver",
     "keepout.sources | keepout.synthetic",
     "keepout.events",
@@ -240,9 +257,15 @@ layers = [
     "keepout.state",
     "keepout._workers",
     "keepout._linalg",
-    "keepout._types | keepout._validation | keepout._methods | keepout._defaults | keepout._text | keepout.errors",
+    "keepout._types | keepout._validation | keepout._methods | keepout._defaults | keepout._text | keepout._environment | keepout.errors",
     "keepout.units",
 ]
+
+[[tool.importlinter.contracts]]
+name = "The store does not draw: no figures in the store"
+type = "forbidden"
+source_modules = ["keepout.store"]
+forbidden_modules = ["keepout.figures"]
 
 [[tool.importlinter.contracts]]
 name = "Only the command line uses the cli extra"
@@ -257,3 +280,10 @@ type = "forbidden"
 source_modules = ["keepout"]
 forbidden_modules = ["sqlalchemy", "alembic"]
 ignore_imports = ["keepout.store.** -> sqlalchemy", "keepout.store.** -> alembic"]
+
+[[tool.importlinter.contracts]]
+name = "Only the dashboard uses the dashboard extra"
+type = "forbidden"
+source_modules = ["keepout"]
+forbidden_modules = ["streamlit", "plotly"]
+ignore_imports = ["keepout.dashboard.** -> streamlit", "keepout.dashboard.** -> plotly"]

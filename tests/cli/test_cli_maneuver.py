@@ -1272,7 +1272,7 @@ def test_queue_then_worker_then_cached(
     assert [(j["job"], j["status"]) for j in json.loads(listed.stdout)["jobs"]] == [
         (1, "queued")
     ]
-    monkeypatch.setattr(planning, "run_maneuver_job", small_grid_maneuver)
+    monkeypatch.setattr(planning, "run_job", small_grid_maneuver)
     ran = keepout("worker", "--store", str(db), "--until-idle", "--workers", "1")
     assert ran.exit_code == ExitCode.OK
     assert ran.stdout == "Ran 1 job.\n"

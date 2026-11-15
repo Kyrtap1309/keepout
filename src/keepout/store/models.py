@@ -12,7 +12,7 @@ test compares the two.
 from __future__ import annotations
 
 import enum
-from typing import Any, Final, NewType, cast, get_args
+from typing import Any, Final, NewType, TypeVar, cast, get_args
 
 from astropy.time import Time
 from sqlalchemy import (
@@ -32,9 +32,11 @@ from sqlalchemy.types import TypeDecorator, TypeEngine
 
 from keepout._types import override
 from keepout.cdm import CdmFormat
+from keepout.errors import StoreError
 from keepout.units import elapsed_seconds
 
 __all__ = [
+    "ACTIVE_STATUSES",
     "NAMING_CONVENTION",
     "Base",
     "Catalog",
@@ -43,10 +45,11 @@ __all__ = [
     "Event",
     "EventId",
     "Job",
+    "JobKind",
     "JobStatus",
-    "JobStatusText",
     "MessageId",
     "Result",
+    "StrEnumText",
     "UtcTime",
 ]
 
@@ -77,6 +80,21 @@ class JobStatus(enum.StrEnum):
         return self in {JobStatus.QUEUED, JobStatus.RUNNING}
 
 
+ACTIVE_STATUSES: Final = tuple(status for status in JobStatus if status.is_active)
+"""The statuses of a job that has not ended."""
+
+
+class JobKind(enum.StrEnum):
+    """What a job computes: a manoeuvre plan, or the Pc an event lacks."""
+
+    MANEUVER = "maneuver"
+    """A manoeuvre plan of the event at its pinned CDM, cached there under
+    :func:`~keepout.store.codec.maneuver_key`."""
+    REFRESH = "refresh"
+    """The Pc observations the event's CDMs up to the pinned one lack,
+    cached under :func:`~keepout.store.codec.result_key`."""
+
+
 NAMING_CONVENTION: Final = {
     "ix": "ix_%(table_name)s_%(column_0_N_name)s",
     "uq": "uq_%(table_name)s_%(column_0_N_name)s",
@@ -88,6 +106,8 @@ NAMING_CONVENTION: Final = {
 (Alembic's batch mode), which needs every constraint named."""
 
 _CDM_FORMATS: Final[tuple[CdmFormat, ...]] = get_args(CdmFormat)
+
+_E = TypeVar("_E", bound=enum.StrEnum)
 
 
 class UtcTime(TypeDecorator[Time]):
@@ -164,41 +184,51 @@ class UtcTime(TypeDecorator[Time]):
         return elapsed_seconds(x, y) == 0.0
 
 
-class JobStatusText(TypeDecorator[JobStatus]):
-    """A :class:`JobStatus` as its text."""
+class StrEnumText(TypeDecorator[_E]):
+    """A member of a :class:`~enum.StrEnum` as its text.
+
+    Parameters
+    ----------
+    enum_type
+        The enum of the members stored.
+    """
 
     impl: TypeEngine[Any] | type[TypeEngine[Any]] = String
     cache_ok: bool | None = True
 
+    def __init__(self, enum_type: type[_E]) -> None:
+        super().__init__()
+        self.enum_type = enum_type  # named as the argument: the cache key
+
     @override
     def process_bind_param(
         self,
-        value: JobStatus | None,
+        value: _E | None,
         dialect: Dialect,  # noqa: ARG002 (SQLite only)
     ) -> str | None:
-        """The text of a status.
+        """The text of a member.
 
         Parameters
         ----------
         value
-            The status to store, or None.
+            The member to store, or None.
         dialect
             The database dialect (not used).
 
         Returns
         -------
         str or None
-            The status's text, or None for None.
+            The member's text, or None for None.
         """
-        return None if value is None else JobStatus(value).value
+        return None if value is None else self.enum_type(value).value
 
     @override
     def process_result_value(
         self,
         value: str | None,
         dialect: Dialect,  # noqa: ARG002 (SQLite only)
-    ) -> JobStatus | None:
-        """The status of a text.
+    ) -> _E | None:
+        """The member of a text.
 
         Parameters
         ----------
@@ -209,10 +239,21 @@ class JobStatusText(TypeDecorator[JobStatus]):
 
         Returns
         -------
-        JobStatus or None
-            The status, or None for None.
+        enum.StrEnum or None
+            The member, or None for None.
+
+        Raises
+        ------
+        StoreError
+            If the text is of no member (a store written by hand).
         """
-        return None if value is None else JobStatus(value)
+        if value is None:
+            return None
+        try:
+            return self.enum_type(value)
+        except ValueError:
+            name = self.enum_type.__name__
+            raise StoreError(f"unknown {name} {value!r} in the store") from None
 
 
 class Base(DeclarativeBase):
@@ -225,7 +266,10 @@ class Event(Base):
     """A conjunction event: the CDMs of one encounter of two objects."""
 
     __tablename__ = "events"
-    __table_args__: tuple[object, ...] = (Index(None, "object1", "object2", "tca_min"),)
+    __table_args__: tuple[object, ...] = (
+        Index(None, "object1", "object2", "tca_min"),
+        Index(None, "tca_max"),
+    )
 
     id: Mapped[EventId] = mapped_column(String(12), primary_key=True)
     object1: Mapped[str] = mapped_column(String)
@@ -330,14 +374,19 @@ class Result(Base):
 
 
 class Job(Base):
-    """A manoeuvre plan queued on an event's CDM, and how far it got."""
+    """A computation queued on an event's CDM, and how far it got."""
 
     __tablename__ = "jobs"
     __table_args__: tuple[object, ...] = (
         Index(None, "status", "created_at"),
+        Index(None, "event_id", "status"),
         CheckConstraint(
             f"status IN ({', '.join(repr(s.value) for s in JobStatus)})",
             name="status",
+        ),
+        CheckConstraint(
+            f"kind IN ({', '.join(repr(k.value) for k in JobKind)})",
+            name="kind",
         ),
         {"sqlite_autoincrement": True},
     )
@@ -346,8 +395,9 @@ class Job(Base):
     """Never reused (SQLite ``AUTOINCREMENT``): a worker's stale write to a
     deleted job cannot reach a new one."""
     event_id: Mapped[EventId] = mapped_column(
-        String(12), ForeignKey("events.id", ondelete="CASCADE"), index=True
+        String(12), ForeignKey("events.id", ondelete="CASCADE")
     )
+    """Indexed with :attr:`status` (``ix_jobs_event_id_status``)."""
     message_id: Mapped[MessageId] = mapped_column(
         String, ForeignKey("cdms.message_id", ondelete="CASCADE"), index=True
     )
@@ -356,7 +406,7 @@ class Job(Base):
     """The key its result is cached under."""
     params: Mapped[dict[str, Any]] = mapped_column(JSON)
     """What the computation needs, e.g. the settings."""
-    status: Mapped[JobStatus] = mapped_column(JobStatusText)
+    status: Mapped[JobStatus] = mapped_column(StrEnumText(JobStatus))
     attempt: Mapped[int] = mapped_column(Integer, default=0)
     """How many attempts it cost: a claim adds one, a release on a stop takes
     it back."""
@@ -373,3 +423,9 @@ class Job(Base):
     finished_at: Mapped[Time | None] = mapped_column(UtcTime)
     error: Mapped[str | None] = mapped_column(String)
     """Why it failed."""
+    # Last: migration 0003 added it to the end of the table.
+    kind: Mapped[JobKind] = mapped_column(
+        StrEnumText(JobKind), server_default=JobKind.MANEUVER.value
+    )
+    """What it computes; the jobs of a store from before kinds are
+    manoeuvre plans."""

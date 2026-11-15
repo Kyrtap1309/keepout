@@ -30,11 +30,14 @@ line on what the module is for and a link to the guide that explains it.
 | Message formats | `keepout.cdm`, `keepout.omm`, `keepout.ccsds` | [CDM](cdm.md), [Element sets (OMM)](omm.md), [CCSDS formats](ccsds.md) |
 | Data sources | `keepout.sources` | [GP catalog](catalog.md), [CelesTrak data](celestrak.md), [Space-Track data](spacetrack.md), [CARA reference data](cara.md), [Kelvins data](kelvins.md), [Data cache](cache.md) |
 | Conjunction store | `keepout.store` | [Conjunction store](store.md) |
+| Figures | `keepout.figures` | [Figures](figures.md) |
+| Dashboard | `keepout.dashboard` | [Dashboard](dashboard.md) (its context only) |
 | Validation | `keepout.validation` | [Validation tooling](validation.md) |
 | Errors | `keepout.errors` | [Errors](errors.md) |
 
 `keepout.cli` is the `keepout` command. It is documented in
-[Command line](../cli.md), not here.
+[Command line](../cli.md), not here; likewise the dashboard's pages, in
+[The dashboard](../dashboard.md).
 
 ## What `keepout` exports
 

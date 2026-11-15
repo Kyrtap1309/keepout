@@ -24,4 +24,8 @@ The features in the order they were added:
 - **2026-11:** collision-avoidance manoeuvre planning and its re-screen
   (`keepout maneuver`). The conjunction store with stable event ids
   (`keepout store`), then background jobs and the worker (`keepout jobs`,
-  `keepout worker`).
+  `keepout worker`). The [dashboard](dashboard.md) (`keepout dashboard`,
+  the `dashboard` extra), with CDM uploads and refresh jobs. `keepout.figures`
+  and a colour-blind-safe palette shared by the reports and the dashboard
+  (the report SVGs changed colours). Store schema revision `0003`:
+  `keepout store upgrade` migrates an older store.

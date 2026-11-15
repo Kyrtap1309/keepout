@@ -6,7 +6,8 @@ import re
 import shutil
 import sqlite3
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Generator, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,7 @@ from cdm_strategies import cdms
 from cli_builders import operator_kvn, without_hbr
 from hypothesis import given, settings
 from sqlalchemy import event, select, text
+from sqlalchemy.orm import Session
 from store_builders import FOSTER, TCA, cdm, cdm_text, count_rows, message, written
 
 import keepout.cdm
@@ -45,7 +47,7 @@ from keepout.store import (
 from keepout.store.codec import maneuver_key, observation_to_json
 from keepout.store.jobs import JobQueue
 from keepout.store.maneuver_codec import outcome_to_json
-from keepout.store.repo import pinned_in, save_maneuver_in
+from keepout.store.repo import _parsed_cdm, pinned_in, save_maneuver_in
 
 TOLERANCE = DEFAULT_TCA_TOLERANCE
 SAMPLE_CSV = Path(__file__).parents[1] / "omm" / "data" / "celestrak_sample.csv"
@@ -1017,3 +1019,87 @@ def test_purge_drops_jobs_and_results(store: Store) -> None:
     assert store.purge(TCA + 1.0 * u.day) == 1
     assert count_rows(store, models.Job) == 0
     assert count_rows(store, models.Result) == 0
+
+
+def _counting_reads(store: Store, monkeypatch: pytest.MonkeyPatch) -> list[None]:
+    """A list that grows by one per read transaction of ``store``."""
+    opened: list[None] = []
+    read = store.read
+
+    @contextmanager
+    def counted() -> Generator[Session]:
+        opened.append(None)
+        with read() as session:
+            yield session
+
+    monkeypatch.setattr(store, "read", counted)
+    return opened
+
+
+def test_the_plan_detail_of_an_unknown_event(store: Store) -> None:
+    assert store.plan_detail("12345678", FOSTER) is None
+
+
+def test_the_plan_detail_is_read_in_one_transaction(
+    store: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    event_id = _three_cdms(store)
+    assert store.save_maneuver("C", FOSTER, _outcome(store.event(event_id)))
+    queued = JobQueue(store).submit(event_id, Settings()).job
+    assert queued is not None
+    _parsed_cdm.cache_clear()
+    parsed = _counting_parses(monkeypatch)
+    opened = _counting_reads(store, monkeypatch)
+    detail = store.plan_detail(event_id, FOSTER)
+    assert len(opened) == 1
+    assert len(parsed) == 3  # each CDM once
+    assert detail is not None
+    assert [cdm.message_id for cdm in detail.event.cdms] == ["A", "B", "C"]
+    assert (detail.message_id, detail.key) == ("C", maneuver_key(FOSTER, None))
+    assert detail.outcome is not None
+    assert detail.outcome.event is detail.event
+    assert detail.jobs.current is None  # cached: no job for FOSTER
+    assert [job.id for job in detail.jobs.active] == [queued.id]
+
+
+def test_the_plan_detail_misses_after_a_new_cdm(store: Store) -> None:
+    event_id = _three_cdms(store)
+    assert store.save_maneuver("C", FOSTER, _outcome(store.event(event_id)))
+    store.ingest([message("D", tca=3.0, created=-10.0)])
+    submitted = JobQueue(store).submit(event_id, FOSTER).job
+    assert submitted is not None
+    detail = store.plan_detail(event_id, FOSTER)
+    assert detail is not None
+    assert detail.message_id == "D"
+    assert detail.event.latest.message_id == "D"
+    assert detail.outcome is None
+    assert detail.jobs.current is not None
+    assert detail.jobs.current.id == submitted.id
+
+
+def _counting_parses(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """A list of the CDM texts parsed from now on."""
+    parsed: list[str] = []
+    loads = keepout.cdm.loads
+
+    def counted(text: str) -> keepout.cdm.Cdm:
+        parsed.append(text)
+        return loads(text)
+
+    monkeypatch.setattr(keepout.cdm, "loads", counted)
+    return parsed
+
+
+def test_a_stored_cdm_is_parsed_once(
+    store: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Its text never changes: a page shown again does not parse it again.
+    event_id = _three_cdms(store)
+    _parsed_cdm.cache_clear()
+    parsed = _counting_parses(monkeypatch)
+    first = store.event(event_id)
+    again = store.detail(event_id, FOSTER)
+    assert again is not None
+    assert len(parsed) == 3
+    assert again.event.cdms == first.cdms
+    assert all(a is b for a, b in zip(again.event.cdms, first.cdms, strict=True))

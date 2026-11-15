@@ -1,3 +1,4 @@
+import gzip
 from pathlib import Path
 from xml.etree import ElementTree
 
@@ -82,3 +83,52 @@ def test_a_broken_file_is_the_familys_parse_error(
     path.write_bytes(b"\xff")
     with pytest.raises(family.parse_error, match="not UTF-8 text"):
         files.read_file(path, family)
+
+
+@pytest.mark.parametrize("family", FAMILIES)
+def test_decode_file_caps_the_size(family: Family) -> None:
+    text = "A = 1\n"
+    size = len(text)
+    assert files.decode_file(text.encode(), "f", family, max_bytes=size) == text
+    with pytest.raises(family.parse_error, match=f"^f: larger than {size - 1} bytes$"):
+        files.decode_file(text.encode(), "f", family, max_bytes=size - 1)
+
+
+@pytest.mark.parametrize("family", FAMILIES)
+def test_decode_file_caps_gzip_data_once_decompressed(family: Family) -> None:
+    text = "A = 1\n" * 1000
+    packed = gzip.compress(text.encode())
+    size = len(text)
+    assert len(packed) < size
+    assert files.decode_file(packed, "f", family, max_bytes=size) == text
+    # Several members, as gzip.decompress reads them.
+    twice = packed + packed
+    assert files.decode_file(twice, "f", family, max_bytes=2 * size) == text * 2
+    with pytest.raises(family.parse_error, match=r"than \d+ bytes once"):
+        files.decode_file(twice, "f", family, max_bytes=2 * size - 1)
+    # A bomb is not inflated past the limit.
+    bomb = gzip.compress(b" " * 50_000_000)
+    with pytest.raises(family.parse_error, match="once decompressed"):
+        files.decode_file(bomb, "f", family, max_bytes=len(bomb) + 1)
+
+
+@pytest.mark.parametrize(
+    ("data", "match"),
+    [
+        (b"\x1f\x8bnot gzip", "invalid gzip data"),
+        (gzip.compress(b"A = 1\n")[:-4], "invalid gzip data: truncated"),
+        (gzip.compress(b"A = 1\n") + b"junk", "invalid gzip data: trailing bytes"),
+    ],
+)
+def test_decode_file_with_a_cap_refuses_broken_gzip(data: bytes, match: str) -> None:
+    with pytest.raises(FAMILY_A.parse_error, match=match):
+        files.decode_file(data, "f", FAMILY_A, max_bytes=1000)
+    # As without a cap.
+    with pytest.raises(FAMILY_A.parse_error, match="invalid gzip data"):
+        files.decode_file(data, "f", FAMILY_A)
+
+
+@pytest.mark.parametrize("max_bytes", [None, 1000])
+def test_decode_file_allows_zero_padding_after_gzip(max_bytes: int | None) -> None:
+    padded = gzip.compress(b"A = 1\n") + bytes(16)
+    assert files.decode_file(padded, "f", FAMILY_A, max_bytes=max_bytes) == "A = 1\n"

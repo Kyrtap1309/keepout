@@ -25,6 +25,8 @@ from sqlalchemy import create_engine, select
 from worker_jobs import ready_then_sleep, workers_given
 
 from keepout.cli.output import ExitCode
+from keepout.pc import computation
+from keepout.settings import Settings
 from keepout.store import JobQueue, models, open_store, planning
 from keepout.store import db as store_db
 
@@ -78,9 +80,19 @@ def test_list_shows_the_jobs_newest_first(stored: tuple[Path, str]) -> None:
     ]
     assert cells == snapshot(
         [
-            ["Job", "Event", "CDM", "Status", "Attempt", "Created (UTC)", "Error"],
+            [
+                "Job",
+                "Kind",
+                "Event",
+                "CDM",
+                "Status",
+                "Attempt",
+                "Created (UTC)",
+                "Error",
+            ],
             [
                 "2",
+                "maneuver",
                 "2a85ed50c4e6",
                 "52939_47826_20261006T193642.717Z_20261006T000000.000Z",
                 "queued",
@@ -89,6 +101,7 @@ def test_list_shows_the_jobs_newest_first(stored: tuple[Path, str]) -> None:
             ],
             [
                 "1",
+                "maneuver",
                 "2a85ed50c4e6",
                 "52939_47826_20261006T193642.717Z_20261006T000000.000Z",
                 "failed",
@@ -108,6 +121,7 @@ def test_list_shows_the_jobs_newest_first(stored: tuple[Path, str]) -> None:
         [
             {
                 "job": 2,
+                "kind": "maneuver",
                 "event": "2a85ed50c4e6",
                 "cdm": "52939_47826_20261006T193642.717Z_20261006T000000.000Z",
                 "status": "queued",
@@ -120,6 +134,7 @@ def test_list_shows_the_jobs_newest_first(stored: tuple[Path, str]) -> None:
             },
             {
                 "job": 1,
+                "kind": "maneuver",
                 "event": "2a85ed50c4e6",
                 "cdm": "52939_47826_20261006T193642.717Z_20261006T000000.000Z",
                 "status": "failed",
@@ -132,6 +147,26 @@ def test_list_shows_the_jobs_newest_first(stored: tuple[Path, str]) -> None:
             },
         ]
     )
+
+
+def test_cli_jobs_list_shows_kind(stored: tuple[Path, str]) -> None:
+    db, event_id = stored
+    assert queued_job(db, event_id) == 1
+    with open_store(db, create=False) as store:
+        # Not the default settings: `store add` cached their Pc.
+        foster = Settings(compute=computation("foster"))
+        refresh = JobQueue(store).submit_refresh(event_id, foster)
+    assert refresh.job is not None
+    listed = keepout("jobs", "list", "--store", str(db), env={"COLUMNS": "200"})
+    assert listed.exit_code == ExitCode.OK
+    rows = [re.split(r" {2,}", line.strip()) for line in listed.stdout.splitlines()]
+    assert rows[1][:2] == ["Job", "Kind"]
+    assert [row[:2] for row in rows[3:]] == [
+        [str(refresh.job.id), "refresh"],
+        ["1", "maneuver"],
+    ]
+    payload = json.loads(keepout("jobs", "list", "--store", str(db), "--json").stdout)
+    assert [job["kind"] for job in payload["jobs"]] == ["refresh", "maneuver"]
 
 
 def test_cancel(stored: tuple[Path, str]) -> None:
@@ -223,7 +258,7 @@ def test_worker_gives_its_workers_to_the_computation(
 ) -> None:
     db, event_id = stored
     job = queued_job(db, event_id)
-    monkeypatch.setattr(planning, "run_maneuver_job", workers_given)
+    monkeypatch.setattr(planning, "run_job", workers_given)
     result = keepout("worker", "--store", str(db), "--until-idle", "--workers", "3")
     assert (result.exit_code, result.stdout) == (ExitCode.OK, "Ran 1 job.\n")
     with open_store(db, create=False) as store:
@@ -257,7 +292,7 @@ def test_a_signal_stops_the_worker_and_releases_its_job(
 ) -> None:
     db, event_id = stored
     job = queued_job(db, event_id)
-    monkeypatch.setattr(planning, "run_maneuver_job", ready_then_sleep)
+    monkeypatch.setattr(planning, "run_job", ready_then_sleep)
     ready = db.with_name("ready")
 
     def signal_when_ready() -> None:

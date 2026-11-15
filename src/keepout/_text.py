@@ -1,10 +1,32 @@
-"""Words for messages and notes, shared by the library and the command line."""
+"""Words for messages and notes, shared by the library, the command line
+and the dashboard."""
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Final
+
 from keepout.units import DAY, HOUR, MINUTE
 
-__all__ = ["before_tca", "days_text", "duration_words", "pc_text", "plural"]
+if TYPE_CHECKING:
+    from astropy.time import Time
+
+__all__ = [
+    "ASSUMED_COVARIANCES",
+    "before_tca",
+    "days_text",
+    "duration_words",
+    "isot",
+    "minute",
+    "pc_text",
+    "plural",
+    "utc",
+]
+
+ASSUMED_COVARIANCES: Final = (
+    "Covariances are assumed (keepout's model of GP element set errors), "
+    "not orbit determination."
+)
+"""The line under a Pc on the synthetic covariance model."""
 
 
 def before_tca(seconds: float) -> str:
@@ -42,3 +64,19 @@ def plural(count: int, noun: str, nouns: str | None = None) -> str:
     if count == 1:
         return f"{count} {noun}"
     return f"{count} {nouns or noun + 's'}"
+
+
+def isot(time: Time) -> str:
+    """``time`` in UTC, ISO 8601 to the millisecond, for JSON:
+    ``2026-10-06T19:36:42.123``."""
+    return str(time.utc.isot)
+
+
+def utc(time: Time) -> str:
+    """``time`` in UTC to the second, ISO 8601: ``2026-10-06T19:36:42``."""
+    return isot(time)[:19]
+
+
+def minute(time: Time) -> str:
+    """``time`` in UTC to the minute, for tables: ``2026-10-06 19:36``."""
+    return utc(time)[:16].replace("T", " ")
