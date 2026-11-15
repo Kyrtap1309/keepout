@@ -12,6 +12,7 @@ from builders import loaded_after
 from cli_builders import keepout, usage_error
 from sqlalchemy import create_engine
 
+from keepout.cli.dashboard import EXPOSED_WARNING
 from keepout.cli.output import ExitCode
 from keepout.store import db as store_db
 from keepout.store import open_store
@@ -165,6 +166,38 @@ def test_cli_dashboard_refuses_bad_options(
     result = keepout("dashboard", "--store", str(store), option, value)
     assert result.exit_code == ExitCode.USAGE
     assert option in usage_error(result)
+    assert fake_run.calls == []
+
+
+def test_default_host_is_loopback(fake_run: FakeRun, store: Path) -> None:
+    result = keepout("dashboard", "--store", str(store))
+    assert result.exit_code == ExitCode.OK, result.stderr
+    [(args, _)] = fake_run.calls
+    assert args[args.index("--server.address") + 1] == "127.0.0.1"
+    assert result.stderr == ""
+
+
+def test_host_any_address_warns(fake_run: FakeRun, store: Path) -> None:
+    result = keepout("dashboard", "--store", str(store), "--host", "0.0.0.0")  # noqa: S104 (the option under test)
+    assert result.exit_code == ExitCode.OK, result.stderr
+    [(args, _)] = fake_run.calls
+    assert args[args.index("--server.address") + 1] == "0.0.0.0"  # noqa: S104
+    assert result.stderr == EXPOSED_WARNING.format(host="0.0.0.0") + "\n"  # noqa: S104
+
+
+def test_host_ipv6_loopback_quiet(fake_run: FakeRun, store: Path) -> None:
+    result = keepout("dashboard", "--store", str(store), "--host", "::1")
+    assert result.exit_code == ExitCode.OK, result.stderr
+    [(args, _)] = fake_run.calls
+    assert args[args.index("--server.address") + 1] == "::1"
+    assert result.stderr == ""
+
+
+@pytest.mark.parametrize("value", ["example.com", "0.0.0.0:80", ""])
+def test_host_not_an_address(fake_run: FakeRun, store: Path, value: str) -> None:
+    result = keepout("dashboard", "--store", str(store), "--host", value)
+    assert result.exit_code == ExitCode.USAGE
+    assert "--host" in usage_error(result)
     assert fake_run.calls == []
 
 

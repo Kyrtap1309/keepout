@@ -10,6 +10,7 @@ check the store before Streamlit starts.
 from __future__ import annotations
 
 import importlib.util
+import ipaddress
 import os
 import subprocess
 import sys
@@ -28,7 +29,7 @@ from keepout.cli.options import SettingsFile, operator_settings, time_option
 from keepout.cli.output import ExitCode, fail, isot
 from keepout.cli.store import StorePath, open_cli_store
 
-__all__ = ["DASHBOARD_HINT", "dashboard_command"]
+__all__ = ["DASHBOARD_HINT", "DEFAULT_HOST", "EXPOSED_WARNING", "dashboard_command"]
 
 DASHBOARD_HINT: Final = (
     "keepout dashboard needs the dashboard extra: "
@@ -40,14 +41,32 @@ missing."""
 _DASHBOARD_MODULES: Final = ("streamlit", "plotly")
 """The top-level packages of the ``dashboard`` extra."""
 
-ADDRESS: Final = "127.0.0.1"
-"""The only address the dashboard listens on: this machine."""
+DEFAULT_HOST: Final = "127.0.0.1"
+"""The address the dashboard listens on unless ``--host`` gives another:
+this machine only."""
+
+EXPOSED_WARNING: Final = (
+    "Warning: the dashboard listens on {host}, which other machines may "
+    "reach; it has no authentication (see the deployment docs)."
+)
+"""What ``keepout dashboard`` prints on standard error when ``--host`` is
+not a loopback address."""
+
+Host: TypeAlias = Annotated[
+    str,
+    typer.Option(
+        "--host",
+        metavar="ADDRESS",
+        help="The IP address to listen on (default: this machine only).",
+    ),
+]
+"""``--host``: the IP address the dashboard listens on."""
 
 Port: TypeAlias = Annotated[
     int,
     typer.Option("--port", min=1, max=65535, metavar="N", help="The port to serve on."),
 ]
-"""``--port``: the dashboard's TCP port on 127.0.0.1."""
+"""``--port``: the dashboard's TCP port."""
 
 AsOf: TypeAlias = Annotated[
     str | None,
@@ -83,21 +102,44 @@ def _app_path() -> Path:
     return Path(spec.origin)
 
 
+def _host(value: str) -> str:
+    """The ``--host`` address ``value``, warned about on standard error if
+    it is not a loopback address.
+
+    Raises
+    ------
+    typer.BadParameter
+        If ``value`` is not an IP address.
+    """
+    try:
+        address = ipaddress.ip_address(value)
+    except ValueError:
+        raise typer.BadParameter(
+            f"{value!r} is not an IP address", param_hint="--host"
+        ) from None
+    if not address.is_loopback:
+        typer.echo(EXPOSED_WARNING.format(host=value), err=True)
+    return value
+
+
 def dashboard_command(
     *,
     store: StorePath,
     settings: SettingsFile = None,
+    host: Host = DEFAULT_HOST,
     port: Port = 8501,
     as_of: AsOf = None,
 ) -> None:
     """Run the dashboard on a store (needs the dashboard extra).
 
-    Serves the dashboard on http://127.0.0.1:PORT, this machine only, until
-    stopped with Ctrl+C: the events, each event's risk and the maneuver
-    planner. It reads the store and queues jobs for keepout worker; it
-    computes no Pc or plan itself. The store must exist and be at this
-    keepout's schema (keepout store upgrade). Exits with Streamlit's status.
+    Serves the dashboard on http://HOST:PORT (127.0.0.1, this machine only,
+    by default) until stopped with Ctrl+C: the events, each event's risk
+    and the maneuver planner. It reads the store and queues jobs for
+    keepout worker; it computes no Pc or plan itself. The store must exist
+    and be at this keepout's schema (keepout store upgrade). Exits with
+    Streamlit's status.
     """
+    address = _host(host)
     when = None if as_of is None else time_option(as_of, "--as-of")
     if settings is not None:
         operator_settings(settings)  # A bad file fails here, not in the browser.
@@ -118,7 +160,7 @@ def dashboard_command(
         "run",
         str(app_path),
         "--server.address",
-        ADDRESS,
+        address,
         "--server.port",
         str(port),
         "--server.maxUploadSize",
