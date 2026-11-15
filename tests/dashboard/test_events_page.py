@@ -7,7 +7,7 @@ from pathlib import Path
 import dashboard_seed as seed
 import pytest
 from astropy.time import Time
-from builders import CDM_DATA, leo_crossing
+from builders import B1_TEXT, leo_crossing, set_keyword
 from dashboard_builders import OpenApp
 from streamlit.testing.v1 import AppTest
 from streamlit.testing.v1.element_tree import Block, PageLink
@@ -123,12 +123,19 @@ def test_risk_not_computed(
     }
 
 
-def test_past_toggle(app_test: OpenApp, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_past_events_are_shown_on_the_toggle(
+    app_test: OpenApp, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("KEEPOUT_AS_OF", "2027-01-01T00:00:00")
     app = app_test()
     assert not app.exception
     assert _rows(app) == []
-    assert [item.value for item in app.info] == ["No upcoming events."]
+    assert [item.value for item in app.info] == [
+        (
+            "No upcoming events as of 2027-01-01T00:00:00 UTC: turn on Show "
+            "past events, or start the dashboard with an earlier --as-of."
+        )
+    ]
     app.toggle(key="events-past").set_value(True).run()
     assert not app.exception
     rows = _rows(app)
@@ -140,20 +147,17 @@ def test_past_toggle(app_test: OpenApp, monkeypatch: pytest.MonkeyPatch) -> None
 def _many(path: Path, count: int) -> Path:
     """A store of ``count`` events: the CCSDS example against ``count``
     secondaries, in 2010, without Pc."""
-    text = (CDM_DATA / "b1_example.kvn").read_text(encoding="utf-8")
     messages = []
     for i in range(count):
-        made = text.replace("= 30337", f"= {40000 + i}")
-        made = re.sub(
-            r"^MESSAGE_ID\s*=.*$", f"MESSAGE_ID = MANY-{i}", made, flags=re.MULTILINE
-        )
+        made = B1_TEXT.replace("= 30337", f"= {40000 + i}")
+        made = set_keyword(made, "MESSAGE_ID", f"MANY-{i}")
         messages.append(CdmInput.of(keepout.cdm.loads(made), origin="test"))
     with open_store(path) as store:
         assert len(store.ingest(messages).new_events) == count
     return path
 
 
-def test_pagination(
+def test_the_list_shows_25_events_a_page(
     app_test: OpenApp, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("KEEPOUT_STORE", str(_many(tmp_path / "many.db", 30)))

@@ -1,8 +1,6 @@
 """Builders and strategies for the risk tests."""
 
-import re
-
-from builders import CDM_DATA, at
+from builders import B1_TEXT, at, set_keyword
 from hypothesis import strategies as st
 
 import keepout.cdm
@@ -34,18 +32,6 @@ def observations(draw: st.DrawFn) -> PcObservation:
     )
 
 
-B1_TEXT = (CDM_DATA / "b1_example.kvn").read_text(encoding="utf-8")
-"""The CCSDS 508.0-B-1 annex example: created 2010-03-12T22:31:12.000, TCA
-2010-03-13T22:37:52.618, objects 12345 and 30337, no HBR."""
-
-
-def _set(text: str, keyword: str, value: str) -> str:
-    """``text`` with the first ``keyword = ...`` line set to ``value``."""
-    line = re.compile(rf"^{keyword}\s*=.*$", re.MULTILINE)
-    assert line.search(text), keyword
-    return line.sub(f"{keyword} = {value}", text, count=1)
-
-
 def b1_cdm(
     message_id: str = "B1-1",
     *,
@@ -59,10 +45,10 @@ def b1_cdm(
     """The annex example with its header, TCA and secondary changed; with
     ``assumed_covariance``, the secondary's covariance is assumed
     (``COVARIANCE_METHOD = DEFAULT``)."""
-    text = _set(B1_TEXT, "MESSAGE_ID", message_id)
-    text = _set(text, "CREATION_DATE", created)
-    text = _set(text, "TCA", tca)
-    text = _set(text, "COLLISION_PROBABILITY", reported_pc)
+    text = set_keyword(B1_TEXT, "MESSAGE_ID", message_id)
+    text = set_keyword(text, "CREATION_DATE", created)
+    text = set_keyword(text, "TCA", tca)
+    text = set_keyword(text, "COLLISION_PROBABILITY", reported_pc)
     assert text.count("= 30337") == 1
     text = text.replace("= 30337", f"= {secondary}")
     if conjunction_id is not None:
@@ -72,5 +58,5 @@ def b1_cdm(
         )
     if assumed_covariance:
         head, keyword, secondary_part = text.rpartition("COVARIANCE_METHOD")
-        text = head + _set(keyword + secondary_part, keyword, "DEFAULT")
+        text = head + set_keyword(keyword + secondary_part, keyword, "DEFAULT")
     return keepout.cdm.loads(text)

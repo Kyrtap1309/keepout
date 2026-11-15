@@ -13,6 +13,8 @@ import dashboard_seed as seed
 import pytest
 from dashboard_builders import OpenApp, open_app, use_store
 
+from keepout.store import Job, JobQueue
+
 
 @pytest.fixture(autouse=True)
 def _main_module_kept(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -45,3 +47,16 @@ def app_test(seed_db: Path, monkeypatch: pytest.MonkeyPatch) -> OpenApp:
     """
     use_store(monkeypatch, seed_db, seed.SETTINGS, seed.seed_as_of())
     return open_app
+
+
+@pytest.fixture
+def worker_first(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every cancel of a job comes after a worker's: the worker ends the
+    job between the page's read and the click."""
+    cancel = JobQueue.cancel
+
+    def cancelled_first(queue: JobQueue, job: int) -> Job:
+        cancel(queue, job)
+        return cancel(queue, job)
+
+    monkeypatch.setattr(JobQueue, "cancel", cancelled_first)

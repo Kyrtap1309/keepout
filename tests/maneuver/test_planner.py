@@ -3,15 +3,30 @@
 import dataclasses
 import importlib
 import math
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Final
+from typing import Final, TypedDict
 
 import astropy.units as u
 import numpy as np
+import numpy.typing as npt
 import pytest
-from astropy.time import Time
-from builders import SMALL_GRID, approx
+from builders import (
+    CROSSING_INCLINATION,
+    CROSSING_MISS,
+    CROSSING_RADIUS,
+    CROSSING_SIGMA,
+    CROSSING_TCA,
+    SMALL_GRID,
+    approx,
+    crossing_conjunction,
+)
+from faults import (
+    auto_hall_integration,
+    auto_monte_carlo_budget,
+    hall3d_failing,
+    recorded_runs,
+)
 from scipy.stats import ncx2
 
 from keepout._defaults import DECISION_POINT
@@ -39,6 +54,7 @@ from keepout.maneuver import (
     MIN_BURN_LEAD,
     TARGET_PC,
     BurnDirection,
+    BurnEffects,
     BurnGrid,
     ManeuverOption,
     ManeuverPlan,
@@ -51,27 +67,25 @@ from keepout.maneuver import (
 from keepout.objects import ObjectState
 from keepout.orbits import EARTH_MU, orbital_period
 from keepout.pc import (
-    MethodChoice,
     PcComputation,
     PcResult,
-    api,
     computation,
     compute_pc,
 )
 from keepout.pc.api import AUTO_MC_SEED
-from keepout.propagation.forces import EARTH_RADIUS
+from keepout.propagation.forces import EARTH_RADIUS, ForceModel
 from keepout.risk import PC_FLOOR, Thresholds
 from keepout.state import StateVector
 from keepout.units import HOUR, KM
 
-TCA: Final = Time("2026-10-06T00:00:00", scale="utc")
-RADIUS: Final = EARTH_RADIUS + 630 * KM
+TCA: Final = CROSSING_TCA
+RADIUS: Final = CROSSING_RADIUS
 SPEED: Final = math.sqrt(EARTH_MU / RADIUS)
-INCLINATION: Final = 0.9
-SIGMA: Final = 100.0
-"""Position sigma of each object in :func:`leo_cdm` [m]."""
-MISS: Final = 150.0
-"""Radial miss of :func:`leo_cdm` [m]."""
+INCLINATION: Final = CROSSING_INCLINATION
+SIGMA: Final = CROSSING_SIGMA
+"""Position sigma of each object in :func:`crossing_conjunction` [m]."""
+MISS: Final = CROSSING_MISS
+"""Radial miss of :func:`crossing_conjunction` [m]."""
 FOSTER: Final = computation("foster")
 
 
@@ -117,28 +131,6 @@ def as_cdm(
     )
 
 
-def leo_conjunction(
-    sigma: float = SIGMA, *, velocity_sigma: float = 0.01, radius: float = RADIUS
-) -> Conjunction:
-    """A fast crossing in LEO, 150 m apart radially: Pc about 5e-3."""
-    speed = math.sqrt(EARTH_MU / radius)
-    primary = item(
-        "1001",
-        np.array([radius, 0.0, 0.0]),
-        speed * direction(INCLINATION),
-        sigma,
-        velocity_sigma=velocity_sigma,
-    )
-    secondary = item(
-        "2002",
-        np.array([radius + MISS, 0.0, 0.0]),
-        speed * direction(-INCLINATION),
-        sigma,
-        velocity_sigma=velocity_sigma,
-    )
-    return Conjunction(primary, secondary, 20.0)
-
-
 def slow_conjunction(*, velocity_sigma: float = 0.01) -> Conjunction:
     """Nearly co-orbital objects passing at 2 m/s, 50 m apart."""
     along = direction(INCLINATION)
@@ -165,7 +157,7 @@ def event_of(*cdms: Cdm) -> ConjunctionEvent:
 
 
 def leo_event(hours: float = 25.0) -> ConjunctionEvent:
-    return event_of(as_cdm(leo_conjunction(), hours=hours))
+    return event_of(as_cdm(crossing_conjunction(), hours=hours))
 
 
 def with_drag(cdm: Cdm, term: float = 0.02) -> Cdm:
@@ -238,8 +230,10 @@ def test_baseline_applies_no_shift(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_the_plan_reads_the_latest_cdm() -> None:
-    older = as_cdm(leo_conjunction(), hours=40.0)
-    plan = plan_maneuver(event_of(older, as_cdm(leo_conjunction())), grid=SMALL_GRID)
+    older = as_cdm(crossing_conjunction(), hours=40.0)
+    plan = plan_maneuver(
+        event_of(older, as_cdm(crossing_conjunction())), grid=SMALL_GRID
+    )
     assert plan.burn_leads[0] <= 25 * HOUR
 
 
@@ -352,7 +346,7 @@ def test_ties_prefer_the_later_burn(plan: ManeuverPlan) -> None:
 def test_no_cell_meets_target_gives_none() -> None:
     # Foster's Pc is exactly 0 beyond 12 sigma, and 0 is below any target: only
     # covariances wider than the whole grid leave no such cell.
-    event = event_of(as_cdm(leo_conjunction(1000 * KM)))
+    event = event_of(as_cdm(crossing_conjunction(1000 * KM)))
     plan = plan_maneuver(event, target_pc=1e-300, grid=SMALL_GRID, compute=FOSTER)
     assert np.all(plan.pc > 1e-300)
     assert plan.prograde is None
@@ -464,26 +458,18 @@ def test_conservative_basis_decides_on_the_upper_end() -> None:
     assert loose.prograde.method == "montecarlo"
 
 
+@pytest.mark.slow
 def test_auto_fallback_keeps_its_seed_and_cap_in_confirmation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def no_convergence(*_: object, **__: object) -> PcResult:
         raise PcConvergenceError("no convergence")
 
-    runs: list[tuple[str, dict[str, object]]] = []
-    real = api._compute
-
-    def spy(
-        conjunction: Conjunction, method: MethodChoice, options: Mapping[str, object]
-    ) -> PcResult:
-        runs.append((method, dict(options)))
-        return real(conjunction, method, options)
-
     # Real, seeded Monte Carlo, with a cap that keeps the runs to a test's length.
     cap = 20_000
-    monkeypatch.setattr("keepout.pc._auto.hall3d_over_scan", no_convergence)
-    monkeypatch.setattr("keepout.pc._auto.AUTO_MC_SAMPLES", cap)
-    monkeypatch.setattr(api, "_compute", spy)
+    auto_hall_integration(monkeypatch, no_convergence)
+    auto_monte_carlo_budget(monkeypatch, cap)
+    runs = recorded_runs(monkeypatch)
     event = event_of(as_cdm(slow_conjunction()))
     first = plan_maneuver(event, target_pc=1e-3, grid=SMALL_GRID)
     assert first.baseline.method == "montecarlo"
@@ -517,16 +503,7 @@ def test_explicit_options_are_what_confirms_and_evaluates(
             self.calls.append(conjunction)
             return super().__call__(conjunction)
 
-    runs: list[tuple[str, dict[str, object]]] = []
-    real = api._compute
-
-    def spy(
-        conjunction: Conjunction, method: MethodChoice, options: Mapping[str, object]
-    ) -> PcResult:
-        runs.append((method, dict(options)))
-        return real(conjunction, method, options)
-
-    monkeypatch.setattr(api, "_compute", spy)
+    runs = recorded_runs(monkeypatch)
     compute = Counted("foster", {"rtol": 1e-6})
     plan = plan_maneuver(leo_event(), grid=SMALL_GRID, compute=compute)
     assert plan.confirmation is compute
@@ -543,40 +520,12 @@ def test_explicit_options_are_what_confirms_and_evaluates(
     assert runs == [expected]
 
 
-@dataclass
-class HallFails:
-    """:func:`api._compute`, but the next ``hall3d`` run raises after ``skip``
-    of them; ``runs`` are the methods run."""
-
-    skip: int = 0
-    armed: bool = True
-    runs: list[str] = field(default_factory=list)
-
-    def __call__(
-        self,
-        conjunction: Conjunction,
-        method: MethodChoice,
-        options: Mapping[str, object],
-    ) -> PcResult:
-        self.runs.append(method)
-        if method == "hall3d" and self.armed:
-            if self.skip == 0:
-                self.armed = False
-                raise PcConvergenceError("Nc is not finite")
-            self.skip -= 1
-        return REAL_COMPUTE(conjunction, method, options)
-
-
-REAL_COMPUTE: Final = api._compute
-
-
 def test_a_hall3d_failure_on_a_candidate_falls_back_to_monte_carlo(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cap = 20_000
-    monkeypatch.setattr("keepout.pc._auto.AUTO_MC_SAMPLES", cap)
-    spy = HallFails()
-    monkeypatch.setattr(api, "_compute", spy)
+    auto_monte_carlo_budget(monkeypatch, cap)
+    spy = hall3d_failing(monkeypatch)
     event = event_of(as_cdm(slow_conjunction()))
     plan = plan_maneuver(event, target_pc=1e-3, grid=SMALL_GRID)
     assert plan.baseline.method == "hall3d"
@@ -600,8 +549,7 @@ def test_a_hall3d_failure_on_a_candidate_falls_back_to_monte_carlo(
 
 def test_an_explicit_hall3d_gets_no_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     # The baseline is the first hall3d run; the first prograde candidate fails.
-    spy = HallFails(skip=1)
-    monkeypatch.setattr(api, "_compute", spy)
+    spy = hall3d_failing(monkeypatch, skip=1)
     event = event_of(as_cdm(slow_conjunction()))
     plan = plan_maneuver(event, grid=SMALL_GRID, compute=computation("hall3d"))
     assert plan.confirmation.fallback is None
@@ -646,7 +594,7 @@ def test_evaluate_burn_returns_the_burns_own_diagnostics() -> None:
 
 
 def test_assumed_covariance_is_carried() -> None:
-    cdm = as_cdm(leo_conjunction(), method=CovarianceMethod.DEFAULT)
+    cdm = as_cdm(crossing_conjunction(), method=CovarianceMethod.DEFAULT)
     plan = plan_maneuver(event_of(cdm), grid=SMALL_GRID)
     assert plan.assumed_covariance
     assert any("assumed" in note for note in plan.notes)
@@ -664,7 +612,7 @@ def test_position_only_covariance_stays_on_foster() -> None:
 
 
 def test_unknown_covariance_is_an_error() -> None:
-    conjunction = leo_conjunction()
+    conjunction = crossing_conjunction()
     secondary = dataclasses.replace(conjunction.secondary, covariance=None)
     unknown = Conjunction(conjunction.primary, secondary, 20.0)
     with pytest.raises(ManeuverError, match=r"EVENT-7.*secondary \(2002\)"):
@@ -672,7 +620,7 @@ def test_unknown_covariance_is_an_error() -> None:
 
 
 def test_a_missing_hard_body_radius_is_said_as_elsewhere() -> None:
-    conjunction = leo_conjunction()
+    conjunction = crossing_conjunction()
     primary = dataclasses.replace(conjunction.primary, hard_body_radius=None)
     secondary = dataclasses.replace(conjunction.secondary, hard_body_radius=None)
     event = event_of(as_cdm(Conjunction(primary, secondary, 20.0)))
@@ -684,15 +632,15 @@ def test_a_missing_hard_body_radius_is_said_as_elsewhere() -> None:
 
 
 def test_primary_that_cannot_manoeuvre_is_an_error() -> None:
-    cdm = as_cdm(leo_conjunction(), maneuverable=Maneuverable.NO)
+    cdm = as_cdm(crossing_conjunction(), maneuverable=Maneuverable.NO)
     with pytest.raises(ManeuverError, match=r"EVENT-7.*1001.*MANEUVERABLE = NO"):
         plan_maneuver(event_of(cdm), grid=SMALL_GRID)
-    unknown = as_cdm(leo_conjunction(), maneuverable=Maneuverable.NOT_APPLICABLE)
+    unknown = as_cdm(crossing_conjunction(), maneuverable=Maneuverable.NOT_APPLICABLE)
     assert plan_maneuver(event_of(unknown), grid=SMALL_GRID).prograde is not None
 
 
 def test_primary_on_an_unbound_orbit_is_an_error() -> None:
-    conjunction = leo_conjunction()
+    conjunction = crossing_conjunction()
     state = StateVector(
         TCA, conjunction.primary.state.r, 2.0 * conjunction.primary.state.v, "GCRF"
     )
@@ -707,17 +655,22 @@ def test_drag_used_only_with_cd_area_over_mass(
 ) -> None:
     terms: list[float | None] = []
 
-    def spy(*args: object) -> object:
-        terms.append(args[-1].drag_term)  # type: ignore[attr-defined]
-        return burn_effects(*args)  # type: ignore[arg-type]
+    def spy(
+        state: StateVector,
+        burn_leads: npt.ArrayLike,
+        delta_v: npt.ArrayLike,
+        force: ForceModel,
+    ) -> BurnEffects:
+        terms.append(force.drag_term)
+        return burn_effects(state, burn_leads, delta_v, force)
 
     monkeypatch.setattr(planner, "burn_effects", spy)
     without = plan_maneuver(leo_event(), grid=SMALL_GRID)
     assert sum("drag is off" in note for note in without.notes) == 1
-    event = event_of(with_drag(as_cdm(leo_conjunction())))
+    event = event_of(with_drag(as_cdm(crossing_conjunction())))
     dragged = plan_maneuver(event, grid=SMALL_GRID)
     assert not any("drag is off" in note for note in dragged.notes)
-    event = event_of(with_drag(as_cdm(leo_conjunction()), 0.0))
+    event = event_of(with_drag(as_cdm(crossing_conjunction()), 0.0))
     zero = plan_maneuver(event, grid=SMALL_GRID)
     assert sum("drag is off" in note for note in zero.notes) == 1
     assert terms == [None, 0.02, None]
@@ -731,7 +684,7 @@ def drag_note(cdm: Cdm) -> str:
 
 @pytest.mark.parametrize("term", [None, 0.0])
 def test_drag_off_warns_below_450_km(term: float | None) -> None:
-    cdm = as_cdm(leo_conjunction(radius=EARTH_RADIUS + 400 * KM))
+    cdm = as_cdm(crossing_conjunction(radius=EARTH_RADIUS + 400 * KM))
     note = drag_note(cdm if term is None else with_drag(cdm, term))
     assert "perigee at 400 km" in note
     assert "0.18" in note
@@ -740,12 +693,12 @@ def test_drag_off_warns_below_450_km(term: float | None) -> None:
 
 
 def test_drag_off_does_not_warn_above_450_km() -> None:
-    note = drag_note(as_cdm(leo_conjunction(radius=EARTH_RADIUS + 500 * KM)))
+    note = drag_note(as_cdm(crossing_conjunction(radius=EARTH_RADIUS + 500 * KM)))
     assert "perigee" not in note
 
 
 def test_the_drag_warning_goes_by_perigee_not_by_altitude_at_tca() -> None:
-    conjunction = leo_conjunction(radius=EARTH_RADIUS + 500 * KM)
+    conjunction = crossing_conjunction(radius=EARTH_RADIUS + 500 * KM)
     apogee = EARTH_RADIUS + 500 * KM
     axis = apogee - 50 * KM
     speed = math.sqrt(EARTH_MU * (2.0 / apogee - 1.0 / axis))
@@ -758,13 +711,13 @@ def test_the_drag_warning_goes_by_perigee_not_by_altitude_at_tca() -> None:
 
 
 def test_drag_on_gives_no_warning_at_any_altitude() -> None:
-    cdm = as_cdm(leo_conjunction(radius=EARTH_RADIUS + 400 * KM))
+    cdm = as_cdm(crossing_conjunction(radius=EARTH_RADIUS + 400 * KM))
     plan = plan_maneuver(event_of(with_drag(cdm)), grid=SMALL_GRID)
     assert not any("perigee" in note for note in plan.notes)
 
 
 def test_a_negative_drag_term_is_an_error() -> None:
-    event = event_of(with_drag(as_cdm(leo_conjunction()), -0.02))
+    event = event_of(with_drag(as_cdm(crossing_conjunction()), -0.02))
     with pytest.raises(ManeuverError, match=r"EVENT-7.*CD_AREA_OVER_MASS"):
         plan_maneuver(event, grid=SMALL_GRID)
 
@@ -775,7 +728,7 @@ def test_drag_barely_changes_the_grid(
 ) -> None:
     # 500 km, where the claim is tight: 0.03 here and 0.003 at 630 km. It does
     # not hold lower down: 0.18 at 400 km and 1.3 at 300 km (Pc near 1e-28).
-    cdm = as_cdm(leo_conjunction(radius=EARTH_RADIUS + 500 * KM))
+    cdm = as_cdm(crossing_conjunction(radius=EARTH_RADIUS + 500 * KM))
     plain = plan_maneuver(event_of(cdm), compute=FOSTER)
     dragged = event_of(with_drag(cdm))
     drag = plan_maneuver(dragged, compute=FOSTER)
@@ -845,7 +798,7 @@ def test_evaluate_burn_matches_the_grid_cell(plan: ManeuverPlan) -> None:
 
 
 def test_evaluate_burn_keeps_the_force_of_the_plan() -> None:
-    event = event_of(with_drag(as_cdm(leo_conjunction())))
+    event = event_of(with_drag(as_cdm(crossing_conjunction())))
     plan = plan_maneuver(event, grid=SMALL_GRID)
     option = plan.prograde
     assert option is not None
@@ -1026,6 +979,17 @@ def test_the_arrays_must_fit_the_axes(plan: ManeuverPlan) -> None:
         dataclasses.replace(plan, pc=plan.pc[:-1])
 
 
+class GridOptions(TypedDict, total=False):
+    """Fields of a :class:`BurnGrid`."""
+
+    earliest_lead: float
+    latest_lead: float
+    steps_per_orbit: int
+    smallest_delta_v: float
+    largest_delta_v: float
+    delta_v_per_direction: int
+
+
 @pytest.mark.parametrize(
     ("options", "name"),
     [
@@ -1039,9 +1003,9 @@ def test_the_arrays_must_fit_the_axes(plan: ManeuverPlan) -> None:
         ({"delta_v_per_direction": 0}, "delta_v_per_direction"),
     ],
 )
-def test_a_grid_must_make_sense(options: dict[str, float], name: str) -> None:
+def test_a_grid_must_make_sense(options: GridOptions, name: str) -> None:
     with pytest.raises(ValueError, match=name):
-        BurnGrid(**options)  # type: ignore[arg-type]
+        BurnGrid(**options)
 
 
 def test_the_default_grid_is_the_documented_one() -> None:

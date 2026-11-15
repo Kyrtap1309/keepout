@@ -38,9 +38,11 @@ if TYPE_CHECKING:
 __all__ = [
     "MAX_LIMIT",
     "EventDetail",
+    "EventRows",
     "EventSummary",
     "SummaryPage",
     "active_refresh_in",
+    "assessed",
     "check_page",
     "complete_of",
     "decoded",
@@ -134,6 +136,11 @@ class EventDetail:
         computed."""
         return complete_of([item for _, item in self.observations])
 
+    def assessment(self, thresholds: Thresholds) -> Assessment | None:
+        """The event's risk with ``thresholds`` (:func:`assessed`); ``None``
+        if any Pc is not computed."""
+        return assessed([item for _, item in self.observations], thresholds)
+
 
 def decoded(
     payloads: Iterable[Mapping[str, object] | None],
@@ -159,6 +166,29 @@ def complete_of(
     ``None``: an event is assessed only from all of them."""
     known = tuple(item for item in observations if item is not None)
     return known if len(known) == len(observations) else None
+
+
+def assessed(
+    observations: Sequence[PcObservation | None], thresholds: Thresholds
+) -> Assessment | None:
+    """The risk of an event from the observations of its CDMs, oldest
+    first, with ``thresholds``: assessed only when every one is computed
+    (:func:`complete_of`), the events list and an event's page alike.
+
+    Parameters
+    ----------
+    observations
+        Each CDM's observation; ``None`` where it is not computed.
+    thresholds
+        The thresholds of the risk levels.
+
+    Returns
+    -------
+    Assessment or None
+        The risk; ``None`` if any observation is not computed.
+    """
+    complete = complete_of(observations)
+    return None if complete is None else assess(complete, thresholds=thresholds)
 
 
 @dataclass(frozen=True, slots=True)
@@ -193,8 +223,12 @@ class _Latest:
 
 
 @dataclass(frozen=True, slots=True)
-class _EventRows:
-    """What the store holds of a listed event."""
+class EventRows:
+    """What the store holds of a listed event, as :func:`read_page` reads
+    it for :func:`summarize`.
+
+    Internal to :mod:`keepout.store`.
+    """
 
     event_id: EventId
     object1: str
@@ -206,7 +240,7 @@ class _EventRows:
     active_job: JobKind | None
 
 
-def _summary(rows: _EventRows, thresholds: Thresholds) -> EventSummary:
+def _summary(rows: EventRows, thresholds: Thresholds) -> EventSummary:
     """The summary of a listed event.
 
     Raises
@@ -218,8 +252,7 @@ def _summary(rows: _EventRows, thresholds: Thresholds) -> EventSummary:
     """
     observations = decoded(rows.payloads)
     latest = observations[-1]
-    complete = complete_of(observations)
-    assessment = None if complete is None else assess(complete, thresholds=thresholds)
+    assessment = assessed(observations, thresholds)
     badge = (
         None
         if latest is None
@@ -242,7 +275,7 @@ def _summary(rows: _EventRows, thresholds: Thresholds) -> EventSummary:
 
 
 def summarize(
-    events: Iterable[_EventRows], thresholds: Thresholds
+    events: Iterable[EventRows], thresholds: Thresholds
 ) -> tuple[EventSummary, ...]:
     """The summaries of listed events (:func:`read_page`), each assessed from
     its cached observations.
@@ -298,7 +331,7 @@ def read_page(
     as_of: Time | None,
     offset: int,
     limit: int,
-) -> tuple[tuple[_EventRows, ...], int]:
+) -> tuple[tuple[EventRows, ...], int]:
     """A page of the events list, read in the caller's transaction.
 
     Internal to :mod:`keepout.store`: :meth:`~keepout.store.Store.summaries`
@@ -341,7 +374,7 @@ def read_page(
     latest = _latest(session, [cdms[-1][0] for cdms in payloads.values()])
     jobs = _active_jobs(session, ids)
     rows = tuple(
-        _EventRows(
+        EventRows(
             event_id=event_id,
             object1=object1,
             object2=object2,

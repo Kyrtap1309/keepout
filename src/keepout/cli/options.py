@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Annotated, TypeAlias
 
 import typer
 
-from keepout._environment import dubious_years_ignored, parse_time
+from keepout._environment import CACHE_DIR_VARIABLE, dubious_years_ignored, parse_time
 from keepout._validation import require_positive
 from keepout.sources.catalog import CATALOG_SOURCES, DEFAULT_SOURCE, CatalogSourceName
 
@@ -23,6 +23,7 @@ __all__ = [
     "CacheDir",
     "HardBodyRadius",
     "JsonFlag",
+    "OverriddenSettingsFile",
     "SettingsFile",
     "SourceOption",
     "Workers",
@@ -59,7 +60,7 @@ CacheDir: TypeAlias = Annotated[
     Path | None,
     typer.Option(
         "--cache-dir",
-        envvar="KEEPOUT_CACHE_DIR",
+        envvar=CACHE_DIR_VARIABLE,
         file_okay=False,
         metavar="DIR",
         help="Cache root for downloaded data (default: the user cache directory).",
@@ -141,15 +142,30 @@ SettingsFile: TypeAlias = Annotated[
         dir_okay=False,
         metavar="FILE",
         help=(
-            "Operator settings, TOML: \\[pc] method, policy, hbr_m; \\[risk] "
-            "green_below, red_from; \\[maneuver] target_pc (default: the "
-            "library's). Where the command has --method, --hbr or "
-            "--target-pc, that option wins over the file."
+            "Operator settings, a TOML file: Pc method, covariance policy, "
+            "hbr_m, risk thresholds, target_pc (default: the library's)."
         ),
     ),
 ]
 """``--settings``: the operator's settings file
 (:func:`keepout.settings.load_settings`)."""
+
+OverriddenSettingsFile: TypeAlias = Annotated[
+    Path | None,
+    typer.Option(
+        "--settings",
+        exists=True,
+        dir_okay=False,
+        metavar="FILE",
+        help=(
+            "Operator settings, a TOML file: Pc method, covariance policy, "
+            "hbr_m, risk thresholds, target_pc (default: the library's). "
+            "The command's own options win over it."
+        ),
+    ),
+]
+"""``--settings`` on a command whose options (``--method``, ``--hbr``,
+``--target-pc``) win over the file's values."""
 
 
 def operator_settings(

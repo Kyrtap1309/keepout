@@ -158,7 +158,7 @@ def test_no_event_param(store: Path) -> None:
     assert "Pick an event" in shown(app)
 
 
-def test_unknown_event(store: Path) -> None:
+def test_an_unknown_event_is_a_warning_with_the_way_back(store: Path) -> None:
     # As the event page: a warning and the way back to the list.
     app = open_app("planner", query={"event": "nope"})
     assert not app.exception
@@ -240,7 +240,7 @@ def test_what_if_dedupes(store: Path, planned: Planned) -> None:
     assert "What-if" not in shown(app)
 
 
-def test_cancel_job(store: Path) -> None:
+def test_a_queued_job_is_cancelled_and_can_be_queued_again(store: Path) -> None:
     event_id = _unplanned(store)
     app = open_app("planner", query={"event": event_id})
     job = _queue(app, event_id)
@@ -268,7 +268,9 @@ def test_failed_job_shows_error(store: Path, planned: Planned) -> None:
     assert f"Job {job.id} (maneuver): **failed**" in shown(app)
 
 
-def test_refusal_shown(store: Path, planned: Planned) -> None:
+def test_a_refused_what_if_shows_its_refusal_and_queues_nothing(
+    store: Path, planned: Planned
+) -> None:
     event_id = planned.event_id
     before = len(_jobs(store, event_id))
     app = open_app("planner", query={"event": event_id})
@@ -322,7 +324,9 @@ def test_back_to_the_operators_settings(store: Path, planned: Planned) -> None:
     event_id = planned.event_id
     app = open_app("planner", query={"event": event_id})
     _what_if(app, event_id, REFUSED_TARGET, REFUSED_HBR)
-    assert app.warning
+    assert [item.value for item in app.warning] == [
+        "No burn on the grid meets the target Pc 1.00e-12."
+    ]
     app.button(key=f"planner-own-{event_id}").click().run()
     assert not app.exception
     assert not app.warning

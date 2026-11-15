@@ -454,32 +454,6 @@ def _newest_job(
     return None if row is None else Job.of(row)
 
 
-def _queued(
-    session: Session,
-    *,
-    kind: JobKind,
-    event_id: str,
-    message_id: str,
-    key: str,
-    params: SettingsData,
-    now: Time,
-) -> Submission:
-    """The submission of a job: the active one of the same kind, CDM and key
-    if there is one, else a job queued now."""
-    found = _active_job(session, kind, message_id, key)
-    if found is not None:
-        return Submission(SubmissionOutcome.EXISTING, found)
-    return _queue_new(
-        session,
-        kind=kind,
-        event_id=event_id,
-        message_id=message_id,
-        key=key,
-        params=params,
-        now=now,
-    )
-
-
 def _queue_new(
     session: Session,
     *,
@@ -642,7 +616,10 @@ class JobQueue:
             )
             if _is_cached(session, message_id, key):
                 return Submission(SubmissionOutcome.CACHED, None)
-            return _queued(
+            found = _active_job(session, JobKind.MANEUVER, message_id, key)
+            if found is not None:
+                return Submission(SubmissionOutcome.EXISTING, found)
+            return _queue_new(
                 session,
                 kind=JobKind.MANEUVER,
                 event_id=event_id,
@@ -925,8 +902,12 @@ class JobQueue:
         StoreError
             If there is no such job, if it has already ended, or if the
             database cannot be used.
+        SettingsError
+            If the job's stored settings no longer make settings; it is
+            cancelled all the same.
         """
         now = self._now()
+        status: JobStatus | None = None
         with self.store.write() as session:
             row = session.scalars(
                 update(models.Job)
@@ -935,11 +916,14 @@ class JobQueue:
                 .returning(models.Job)
                 .execution_options(synchronize_session=False)
             ).one_or_none()
-            if row is not None:
-                return Job.of(row)
-            status = session.scalar(
-                select(models.Job.status).where(models.Job.id == job_id)
-            )
+            if row is None:
+                status = session.scalar(
+                    select(models.Job.status).where(models.Job.id == job_id)
+                )
+        if row is not None:
+            # Read once the cancel is committed: settings that no longer
+            # parse do not undo it.
+            return Job.of(row)
         if status is None:
             raise StoreError(f"no job {job_id} in the store")
         raise StoreError(f"job {job_id} has already ended: {status}")
@@ -1026,13 +1010,18 @@ class JobQueue:
                 raise StoreError(f"no job {job_id} in the store")
             return Job.of(row)
 
-    def jobs_by_id(self, job_ids: Collection[int]) -> list[Job]:
+    def jobs_by_id(
+        self, job_ids: Collection[int], *, missing_ok: bool = False
+    ) -> list[Job]:
         """Jobs, by id, read in one transaction.
 
         Parameters
         ----------
         job_ids
             The jobs' ids.
+        missing_ok
+            Leave out a job that is not in the store (e.g. purged) instead
+            of refusing it.
 
         Returns
         -------
@@ -1042,15 +1031,16 @@ class JobQueue:
         Raises
         ------
         StoreError
-            If a job is not in the store (the first such one is named), or if
-            the database cannot be used.
+            If a job is not in the store and ``missing_ok`` is false (the
+            first such one is named), or if the database cannot be used.
         """
         with self.store.read() as session:
             rows = session.scalars(
                 select(models.Job).where(models.Job.id.in_(set(job_ids)))
             )
             found = {row.id: Job.of(row) for row in rows}
-        for job_id in job_ids:
-            if job_id not in found:
-                raise StoreError(f"no job {job_id} in the store")
-        return [found[job_id] for job_id in job_ids]
+        if not missing_ok:
+            for job_id in job_ids:
+                if job_id not in found:
+                    raise StoreError(f"no job {job_id} in the store")
+        return [found[job_id] for job_id in job_ids if job_id in found]

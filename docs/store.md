@@ -8,16 +8,13 @@ holds manoeuvre plans, computed in the command or by a background worker.
 The command line uses it with `--store FILE` (see
 [`keepout store`](cli.md#store)). The library uses `keepout.store`.
 
-```bash
-pip install "keepout[cli,store] @ git+https://github.com/Kyrtap1309/keepout"
-```
-
-The `cli` extra adds the `keepout` command; `keepout[store]` alone is
-enough to use the store from Python. The `store` extra installs [SQLAlchemy](https://www.sqlalchemy.org/) and
-[Alembic](https://alembic.sqlalchemy.org/). `import keepout` loads
-neither, and neither does `keepout --help`. Without the extra, a command
-given `--store` prints `--store needs the store extra: pip install
-'keepout[store]'` and exits with status 1.
+It needs the `store` extra ([Install](index.md#install)), which adds
+[SQLAlchemy](https://www.sqlalchemy.org/) and
+[Alembic](https://alembic.sqlalchemy.org/); `keepout[store]` alone is
+enough to use the store from Python, `keepout[cli,store]` adds the
+command. `import keepout` loads neither, and neither does
+`keepout --help`. Without the extra, a command given `--store` prints the
+line to install it and exits with status 1.
 
 The store needs SQLite 3.35 or newer, for `UPDATE … RETURNING`, which the
 job queue uses. This is the SQLite Python's `sqlite3` module is built

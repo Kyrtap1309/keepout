@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from functools import cached_property
 from typing import TYPE_CHECKING
 
+from keepout._types import read_only
 from keepout._validation import positive_float
 from keepout.encounter import EncounterPlane, Role, encounter_plane
 from keepout.errors import HardBodyRadiusError
@@ -125,11 +126,13 @@ class Conjunction:
         """Both objects with their role, primary first."""
         return ("primary", self.primary), ("secondary", self.secondary)
 
-    @property
+    @cached_property
     def relative_motion(self) -> RelativeMotion:
         """The secondary's motion relative to the primary, in the states'
-        frame."""
-        return relative_motion(self.primary.state, self.secondary.state)
+        frame (computed on first use; read-only)."""
+        motion = relative_motion(self.primary.state, self.secondary.state)
+        read_only(*motion)
+        return motion
 
     @property
     def relative_position(self) -> FloatArray:

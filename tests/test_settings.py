@@ -26,7 +26,7 @@ def _write(tmp_path: Path, text: str) -> Path:
     return path
 
 
-def test_default_settings() -> None:
+def test_settings_default_to_the_librarys() -> None:
     settings = Settings()
     assert settings.compute == AUTO
     assert settings.policy == "repair"
@@ -44,7 +44,7 @@ def test_default_settings() -> None:
         ({"target_pc": 0.0}, "target_pc"),
     ],
 )
-def test_invalid_settings(changes: dict[str, object], message: str) -> None:
+def test_invalid_settings_are_refused(changes: dict[str, object], message: str) -> None:
     with pytest.raises(ValueError, match=message):
         Settings(**changes)  # type: ignore[arg-type]  # pyright: ignore[reportArgumentType]
 

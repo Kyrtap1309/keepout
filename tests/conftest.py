@@ -26,6 +26,7 @@ from pathlib import Path
 import pytest
 from astropy.utils import iers
 from hypothesis import settings
+from web_builders import Clock
 
 from keepout.sources import _store
 from keepout.store import Store, open_store
@@ -35,7 +36,7 @@ from keepout.store import Store, open_store
 for _name in ("GITHUB_ACTIONS", "FORCE_COLOR", "PY_COLORS"):
     os.environ.pop(_name, None)
 
-settings.register_profile("default")
+settings.register_profile("default", deadline=None)
 settings.register_profile("ci", derandomize=True, print_blob=True, deadline=None)
 settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE", "default"))
 
@@ -106,3 +107,10 @@ def store(tmp_path: Path) -> Iterator[Store]:
     """A new store, ``keepout.db`` in the test's folder."""
     with open_store(tmp_path / "keepout.db") as opened:
         yield opened
+
+
+@pytest.fixture
+def clock() -> Clock:
+    """A settable Unix time, at :data:`web_builders.START` (the sources'
+    clients take it as ``now``)."""
+    return Clock()

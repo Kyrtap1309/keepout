@@ -387,11 +387,7 @@ class Covariance:
         Covariance
             The same matrix, frame and repairs, at ``epoch``.
         """
-        moved = object.__new__(Covariance)
-        for name in ("matrix", "frame", "repairs"):
-            object.__setattr__(moved, name, getattr(self, name))
-        object.__setattr__(moved, "epoch", epoch)
-        return moved
+        return Covariance._trusted(self.matrix, self.frame, epoch, self.repairs)
 
     @classmethod
     def from_position(

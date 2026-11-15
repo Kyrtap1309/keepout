@@ -6,9 +6,12 @@ from typing import Final
 from keepout.omm import Omm
 from keepout.omm.celestrak import load_csv
 
-SAMPLE: Final = load_csv(
+CELESTRAK_SAMPLE_CSV: Final = (
     Path(__file__).parent / "omm" / "data" / "celestrak_sample.csv"
 )
+"""The file of :data:`SAMPLE`."""
+
+SAMPLE: Final = load_csv(CELESTRAK_SAMPLE_CSV)
 """Eight element sets of CelesTrak CSV: 900 (LEO), 25544 ISS, 51850 (GEO),
 30798 (HEO), 38745 (MEO), 100000, 100001 and 100882 (docked to the ISS,
 same epoch)."""

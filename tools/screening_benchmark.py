@@ -58,7 +58,7 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Final, Protocol, TypedDict, TypeVar
+from typing import TYPE_CHECKING, Final, Generic, Protocol, TypedDict, TypeVar
 
 import screening_snapshot as snapshot
 import spacetrack_snapshot
@@ -77,17 +77,16 @@ from generated import (
     README,
     REPO,
     json_text,
-    minute_text,
     parse_json,
     positive,
-    read_json,
+    read_timings,
     readme_with,
     table,
     write_or_check,
 )
 from screening_timing import TimingOutput, select, timed
 
-from keepout._text import plural
+from keepout._text import isot, minute, plural
 from keepout.omm.celestrak import dumps_csv
 from keepout.screening import (
     DEFAULT_DURATION,
@@ -257,7 +256,7 @@ class Snapshot(Protocol[_Manifest]):
 
 
 @dataclass(frozen=True, slots=True)
-class Source:
+class Source(Generic[_Manifest]):
     """A frozen catalog the benchmark screens.
 
     Parameters
@@ -277,7 +276,7 @@ class Source:
     catalog: str
     provider: str
     data: Path
-    snapshot: Snapshot[Any]
+    snapshot: Snapshot[_Manifest]
 
     def read(self, data: Path) -> tuple[tuple[Omm, ...], str]:
         """The element sets in the directory ``data`` and the day they were
@@ -324,7 +323,9 @@ class Source:
 DEFAULT_SOURCE: Final = "celestrak"
 """The source benchmarked unless told otherwise."""
 
-SOURCES: Final[Mapping[str, Source]] = {
+SOURCES: Final[
+    Mapping[str, Source[snapshot.Manifest] | Source[spacetrack_snapshot.Manifest]]
+] = {
     source.name: source
     for source in (
         Source(
@@ -400,19 +401,6 @@ def benchmark(
             }
         )
     return data, timings
-
-
-def read_timings(path: Path) -> Timings | None:
-    """The timings of the results file at ``path``, if it exists.
-
-    Raises
-    ------
-    ValueError
-        If the file is not a results file this tool writes.
-    """
-    if not path.exists():
-        return None
-    return read_json(path, Summary)["timings"]
 
 
 def _seconds_text(value: float) -> str:
@@ -496,7 +484,7 @@ def benchmark_main(args: argparse.Namespace) -> int:
     )
     timings: Timings | None
     if args.check:
-        timings = read_timings(args.results)
+        timings = read_timings(args.results, Summary)
     else:
         timings = {
             "cpu_model": cpu_model(),
@@ -512,7 +500,7 @@ def benchmark_main(args: argparse.Namespace) -> int:
             "primaries": list(args.primaries),
             "objects": len(catalog),
             "retrieved": retrieved,
-            "start": minute_text(start.isot),
+            "start": minute(start),
             "days": DEFAULT_DURATION / DAY,
             "workers": args.workers,
         },
@@ -631,7 +619,7 @@ def compare_main(args: argparse.Namespace) -> int:
             "--primaries",
             *map(str, args.primaries),
             "--start",
-            window_start(retrieved).isot,
+            isot(window_start(retrieved)),
             "--days",
             f"{args.days:g}",
             "--radius",

@@ -124,21 +124,25 @@ def test_section_rejects_malformed_keywords(keyword: str) -> None:
         Section("relative", (Field(keyword, "1"),))
 
 
-def test_section_rejects_wrongly_typed_values() -> None:
-    with pytest.raises(
-        ValueError, match="MISS_DISTANCE value '500' is not of kind 'float'"
-    ):
-        Section("relative", (Field("MISS_DISTANCE", "500"),))
-
-
-def test_section_rejects_units_on_known_keywords() -> None:
-    with pytest.raises(ValueError, match="unit is fixed by the standard"):
-        Section("relative", (Field("MISS_DISTANCE", 1.0, "km"),))
-
-
-def test_unknown_keywords_must_be_text() -> None:
-    with pytest.raises(ValueError, match="is not of kind 'str'"):
-        Section("relative", (Field("X_FOO", 1.0),))
+@pytest.mark.parametrize(
+    ("field", "message"),
+    [
+        # A known keyword's value has the keyword's kind.
+        (
+            Field("MISS_DISTANCE", "500"),
+            "MISS_DISTANCE value '500' is not of kind 'float'",
+        ),
+        # A known keyword's unit is the standard's.
+        (Field("MISS_DISTANCE", 1.0, "km"), "unit is fixed by the standard"),
+        # An unknown keyword's value is text.
+        (Field("X_FOO", 1.0), "is not of kind 'str'"),
+    ],
+)
+def test_section_rejects_a_field_of_the_wrong_kind_or_unit(
+    field: Field, message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        Section("relative", (field,))
 
 
 def test_unknown_section_kind() -> None:

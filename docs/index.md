@@ -8,6 +8,30 @@ collision-avoidance manoeuvre planning.
 !!! warning "Pre-alpha"
     Status: pre-alpha; the API may change without notice.
 
+## Quickstart
+
+1. Clone the repository and install keepout with its command line, since
+    the examples read files committed to it:
+
+    ```bash
+    git clone https://github.com/Kyrtap1309/keepout && cd keepout
+    uv sync --extra cli --extra store
+    ```
+
+2. Assess a CDM: its Pc, the risk of its event and the action to take.
+    Here a sample CDM with a combined hard-body radius of 20 m:
+
+    ```bash
+    uv run keepout assess tests/cdm/data/tracss_v2.kvn --hbr 20
+    ```
+
+    It ends with exit status 3: this sample event needs a manoeuvre.
+
+3. Screen a fleet against the public catalog and assess each close
+    approach: see [Synthetic operator and command
+    line](#synthetic-operator-and-command-line). From Python, start with
+    [Probability of collision](#probability-of-collision).
+
 ## Install
 
 keepout needs Python 3.11 or later. It is not on PyPI yet, so install it
@@ -24,15 +48,17 @@ The extras add optional parts; without them you get the library only:
 | `cli` | Typer and Rich | the `keepout` command |
 | `store` | SQLAlchemy and Alembic | the [conjunction store](store.md): `--store`, `keepout store`, `keepout jobs`, `keepout worker` |
 | `dashboard` | Streamlit and Plotly, and the `store` extra | the [dashboard](dashboard.md): `keepout dashboard` |
+| `validation` | openpyxl and xlrd | `keepout validate` and the [validation report](validation.md): reading CARA's spreadsheets |
 
-The examples on these pages read files committed to the repository: a
-sample CDM, the example fleet and the frozen catalogs. To run them, clone
-the repository and work inside it:
+Give several extras as `keepout[cli,store]`. The examples on these pages
+read files committed to the repository: a sample CDM, the example fleet
+and the frozen catalogs. To run them, clone the repository and work
+inside it, with the extras you need:
 
 ```bash
 git clone https://github.com/Kyrtap1309/keepout
 cd keepout
-uv sync --extra cli --extra store
+uv sync --extra cli --extra store   # or --all-extras
 uv run keepout --help
 ```
 
@@ -49,17 +75,6 @@ uv run keepout --help
 - **Prefer a browser?** [The dashboard](dashboard.md) shows a store's
   events, their trends and manoeuvre plans.
 - **Stuck?** [FAQ and troubleshooting](faq.md).
-
-## Performance
-
-!!! tip "One thread per process"
-    NumPy and SciPy start a thread per CPU core by default, which makes
-    keepout's batched computations slower, not faster. The manoeuvre
-    planner, for one, uses 20 times the CPU time and takes longer. The
-    `keepout` command limits them to one thread itself
-    ([Threads](cli.md#threads)). In Python, set `OMP_NUM_THREADS=1` and
-    `OPENBLAS_NUM_THREADS=1` before starting it, and use the `workers=`
-    argument for parallel work.
 
 ## Reading a CDM
 
@@ -206,7 +221,8 @@ keepout assess cdms/*.kvn   # exit status 3 if an event needs a manoeuvre
 ```
 
 `keepout screen` acts as a conjunction assessment service for a fleet of
-real satellites. Here it screens the ISS, Metop-B and Intelsat 39 against
+real satellites, listed in a [fleet file](synthetic.md#the-fleet-file).
+Here it screens the ISS, Metop-B and Intelsat 39 against
 the public catalog frozen on 2026-10-06. It writes a CDM for each close
 approach and assesses each event (12 approaches that week, 2 to monitor).
 
@@ -261,9 +277,7 @@ keepout plans an impulsive along-track burn of the primary from the latest
 CDM of an event. It computes the Pc for a grid of burns (Δv against burn
 time) and picks the smallest prograde and retrograde burn below the target
 Pc. It can also screen each burn against a catalog for the approaches it
-brings. On the command line this is `keepout maneuver`. (Commands and
-API names use the US spelling "maneuver", as the CCSDS keywords do; the
-prose of these pages uses the British "manoeuvre".)
+brings. On the command line this is `keepout maneuver`.
 
 [Manoeuvre planning](maneuver.md) describes the method and its assumptions
 and limits. The [report](maneuver-report.md) shows the Δv × burn-time

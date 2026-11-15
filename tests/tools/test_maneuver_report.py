@@ -6,16 +6,14 @@ drifting past Luch-5X), whose primary the fleet below makes manoeuvrable.
 """
 
 import copy
-import math
 import shutil
 from pathlib import Path
 from typing import Final
 
 import astropy.units as u
 import maneuver_report as report
-import numpy as np
 import pytest
-from astropy.time import Time
+from builders import CROSSING_TCA, crossing_conjunction
 from cli_builders import write_fleet
 from generated import json_text, read_json, readme_with, relative
 from matplotlib.collections import QuadMesh
@@ -23,18 +21,12 @@ from matplotlib.colors import to_hex
 from report_builders import fixture_data, readme_with_markers
 
 from keepout.cdm import Maneuverable, ObjectMetadata, kvn, make_cdm
-from keepout.conjunction import Conjunction
-from keepout.covariance import Covariance
 from keepout.figures import LOWEST_LOG_PC, SEQUENTIAL, grid_figure
-from keepout.objects import ObjectState
-from keepout.orbits import EARTH_MU
-from keepout.propagation import EARTH_RADIUS
 from keepout.sources import cara
 from keepout.sources.cara import CARA_COMMIT
-from keepout.state import StateVector
-from keepout.units import HOUR, KM
+from keepout.units import HOUR
 
-TCA: Final = Time("2026-10-06T00:00:00", scale="utc")
+TCA: Final = CROSSING_TCA
 NAME: Final = "builder_event"
 FLEET: Final = """\
 catalog_hard_body_radius = 1.0
@@ -46,27 +38,11 @@ maneuverable = true
 """
 
 
-def _item(object_id: str, r: np.ndarray, v: np.ndarray) -> ObjectState:
-    matrix = np.diag([100.0**2] * 3 + [0.01**2] * 3)
-    return ObjectState(
-        object_id, StateVector(TCA, r, v, "GCRF"), Covariance(matrix, "GCRF", TCA), 10.0
-    )
-
-
 def builder_cdm() -> str:
     """A fast LEO crossing at 630 km, 150 m apart radially, created 8 h before
     TCA: Pc about 5e-3."""
-    radius = EARTH_RADIUS + 630 * KM
-    speed = math.sqrt(EARTH_MU / radius)
-    along = np.array([0.0, math.cos(0.9), math.sin(0.9)])
-    across = np.array([0.0, math.cos(0.9), -math.sin(0.9)])
-    conjunction = Conjunction(
-        _item("1001", np.array([radius, 0.0, 0.0]), speed * along),
-        _item("2002", np.array([radius + 150.0, 0.0, 0.0]), speed * across),
-        20.0,
-    )
     cdm = make_cdm(
-        conjunction,
+        crossing_conjunction(),
         ObjectMetadata("PRIMARY SAT", "2020-001A", maneuverable=Maneuverable.YES),
         ObjectMetadata("DEBRIS", "2019-001A"),
         created=TCA - 8 * HOUR * u.s,
@@ -190,6 +166,7 @@ OTHER_TIMINGS: report.Timings = {
 }
 
 
+@pytest.mark.slow
 def test_check_takes_the_committed_timings(generated: Path, tmp_path: Path) -> None:
     # The times depend on the machine: --check shows the committed ones and
     # checks the rest.
@@ -484,7 +461,9 @@ def test_a_radius_must_be_positive(
     with pytest.raises(SystemExit) as raised:
         report.main(["--hbr", radius])
     assert raised.value.code == 2
-    message = f"argument --hbr: must be finite and above 0, got {radius}"
+    message = (
+        f"argument --hbr: hard-body radius must be finite and > 0, got {float(radius)}"
+    )
     assert message in capsys.readouterr().err
 
 

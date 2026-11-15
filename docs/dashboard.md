@@ -6,15 +6,12 @@ its manoeuvre plan. It also takes new CDM files and queues the work a
 [worker](store.md#background-jobs) does. It is a Streamlit app run by
 `keepout dashboard`, on the machine that holds the store.
 
-```bash
-pip install "keepout[cli,dashboard] @ git+https://github.com/Kyrtap1309/keepout"
-```
-
-The `dashboard` extra installs [Streamlit](https://streamlit.io/) and
-[Plotly](https://plotly.com/python/), with the `store` extra it needs.
+It needs the `dashboard` extra ([Install](index.md#install)), which adds
+[Streamlit](https://streamlit.io/) and
+[Plotly](https://plotly.com/python/) to the `store` extra.
 `import keepout` loads neither, and neither does `keepout --help`. Without
 the extra, `keepout dashboard` prints the line to install it and exits
-with status 1. In a clone, `uv sync --extra cli --extra dashboard`.
+with status 1.
 
 !!! warning "For this machine only"
     The dashboard listens on 127.0.0.1 and has no authentication: anyone
@@ -40,44 +37,7 @@ Without a worker, the dashboard still shows everything the store holds,
 but **Compute**, **Plan manoeuvre** and uploads queue jobs that wait in
 the store until a worker runs.
 
-```bash
-keepout dashboard --help
-```
-
-```text
- Usage: keepout dashboard [OPTIONS]
-
- Run the dashboard on a store (needs the dashboard extra).
-
- Serves the dashboard on http://127.0.0.1:PORT, this machine only, until
- stopped with Ctrl+C: the events, each event's risk and the manoeuvre
- planner. It reads the store and queues jobs for keepout worker; it
- computes no Pc or plan itself. The store must exist and be at this
- keepout's schema (keepout store upgrade). Exits with Streamlit's status.
-
-╭─ Options ────────────────────────────────────────────────────────────────────╮
-│ *  --store           FILE             The conjunction store, a SQLite file.  │
-│                                       [env var: KEEPOUT_STORE]               │
-│                                       [required]                             │
-│    --settings        FILE             Operator settings, TOML: [pc] method,  │
-│                                       policy, hbr_m; [risk] green_below,     │
-│                                       red_from; [maneuver] target_pc         │
-│                                       (default: the library's). Where the    │
-│                                       command has --method, --hbr or         │
-│                                       --target-pc, that option wins over the │
-│                                       file.                                  │
-│    --port            N [1<=x<=65535]  The port to serve on. [default: 8501]  │
-│    --as-of           TIME             See the data at this time, ISO 8601    │
-│                                       UTC: the events whose latest TCA is    │
-│                                       before it are past (default: the       │
-│                                       clock, read on each page).             │
-│    --help                             Show this message and exit.            │
-╰──────────────────────────────────────────────────────────────────────────────╯
-
- Examples:
- keepout dashboard --store keepout.db
- keepout dashboard --store keepout.db --as-of 2026-10-07T12:00 --port 8502
-```
+The options (`keepout dashboard --help` lists them all):
 
 - **`--store FILE`** (or `$KEEPOUT_STORE`): the store. A missing store,
   or one made by an older keepout, is an error before Streamlit starts

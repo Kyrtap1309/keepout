@@ -305,6 +305,14 @@ def _create(path: Path) -> None:
             _require_head(path, schema)
 
 
+def _no_store(path: Path) -> str:
+    """The error for a store that is not there: how to make one."""
+    return (
+        f"no store at {path}: make one by adding CDMs to it, "
+        f"keepout store add CDM... --store {path}"
+    )
+
+
 def _exists(path: Path) -> bool:
     """Whether there is a file (or anything) at ``path``.
 
@@ -390,7 +398,7 @@ def open_store(path: str | Path, *, create: bool = True) -> Store:
     schema = _read_schema(path) if _exists(path) else _Schema(empty=True, revision=None)
     if schema.empty:
         if not create:
-            raise StoreError(f"no store at {path}")
+            raise StoreError(_no_store(path))
         _create(path)
     else:
         _require_head(path, schema)
@@ -422,7 +430,7 @@ def upgrade(path: str | Path) -> tuple[str | None, str]:
     """
     path = Path(path)
     if not _exists(path):
-        raise StoreError(f"no store at {path}")
+        raise StoreError(_no_store(path))
     schema = _read_schema(path)
     _require_known(path, schema)
     if schema.revision == HEAD:

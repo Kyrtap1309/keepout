@@ -21,6 +21,7 @@ made.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import hashlib
 import importlib
@@ -33,7 +34,7 @@ from keepout._defaults import CELESTRAK_TTL, GP_INTERVAL
 from keepout.errors import ChecksumMismatch, SourceUnavailable
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Mapping
+    from collections.abc import Callable, Generator, Iterable, Mapping
 
     from astropy.time import Time
 
@@ -130,6 +131,21 @@ class CatalogPart:
     retrieval: Retrieval
 
 
+@contextlib.contextmanager
+def _reading(path: Path) -> Generator[None]:
+    """A context reading the catalog file ``path``.
+
+    Raises
+    ------
+    SourceUnavailable
+        On an :class:`OSError` in the context.
+    """
+    try:
+        yield
+    except OSError as exc:
+        raise SourceUnavailable(f"cannot read the catalog file {path}: {exc}") from exc
+
+
 def _sha256(path: Path) -> str:
     """The SHA-256 (hex) of the file at ``path``.
 
@@ -138,11 +154,8 @@ def _sha256(path: Path) -> str:
     SourceUnavailable
         If it cannot be read (e.g. it is gone).
     """
-    try:
-        with path.open("rb") as file:
-            return hashlib.file_digest(file, "sha256").hexdigest()
-    except OSError as exc:
-        raise SourceUnavailable(f"cannot read the catalog file {path}: {exc}") from exc
+    with _reading(path), path.open("rb") as file:
+        return hashlib.file_digest(file, "sha256").hexdigest()
 
 
 def _verified(file: CatalogFileRef) -> bytes:
@@ -155,12 +168,8 @@ def _verified(file: CatalogFileRef) -> bytes:
     ChecksumMismatch
         If its digest is not the one referenced.
     """
-    try:
+    with _reading(file.path):
         data = file.path.read_bytes()
-    except OSError as exc:
-        raise SourceUnavailable(
-            f"cannot read the catalog file {file.path}: {exc}"
-        ) from exc
     digest = hashlib.sha256(data).hexdigest()
     if digest != file.sha256:
         raise ChecksumMismatch(

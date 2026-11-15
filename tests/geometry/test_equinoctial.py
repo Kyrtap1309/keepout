@@ -46,14 +46,14 @@ def two_body(state: FloatArray, dt: float) -> FloatArray:
 
 
 @pytest.mark.parametrize("state", [LEO, GEO_RETROGRADE, POLAR_ECCENTRIC])
-def test_round_trip(state: FloatArray) -> None:
+def test_cartesian_state_survives_the_equinoctial_round_trip(state: FloatArray) -> None:
     fr = retrograde_factor(state[:3], state[3:])
     back = to_cartesian(to_equinoctial(state, fr), fr)
     np.testing.assert_allclose(back[:3], state[:3], rtol=0, atol=1e-6)
     np.testing.assert_allclose(back[3:], state[3:], rtol=0, atol=1e-9)
 
 
-def test_retrograde_factor() -> None:
+def test_the_retrograde_factor_is_minus_one_for_a_retrograde_orbit() -> None:
     assert retrograde_factor(LEO[:3], LEO[3:]) == 1
     assert retrograde_factor(GEO_RETROGRADE[:3], GEO_RETROGRADE[3:]) == -1
 
@@ -113,7 +113,7 @@ def test_unbound_state_is_rejected() -> None:
         to_equinoctial(ESCAPING, 1)
 
 
-def test_wrap_angle() -> None:
+def test_angles_wrap_into_one_turn_about_zero() -> None:
     assert wrap_angle(2 * np.pi + 0.1) == pytest.approx(0.1)
     assert wrap_angle(-np.pi - 0.1) == pytest.approx(np.pi - 0.1)
 

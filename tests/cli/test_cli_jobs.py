@@ -169,7 +169,7 @@ def test_cli_jobs_list_shows_kind(stored: tuple[Path, str]) -> None:
     assert [job["kind"] for job in payload["jobs"]] == ["refresh", "maneuver"]
 
 
-def test_cancel(stored: tuple[Path, str]) -> None:
+def test_cancel_ends_a_queued_job_once(stored: tuple[Path, str]) -> None:
     db, event_id = stored
     job = queued_job(db, event_id)
     cancelled = keepout("jobs", "cancel", str(job), "--store", str(db))
@@ -184,7 +184,9 @@ def test_cancel(stored: tuple[Path, str]) -> None:
     assert queued_job(db, event_id) == job + 1
 
 
-def test_cancel_json(stored: tuple[Path, str]) -> None:
+def test_cancel_json_gives_the_job_its_event_and_status(
+    stored: tuple[Path, str],
+) -> None:
     db, event_id = stored
     job = queued_job(db, event_id)
     cancelled = keepout("jobs", "cancel", str(job), "--store", str(db), "--json")
@@ -207,7 +209,10 @@ def test_jobs_need_a_store(tmp_path: Path) -> None:
     for args in (("jobs", "list"), ("worker", "--until-idle")):
         result = keepout(*args, "--store", str(missing))
         assert result.exit_code == ExitCode.ERROR
-        assert result.stderr == f"Error: no store at {missing}\n"
+        assert result.stderr == (
+            f"Error: no store at {missing}: make one by adding CDMs to it, "
+            f"keepout store add CDM... --store {missing}\n"
+        )
         assert not missing.exists()
     result = keepout("jobs", "list", env={"KEEPOUT_STORE": None})
     assert result.exit_code == ExitCode.USAGE

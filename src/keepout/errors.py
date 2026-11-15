@@ -24,6 +24,7 @@ __all__ = [
     "GeometryError",
     "HardBodyRadiusError",
     "HttpStatusError",
+    "InvalidArgument",
     "KeepoutError",
     "KelvinsFormatError",
     "ManeuverError",
@@ -60,12 +61,23 @@ class HttpStatusError(SourceUnavailable):
         The URL asked for.
     status
         The HTTP status code, e.g. 403 or 503.
+    retry_after
+        Seconds the server asked to wait before trying again (its numeric
+        ``Retry-After`` header with a 429 or 503 status), else ``None``.
     """
 
-    def __init__(self, message: str, *, url: str, status: int) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        url: str,
+        status: int,
+        retry_after: float | None = None,
+    ) -> None:
         super().__init__(message)
         self.url = url
         self.status = status
+        self.retry_after = retry_after
 
 
 class AuthError(SourceUnavailable):
@@ -179,6 +191,12 @@ class UnsupportedElements(KeepoutError, ValueError):
     """
 
 
+class InvalidArgument(KeepoutError, ValueError):
+    """An argument keepout cannot take, e.g. settings a settings file cannot
+    hold. It is also a :class:`ValueError`, as raised for any other invalid
+    argument."""
+
+
 class CovarianceError(KeepoutError):
     """A covariance matrix is malformed, asymmetric or not positive semi-definite."""
 
@@ -258,7 +276,21 @@ class ManeuverError(KeepoutError):
 class StoreError(KeepoutError):
     """A conjunction store (``keepout[store]``) cannot be opened or does not
     hold what was asked: no file, a file of another keepout version, or
-    stored data that contradicts itself."""
+    stored data that contradicts itself.
+
+    Parameters
+    ----------
+    message
+        What is wrong.
+    message_id
+        The ``MESSAGE_ID`` of the CDM it is of, if it is of one given to
+        :meth:`~keepout.store.Store.ingest` (stored with other content, or
+        fitting more than one event).
+    """
+
+    def __init__(self, message: str, *, message_id: str | None = None) -> None:
+        super().__init__(message)
+        self.message_id = message_id
 
 
 class SettingsError(KeepoutError):

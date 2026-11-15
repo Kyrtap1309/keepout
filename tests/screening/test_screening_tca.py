@@ -53,9 +53,8 @@ from keepout.screening.tca import (
     time_grid,
 )
 from keepout.state import RefFrame
-from keepout.units import KM
+from keepout.units import DAY, HOUR, KM
 
-HOUR = 3600.0
 REFERENCE = FIXTURE_START
 """Time zero of the straight-line objects."""
 
@@ -233,7 +232,7 @@ def summary(result: SearchResult) -> list[object]:
         (600.0, 120.0, 6),
         (601.0, 120.0, 7),
         (100.0, 120.0, 2),
-        (7 * 86400.0, 120.0, 5041),
+        (7 * DAY, 120.0, 5041),
     ],
 )
 def test_the_grid_spans_the_window_at_most_a_step_apart(
@@ -302,7 +301,7 @@ def test_sgp4_moves_within_the_bounds_the_sieves_assume() -> None:
     # Over the week after the download, every 5 minutes: speed and the
     # acceleration beyond point mass and J2, both from positions.
     propagator = Sgp4Propagator(FIXTURE)
-    week = 7 * 86400.0
+    week = 7 * DAY
     centres = np.arange(0.0, week, 300.0)
     delta = 1.0
     ephemeris = propagator.propagate(
@@ -862,10 +861,11 @@ volumes = st.one_of(
 )
 
 
+@pytest.mark.slow
 @settings(deadline=None, max_examples=20)
 @given(
     chosen=st.lists(st.sampled_from(CLOSE), min_size=1, max_size=3, unique=True),
-    start=st.floats(min_value=-2 * 86400.0, max_value=5 * 86400.0),
+    start=st.floats(min_value=-2 * DAY, max_value=5 * DAY),
     duration=st.floats(min_value=0.5 * HOUR, max_value=12 * HOUR),
     step=st.floats(min_value=30.0, max_value=600.0),
     volume=volumes,
@@ -946,6 +946,7 @@ class Wrapped:
         return self.inner.radius_bounds(start, duration)
 
 
+@pytest.mark.slow
 def test_sgp4s_own_path_finds_what_any_propagator_finds() -> None:
     # Formation flyers, fast passes and objects that fail SGP4 in the week.
     primaries = [68377, 56156, 58199, *(omm.catalog_number for omm in PRIMARIES[:3])]
@@ -954,7 +955,7 @@ def test_sgp4s_own_path_finds_what_any_propagator_finds() -> None:
     pairs = np.ones((len(own), len(catalog)), dtype=bool)
     for row, number in enumerate(primaries):
         pairs[row, COLUMN[number]] = False
-    duration = 7 * 86400.0
+    duration = 7 * DAY
     own_bounds = own.radius_bounds(WEEK_START, duration)
     catalog_bounds = catalog.radius_bounds(WEEK_START, duration)
 
@@ -982,7 +983,7 @@ def test_a_week_of_the_fixture_against_the_oracle() -> None:
     inside = check_against_oracle(
         [omm.catalog_number for omm in PRIMARIES],
         WEEK_START,
-        7 * 86400.0,
+        7 * DAY,
         DEFAULT_VOLUME,
         DEFAULT_STEP,
     )

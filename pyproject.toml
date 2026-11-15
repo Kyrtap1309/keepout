@@ -159,6 +159,7 @@ markers = [
 # Directories, not the package's name: AppTest runs the dashboard's pages as
 # scripts (__main__), which a package source would not measure.
 source = ["src/keepout", "tools"]
+branch = true
 
 [tool.coverage.report]
 # The dashboard is measured (AppTest runs it in-process) but left out of the

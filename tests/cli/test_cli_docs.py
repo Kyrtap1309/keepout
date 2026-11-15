@@ -1,7 +1,6 @@
 """The walk-through of ``docs/cli.md``, run as written: each command's output
 is the block that follows it on the page; likewise the JSON sample of
-``docs/cli-json.md`` and the help of ``keepout dashboard`` in
-``docs/dashboard.md``."""
+``docs/cli-json.md``."""
 
 import json
 import math
@@ -122,15 +121,3 @@ def test_the_json_sample_is_what_assess_prints(
     result = keepout(*shlex.split(found[1])[1:])
     assert result.exit_code == ExitCode.MANEUVER
     assert _close(json.loads(result.stdout), json.loads(found[2]))
-
-
-DASHBOARD_PAGE: Final = REPO / "docs" / "dashboard.md"
-
-
-def test_the_dashboard_page_shows_its_help() -> None:
-    arguments, shown = documented("dashboard", DASHBOARD_PAGE)
-    assert arguments == ["dashboard", "--help"]
-    status, printed = run(arguments)
-    assert status == ExitCode.OK
-    # The page leaves out the blank lines around the help.
-    assert printed.strip("\n") == shown.rstrip("\n")

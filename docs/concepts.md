@@ -169,9 +169,8 @@ that assumption implies, not the real risk
     ([Kelvins report](risk-kelvins.md)).
 
 **Manoeuvre (maneuver)**
-:   A collision-avoidance burn. The prose of these pages uses the British
-    "manoeuvre"; commands and API names use the US "maneuver", as the CCSDS
-    keywords do.
+:   A collision-avoidance burn
+    ([which spelling](faq.md#getting-started)).
 
 **Maximum Pc**
 :   The largest Pc any covariance in a family could give: an upper bound,

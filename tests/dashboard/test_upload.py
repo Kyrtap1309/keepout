@@ -69,6 +69,14 @@ def test_upload_rejects_large_file(store: Store) -> None:
     _nothing_ingested(store, result, before)
 
 
+def test_upload_takes_what_streamlit_takes(store: Store) -> None:
+    # Streamlit's uploader counts 2^20 bytes per MB: a file of 1,020,000
+    # bytes passes it, so it is not refused here as too large.
+    big = b"x" * 1_020_000
+    result = ingest_upload(store, SETTINGS, [("big.kvn", big)])
+    assert not any("larger than" in message for _, message in result.errors)
+
+
 def test_upload_rejects_a_gzip_bomb(store: Store) -> None:
     before = _cdm_count(store)
     bomb = gzip.compress(b" " * (MAX_FILE_BYTES + 1))
@@ -169,7 +177,7 @@ def test_upload_of_stored_cdms_queues_nothing(store: Store) -> None:
     assert result.jobs == ()
 
 
-def test_upload_nothing(store: Store) -> None:
+def test_an_empty_upload_does_nothing(store: Store) -> None:
     assert ingest_upload(store, SETTINGS, []) == UploadResult(None, (), ())
 
 
@@ -222,7 +230,9 @@ FUZZ = settings(
 
 @FUZZ
 @given(data=st.binary(max_size=4096))
-def test_upload_fuzz(store: Store, data: bytes) -> None:
+def test_any_upload_is_ingested_or_refused_with_its_errors(
+    store: Store, data: bytes
+) -> None:
     _check(ingest_upload(store, SETTINGS, [("fuzz.kvn", data)]))
 
 

@@ -41,12 +41,9 @@ _MIN_SIGMA: Final = 1e-12
 degenerate axis would otherwise ask for infinitely many nodes)."""
 
 
-@lru_cache(maxsize=8)
-def gauss_legendre(order: int) -> tuple[FloatArray, FloatArray]:
-    """Read-only Gauss-Legendre nodes and weights on ``[-1, 1]``."""
-    nodes, weights = np.polynomial.legendre.leggauss(order)
-    read_only(nodes, weights)
-    return nodes, weights
+_PANEL_NODES, _PANEL_WEIGHTS = np.polynomial.legendre.leggauss(PANEL_ORDER)
+read_only(_PANEL_NODES, _PANEL_WEIGHTS)
+"""Gauss-Legendre nodes and weights of a theta panel on ``[-1, 1]``."""
 
 
 class SphereGrid(NamedTuple):
@@ -138,7 +135,7 @@ def sphere_grids(
     lower, upper = breaks[:, :-1], breaks[:, 1:]
     # Repeated breakpoints (clipped to a pole) give empty panels, left out.
     keep = upper > lower
-    x, w = gauss_legendre(PANEL_ORDER)
+    x, w = _PANEL_NODES, _PANEL_WEIGHTS
     half = 0.5 * (upper - lower)[..., None]
     theta = half * x + 0.5 * (lower + upper)[..., None]
     sin_theta = np.sin(theta)

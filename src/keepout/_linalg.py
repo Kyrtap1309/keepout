@@ -9,7 +9,14 @@ import numpy.typing as npt
 
 from keepout._types import FloatArray, read_only
 
-__all__ = ["as_axis", "as_vector", "from_eigen", "symmetric_part", "take"]
+__all__ = [
+    "as_axis",
+    "as_vector",
+    "from_eigen",
+    "sigma_axes",
+    "symmetric_part",
+    "take",
+]
 
 _Record = TypeVar("_Record", bound=tuple[Any, ...])
 
@@ -73,6 +80,19 @@ def symmetric_part(matrix: FloatArray) -> FloatArray:
     """``(M + M^T) / 2`` of a matrix or a stack of matrices ``(..., n, n)``."""
     result: FloatArray = 0.5 * (matrix + np.swapaxes(matrix, -1, -2))
     return result
+
+
+def sigma_axes(covariance: FloatArray, sigmas: float = 1.0) -> FloatArray:
+    """The axes of the ``sigmas``-sigma ellipse (ellipsoid) of a symmetric
+    covariance, as rows: ``sigmas * sqrt(lambda)`` along each eigenvector
+    (a negative eigenvalue taken as zero)."""
+    eigenvalues, eigenvectors = np.linalg.eigh(covariance)
+    axes: FloatArray = (
+        sigmas
+        * np.sqrt(np.clip(eigenvalues, 0.0, None))[:, np.newaxis]
+        * eigenvectors.T
+    )
+    return axes
 
 
 def from_eigen(values: FloatArray, vectors: FloatArray) -> FloatArray:

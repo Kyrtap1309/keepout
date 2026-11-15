@@ -50,20 +50,21 @@ _EPILOG: Final = f"""Exit status:
   {ExitCode.OK:d}  done
   {ExitCode.ERROR:d}  an error in the data, a download or a file
   {ExitCode.USAGE:d}  a usage error: an unknown option, a bad value, a missing file
-  {ExitCode.MANEUVER:d}  assess, store add: at least one event needs a manoeuvre
+  {ExitCode.MANEUVER:d}  assess, store add: at least one event needs a maneuver
   {ExitCode.NO_SAFE_BURN:d}  maneuver: no burn can be recommended
 
 Environment:
   SPACETRACK_IDENTITY  the Space-Track account (--source spacetrack, fetch)
   SPACETRACK_PASSWORD  its password
   KEEPOUT_CACHE_DIR    the cache root, as --cache-dir
-  KEEPOUT_STORE        the store of store, jobs, worker, dashboard and maneuver
-                       --event
+  KEEPOUT_STORE        the store, as --store (store, jobs, worker, dashboard,
+                       maneuver --event)
 
-Commands and options spell maneuver the US way, as the CCSDS keywords do; the
-help text says manoeuvre. keepout COMMAND --help gives each command's options."""
+Start with keepout assess CDM... or keepout screen --fleet FILE; keepout
+COMMAND --help gives each command's options. The guides are in the
+repository's docs/ folder."""
 """The end of ``keepout --help``: the exit statuses, the environment
-variables and the spelling."""
+variables and where to start."""
 
 _EXAMPLES: Final = {
     "screen": (
@@ -159,7 +160,7 @@ jobs_app = typer.Typer(
 app.add_typer(jobs_app)
 
 
-def _print_version(*, value: bool) -> None:
+def _print_version(*, value: bool | None) -> None:
     if value:
         typer.echo(f"keepout {keepout.__version__}")
         raise typer.Exit

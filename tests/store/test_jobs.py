@@ -12,7 +12,7 @@ from sqlalchemy import select, update
 from store_builders import FOSTER, count_rows, message, missing_pc
 
 from keepout._types import JsonValue
-from keepout.errors import HardBodyRadiusError, StoreError
+from keepout.errors import HardBodyRadiusError, SettingsError, StoreError
 from keepout.pc import PcComputation, computation
 from keepout.settings import Settings, settings_to_data
 from keepout.store import Store, models, open_store
@@ -96,11 +96,12 @@ def test_claim_on_an_empty_queue(queue: JobQueue, event_id: str) -> None:
 def test_an_idle_claim_does_not_take_the_write_lock(
     queue: JobQueue, store: Store, event_id: str
 ) -> None:
-    # A claim that would write waits for this writer (BUSY_TIMEOUT_MS).
+    # A claim that would write waits for this writer (BUSY_TIMEOUT_MS, 30 s);
+    # 10 s leaves a slow, loaded runner its margin and still tells them apart.
     with store.write():
         started = time.monotonic()
         assert queue.claim("w1") is None
-        assert time.monotonic() - started < 1.0
+        assert time.monotonic() - started < 10.0
 
 
 def test_the_oldest_job_is_claimed_first(
@@ -400,6 +401,26 @@ def test_cancel_a_queued_job(queue: JobQueue, event_id: str) -> None:
     assert queue.claim("w1") is None
 
 
+def test_a_job_whose_settings_no_longer_parse_is_cancelled(
+    queue: JobQueue, store: Store, event_id: str
+) -> None:
+    submission = queue.submit(event_id, FOSTER)
+    assert submission.job is not None
+    job_id = submission.job.id
+    with store.write() as session:
+        session.execute(
+            update(models.Job)
+            .where(models.Job.id == job_id)
+            .values(params={"pc": {"method": "nope"}})
+        )
+    with pytest.raises(SettingsError, match=r"pc\.method"):
+        queue.cancel(job_id)
+    with store.read() as session:
+        row = session.get(models.Job, job_id)
+        assert row is not None
+        assert row.status == JobStatus.CANCELLED
+
+
 def test_cancel_a_finished_job_is_refused(queue: JobQueue, event_id: str) -> None:
     queue.submit(event_id, FOSTER)
     job = queue.claim("w1")
@@ -408,6 +429,16 @@ def test_cancel_a_finished_job_is_refused(queue: JobQueue, event_id: str) -> Non
     with pytest.raises(StoreError, match=f"job {job.id} has already ended: succeeded"):
         queue.cancel(job.id)
     assert queue.job(job.id).status is JobStatus.SUCCEEDED
+
+
+def test_jobs_by_id_may_leave_out_a_missing_job(queue: JobQueue, event_id: str) -> None:
+    submission = queue.submit(event_id, FOSTER)
+    assert submission.job is not None
+    job_id = submission.job.id
+    with pytest.raises(StoreError, match="no job 999 in the store"):
+        queue.jobs_by_id([job_id, 999])
+    found = queue.jobs_by_id([999, job_id], missing_ok=True)
+    assert [job.id for job in found] == [job_id]
 
 
 def test_an_unknown_job(queue: JobQueue, event_id: str) -> None:

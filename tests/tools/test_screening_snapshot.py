@@ -108,7 +108,7 @@ def test_a_changed_body_is_refused(raw: Path) -> None:
         (SOCRATES_URL, "socrates-sort-minRange.csv"),
     ],
 )
-def test_raw_name(url: str, name: str) -> None:
+def test_a_url_gives_its_raw_file_name(url: str, name: str) -> None:
     assert snapshot.raw_name(url) == name
 
 
@@ -242,7 +242,7 @@ def test_comparable_approaches() -> None:
     ("omm", "expected"),
     [(CALSPHERE, "LEO"), (EXPRESS, "MEO"), (GOES, "GEO"), (THEMIS, "HEO")],
 )
-def test_regime(omm: Omm, expected: str) -> None:
+def test_an_orbit_is_put_in_its_regime(omm: Omm, expected: str) -> None:
     assert snapshot.regime(omm) == expected
 
 
@@ -254,7 +254,7 @@ def test_perigee_altitude_of_the_iss() -> None:
     ("count", "expected"),
     [(0, []), (3, [0, 3, 6]), (10, list(range(10))), (12, list(range(10)))],
 )
-def test_spread(count: int, expected: list[int]) -> None:
+def test_spread_takes_count_items_evenly(count: int, expected: list[int]) -> None:
     assert snapshot.spread(list(range(10)), count) == expected
 
 

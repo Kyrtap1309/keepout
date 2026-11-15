@@ -15,22 +15,15 @@ never redistributed.
 
 ## Install
 
-keepout needs Python 3.11 or later. It is not on PyPI yet, so install it
-from GitHub:
+keepout needs Python 3.11 or later. It is not on PyPI yet:
 
 ```bash
 pip install "keepout[cli,store] @ git+https://github.com/Kyrtap1309/keepout"
 ```
 
-The `cli` extra adds the `keepout` command and the `store` extra the
-conjunction store (a SQLite file); the library needs neither. To run the
-examples that read files committed to the repository, clone it instead:
-
-```bash
-git clone https://github.com/Kyrtap1309/keepout
-cd keepout
-uv sync --extra cli --extra store
-```
+The extras (`cli`, `store`, `dashboard`, `validation`) and running the
+examples from a clone (`uv sync`) are in
+[Install](docs/index.md#install).
 
 ## Example
 
@@ -45,8 +38,9 @@ result = compute_pc(conjunction)  # picks Foster, Hall 3D-Nc or a maximum Pc
 print(result.method, f"{result.value:.2e}")  # hall3d 4.50e-02
 ```
 
-The same from the command line: screen three real satellites against the
-public catalog frozen in the repository, write a CDM per close approach,
+The same from the command line: screen three real satellites (a
+[fleet file](docs/synthetic.md#the-fleet-file)) against the public catalog
+frozen in the repository, write a CDM per close approach,
 then assess them.
 
 ```bash

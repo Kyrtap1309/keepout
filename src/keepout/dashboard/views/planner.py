@@ -36,7 +36,7 @@ from keepout.dashboard.widgets import (
 from keepout.errors import KeepoutError
 from keepout.figures import PROVENANCE_LABELS, RISK_LABELS, grid_figure
 from keepout.maneuver import BurnDirection
-from keepout.maneuver._words import (
+from keepout.maneuver.wording import (
     conflict_line,
     event_line,
     gap_lines,
@@ -109,9 +109,7 @@ def _read(ctx: DashboardContext, event_id: str, settings: Settings) -> _Planned 
     ValueError
         If a settings file cannot hold ``settings``.
     """
-    from keepout.store import open_store
-
-    with open_store(ctx.store_path, create=False) as store:
+    with ctx.store() as store:
         detail = store.plan_detail(event_id, settings)
     if detail is None:
         return None
@@ -147,10 +145,10 @@ def _submit(ctx: DashboardContext, event_id: str, settings: Settings) -> bool:
     bool
         Whether the submission went through (the page then runs again).
     """
-    from keepout.store import JobQueue, open_store
+    from keepout.store import JobQueue
 
     try:
-        with open_store(ctx.store_path, create=False) as store:
+        with ctx.store() as store:
             JobQueue(store).submit(event_id, settings)
     except (KeepoutError, ValueError) as exc:
         show_error(exc)

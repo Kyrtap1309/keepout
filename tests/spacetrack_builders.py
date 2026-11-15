@@ -40,8 +40,6 @@ PASSWORD: Final = "s3cret P@ss&w0rd%"  # noqa: S105
 
 CREDENTIALS: Final = Credentials(IDENTITY, PASSWORD)
 
-HOUR: Final = 3600.0
-
 Answer: TypeAlias = bytes | Response | Exception
 """A fake server's answer to a query: a body (HTTP 200), a response, or a
 failure to raise."""

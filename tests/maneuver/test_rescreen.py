@@ -409,6 +409,7 @@ def test_matched_approach_that_moved_away_is_not_closer() -> None:
     assert result.new_approaches == ()
 
 
+@functools.cache
 def repeating_plan() -> ManeuverPlan:
     """The plan of the first of the two approaches of 57062 and 63216."""
     fleet = Fleet(

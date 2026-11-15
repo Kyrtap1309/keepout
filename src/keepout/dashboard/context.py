@@ -22,14 +22,30 @@ from keepout.settings import Settings, load_settings
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
+    from keepout.store import Store
+
 __all__ = [
-    "AS_OF_VARIABLE",
-    "SETTINGS_VARIABLE",
-    "STORE_VARIABLE",
     "DashboardContext",
     "context_from_env",
+    "open_existing",
     "parse_as_of",
 ]
+
+
+def open_existing(store_path: Path) -> Store:
+    """The dashboard's store, opened as every page opens it: never created.
+
+    Use it as a context manager, which closes it.
+
+    Raises
+    ------
+    StoreError
+        If the store cannot be opened (:func:`keepout.store.open_store`
+        with ``create=False``).
+    """
+    from keepout.store import open_store
+
+    return open_store(store_path, create=False)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -54,6 +70,17 @@ class DashboardContext:
     settings: Settings
     as_of: Time
     as_of_fixed: bool
+
+    def store(self) -> Store:
+        """The store, opened (:func:`open_existing`); use it as a context
+        manager, which closes it.
+
+        Raises
+        ------
+        StoreError
+            If it cannot be opened.
+        """
+        return open_existing(self.store_path)
 
 
 def parse_as_of(text: str) -> Time:

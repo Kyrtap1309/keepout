@@ -25,7 +25,11 @@ from typing import TYPE_CHECKING, Final, NamedTuple
 
 import numpy as np
 
-from keepout._validation import require_at_least, require_positive
+from keepout._validation import (
+    require_at_least,
+    require_open_probability,
+    require_positive,
+)
 from keepout._workers import process_pool, resolve_workers
 from keepout.equinoctial import Orbits
 from keepout.orbits import EARTH_MU
@@ -323,8 +327,7 @@ def montecarlo(
         require_at_least(samples, 1, "samples")
     require_positive(rtol, "rtol")
     require_at_least(max_samples, 1, "max_samples")
-    if not 0.0 < confidence < 1.0:
-        raise ValueError(f"confidence must be in (0, 1), got {confidence}")
+    require_open_probability(confidence, "confidence")
     require_known_covariance(conjunction.unknown_covariance, "montecarlo")
     encounters = Encounters.locate(conjunction, window)
     return montecarlo_over_scan(

@@ -6,7 +6,6 @@ import json
 import os
 import platform
 import shutil
-import stat
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -20,7 +19,12 @@ import spacetrack_snapshot
 from astropy.time import Time
 from benchmark_runs import Comparison
 from generated import README, json_text, read_json
-from report_builders import assert_writes_then_checks, fixture_data, readme_with_markers
+from report_builders import (
+    assert_writes_then_checks,
+    fake_python,
+    fixture_data,
+    readme_with_markers,
+)
 from screening_data import fixture_by_number, load_fixture
 from screening_timing import Timing, timed
 
@@ -538,9 +542,8 @@ def compare_arguments(tmp_path: Path, base_python: str) -> list[str]:
     ]
 
 
-def fake_python(tmp_path: Path, cpu: float) -> str:
-    """An executable printing one measurement whatever it is asked."""
-    path = tmp_path / "fake-python"
+def base_python(tmp_path: Path, cpu: float) -> str:
+    """A base printing one measurement whatever it is asked."""
     measurement = {
         "wall": cpu,
         "cpu": cpu,
@@ -548,11 +551,7 @@ def fake_python(tmp_path: Path, cpu: float) -> str:
         "screened": 1,
         "objects": 1,
     }
-    path.write_text(
-        f"#!{sys.executable}\nprint({json.dumps(json.dumps(measurement))})\n"
-    )
-    path.chmod(path.stat().st_mode | stat.S_IXUSR)
-    return str(path)
+    return fake_python(tmp_path, measurement)
 
 
 def test_compare_main_against_a_faster_base_fails(
@@ -562,7 +561,7 @@ def test_compare_main_against_a_faster_base_fails(
 ) -> None:
     step_summary = tmp_path / "summary.md"
     monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(step_summary))
-    args = compare_arguments(tmp_path, fake_python(tmp_path, 1e-6))
+    args = compare_arguments(tmp_path, base_python(tmp_path, 1e-6))
     assert benchmark.main(args) == 1
     out = capsys.readouterr().out
     assert out.startswith(

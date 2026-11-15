@@ -22,12 +22,10 @@ from keepout.errors import KeepoutError
 def _context() -> DashboardContext:
     """The context of this run, its store checked to open; on an error, the
     message and a stopped page."""
-    from keepout.store import open_store
-
     try:
         context = context_from_env()
         # Refused without a change to the file if made by an older keepout.
-        open_store(context.store_path, create=False).close()
+        context.store().close()
     except (KeepoutError, ValueError) as exc:
         show_error(exc)
         st.stop()

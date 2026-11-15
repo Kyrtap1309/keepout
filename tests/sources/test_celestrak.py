@@ -36,11 +36,6 @@ SOCRATES_CSV = (
 
 
 @pytest.fixture
-def clock() -> Clock:
-    return Clock()
-
-
-@pytest.fixture
 def primed(tmp_path: Path, clock: Clock) -> None:
     """A copy of ``active`` in the cache at ``tmp_path``, downloaded at
     :data:`~web_builders.START`."""

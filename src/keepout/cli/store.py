@@ -297,7 +297,7 @@ def add_and_show(
     ------
     typer.Exit
         Without the ``store`` extra (status 1); with status 3 if an event
-        needs a manoeuvre.
+        needs a maneuver.
     """
     from keepout.store import CdmInput
 
@@ -329,7 +329,7 @@ def store_add(
     reported as already stored. The Pc of every CDM of these events is
     computed with the settings, unless the store has it, and each event is
     assessed as keepout assess does, with the store's event ids. Exits with
-    status 3 if at least one event's action is to manoeuvre.
+    status 3 if at least one event's action is to maneuver.
     """
     add_and_show(store, files, operator_settings(settings), as_json=as_json)
 
@@ -354,10 +354,10 @@ def store_upgrade(*, store: StorePath, as_json: JsonFlag = False) -> None:
 def store_rebuild(
     *, store: StorePath, settings: SettingsFile = None, as_json: JsonFlag = False
 ) -> None:
-    """Compute the Pc of every stored CDM that the store lacks for the
-    settings.
+    """Compute the stored CDMs' missing Pc for the settings.
 
-    Settings that compute Pc the same way (method, covariance policy,
+    Computes the Pc of every stored CDM that the store lacks for the
+    settings. Settings that compute Pc the same way (method, covariance policy,
     hard-body radius) share the stored Pc; the risk thresholds do not
     change them. Without hbr_m in the settings, a CDM without HBR is
     skipped, and the count of those skipped is printed.
@@ -389,10 +389,10 @@ def store_purge(
     yes: Yes = False,
     as_json: JsonFlag = False,
 ) -> None:
-    """Delete the events whose latest TCA is before a time, with their CDMs,
-    their Pc and the catalog copies no other CDM needs.
+    """Delete the events whose latest TCA is before a time.
 
-    Asks first, unless --yes is given.
+    Their CDMs and Pc go with them, as do the catalog copies no other CDM
+    needs. Asks first, unless --yes is given.
     """
     when = time_option(before, "--before")
     # A time years ahead is "dubious" to ERFA wherever it is formatted.

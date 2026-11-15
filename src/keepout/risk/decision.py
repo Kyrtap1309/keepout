@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
 from keepout._defaults import DECISION_POINT
-from keepout._text import days_text
+from keepout._text import days_text, pc_text
 from keepout._types import OrderedEnum
 from keepout._validation import require_positive
 from keepout.risk.observation import PC_FLOOR, PcObservation
@@ -102,14 +102,17 @@ class Decision:
 
 def _describe_latest(point: TrendPoint) -> str:
     """The latest point's Pc, level and time."""
-    return _with_qualifiers(f"latest Pc {point.value:.2e} is {point.level.key}", point)
+    return _with_qualifiers(
+        f"latest Pc {pc_text(point.value)} is {point.level.key}", point
+    )
 
 
 def _describe_before_failure(point: TrendPoint) -> str:
     """The point's Pc, level and time, as the latest observation with a Pc,
     followed by one without."""
     text = (
-        f"the latest observation with a Pc was {point.level.key}: Pc {point.value:.2e}"
+        f"the latest observation with a Pc was {point.level.key}: "
+        f"Pc {pc_text(point.value)}"
     )
     return _with_qualifiers(text, point)
 
@@ -162,7 +165,7 @@ def _red(
     if time_to_tca <= config.decision_point:
         within = f"within {decision_point_text}"
         return Decision(Action.MANEUVER, (*reasons, within, *concerns))
-    timing = f"before {decision_point_text}: prepare a manoeuvre"
+    timing = f"before {decision_point_text}: prepare a maneuver"
     return Decision(Action.PREPARE_MANEUVER, (*reasons, timing, *concerns))
 
 

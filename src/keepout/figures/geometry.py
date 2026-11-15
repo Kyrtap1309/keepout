@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Final
 
 import numpy as np
 
-from keepout._linalg import symmetric_part
+from keepout._linalg import sigma_axes, symmetric_part
 from keepout._types import FloatArray, read_only
 from keepout._validation import require_at_least, require_positive
 from keepout.frames import rtn_rotation
@@ -117,13 +117,7 @@ def geometry_figure(
     # TCA exactly, not position + 0.0 * velocity rounded.
     path[points // 2] = position
     unit = _unit_sphere(points)
-    eigenvalues, eigenvectors = np.linalg.eigh(covariance)
-    # The axes of the 3-sigma ellipsoid, as rows: 3·sqrt(λ) along each eigenvector.
-    axes = (
-        _SIGMA
-        * np.sqrt(np.clip(eigenvalues, 0.0, None))[:, np.newaxis]
-        * eigenvectors.T
-    )
+    axes = sigma_axes(covariance, _SIGMA)
     ellipsoid = _components(position + unit @ axes)
     sphere = _components(hbr * unit)
     read_only(path)

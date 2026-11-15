@@ -109,10 +109,13 @@ class CloseApproach:
         tca: Time = self.primary_state.epoch.utc
         return tca
 
-    @property
+    @cached_property
     def relative_motion(self) -> RelativeMotion:
-        """The secondary's motion relative to the primary at TCA, in GCRF."""
-        return relative_motion(self.primary_state, self.secondary_state)
+        """The secondary's motion relative to the primary at TCA, in GCRF
+        (computed on first use; read-only)."""
+        motion = relative_motion(self.primary_state, self.secondary_state)
+        read_only(*motion)
+        return motion
 
     @property
     def relative_position(self) -> FloatArray:

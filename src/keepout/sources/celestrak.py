@@ -185,7 +185,7 @@ def group_url(name: str) -> str:
     ValueError
         If ``name`` is not a group name: letters, digits and single hyphens.
     """
-    return f"{GP_URL}?GROUP={_group_name(name)}&FORMAT=CSV"
+    return _group_url(_group_name(name))
 
 
 def fetch_group(
@@ -233,18 +233,7 @@ def fetch_group(
     SourceFormatError
         If the download is not CelesTrak OMM CSV. Nothing is cached then.
     """
-    group = _group_name(name)
-    url = group_url(group)
-    target = _root(cache) / "gp" / f"{group}.csv"
-    omms, retrieval = _fetch(
-        url,
-        target,
-        omm_reader(loads_csv, url, "CelesTrak OMM CSV"),
-        max_age,
-        download,
-        now,
-    )
-    return CatalogPart(group, omms, retrieval)
+    return _fetch_group(_group_name(name), cache, max_age, download, now)
 
 
 def fetch_catalog(
@@ -296,10 +285,7 @@ def fetch_catalog(
     names = tuple(dict.fromkeys(_group_name(name) for name in groups))
     if not names:
         raise ValueError("no groups to fetch")
-    fetched = tuple(
-        fetch_group(name, cache=cache, max_age=max_age, download=download, now=now)
-        for name in names
-    )
+    fetched = tuple(_fetch_group(name, cache, max_age, download, now) for name in names)
     return Catalog.of(fetched)
 
 
@@ -346,6 +332,33 @@ def fetch_socrates(
         SOCRATES_URL, target, _read_socrates, max_age, download, now
     )
     return SocratesReport(text, retrieval)
+
+
+def _fetch_group(
+    group: str,
+    cache: Path | None,
+    max_age: float,
+    download: Downloader,
+    now: Callable[[], float],
+) -> CatalogPart:
+    """:func:`fetch_group` of a group name already checked and lower case
+    (:func:`_group_name`)."""
+    url = _group_url(group)
+    target = _root(cache) / "gp" / f"{group}.csv"
+    omms, retrieval = _fetch(
+        url,
+        target,
+        omm_reader(loads_csv, url, "CelesTrak OMM CSV"),
+        max_age,
+        download,
+        now,
+    )
+    return CatalogPart(group, omms, retrieval)
+
+
+def _group_url(group: str) -> str:
+    """:func:`group_url` of a group name already checked and lower case."""
+    return f"{GP_URL}?GROUP={group}&FORMAT=CSV"
 
 
 def _group_name(name: str) -> str:

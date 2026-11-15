@@ -17,6 +17,7 @@ from cli_builders import (
     usage_error,
     write_fleet,
 )
+from faults import recorded_runs
 from inline_snapshot import snapshot
 
 from keepout.cdm import kvn
@@ -60,7 +61,7 @@ TCA (UTC)         Objects        Miss (m)  CDMs        Pc  Level   Action \n\
 ──────────────────────────────────────────────────────────────────────────
 2026-10-06 19:36  52939 / 47826      1029     1  4.37e-08  green   ignore \n\
 2026-10-08 12:03  44476 / 55841      3647     1  7.38e-06  yellow  monitor
-5 element sets left out (stale, future epochs, SGP4 failures; --json lists them).
+5 element sets left out (5 stale; --json lists them).
 3befe6f1305d: monitor (latest Pc 7.38e-06 is yellow, 2.50 d before TCA; trend undetermined)
   diagnostic: 2-D Pc assumptions questionable: the encounter lasts about 2.51e+03 s, 2.9% of the primary's orbital period (limit 1%); a 3-D Pc may differ
   diagnostic: the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used
@@ -420,16 +421,7 @@ def test_screen_computes_and_stores_with_the_settings(tmp_path: Path) -> None:
 def test_screen_with_store_computes_each_pc_once(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from keepout.pc import api
-
-    runs: list[str] = []
-    real = api._compute
-
-    def counted(*args: Any) -> Any:
-        runs.append(args[1])
-        return real(*args)
-
-    monkeypatch.setattr(api, "_compute", counted)
+    runs = recorded_runs(monkeypatch)
     db = tmp_path / "keepout.db"
     result = keepout(*screen_fixture(tmp_path, "--store", str(db), "--json"))
     assert result.exit_code == ExitCode.OK

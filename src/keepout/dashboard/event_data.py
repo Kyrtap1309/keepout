@@ -11,8 +11,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from keepout.dashboard import plots
+from keepout.dashboard.context import open_existing
 from keepout.figures import encounter_figure, geometry_figure, trend_figure
-from keepout.risk import DEFAULT_DECISION_CONFIG, Provenance, assess, provenance
+from keepout.risk import DEFAULT_DECISION_CONFIG, Provenance, provenance
 from keepout.units import HOUR
 
 if TYPE_CHECKING:
@@ -22,7 +23,6 @@ if TYPE_CHECKING:
     import plotly.graph_objects as go
 
     from keepout.conjunction import Conjunction
-    from keepout.events import ConjunctionEvent
     from keepout.figures import GeometryFigure, TrendFigure
     from keepout.risk import Assessment, PcObservation
     from keepout.settings import Settings
@@ -48,23 +48,18 @@ class EventView:
 
     Parameters
     ----------
-    event
-        The event and its CDMs.
-    missing
-        The ``MESSAGE_ID`` of each CDM whose Pc is not computed, oldest first.
+    detail
+        The event as the store has it: its CDMs, which Pc are not computed
+        and its refresh jobs.
     observations
         The cached Pc observation of each CDM that has one, by ``MESSAGE_ID``.
     assessment
         The event's risk; ``None`` unless every Pc is computed.
-    refresh_jobs
-        The ids of the event's queued or running ``refresh`` jobs.
     """
 
-    event: ConjunctionEvent
-    missing: tuple[str, ...]
+    detail: EventDetail
     observations: Mapping[str, PcObservation]
     assessment: Assessment | None
-    refresh_jobs: tuple[int, ...]
 
 
 def view_of(detail: EventDetail, settings: Settings) -> EventView:
@@ -84,14 +79,10 @@ def view_of(detail: EventDetail, settings: Settings) -> EventView:
     EventView
         The view.
     """
-    complete = detail.complete
-    assessment = assess(complete, thresholds=settings.thresholds) if complete else None
     observations: dict[str, PcObservation] = {
         message_id: item for message_id, item in detail.observations if item is not None
     }
-    return EventView(
-        detail.event, detail.missing, observations, assessment, detail.refresh_jobs
-    )
+    return EventView(detail, observations, detail.assessment(settings.thresholds))
 
 
 def read_event(store_path: Path, event_id: str, settings: Settings) -> EventView | None:
@@ -118,9 +109,7 @@ def read_event(store_path: Path, event_id: str, settings: Settings) -> EventView
     CdmParseError, EventError
         If its stored CDMs no longer parse or make an event.
     """
-    from keepout.store import open_store
-
-    with open_store(store_path, create=False) as store:
+    with open_existing(store_path) as store:
         detail = store.detail(event_id, settings)
     return None if detail is None else view_of(detail, settings)
 
@@ -188,7 +177,7 @@ def latest_conjunction(view: EventView, settings: Settings) -> Conjunction:
     KeepoutError
         If the CDM's states or covariances cannot be used otherwise.
     """
-    conjunction = view.event.latest.conjunction(
+    conjunction = view.detail.event.latest.conjunction(
         combined_hard_body_radius=settings.combined_hard_body_radius,
         policy=settings.policy,
     )
@@ -212,7 +201,7 @@ def is_max_pc(view: EventView, conjunction: Conjunction) -> bool:
     bool
         Whether the plots leave out the covariance.
     """
-    latest = view.event.latest
+    latest = view.detail.event.latest
     observation = view.observations.get(latest.message_id)
     if (
         observation is not None

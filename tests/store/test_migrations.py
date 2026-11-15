@@ -1,6 +1,6 @@
 import sqlite3
 from pathlib import Path
-from typing import Final
+from typing import Any, Final, TypedDict
 
 import pytest
 from alembic import command
@@ -35,10 +35,28 @@ CDM = text(
 )
 
 
-def _schema(engine: Engine) -> dict[str, dict[str, object]]:
+ForeignKey = tuple[
+    str, tuple[str, ...], str, tuple[str, ...], tuple[tuple[str, Any], ...]
+]
+"""Name, columns, referred table and columns, options (``ondelete``...)."""
+
+
+class TableSchema(TypedDict):
+    """What SQLite reflection sees of a table."""
+
+    columns: list[tuple[str, str, bool, str | None]]
+    primary_key: list[str]
+    foreign_keys: list[ForeignKey]
+    indexes: list[tuple[str, tuple[str, ...], bool]]
+    """Name, columns, unique."""
+    unique: list[tuple[str, tuple[str, ...]]]
+    checks: list[tuple[str, str]]
+
+
+def _schema(engine: Engine) -> dict[str, TableSchema]:
     """Everything SQLite reflection sees of each table, comparable as text."""
     inspector = inspect(engine)
-    schema: dict[str, dict[str, object]] = {}
+    schema: dict[str, TableSchema] = {}
     for table in inspector.get_table_names():
         if table == "alembic_version":
             continue
@@ -96,7 +114,7 @@ def test_the_schema_holds_its_rules(tmp_path: Path) -> None:
     on_delete = {
         (table, fk[1]): dict(fk[4]).get("ondelete")
         for table, rules in schema.items()
-        for fk in rules["foreign_keys"]  # type: ignore[attr-defined]
+        for fk in rules["foreign_keys"]
     }
     assert on_delete == {
         ("cdms", ("event_id",)): "CASCADE",
@@ -107,7 +125,7 @@ def test_the_schema_holds_its_rules(tmp_path: Path) -> None:
         ("jobs", ("message_id",)): "CASCADE",
     }
     assert schema["cdms"]["checks"] == [("ck_cdms_format", "format IN ('kvn', 'xml')")]
-    indexes = {i[0] for rules in schema.values() for i in rules["indexes"]}  # type: ignore[attr-defined]
+    indexes = {i[0] for rules in schema.values() for i in rules["indexes"]}
     assert {
         "ix_cdms_catalog_id",
         "ix_catalog_files_catalog_id",
@@ -399,13 +417,12 @@ def test_the_dashboard_indexes(tmp_path: Path) -> None:
     indexes = {
         name: (columns, unique)
         for rules in schema.values()
-        for name, columns, unique in rules["indexes"]  # type: ignore[attr-defined]
+        for name, columns, unique in rules["indexes"]
     }
     assert indexes["ix_events_tca_max"] == (("tca_max",), False)
     assert indexes["ix_jobs_event_id_status"] == (("event_id", "status"), False)
     # Those the first revisions made already serve the dashboard's queries.
     assert indexes["ix_events_object1_object2_tca_min"][0][:2] == ("object1", "object2")
     assert indexes["ix_cdms_event_id_creation_date"][0] == ("event_id", "creation_date")
-    assert ("uq_results_message_id_key", ("message_id", "key")) in schema["results"][
-        "unique"
-    ]  # type: ignore[operator]
+    unique = schema["results"]["unique"]
+    assert ("uq_results_message_id_key", ("message_id", "key")) in unique

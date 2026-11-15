@@ -10,12 +10,17 @@ error isolation and fallback logic), the automatic window search
 :func:`keepout.pc._timeline.locate_auto` as :mod:`keepout.pc._encounters`
 calls it,
 the rate of a batch of times (``CollisionRate._rates``), the Clenshaw-Curtis
-orders of the time integral, the Monte Carlo batch size and the methods
-:func:`keepout.pc.compute_pc` falls back between.
+orders of the time integral, the Monte Carlo batch size, the methods
+:func:`keepout.pc.compute_pc` falls back between and the run of one method
+behind every :class:`~keepout.pc.PcComputation` (``api._compute``).
+
+It sits at the top of ``tests`` so that the tests of the Pc's callers (the
+maneuver planner) import it too.
 """
 
 import importlib
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, NamedTuple, Self, cast
 
 import numpy as np
@@ -23,12 +28,15 @@ import pytest
 from typing_extensions import override
 
 from keepout._types import BoolArray, FloatArray, IndexArray
-from keepout.errors import GeometryError
+from keepout.conjunction import Conjunction
+from keepout.errors import GeometryError, PcConvergenceError
+from keepout.pc import MethodChoice
 from keepout.pc import _auto as auto_module
 from keepout.pc import _encounters as encounters_module
 from keepout.pc import _overlap as overlap_module
 from keepout.pc import _quadrature as quadrature_module
 from keepout.pc import _rate as rate_module
+from keepout.pc import api as api_module
 from keepout.pc._orbit import OrbitUncertainty
 from keepout.pc._overlap import Gaussians
 from keepout.pc._quadrature import RateIntegral
@@ -307,3 +315,58 @@ def misleading_newton_search() -> ClosestBelow:
     it passes the closest approach at t = 0.1 (distance 1) but never settles
     there."""
     return _MisleadingLine(cast("Orbits", None), cast("Orbits", None)).closest_below
+
+
+Compute = Callable[[Conjunction, MethodChoice, Mapping[str, object]], PcResult]
+"""One run of a method with its options, as every
+:class:`~keepout.pc.PcComputation` makes it (``api._compute``)."""
+
+_REAL_COMPUTE: Compute = api_module._compute
+
+Run = tuple[str, dict[str, object]]
+"""A method run and its options."""
+
+
+def recorded_runs(monkeypatch: pytest.MonkeyPatch) -> list[Run]:
+    """The method and options of every Pc run from now on, the runs unchanged."""
+    runs: list[Run] = []
+
+    def spy(
+        conjunction: Conjunction, method: MethodChoice, options: Mapping[str, object]
+    ) -> PcResult:
+        runs.append((method, dict(options)))
+        return _REAL_COMPUTE(conjunction, method, options)
+
+    monkeypatch.setattr(api_module, "_compute", spy)
+    return runs
+
+
+@dataclass
+class HallFails:
+    """The Pc runs, but the next ``hall3d`` run raises after ``skip`` of them
+    (again once ``armed``); ``runs`` are the methods run."""
+
+    skip: int = 0
+    armed: bool = True
+    runs: list[str] = field(default_factory=list)
+
+    def __call__(
+        self,
+        conjunction: Conjunction,
+        method: MethodChoice,
+        options: Mapping[str, object],
+    ) -> PcResult:
+        self.runs.append(method)
+        if method == "hall3d" and self.armed:
+            if self.skip == 0:
+                self.armed = False
+                raise PcConvergenceError("Nc is not finite")
+            self.skip -= 1
+        return _REAL_COMPUTE(conjunction, method, options)
+
+
+def hall3d_failing(monkeypatch: pytest.MonkeyPatch, skip: int = 0) -> HallFails:
+    """Every Pc run goes through a :class:`HallFails` (returned) from now on."""
+    fails = HallFails(skip=skip)
+    monkeypatch.setattr(api_module, "_compute", fails)
+    return fails

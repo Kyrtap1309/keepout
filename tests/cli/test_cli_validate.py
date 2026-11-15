@@ -8,6 +8,7 @@ from cli_builders import keepout
 from inline_snapshot import snapshot
 
 from keepout.cli.output import ExitCode
+from keepout.cli.validate import VALIDATION_HINT
 from keepout.pc.result import PcResult
 from keepout.sources.cara import CARA_COMMIT
 from keepout.validation import cases as loading
@@ -80,7 +81,7 @@ def test_validate_fails_with_status_1_and_names_the_failures(
     assert result.stderr == "Error: 2 of 4 comparisons failed\n"
 
 
-def test_validate_json(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_validate_json_summarises_each_suite(monkeypatch: pytest.MonkeyPatch) -> None:
     use(monkeypatch, PASSING, FAILING)
     result = keepout("validate", "--workers", "1", "--json")
     assert result.exit_code == ExitCode.ERROR
@@ -169,3 +170,32 @@ def test_validate_needs_a_worker() -> None:
     result = keepout("validate", "--workers", "0")
     assert result.exit_code == ExitCode.USAGE
     assert "0 is not in the range x>=1" in result.stderr
+
+
+@pytest.mark.parametrize("module", ["openpyxl", "xlrd"])
+def test_validate_without_the_extra_says_how_to_install_it(
+    monkeypatch: pytest.MonkeyPatch, module: str
+) -> None:
+    def load_all(cache: Path | None = None) -> list[ValidationCase]:
+        raise ModuleNotFoundError(f"No module named '{module}'", name=module)
+
+    monkeypatch.setattr(loading, "load_all", load_all)
+    result = keepout("validate", "--workers", "1")
+    assert result.exit_code == ExitCode.ERROR
+    assert result.stderr == f"Error: {VALIDATION_HINT}\n"
+    assert result.stdout == ""
+
+
+def test_validate_reraises_another_missing_module(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def load_all(cache: Path | None = None) -> list[ValidationCase]:
+        raise ModuleNotFoundError("No module named 'other'", name="other")
+
+    monkeypatch.setattr(loading, "load_all", load_all)
+    with pytest.raises(ModuleNotFoundError):
+        keepout("validate", "--workers", "1")
+
+
+def test_the_validation_hint_names_the_extra() -> None:
+    assert 'pip install "keepout[cli,validation] @ git+' in VALIDATION_HINT

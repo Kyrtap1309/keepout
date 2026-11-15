@@ -159,7 +159,7 @@ def show_assessed(
     """The output of ``keepout assess`` and ``keepout store add``: the events
     table, the counts of actions and why each event needs more than
     ``ignore``; then an exit with :attr:`ExitCode.MANEUVER` if one needs a
-    manoeuvre.
+    maneuver.
 
     Parameters
     ----------
@@ -178,7 +178,7 @@ def show_assessed(
     ------
     typer.Exit
         With :attr:`ExitCode.MANEUVER` if at least one event's action is to
-        manoeuvre.
+        maneuver.
     """
     from keepout.risk import Action
 
@@ -212,7 +212,7 @@ def show_assessed(
     text += reasons(assessed, Action.MONITOR)
     if maneuver:
         text.append(
-            "At least one event needs a manoeuvre "
+            "At least one event needs a maneuver "
             f"(exit status {int(ExitCode.MANEUVER)})."
         )
     show(

@@ -6,6 +6,7 @@ from typing import Any
 
 import numpy as np
 
+from keepout._types import FloatArray
 from keepout.dashboard import plots
 from keepout.figures import (
     LOWEST_LOG_PC,
@@ -192,7 +193,7 @@ def test_geometry_draws_path_ellipsoid_and_sphere() -> None:
 
 def _panel(
     direction: BurnDirection,
-    log_pc: np.ndarray,
+    log_pc: FloatArray,
     minimum: tuple[float, float] | None = (2.0, 0.03),
 ) -> GridPanel:
     return GridPanel(

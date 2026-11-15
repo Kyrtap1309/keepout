@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import enum
 import functools
-from typing import TYPE_CHECKING, Any, TypeAlias, TypeVar
+from typing import TYPE_CHECKING, TypeAlias, TypeVar
 
 import numpy as np
 import numpy.typing as npt
@@ -75,7 +75,7 @@ class OrderedEnum(enum.Enum):
         return self.name.lower()
 
 
-def read_only(*arrays: npt.NDArray[Any]) -> None:
+def read_only(*arrays: npt.NDArray[np.generic]) -> None:
     """The ``arrays``, made read-only in place."""
     for array in arrays:
         array.flags.writeable = False

@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Final
 
+from keepout.dashboard.context import open_existing
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -53,9 +55,7 @@ def read_page(
     StoreError
         If the store cannot be opened or read.
     """
-    from keepout.store import open_store
-
-    with open_store(store_path, create=False) as store:
+    with open_existing(store_path) as store:
 
         def read(start: int) -> SummaryPage:
             return store.summaries(

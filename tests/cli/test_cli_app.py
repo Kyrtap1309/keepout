@@ -24,7 +24,7 @@ from keepout.cli.output import (
 from keepout.errors import CdmParseError, SourceUnavailable
 
 
-def test_exit_codes() -> None:
+def test_exit_codes_keep_their_documented_values() -> None:
     assert {code.name: int(code) for code in ExitCode} == {
         "OK": 0,
         "ERROR": 1,
@@ -34,7 +34,7 @@ def test_exit_codes() -> None:
     }
 
 
-def test_version() -> None:
+def test_version_prints_the_package_version() -> None:
     result = keepout("--version")
     assert result.exit_code == ExitCode.OK
     assert result.stdout == f"keepout {package.__version__}\n"
@@ -176,7 +176,7 @@ def test_show_refuses_values_json_cannot_hold() -> None:
         show({"pc": math.nan}, as_json=True)
 
 
-def test_plural() -> None:
+def test_plural_uses_the_singular_only_for_one() -> None:
     assert plural(1, "event") == "1 event"
     assert plural(0, "event") == "0 events"
     assert plural(2, "approach", "approaches") == "2 approaches"
@@ -195,7 +195,7 @@ def test_plural() -> None:
         (90.0, "90 s"),
     ],
 )
-def test_duration_words(seconds: float, words: str) -> None:
+def test_a_duration_is_said_in_words(seconds: float, words: str) -> None:
     assert duration_words(seconds) == words
 
 

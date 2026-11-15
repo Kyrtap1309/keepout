@@ -28,7 +28,7 @@ from keepout.cli.options import (
     CacheDir,
     HardBodyRadius,
     JsonFlag,
-    SettingsFile,
+    OverriddenSettingsFile,
     SourceOption,
     Workers,
     operator_settings,
@@ -195,7 +195,7 @@ def maneuver_command(
     burn_before: BurnBefore = None,
     dv: DeltaV = None,
     hbr: HardBodyRadius = None,
-    settings: SettingsFile = None,
+    settings: OverriddenSettingsFile = None,
     catalog: CatalogFile = None,
     source: SourceOption = None,
     workers: Workers = None,
@@ -574,7 +574,7 @@ def _one_event(events: Sequence[ConjunctionEvent]) -> ConjunctionEvent:
 
 def _refusal(outcome: ManeuverOutcome) -> str:
     """The line saying why no burn can be recommended."""
-    from keepout.maneuver._words import refusal
+    from keepout.maneuver.wording import refusal
 
     return f"{refusal(outcome)} (exit status {int(ExitCode.NO_SAFE_BURN)})."
 
@@ -707,7 +707,7 @@ def _rescreen_lines(
     direction: BurnDirection, result: RescreenResult, secondary: str, label: str
 ) -> list[str]:
     """What the re-screen of a burn found, for people."""
-    from keepout.maneuver._words import (
+    from keepout.maneuver.wording import (
         conflict_line,
         event_line,
         rescreen_head,
@@ -759,6 +759,6 @@ def _summary(outcome: ManeuverOutcome) -> list[RenderableType]:
                 burn.direction, burn.rescreen, secondary, catalog_label
             )
         ]
-    from keepout.maneuver._words import gap_lines
+    from keepout.maneuver.wording import gap_lines
 
     return [head, _burns_table(outcome), *gap_lines(outcome), *notes, *rescreens]

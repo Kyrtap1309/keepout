@@ -111,7 +111,7 @@ def test_the_label_is_not_part_of_equality() -> None:
     assert ScreeningVolume.sphere(5e3) != ScreeningVolume(5e3, 5e3, 5.1e3)
 
 
-def test_presets() -> None:
+def test_the_presets_are_the_documented_volumes() -> None:
     assert (
         DEFAULT_VOLUME
         == ScreeningVolume.sphere(5e3)
@@ -384,7 +384,7 @@ def test_a_volume_rule_must_return_a_volume() -> None:
         volume_for(lambda omm: 5e3, BY_NUMBER[31631])  # type: ignore[arg-type,return-value]
 
 
-def test_volumes_pickle() -> None:
+def test_a_volume_survives_pickling() -> None:
     volume = SFS_HANDBOOK_VOLUMES[SfsRegime.LEO_2]
     copy = pickle.loads(pickle.dumps(volume))
     assert copy == volume

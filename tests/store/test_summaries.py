@@ -2,6 +2,7 @@
 
 import astropy.units as u
 import pytest
+from builders import counting_parses
 from store_builders import (
     FOSTER,
     TCA,
@@ -239,14 +240,7 @@ def test_summary_of_an_assumed_covariance_reads_its_cdm(
 ) -> None:
     store.ingest([_assumed("A", comments)])
     store.refresh(FOSTER)
-    parsed: list[str] = []
-    loads = keepout.cdm.loads
-
-    def counted(text: str) -> Cdm:
-        parsed.append(text)
-        return loads(text)
-
-    monkeypatch.setattr(keepout.cdm, "loads", counted)
+    parsed = counting_parses(monkeypatch)
     (item,) = store.summaries(FOSTER, as_of=BEFORE).items
     assert item.latest is not None
     assert item.latest.assumed_covariance

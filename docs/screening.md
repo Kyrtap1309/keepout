@@ -358,22 +358,48 @@ filter or sieve drops an approach the brute-force search finds.
       2*R* + *V h* (*R* the volume's bounding radius) cannot come within *R*
       in between.
     - **Chord sieve.** With *A* a bound on the relative acceleration (the
-      gravity gradient over the largest range, 5 % added for the zonal terms,
-      plus twice the 1 m/s² bound on the other accelerations), the relative position stays within *A h*²/8
+      gravity gradient, 2μ/*r*³ at the lowest radius *r* on the segment
+      joining the objects, 5 % added for the zonal terms, times the largest
+      range over the interval, or at most the sum of both gravities; plus
+      twice the 1 m/s² bound on the other accelerations: drag, the Sun and
+      Moon, SGP4's own terms), the relative position stays within *A h*²/8
       of the straight line between its two end points; if that line does not
-      come within *R* + *A h*²/8 of the primary, neither does the pair.
+      come within *R* + *A h*²/8 of the primary, neither does the pair. The
+      largest range is the smaller of the speed sieve's bound,
+      (|ρ*a*| + |ρ*b*| + *V h*)/2, and the chord's own,
+      max(|ρ*a*|, |ρ*b*|) + *A h*²/8.
 
     In an interval that passes, a minimum of the range is a root of
     ρ·dρ/dt (ρ the relative position), found with Brent's method to 1 µs.
     dρ/dt comes from positions by a central difference, not from SGP4's
     velocities. SGP4's velocity is not exactly the derivative of its position
     (by up to 12 m/s), which would move the TCA of a slow pair by seconds. The
-    states reported at TCA are SGP4's own, velocities included.
+    states reported at TCA are SGP4's own, velocities included. Within two
+    difference steps of the window's ends, where a central difference would
+    take positions outside the window, a one-sided fourth-order difference
+    over five positions inside it is used instead: an SGP4 error just
+    outside the window (an object decaying a second after it) is not the
+    object's.
 
-    The range of a co-orbital or formation-flying pair can change too slowly
-    over an interval for the grid to decide. Such an interval is resampled
-    every 10 s. A minimum and a maximum of the range less than
-    10 s apart are not told apart there.
+    ρ·dρ/dt is increasing over an interval when the relative velocity, which
+    stays within *A h*/2 of the chord velocity *c* = (ρ*b* − ρ*a*)/*h*,
+    satisfies (|*c*| − *A h*/2)² > ρ*max* *A* (ρ*max* the largest range). The
+    interval then holds a minimum exactly when ρ·dρ/dt goes from negative
+    at its start to non-negative at its end. Over a week of the public
+    catalog (20 LEO primaries, a 5 km sphere, the default step), every
+    interval in which the pair moves faster than 0.5 km/s is decided this
+    way. The range of a co-orbital or formation-flying pair can change too
+    slowly for that. Such an interval is resampled every 10 s, and each
+    sign change between the samples is a minimum. A minimum and a maximum
+    of the range less than 10 s apart are not told apart there (on the
+    frozen catalog the closest are 75 s apart).
+
+    An SGP4 error while an interval is refined loses that interval's minima
+    only; the pair's other intervals are refined as if it had none. Each
+    interval, and each failure found while refining it, is decided from
+    its own pair's states only, so the result does not depend on how the
+    grid is cut into chunks (`max_states`) or the catalog into
+    [workers](#workers).
 
 ### What counts as an approach
 

@@ -42,12 +42,12 @@ import socket
 import threading
 import time
 import traceback
-from collections.abc import Callable, Generator
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, Protocol, TypeAlias, cast
 
 from keepout._text import duration_words
-from keepout._workers import ONE_THREAD
+from keepout._workers import ONE_THREAD, environment
 from keepout.errors import KeepoutError, StoreError
 from keepout.store.db import open_store
 from keepout.store.jobs import LEASE_SECONDS, Job, JobQueue
@@ -224,7 +224,13 @@ def run_worker(
         time_limit=time_limit,
     )
     ran = 0
-    with _one_thread(), open_store(path, create=False) as store:
+    # ONE_THREAD unless set already, while the worker runs: a child spawned
+    # meanwhile inherits it, so its numerical libraries run on one thread
+    # and do not compete with the processes of its re-screen.
+    with (
+        environment(ONE_THREAD, override=False),
+        open_store(path, create=False) as store,
+    ):
         queue = JobQueue(store)
         while not stop.is_set():
             job = queue.claim(name, lease=lease)
@@ -242,27 +248,6 @@ def run_worker(
             if supervisor.run(queue, job) is _Run.RAN:
                 ran += 1
     return ran
-
-
-@contextlib.contextmanager
-def _one_thread() -> Generator[None]:
-    """:data:`~keepout._workers.ONE_THREAD` in this process's environment
-    while in the context, unless set already; restored on the way out.
-
-    A child spawned meanwhile inherits it. Its numerical libraries then run
-    on one thread and do not compete with the processes of its re-screen.
-    """
-    saved = {name: os.environ.get(name) for name in ONE_THREAD}
-    for name, value in ONE_THREAD.items():
-        os.environ.setdefault(name, value)
-    try:
-        yield
-    finally:
-        for name, before in saved.items():
-            if before is None:
-                os.environ.pop(name, None)
-            else:
-                os.environ[name] = before
 
 
 def _next_step(

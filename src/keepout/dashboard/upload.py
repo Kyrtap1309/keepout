@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Final, NamedTuple
 
 import keepout.cdm
 from keepout._environment import MAX_UPLOAD_MB
-from keepout.errors import CdmParseError, KeepoutError
+from keepout.errors import CdmParseError, KeepoutError, StoreError
 from keepout.store import CdmInput, IngestReport, JobQueue
 
 if TYPE_CHECKING:
@@ -36,20 +36,18 @@ __all__ = [
     "ingest_upload",
 ]
 
-MAX_FILE_BYTES: Final = MAX_UPLOAD_MB * 1_000_000
+MAX_FILE_BYTES: Final = MAX_UPLOAD_MB * 1024 * 1024
 """Most bytes an uploaded file holds, and most its data holds once
 decompressed if it is gzip data (:func:`keepout.cdm.decode_text`):
-:data:`keepout._environment.MAX_UPLOAD_MB`, which Streamlit's uploader
-enforces too, checked again here for gzip data."""
+:data:`keepout._environment.MAX_UPLOAD_MB` in Streamlit's MB of 2^20
+bytes, the limit its uploader enforces too, checked again here for gzip
+data."""
 
 MAX_FILES: Final = 50
 """Most files one upload holds."""
 
 ORIGIN_PREFIX: Final = "upload:"
 """What the origin of an uploaded CDM starts with, before the file's name."""
-
-_TRAILING: Final = ",;:"
-"""What may follow a word of a store error's message."""
 
 
 class UploadError(NamedTuple):
@@ -59,8 +57,8 @@ class UploadError(NamedTuple):
     ----------
     file
         The name of the file it is of; ``None`` when it is not of one file
-        (too many files, a store error naming none of the uploaded
-        ``MESSAGE_ID``, a job that could not be queued).
+        (too many files, a store error of no uploaded CDM, a job that could
+        not be queued).
     message
         The error, not repeating the file's name.
     """
@@ -107,12 +105,13 @@ def _parsed(
 
 
 def _named(error: KeepoutError, messages: Sequence[CdmInput]) -> UploadError:
-    """A store error, of the first file whose ``MESSAGE_ID`` is a word of
-    its message, else of no file."""
+    """An ingest error, of the first file of the CDM it names
+    (:attr:`StoreError.message_id <keepout.errors.StoreError.message_id>`),
+    else of no file."""
     text = str(error)
-    words = {word.rstrip(_TRAILING) for word in text.split()}
+    message_id = error.message_id if isinstance(error, StoreError) else None
     for message in messages:
-        if message.cdm.message_id in words:
+        if message_id is not None and message.cdm.message_id == message_id:
             return UploadError(message.origin.removeprefix(ORIGIN_PREFIX), text)
     return UploadError(None, text)
 

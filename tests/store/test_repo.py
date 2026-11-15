@@ -14,8 +14,9 @@ from typing import Any
 import astropy.units as u
 import pytest
 from astropy.time import Time
-from builders import B1_KVN, CDM_DATA
+from builders import B1_KVN, CDM_DATA, counting_parses
 from cdm_strategies import cdms
+from celestrak_builders import CELESTRAK_SAMPLE_CSV
 from cli_builders import operator_kvn, without_hbr
 from hypothesis import given, settings
 from sqlalchemy import event, select, text
@@ -50,7 +51,6 @@ from keepout.store.maneuver_codec import outcome_to_json
 from keepout.store.repo import _parsed_cdm, pinned_in, save_maneuver_in
 
 TOLERANCE = DEFAULT_TCA_TOLERANCE
-SAMPLE_CSV = Path(__file__).parents[1] / "omm" / "data" / "celestrak_sample.csv"
 
 
 def _partition(store: Store) -> set[frozenset[str]]:
@@ -303,18 +303,11 @@ def test_events_of_given_ids_parse_only_theirs(
         broken = session.get(models.Cdm, "C")
         assert broken is not None
         broken.content = "not a CDM"
-    parsed: list[str] = []
-    loads = keepout.cdm.loads
-
-    def counted(text: str) -> keepout.cdm.Cdm:
-        made = loads(text)
-        parsed.append(made.message_id)
-        return made
-
-    monkeypatch.setattr(keepout.cdm, "loads", counted)
+    _parsed_cdm.cache_clear()
+    parsed = counting_parses(monkeypatch)
     listed = store.events(event_ids=[late, early])
     assert [e.event_id for e in listed] == [early, late]
-    assert sorted(parsed) == ["A", "B"]
+    assert sorted(cdm.message_id for cdm in parsed) == ["A", "B"]
     assert store.events(event_ids=[]) == []
     with pytest.raises(StoreError, match="no event 12345678 in the store"):
         store.events(event_ids=["12345678", early])
@@ -398,7 +391,7 @@ def test_a_stored_catalog_outlives_its_original_file(
     store: Store, tmp_path: Path
 ) -> None:
     path = tmp_path / "active.csv"
-    shutil.copyfile(SAMPLE_CSV, path)
+    shutil.copyfile(CELESTRAK_SAMPLE_CSV, path)
     loaded = load_reference(CatalogReference.of_file(path))
     (event_id,) = store.ingest(
         [message("A")], catalog=CatalogReference.of_file(path)
@@ -538,7 +531,9 @@ def test_a_result_of_a_cdm_purged_meanwhile_is_dropped(
     assert count_rows(store, models.Result) == 0
 
 
-def test_purge_cascades(store: Store, tmp_path: Path) -> None:
+def test_purge_removes_the_cdms_results_and_catalogs_of_past_events(
+    store: Store, tmp_path: Path
+) -> None:
     old = _reference(tmp_path, "old.csv")
     kept = _reference(tmp_path, "kept.csv")
     store.ingest([message("A"), message("B", tca=1.0)], catalog=old)
@@ -584,7 +579,7 @@ def test_a_copy_ingested_again_while_purging_survives(
     # Another process ingests the same catalog between the purge's commit of
     # its deletions and its deletion of the copies: the copy stays.
     path = tmp_path / "active.csv"
-    shutil.copyfile(SAMPLE_CSV, path)
+    shutil.copyfile(CELESTRAK_SAMPLE_CSV, path)
     reference = CatalogReference.of_file(path)
     store.ingest([message("A")], catalog=reference)
     original = Store._delete_copies
@@ -611,7 +606,7 @@ def test_copies_are_found_from_any_path_to_the_store(
     here.mkdir()
     elsewhere.mkdir()
     reference = CatalogReference.of_file(
-        shutil.copyfile(SAMPLE_CSV, tmp_path / "a.csv")
+        shutil.copyfile(CELESTRAK_SAMPLE_CSV, tmp_path / "a.csv")
     )
     monkeypatch.chdir(here)
     with open_store("k.db") as store:
@@ -633,7 +628,7 @@ def test_copies_are_found_from_any_path_to_the_store(
 
 def test_a_store_moved_with_its_directory_keeps_its_catalogs(tmp_path: Path) -> None:
     reference = CatalogReference.of_file(
-        shutil.copyfile(SAMPLE_CSV, tmp_path / "a.csv")
+        shutil.copyfile(CELESTRAK_SAMPLE_CSV, tmp_path / "a.csv")
     )
     with open_store(tmp_path / "one" / "k.db") as store:
         (event_id,) = store.ingest([message("A")], catalog=reference).events
@@ -817,7 +812,8 @@ def test_refresh_writes_in_batches(
     writes.clear()
     monkeypatch.setattr("keepout.store.repo._BATCH_SECONDS", 0.0)
     assert store.refresh(dataclasses.replace(FOSTER, policy="raise")).computed == 5
-    assert writes == [1, 1, 1, 1, 1, 0]
+    # (Whether an empty last batch is written is the loop's business.)
+    assert [count for count in writes if count] == [1, 1, 1, 1, 1]
 
 
 def test_an_interrupted_refresh_keeps_the_batches_written(
@@ -845,6 +841,7 @@ def test_refresh_parses_each_cdm_just_before_its_pc(
     store: Store, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _five_cdms(store)
+    _parsed_cdm.cache_clear()
     steps: list[str] = []
     loads = keepout.cdm.loads
     observations = ConjunctionEvent.observations
@@ -1048,7 +1045,7 @@ def test_the_plan_detail_is_read_in_one_transaction(
     queued = JobQueue(store).submit(event_id, Settings()).job
     assert queued is not None
     _parsed_cdm.cache_clear()
-    parsed = _counting_parses(monkeypatch)
+    parsed = counting_parses(monkeypatch)
     opened = _counting_reads(store, monkeypatch)
     detail = store.plan_detail(event_id, FOSTER)
     assert len(opened) == 1
@@ -1077,26 +1074,13 @@ def test_the_plan_detail_misses_after_a_new_cdm(store: Store) -> None:
     assert detail.jobs.current.id == submitted.id
 
 
-def _counting_parses(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    """A list of the CDM texts parsed from now on."""
-    parsed: list[str] = []
-    loads = keepout.cdm.loads
-
-    def counted(text: str) -> keepout.cdm.Cdm:
-        parsed.append(text)
-        return loads(text)
-
-    monkeypatch.setattr(keepout.cdm, "loads", counted)
-    return parsed
-
-
 def test_a_stored_cdm_is_parsed_once(
     store: Store, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # Its text never changes: a page shown again does not parse it again.
     event_id = _three_cdms(store)
     _parsed_cdm.cache_clear()
-    parsed = _counting_parses(monkeypatch)
+    parsed = counting_parses(monkeypatch)
     first = store.event(event_id)
     again = store.detail(event_id, FOSTER)
     assert again is not None

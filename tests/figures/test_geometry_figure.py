@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 from builders import TYPICAL_HEAD_ON, object_state
 
+from keepout._types import FloatArray
 from keepout.conjunction import Conjunction
 from keepout.figures import geometry_figure
 from keepout.frames import rtn_rotation
@@ -16,7 +17,7 @@ RELATIVE_POSITION = np.array([30.0, -40.0, 50.0])
 RELATIVE_VELOCITY = np.array([100.0, -14000.0, 300.0])
 
 
-def _conjunction(rtn_covariance: np.ndarray) -> Conjunction:
+def _conjunction(rtn_covariance: FloatArray) -> Conjunction:
     """A conjunction with the given combined position covariance in the
     primary's RTN, all on the primary."""
     primary = object_state(

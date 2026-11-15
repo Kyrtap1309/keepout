@@ -29,7 +29,7 @@ def classify(observation: PcObservation, limits: Thresholds | None = None) -> Ri
         (1.0, RiskLevel.RED),
     ],
 )
-def test_default_levels(pc: float, level: RiskLevel) -> None:
+def test_the_default_thresholds_give_each_level(pc: float, level: RiskLevel) -> None:
     assert classify(seen(pc)) is level
 
 
@@ -49,7 +49,7 @@ def test_conservative_basis_uses_the_upper_end_of_an_interval() -> None:
     assert classify(observation, Thresholds(basis="estimate")) is RiskLevel.YELLOW
 
 
-def test_custom_thresholds() -> None:
+def test_custom_thresholds_move_the_level_boundaries() -> None:
     limits = Thresholds(green_below=1e-6, red_from=1e-3)
     assert classify(seen(5e-7), limits) is RiskLevel.GREEN
     assert classify(seen(1e-6), limits) is RiskLevel.YELLOW

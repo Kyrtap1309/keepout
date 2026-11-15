@@ -12,8 +12,10 @@ from typing import TYPE_CHECKING, TypeVar
 
 if TYPE_CHECKING:
     from astropy.time import Time
+    from typing_extensions import TypeIs
 
 __all__ = [
+    "is_number",
     "is_probability",
     "is_single_line",
     "non_negative_float",
@@ -52,6 +54,12 @@ def require_non_negative(value: float, name: str) -> None:
     """
     if not (math.isfinite(value) and value >= 0.0):
         raise ValueError(f"{name} must be finite and >= 0, got {value}")
+
+
+def is_number(value: object) -> TypeIs[int | float]:
+    """Whether ``value`` is an ``int`` or a ``float``; a ``bool`` is not a
+    number here."""
+    return isinstance(value, int | float) and not isinstance(value, bool)
 
 
 def is_probability(value: float) -> bool:

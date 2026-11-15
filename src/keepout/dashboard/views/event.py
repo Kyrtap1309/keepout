@@ -90,7 +90,7 @@ def _provenance(observation: PcObservation, cdm: Cdm) -> Provenance:
 def _header(data: EventView) -> None:
     """The event's objects, its TCA, the latest Pc with its provenance and
     the risk with the recommended action."""
-    event = data.event
+    event = data.detail.event
     latest = event.latest
     st.markdown(
         f"**{literal(event.primary_id)} / {literal(event.secondary_id)}** · TCA "
@@ -114,10 +114,10 @@ def _header(data: EventView) -> None:
 def _compute(ctx: DashboardContext, event_id: str) -> None:
     """Queue the refresh of the event's missing Pc (or find the one queued)
     and keep its job for the page; every Pc cached meanwhile reruns it."""
-    from keepout.store import JobQueue, open_store
+    from keepout.store import JobQueue
 
     try:
-        with open_store(ctx.store_path, create=False) as store:
+        with ctx.store() as store:
             submission = JobQueue(store).submit_refresh(event_id, ctx.settings)
     except (KeepoutError, ValueError) as exc:
         show_error(exc)
@@ -129,13 +129,13 @@ def _compute(ctx: DashboardContext, event_id: str) -> None:
 
 def _not_computed(ctx: DashboardContext, data: EventView) -> None:
     """Which Pc are not computed, and the button that queues them."""
-    missing = data.missing
+    event, missing = data.detail.event, data.detail.missing
     st.warning(
         f"Pc {NOT_COMPUTED} for {len(missing)} of "
-        f"{plural(len(data.event.cdms), 'CDM')} ({literal(', '.join(missing))}): "
+        f"{plural(len(event.cdms), 'CDM')} ({literal(', '.join(missing))}): "
         "the trend and risk are shown once a worker has computed them."
     )
-    event_id = data.event.event_id
+    event_id = event.event_id
     if st.button("Compute", key=f"event-compute-{event_id}"):
         _compute(ctx, event_id)
 
@@ -143,8 +143,8 @@ def _not_computed(ctx: DashboardContext, data: EventView) -> None:
 def _jobs(ctx: DashboardContext, data: EventView) -> None:
     """The status of the event's refresh jobs: those the store has queued
     or running, and the one this session queued (also once it ended)."""
-    queued = state(refresh_job_key(data.event.event_id), int)
-    ids = list(data.refresh_jobs)
+    queued = state(refresh_job_key(data.detail.event.event_id), int)
+    ids = list(data.detail.refresh_jobs)
     if queued is not None and queued not in ids:
         ids.append(queued)
     if ids:
@@ -155,7 +155,7 @@ def _trend(ctx: DashboardContext, data: EventView) -> None:
     """The Pc against the hours to TCA with the thresholds and the decision
     point, and its data; or what is not computed."""
     st.subheader("Pc trend")
-    if data.missing:
+    if data.detail.missing:
         _not_computed(ctx, data)
     _jobs(ctx, data)
     figure = trend_of(data, ctx.settings)
@@ -166,7 +166,7 @@ def _trend(ctx: DashboardContext, data: EventView) -> None:
         return
     st.plotly_chart(trend_plot(figure))
     # Assessed: every CDM has its observation.
-    cdms = {cdm.message_id: cdm for cdm in data.event.cdms}
+    cdms = {cdm.message_id: cdm for cdm in data.detail.event.cdms}
     origins = [
         PROVENANCE_LABELS[_provenance(data.observations[label], cdms[label])]
         if label in cdms
@@ -227,7 +227,7 @@ def _cdms(data: EventView) -> None:
     st.subheader("CDMs")
     table_header(COLUMNS)
     levels = _levels(data)
-    for cdm in data.event.cdms:
+    for cdm in data.detail.event.cdms:
         _cdm_row(data, cdm, levels.get(cdm.message_id))
 
 
@@ -235,7 +235,7 @@ def _conjunction(ctx: DashboardContext, data: EventView) -> Conjunction | None:
     """The latest CDM's conjunction with the settings' hard-body radius (or
     the CDM's), its encounter plane checked; ``None``, with the reason
     shown, if there is none."""
-    latest = data.event.latest
+    latest = data.detail.event.latest
     try:
         conjunction = latest_conjunction(data, ctx.settings)
     except HardBodyRadiusError:
@@ -258,7 +258,7 @@ def _encounter(conjunction: Conjunction, *, max_pc: bool) -> None:
     plane = conjunction.plane
     hbr = conjunction.combined_hard_body_radius
     if max_pc:
-        st.caption("no covariance: max-Pc")
+        st.caption("No covariance: the Pc shown is an upper bound (maximum Pc).")
     st.plotly_chart(encounter_plot(conjunction, max_pc=max_pc))
     sigmas = np.sqrt(np.clip(np.linalg.eigvalsh(plane.covariance), 0.0, None))
     x, z = plane.miss_vector.item(0), plane.miss_vector.item(1)
@@ -305,7 +305,7 @@ def _geometry(conjunction: Conjunction, *, max_pc: bool) -> None:
 def _latest_geometry(ctx: DashboardContext, data: EventView) -> None:
     """The encounter plane and the geometry at TCA of the latest CDM, or
     why they cannot be drawn."""
-    latest = data.event.latest
+    latest = data.detail.event.latest
     st.caption(
         "Encounter plane and geometry at TCA of the latest CDM, "
         f"{literal(latest.message_id)}."

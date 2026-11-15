@@ -21,7 +21,7 @@ from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final, TypeAlias, TypedDict
+from typing import Final, TypeAlias, TypedDict, TypeVar
 
 from generated import (
     README,
@@ -56,6 +56,9 @@ from keepout.validation.criteria import (
 from keepout.validation.evaluation import Outcome, evaluate
 
 TOOL: Final = "tools/validation_report.py"
+
+_A = TypeVar("_A")
+_B = TypeVar("_B")
 
 PAPER: Final = BoundCriterion(relative=1e-3)
 """Agreement with Alfano's published values (as in CARA's own tests). The
@@ -349,6 +352,11 @@ class RecordJson(TypedDict):
     rows: list[RowJson]
 
 
+def _list(pair: tuple[_A, _B] | None) -> list[_A | _B] | None:
+    """A pair as a JSON list; ``None`` stays ``None``."""
+    return None if pair is None else [pair[0], pair[1]]
+
+
 def _pair(values: list[float] | None) -> tuple[float, float] | None:
     """A JSON pair of numbers as a tuple.
 
@@ -466,11 +474,25 @@ class Row:
             samples=data["samples"],
         )
 
-    def to_json(self) -> dict[str, Any]:
+    def to_json(self) -> RowJson:
         """The row as JSON values."""
-        values = dataclasses.asdict(self)
-        values["criterion"] = _criterion_json(self.criterion)
-        return values
+        return {
+            "suite": self.suite,
+            "case_id": self.case_id,
+            "hard_body_radius": self.hard_body_radius,
+            "reference": self.reference,
+            "criterion": _criterion_json(self.criterion),
+            "method": self.method,
+            "value": self.value,
+            "error": self.error,
+            "relative": self.relative,
+            "passed": self.passed,
+            "paper": self.paper,
+            "interval": _list(self.interval),
+            "informative": _list(self.informative),
+            "ci": _list(self.ci),
+            "samples": self.samples,
+        }
 
     def difference(self, previous: Row) -> str | None:
         """Why this row does not repeat ``previous`` (``None`` if it does).
@@ -518,7 +540,7 @@ class Record:
 
     def dumps(self) -> str:
         """The record as JSON text."""
-        data = {
+        data: RecordJson = {
             "cara_commit": self.cara_commit,
             "rows": [row.to_json() for row in self.rows],
         }

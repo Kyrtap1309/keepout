@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import time
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from contextlib import ExitStack
 from pathlib import Path
@@ -254,7 +255,7 @@ def _summary(
     """The result for people: what was screened, the fleet satellites left
     out, the table of approaches and the notes after it."""
     from keepout.risk import Action
-    from keepout.screening import ScreeningRole
+    from keepout.screening import ScreeningRole, SkipReason
 
     screening = result.screening
     fleet = result.fleet
@@ -276,9 +277,11 @@ def _summary(
     ]
     tail: list[str] = []
     if screening.skipped:
+        left_out = Counter(s.reason for s in screening.skipped)
+        counted = ", ".join(f"{left_out[r]} {r}" for r in SkipReason if left_out[r])
         tail.append(
-            f"{plural(len(screening.skipped), 'element set')} left out (stale, "
-            "future epochs, SGP4 failures; --json lists them)."
+            f"{plural(len(screening.skipped), 'element set')} left out "
+            f"({counted}; --json lists them)."
         )
     tail += reasons(events, Action.MONITOR)
     tail.append(ASSUMED_COVARIANCES)

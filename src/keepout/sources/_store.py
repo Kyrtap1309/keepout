@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Final, TypeAlias
 
 import platformdirs
 
+from keepout._environment import CACHE_DIR_VARIABLE
 from keepout.errors import ChecksumMismatch
 
 if TYPE_CHECKING:
@@ -50,7 +51,7 @@ def cache_dir(given: Path | None = None) -> Path:
     """
     if given is not None:
         return given
-    override = os.environ.get("KEEPOUT_CACHE_DIR")
+    override = os.environ.get(CACHE_DIR_VARIABLE)
     if override:
         return Path(override)
     return platformdirs.user_cache_path("keepout")

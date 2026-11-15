@@ -49,7 +49,9 @@ def decision_for(seen: list[PcObservation], **config: float) -> Action:
         "green-rising-far-below",
     ],
 )
-def test_rules(seen: list[PcObservation], expected: Action) -> None:
+def test_each_rule_gives_its_action(
+    seen: list[PcObservation], expected: Action
+) -> None:
     assert decision_for(seen) == expected
 
 
@@ -139,7 +141,7 @@ def test_a_floored_pc_says_so() -> None:
 
 NO_PC = "latest observation has no Pc: GeometryError: no plane"
 RED_THEN = "the latest observation with a Pc was red: Pc 1.00e-03, {} d before TCA"
-PREPARE = "before the decision point (2.00 d before TCA): prepare a manoeuvre"
+PREPARE = "before the decision point (2.00 d before TCA): prepare a maneuver"
 WITHIN = "within the decision point (2.00 d before TCA)"
 
 

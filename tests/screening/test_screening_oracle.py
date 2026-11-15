@@ -61,7 +61,9 @@ def test_positions_are_sgp4s() -> None:
         ([5.0], [True]),
     ],
 )
-def test_local_minima(distances: list[float], minima: list[bool]) -> None:
+def test_local_minima_are_flagged_in_each_row(
+    distances: list[float], minima: list[bool]
+) -> None:
     np.testing.assert_array_equal(local_minima(np.array(distances)), minima)
     stacked = np.array([distances, distances])
     np.testing.assert_array_equal(local_minima(stacked), [minima, minima])

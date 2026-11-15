@@ -7,7 +7,6 @@ from hypothesis import given
 from hypothesis import strategies as st
 from spacetrack_builders import (
     CREDENTIALS,
-    HOUR,
     FakeSpaceTrack,
     public_cdm,
     space_track_cdm_public,
@@ -25,6 +24,7 @@ from keepout.sources.spacetrack import (
     fetch_public_cdms,
     read_public_cdms,
 )
+from keepout.units import HOUR
 
 ROW = public_cdm()
 ANSWER = space_track_cdm_public(ROW, public_cdm(CDM_ID="1000002", PC="0"))

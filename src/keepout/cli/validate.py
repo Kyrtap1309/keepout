@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Annotated, TypeAlias
+from typing import TYPE_CHECKING, Annotated, Final, NoReturn, TypeAlias
 
 import typer
 
@@ -16,7 +16,17 @@ if TYPE_CHECKING:
 
     from keepout.validation.evaluation import MethodSummary, Outcome
 
-__all__ = ["validate_command"]
+__all__ = ["VALIDATION_HINT", "validate_command"]
+
+VALIDATION_HINT: Final = (
+    "keepout validate needs the validation extra to read CARA's spreadsheets: "
+    'pip install "keepout[cli,validation] @ git+https://github.com/Kyrtap1309/keepout"'
+)
+"""What ``keepout validate`` prints (exit status 1) when the extra is
+missing."""
+
+_VALIDATION_MODULES: Final = frozenset({"openpyxl", "xlrd"})
+"""The top-level packages of the ``validation`` extra."""
 
 MonteCarloFlag: TypeAlias = Annotated[
     bool,
@@ -40,16 +50,20 @@ def validate_command(
     Downloads CARA's files at the pinned commit on first use, runs every
     case (2-D, 3-D and maximum Pc; with --monte-carlo the Monte Carlo
     cases) and prints, per suite and method, the cases passed and the worst
-    relative error. Exits with status 1 if a case fails. In a clone of the
-    repository, tools/validation_report.py writes the same comparison as
-    the documentation's validation report.
+    relative error. Exits with status 1 if a case fails. Needs the
+    validation extra (openpyxl and xlrd) to read CARA's spreadsheets. In a
+    clone of the repository, tools/validation_report.py writes the same
+    comparison as the documentation's validation report.
     """
     # Imported here: keepout --help need not load the numerical libraries.
     from keepout.sources.cara import CARA_COMMIT
     from keepout.validation.cases import load_all, load_monte_carlo_cases
     from keepout.validation.evaluation import evaluate, summarise
 
-    cases = (load_monte_carlo_cases if monte_carlo else load_all)(cache_dir)
+    try:
+        cases = (load_monte_carlo_cases if monte_carlo else load_all)(cache_dir)
+    except ModuleNotFoundError as exc:
+        _without_extra(exc)
     outcomes = evaluate(cases, workers=workers)
     summary = summarise(outcomes)
     failed = [o for o in outcomes if not o.passed]
@@ -75,6 +89,22 @@ def validate_command(
     )
     if failed:
         fail(f"{len(failed)} of {len(outcomes)} comparisons failed")
+
+
+def _without_extra(exc: ModuleNotFoundError) -> NoReturn:
+    """The end of ``keepout validate`` without the ``validation`` extra.
+
+    Raises
+    ------
+    typer.Exit
+        If ``exc`` is about a package of the extra: :data:`VALIDATION_HINT`,
+        status 1.
+    ModuleNotFoundError
+        Otherwise: ``exc`` again.
+    """
+    if (exc.name or "").partition(".")[0] not in _VALIDATION_MODULES:
+        raise exc
+    fail(VALIDATION_HINT)
 
 
 def _name(outcome: Outcome) -> str:

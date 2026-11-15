@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
 from keepout._validation import (
+    is_number,
     is_single_line,
     non_negative_float,
     positive_float,
@@ -191,7 +192,7 @@ def _keys(table: Mapping[str, object], allowed: frozenset[str], where: str) -> N
 
 def _number(table: Mapping[str, object], key: str, where: str) -> float:
     value = table[key]
-    if isinstance(value, bool) or not isinstance(value, int | float):
+    if not is_number(value):
         raise FleetError(f"{where}{key} must be a number, got {value!r}")
     return float(value)
 

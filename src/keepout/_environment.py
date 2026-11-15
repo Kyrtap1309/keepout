@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "AS_OF_VARIABLE",
+    "CACHE_DIR_VARIABLE",
     "MAX_UPLOAD_MB",
     "SETTINGS_VARIABLE",
     "STORE_VARIABLE",
@@ -31,6 +32,10 @@ STORE_VARIABLE: Final = "KEEPOUT_STORE"
 """The store's file: ``--store`` of the commands that read one, and the
 dashboard's store."""
 
+CACHE_DIR_VARIABLE: Final = "KEEPOUT_CACHE_DIR"
+"""The cache root of downloaded data: ``--cache-dir``, and the library's
+default (:func:`keepout.sources._store.cache_dir`)."""
+
 SETTINGS_VARIABLE: Final = "KEEPOUT_SETTINGS"
 """The dashboard's operator settings file (TOML); unset: the library's
 defaults."""
@@ -41,8 +46,8 @@ clock."""
 
 MAX_UPLOAD_MB: Final = 1
 """The largest file [MB] the dashboard takes (a CDM is a few kB): Streamlit's
-upload limit, and the most bytes (10^6 per MB) the dashboard reads of a
-file or of its decompressed data."""
+upload limit, and the most bytes (2^20 per MB, as Streamlit counts) the
+dashboard reads of a file or of its decompressed data."""
 
 
 @contextmanager
@@ -63,7 +68,8 @@ def dubious_years_ignored() -> Generator[None]:
 
 def parse_time(text: str) -> Time:
     """A time given on the command line or in the environment: ISO 8601 in
-    UTC, e.g. ``2026-10-06`` or ``2026-10-06T12:00:00``.
+    UTC, e.g. ``2026-10-06``, ``2026-10-06T12:00:00`` or
+    ``2026-10-06 12:00``.
 
     Raises
     ------
@@ -72,8 +78,12 @@ def parse_time(text: str) -> Time:
     """
     from astropy.time import Time
 
-    try:
-        with dubious_years_ignored():
-            return Time(text, scale="utc")
-    except ValueError as exc:
-        raise ValueError(f"not an ISO 8601 UTC time: {text!r}") from exc
+    # The ISO formats only: left to guess, Astropy also reads e.g. "J2026" or
+    # "2026:279:12:00" (year, day of year).
+    for time_format in ("isot", "iso"):
+        try:
+            with dubious_years_ignored():
+                return Time(text, format=time_format, scale="utc")
+        except ValueError:
+            continue
+    raise ValueError(f"not an ISO 8601 UTC time: {text!r}")

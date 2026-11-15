@@ -34,17 +34,19 @@ from __future__ import annotations
 import tomllib
 from dataclasses import dataclass, replace
 from pathlib import Path
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Final, NotRequired, TypedDict, TypeVar, cast
 
 from keepout._defaults import TARGET_PC
 from keepout._methods import METHOD_CHOICES, MethodChoice
 from keepout._validation import (
+    is_number,
     positive_float,
     require_choice,
     require_open_probability,
 )
 from keepout.covariance import POLICIES, Policy
-from keepout.errors import SettingsError
+from keepout.errors import InvalidArgument, SettingsError
 from keepout.pc import AUTO, PcComputation
 from keepout.risk import DEFAULT_THRESHOLDS, Thresholds
 
@@ -65,11 +67,13 @@ __all__ = [
     "settings_to_data",
 ]
 
-SETTINGS_KEYS: Final[Mapping[str, frozenset[str]]] = {
-    "pc": frozenset({"method", "policy", "hbr_m"}),
-    "risk": frozenset({"green_below", "red_from"}),
-    "maneuver": frozenset({"target_pc"}),
-}
+SETTINGS_KEYS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
+    {
+        "pc": frozenset({"method", "policy", "hbr_m"}),
+        "risk": frozenset({"green_below", "red_from"}),
+        "maneuver": frozenset({"target_pc"}),
+    }
+)
 """The tables of a settings file and the keys of each; all optional."""
 
 _C = TypeVar("_C")
@@ -236,7 +240,7 @@ def _number(table: Mapping[str, object], name: str, key: str) -> float:
         If it is not one (a bool is not a number).
     """
     value = table[key]
-    if isinstance(value, bool) or not isinstance(value, int | float):
+    if not is_number(value):
         raise SettingsError(f"{name}.{key} must be a number, got {value!r}")
     return float(value)
 
@@ -290,10 +294,11 @@ def settings_to_data(settings: Settings) -> SettingsData:
 
     Raises
     ------
-    ValueError
-        If the settings file cannot hold ``settings``: ``compute`` has
-        options or a fallback, or ``thresholds.basis`` is not the default's;
-        the message names the field.
+    InvalidArgument
+        A :class:`ValueError`, if the settings file cannot hold
+        ``settings``: ``compute`` has options or a fallback, or
+        ``thresholds.basis`` is not the default's; the message names the
+        field.
     """
     unexpressible: dict[str, object] = {
         "compute.options": dict(settings.compute.options) or None,
@@ -306,7 +311,7 @@ def settings_to_data(settings: Settings) -> SettingsData:
     }
     for field, value in unexpressible.items():
         if value is not None:
-            raise ValueError(f"a settings file cannot hold {field}, got {value!r}")
+            raise InvalidArgument(f"a settings file cannot hold {field}, got {value!r}")
     pc: PcTable = {"method": settings.compute.method, "policy": settings.policy}
     if settings.combined_hard_body_radius is not None:
         pc["hbr_m"] = settings.combined_hard_body_radius

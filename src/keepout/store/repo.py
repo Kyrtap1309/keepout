@@ -26,7 +26,7 @@ import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Final, Self, TypeVarTuple
+from typing import TYPE_CHECKING, Final, Self, TypeVarTuple
 
 import astropy.units as u
 from astropy.time import Time
@@ -305,7 +305,10 @@ def _event_of(session: Session, cdm: Cdm) -> tuple[models.Event, bool]:
     fitting = [event for event in session.scalars(query) if _bounds(event).admits(cdm)]
     if len(fitting) > 1:
         ids = ", ".join(sorted(event.id for event in fitting))
-        raise StoreError(f"CDM {cdm.message_id} fits more than one event: {ids}")
+        raise StoreError(
+            f"CDM {cdm.message_id} fits more than one event: {ids}",
+            message_id=cdm.message_id,
+        )
     if fitting:
         (event,) = fitting
         bounds = _bounds(event).including(cdm)
@@ -539,6 +542,25 @@ def _paired(
     )
 
 
+def _all_observations(
+    event_id: str, pairs: Sequence[tuple[MessageId, PcObservation | None]]
+) -> tuple[PcObservation, ...]:
+    """The observations of an event's CDMs (:func:`_paired`), all or none.
+
+    Raises
+    ------
+    StoreError
+        If a CDM's observation is not cached.
+    """
+    missing = [message_id for message_id, item in pairs if item is None]
+    if missing:
+        raise StoreError(
+            f"no Pc of {', '.join(missing)} in event {event_id} for these "
+            "settings: refresh the store first"
+        )
+    return tuple(item for _, item in pairs if item is not None)
+
+
 def _cached(key: str) -> ColumnElement[bool]:
     """The CDMs whose result is cached under ``key``."""
     return exists().where(result_under(key))
@@ -766,7 +788,7 @@ def compute_missing(
         cdms_of = _cdms_of(session, event_id, until)
         query = _oldest_first(select(models.Cdm.content), cdms_of, lacking=key)
         texts = session.scalars(query).all()
-    cdms = [keepout.cdm.loads(text) for text in texts]
+    cdms = [_parsed_cdm(text) for text in texts]
     _refuse_lacking_hard_body_radius(_lacking_hard_body_radius(settings, cdms))
     return {
         MessageId(cdm.message_id): _observation(event_id, cdm, settings) for cdm in cdms
@@ -873,7 +895,7 @@ def _parsed_event(event_id: str, texts: Iterable[str]) -> ConjunctionEvent:
 
 def _cached_payload(
     session: Session, message_id: str, key: str
-) -> dict[str, Any] | None:
+) -> dict[str, JsonValue] | None:
     """The result cached on ``message_id`` under ``key``, ``None`` if none
     is."""
     return session.scalar(
@@ -1084,7 +1106,8 @@ class Store:
                 if stored is not None:
                     if stored.digest != digest:
                         raise StoreError(
-                            f"MESSAGE_ID {message_id} is stored with other content"
+                            f"MESSAGE_ID {message_id} is stored with other content",
+                            message_id=message_id,
                         )
                     added[i], events[i] = False, stored.event_id
                     continue
@@ -1241,7 +1264,7 @@ class Store:
                 texts = dict(found.all())
             for event_id, message_id in chunk:
                 if message_id in texts:
-                    yield event_id, keepout.cdm.loads(texts.pop(message_id))
+                    yield event_id, _parsed_cdm(texts.pop(message_id))
 
     def _write(self, key: str, observations: Sequence[PcObservation]) -> int:
         """Write observations under ``key`` in one write transaction (none if
@@ -1309,15 +1332,22 @@ class Store:
             If the settings give no hard-body radius and a CDM lacks ``HBR``.
         """
         self.refresh(settings, event_ids=event_ids)
+        events = self.events(event_ids=event_ids)
+        with self.read() as session:
+            ids = [event.event_id for event in events]
+            _require_events(session, ids)
+            payloads = payloads_in(session, ids, result_key(settings))
         return [
             AssessedEvent(
                 event,
                 assess(
-                    self.observations(event.event_id, settings),
+                    _all_observations(
+                        event.event_id, _paired(payloads[EventId(event.event_id)])
+                    ),
                     thresholds=settings.thresholds,
                 ),
             )
-            for event in self.events(event_ids=event_ids)
+            for event in events
         ]
 
     def summaries(
@@ -1453,7 +1483,7 @@ class Store:
             ).all()
         cdms: dict[str, list[Cdm]] = {}
         for event_id, content in rows:
-            cdms.setdefault(event_id, []).append(keepout.cdm.loads(content))
+            cdms.setdefault(event_id, []).append(_parsed_cdm(content))
         return [ConjunctionEvent(event_id, tuple(cdms[event_id])) for event_id in ids]
 
     def cached_observations(
@@ -1514,14 +1544,7 @@ class Store:
             for these settings (:meth:`refresh` caches them) or cannot be
             read; or if the database cannot be used.
         """
-        pairs = self.cached_observations(event_id, settings)
-        missing = [message_id for message_id, item in pairs if item is None]
-        if missing:
-            raise StoreError(
-                f"no Pc of {', '.join(missing)} in event {event_id} for these "
-                "settings: refresh the store first"
-            )
-        return tuple(item for _, item in pairs if item is not None)
+        return _all_observations(event_id, self.cached_observations(event_id, settings))
 
     def detail(self, event_id: str, settings: Settings) -> EventDetail | None:
         """A stored event, read in one transaction: its CDMs, their cached

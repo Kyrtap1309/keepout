@@ -66,14 +66,12 @@ def _upload_message(report: IngestReport, jobs: int) -> str:
 def _ingest(ctx: DashboardContext, files: list[tuple[str, bytes]]) -> None:
     """Ingest uploaded files, the outcome kept in the session for
     :func:`_last_upload`; a store that cannot be opened shows its error."""
-    from keepout.store import open_store
-
     st.session_state.pop(UPLOAD_KEY, None)
     if not files:
         st.warning("Choose CDM files to ingest.")
         return
     try:
-        with open_store(ctx.store_path, create=False) as store:
+        with ctx.store() as store:
             st.session_state[UPLOAD_KEY] = ingest_upload(store, ctx.settings, files)
     except KeepoutError as exc:
         show_error(exc)
@@ -214,7 +212,12 @@ def _events(ctx: DashboardContext) -> None:
         show_error(exc)
         return
     if not page.items:
-        st.info("No events in the store." if include_past else "No upcoming events.")
+        st.info(
+            "No events in the store: upload CDMs above."
+            if include_past
+            else f"No upcoming events as of {utc(ctx.as_of)} UTC: turn on Show "
+            "past events, or start the dashboard with an earlier --as-of."
+        )
         return
     table_header(COLUMNS)
     for summary in page.items:

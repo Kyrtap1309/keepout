@@ -5,15 +5,8 @@
 **Where do I get a CDM to try keepout on?**
 :   The repository has two hand-written examples: `tests/cdm/data/tracss_v2.kvn`
     (CDM 2.0, an `HBR` for one object only) and `tests/cdm/data/b1_example.kvn`
-    (CDM 1.0, no `HBR`). Both need a combined hard-body radius:
-
-    ```python
-    import keepout.cdm
-    from keepout import compute_pc
-
-    cdm = keepout.cdm.load("tests/cdm/data/tracss_v2.kvn")
-    print(compute_pc(cdm.conjunction(combined_hard_body_radius=20.0)).value)
-    ```
+    (CDM 1.0, no `HBR`). Both need a combined hard-body radius, as in
+    [Probability of collision](index.md#probability-of-collision).
 
     For a week of CDMs on real satellites, run the
     [synthetic operator](cli.md#a-week-of-a-synthetic-operator). Its CDMs
@@ -26,8 +19,9 @@
     ([Limits of GP data](screening.md#limits-of-gp-data)).
 
 **Is it "maneuver" or "manoeuvre"?**
-:   Commands, options and API names use the US "maneuver", as the CCSDS
-    keywords do. The prose of these pages uses the British "manoeuvre".
+:   Commands, options, the command line's output and API names use the US
+    "maneuver", as the CCSDS keywords do. The prose of these pages uses the
+    British "manoeuvre".
 
 ## Errors
 
@@ -72,9 +66,11 @@
 :   The store's schema is older than this keepout's. Back it up, then run
     `keepout store upgrade --store FILE` ([Upgrading](store.md#upgrading)).
 
-**`--store needs the store extra`**
-:   Install it: `pip install "keepout[store] @ git+https://github.com/Kyrtap1309/keepout"`,
-    or `uv sync --extra store` in a clone.
+**`--store needs the store extra`**, **`keepout validate needs the validation extra`**
+:   Install the extra the message names, `keepout[cli,store]` or
+    `keepout[cli,validation]`; the message gives the `pip` command. In a
+    clone: `uv sync --extra cli --extra store` (or `--extra validation`).
+    See [Install](index.md#install).
 
 ## Performance
 

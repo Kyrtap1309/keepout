@@ -27,7 +27,6 @@ from typing import (
     get_args,
 )
 
-import matplotlib as mpl
 from generated import (
     README,
     REPO,
@@ -35,6 +34,7 @@ from generated import (
     json_text,
     readme_with,
     relative,
+    save_svg,
     table,
     threshold_settings,
     threshold_text,
@@ -477,56 +477,51 @@ def trend_plot(figure: TrendFigure, title: str) -> Figure:
     """An event's Pc against the time to TCA; a point below the source's
     floor is drawn hollow."""
     days = figure.hours_to_tca * HOUR / DAY
-    with mpl.rc_context({"svg.hashsalt": "keepout", "svg.fonttype": "none"}):
-        drawing = Figure(figsize=(8.5, 3.6))
-        axes = drawing.subplots()
-        if figure.fit is not None:
-            hours, values = figure.fit
-            axes.plot(
-                hours * HOUR / DAY, values, color=FIT_COLOUR, linewidth=1.0, zorder=1
-            )
-        for day, value, level, floored in zip(
-            days, figure.pc, figure.levels, figure.below_floor, strict=True
-        ):
-            colour = RISK_COLOURS[level]
-            axes.scatter(
-                [day],
-                [value],
-                s=36,
-                zorder=2,
-                facecolors="none" if floored else colour,
-                edgecolors=colour,
-            )
-        for value, level in reversed(figure.thresholds):
-            axes.axhline(
-                value,
-                color=RISK_COLOURS[level],
-                linestyle="--",
-                label=f"{THRESHOLD_LABELS[level]} {value:.0e}",
-            )
-        axes.axvline(
-            DECISION.decision_point / DAY,
-            color="#424242",
-            linestyle=":",
-            label="decision point",
+    drawing = Figure(figsize=(8.5, 3.6))
+    axes = drawing.subplots()
+    if figure.fit is not None:
+        hours, values = figure.fit
+        axes.plot(hours * HOUR / DAY, values, color=FIT_COLOUR, linewidth=1.0, zorder=1)
+    for day, value, level, floored in zip(
+        days, figure.pc, figure.levels, figure.below_floor, strict=True
+    ):
+        colour = RISK_COLOURS[level]
+        axes.scatter(
+            [day],
+            [value],
+            s=36,
+            zorder=2,
+            facecolors="none" if floored else colour,
+            edgecolors=colour,
         )
-        axes.set_yscale("log")
-        axes.set_ylim(min([LOWEST_AXIS, *figure.pc]) / 10, 1.0)
-        axes.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), fontsize="small")
-        axes.set_xlim(PLOT_DAYS, 0.0)
-        axes.set_xlabel("days to TCA")
-        axes.set_ylabel("Pc (ESA)")
-        axes.set_title(title)
-        axes.grid(visible=True, which="major", alpha=0.3)
-        drawing.tight_layout()
+    for value, level in reversed(figure.thresholds):
+        axes.axhline(
+            value,
+            color=RISK_COLOURS[level],
+            linestyle="--",
+            label=f"{THRESHOLD_LABELS[level]} {value:.0e}",
+        )
+    axes.axvline(
+        DECISION.decision_point / DAY,
+        color="#424242",
+        linestyle=":",
+        label="decision point",
+    )
+    axes.set_yscale("log")
+    axes.set_ylim(min([LOWEST_AXIS, *figure.pc]) / 10, 1.0)
+    axes.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), fontsize="small")
+    axes.set_xlim(PLOT_DAYS, 0.0)
+    axes.set_xlabel("days to TCA")
+    axes.set_ylabel("Pc (ESA)")
+    axes.set_title(title)
+    axes.grid(visible=True, which="major", alpha=0.3)
+    drawing.tight_layout()
     return drawing
 
 
 def plot(figure: TrendFigure, title: str, path: Path) -> None:
     """An event's plot (:func:`trend_plot`), saved as a reproducible SVG."""
-    drawing = trend_plot(figure, title)
-    with mpl.rc_context({"svg.hashsalt": "keepout", "svg.fonttype": "none"}):
-        drawing.savefig(path, format="svg", metadata={"Date": None})
+    save_svg(trend_plot(figure, title), path)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

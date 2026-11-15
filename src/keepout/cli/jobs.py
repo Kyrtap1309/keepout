@@ -54,7 +54,7 @@ def _job_json(job: Job) -> dict[str, JsonOut]:
 def jobs_list(*, store: StorePath, as_json: JsonFlag = False) -> None:
     """List the store's jobs, the newest first.
 
-    A job is a manoeuvre plan (maneuver) or the Pc its event lacks
+    A job is a maneuver plan (kind maneuver) or the Pc its event lacks
     (refresh). It is queued, running, succeeded, failed or cancelled; a
     failed job gives its error.
     """

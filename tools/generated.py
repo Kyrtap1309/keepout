@@ -1,7 +1,7 @@
 """Shared by the report tools: the repository's paths, command-line counts,
 JSON read back, README blocks, Markdown tables, links, plain-text numbers
-and times, risk thresholds as settings, the generated-page notice and
-writing or checking files."""
+and times, risk thresholds as settings, the generated-page notice,
+reproducible SVGs and writing or checking files."""
 
 from __future__ import annotations
 
@@ -10,14 +10,17 @@ import difflib
 import json
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Final, TypedDict, TypeVar
+from typing import TYPE_CHECKING, Final, Generic, Literal, TypedDict, TypeVar
 
+import matplotlib as mpl
 from typeguard import CollectionCheckStrategy, TypeCheckError, check_type
 
 from keepout.risk import Basis
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
+
+    from matplotlib.figure import Figure
 
     from keepout.risk import Thresholds
 
@@ -80,6 +83,26 @@ def read_json(path: Path, shape: type[_T]) -> _T:
         If the file is not JSON, or not a ``shape``.
     """
     return parse_json(path.read_text(encoding="utf-8"), shape, str(path))
+
+
+class Timed(TypedDict, Generic[_T]):
+    """A results file holding the ``timings`` a tool measured."""
+
+    timings: _T
+
+
+def read_timings(path: Path, shape: type[Timed[_T]]) -> _T | None:
+    """The timings of the ``shape`` JSON file at ``path``, if it exists
+    (:func:`read_json`).
+
+    Raises
+    ------
+    ValueError
+        If the file is not JSON, or not a ``shape``.
+    """
+    if not path.exists():
+        return None
+    return read_json(path, shape)["timings"]
 
 
 def replace_block(text: str, start: str, end: str, block: str) -> str:
@@ -170,6 +193,22 @@ def threshold_text(green_below: float, red_from: float) -> str:
     """Risk thresholds as the reports write them:
     ``green below 1e-07, red from 1e-04``."""
     return f"green below {green_below:.0e}, red from {red_from:.0e}"
+
+
+def save_svg(
+    drawing: Figure,
+    path: Path,
+    *,
+    facecolor: str = "auto",
+    dpi: float | Literal["figure"] = "figure",
+) -> None:
+    """``drawing`` saved to ``path`` as a reproducible SVG: no date, fixed
+    element ids and text as text. ``facecolor`` and ``dpi`` are
+    ``savefig``'s (its defaults: the figure's)."""
+    with mpl.rc_context({"svg.hashsalt": "keepout", "svg.fonttype": "none"}):
+        drawing.savefig(
+            path, format="svg", metadata={"Date": None}, facecolor=facecolor, dpi=dpi
+        )
 
 
 def _diff(path: Path, content: str) -> str:

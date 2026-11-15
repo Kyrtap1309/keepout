@@ -162,6 +162,7 @@ def test_plots_use_the_reports_settings(
     }
     assert settings
     assert all(kwargs == expected for kwargs in settings)
+    assert set(plotted) == {907, 5490}
     assert all(a.thresholds is thresholds for a in plotted.values())
     assert "within the decision point (5.00 d before TCA)" in (
         plotted[5490].decision.reasons

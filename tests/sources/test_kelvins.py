@@ -6,6 +6,7 @@ import pytest
 from builders import KELVINS_EXCERPT as EXCERPT
 from web_builders import pin_kelvins, zipped
 
+from keepout._types import FloatArray
 from keepout.errors import ChecksumMismatch, KelvinsFormatError
 from keepout.risk import Action, assess
 from keepout.sources import _http, kelvins
@@ -48,7 +49,7 @@ def test_features_are_read_only(events: dict[int, KelvinsEvent]) -> None:
         events[30].features[0, 0] = 1.0
 
 
-def test_unknown_column(events: dict[int, KelvinsEvent]) -> None:
+def test_an_unknown_column_is_a_key_error(events: dict[int, KelvinsEvent]) -> None:
     with pytest.raises(KeyError, match="'event_id' is not a Kelvins feature"):
         events[30].column("event_id")
 
@@ -147,7 +148,7 @@ def test_an_empty_file_is_refused(tmp_path: Path) -> None:
     ],
 )
 def test_invalid_events_are_refused(
-    features: np.ndarray, types: tuple[str, ...], message: str
+    features: FloatArray, types: tuple[str, ...], message: str
 ) -> None:
     with pytest.raises(ValueError, match=message):
         KelvinsEvent(1, 1, features, types)

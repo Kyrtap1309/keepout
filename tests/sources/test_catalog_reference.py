@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 from astropy.time import Time
-from celestrak_builders import SAMPLE
+from celestrak_builders import CELESTRAK_SAMPLE_CSV, SAMPLE
 
 import keepout.omm
 from keepout.errors import ChecksumMismatch, SourceUnavailable
@@ -19,14 +19,13 @@ from keepout.sources.catalog import (
     load_reference,
 )
 
-SAMPLE_CSV = Path(__file__).parents[1] / "omm" / "data" / "celestrak_sample.csv"
 URL = "https://example.org/gp?GROUP=active&FORMAT=CSV"
 NOW = 1_791_000_000.0
 
 
 def _copy(tmp_path: Path, name: str = "active.csv") -> Path:
     target = tmp_path / name
-    shutil.copyfile(SAMPLE_CSV, target)
+    shutil.copyfile(CELESTRAK_SAMPLE_CSV, target)
     return target
 
 

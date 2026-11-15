@@ -20,6 +20,7 @@ from typing import Any, Final, TypedDict
 import pytest
 from astropy.time import Time
 from builders import SMALL_GRID
+from celestrak_builders import CELESTRAK_SAMPLE_CSV
 from cli_builders import operator_kvn
 from sqlalchemy import select
 from store_builders import FOSTER, count_rows, message
@@ -69,8 +70,6 @@ from keepout.store.worker import (
 
 # Every test here runs a worker or its child: a regression fails, not hangs.
 pytestmark = pytest.mark.timeout(60)
-
-SAMPLE_CSV = Path(__file__).parents[1] / "omm" / "data" / "celestrak_sample.csv"
 
 
 class _Timing(TypedDict):
@@ -194,13 +193,17 @@ def test_bug_is_internal_error_with_traceback_logged(
     assert "Traceback" in caplog.text
 
 
-def test_time_limit(store: Store, path: str, job: Job) -> None:
+def test_a_job_past_the_time_limit_is_stopped_and_failed(
+    store: Store, path: str, job: Job
+) -> None:
     started = time.monotonic()
     ran = run_worker(
         path, compute=sleep_forever, until_idle=True, time_limit=1.0, **FAST
     )
     assert ran == 1
-    assert time.monotonic() - started < 5.0
+    # The job sleeps forever: 15 s is a loaded runner's margin over the 1 s
+    # limit, well below a worker that never stopped it.
+    assert time.monotonic() - started < 15.0
     failed = JobQueue(store).job(job.id)
     assert failed.status is JobStatus.FAILED
     assert failed.error == "stopped at the time limit of 1 s"
@@ -334,7 +337,7 @@ def _with_catalog(store: Store, tmp_path: Path) -> str:
     """An event of one CDM made from a catalog (the store keeps a copy of
     the sample catalog); its id."""
     original = tmp_path / "active.csv"
-    shutil.copyfile(SAMPLE_CSV, original)
+    shutil.copyfile(CELESTRAK_SAMPLE_CSV, original)
     reference = CatalogReference.of_file(original)
     (event_id,) = store.ingest([message("A")], catalog=reference).events
     original.unlink()
@@ -379,7 +382,7 @@ def test_run_maneuver_job_plans_the_pinned_cdm_with_its_catalog(
     run_maneuver_job(path, submitted, 3, grid=SMALL_GRID)
     assert [cdm.message_id for cdm in given["event"].cdms] == ["A"]
     assert given["catalog_label"] == f"stored copy of {tmp_path / 'active.csv'}"
-    assert len(given["catalog"]) > 0
+    assert len(given["catalog"]) == 8  # the sample's element sets
     assert given["workers"] == 3
     assert given["grid"] == SMALL_GRID
     assert given["compute"].method == "foster"

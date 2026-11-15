@@ -29,6 +29,7 @@ __all__ = [
     "CHUNK_SIZE",
     "DOWNLOAD_TIMEOUT",
     "HOME_PAGE",
+    "MAX_RETRY_AFTER",
     "RETRY_DELAYS",
     "USER_AGENT",
     "Downloader",
@@ -49,6 +50,14 @@ DOWNLOAD_TIMEOUT: Final = 60.0
 RETRY_DELAYS: Final = (5.0, 30.0)
 """Seconds waited before each new attempt of a download that failed
 transiently (:func:`retrying`): two more attempts, over about half a minute."""
+
+MAX_RETRY_AFTER: Final = 120.0
+"""Most seconds :func:`retrying` waits for a server's ``Retry-After``."""
+
+_RETRY_AFTER_STATUSES: Final = frozenset(
+    {HTTPStatus.TOO_MANY_REQUESTS, HTTPStatus.SERVICE_UNAVAILABLE}
+)
+"""The statuses whose ``Retry-After`` header :func:`http_stream` reads."""
 
 CHUNK_SIZE: Final = 1 << 20
 """Bytes :func:`http_stream` reads at a time."""
@@ -153,9 +162,25 @@ def http_stream(url: str, sink: Sink) -> None:
                 while chunk := response.read(CHUNK_SIZE):
                     sink.write(chunk)
         except urllib.error.HTTPError as exc:
+            retry_after = (
+                _retry_after(exc.headers.get("Retry-After"))
+                if exc.code in _RETRY_AFTER_STATUSES
+                else None
+            )
             raise HttpStatusError(
-                f"cannot download {url}: {exc}", url=url, status=exc.code
+                f"cannot download {url}: {exc}",
+                url=url,
+                status=exc.code,
+                retry_after=retry_after,
             ) from exc
+
+
+def _retry_after(value: str | None) -> float | None:
+    """The seconds of a ``Retry-After`` header in seconds (``120``), or
+    ``None`` if there is none or it is an HTTP date."""
+    if value is None or not value.strip().isdecimal():
+        return None
+    return float(value.strip())
 
 
 def _transient(error: SourceUnavailable) -> bool:
@@ -177,8 +202,11 @@ def retrying(
     A failure is transient if it is a
     :class:`~keepout.errors.SourceUnavailable` other than an HTTP status (a
     network error), or an HTTP 429 or 5xx status. ``attempt`` must start
-    afresh each time: a stream already written to cannot be retried. The
-    waits are ``sleep``'s, :func:`time.sleep` if ``None``.
+    afresh each time: a stream already written to cannot be retried. A
+    failure whose server asked to wait longer than the delay
+    (:attr:`~keepout.errors.HttpStatusError.retry_after`) is tried again
+    after that wait instead, at most :data:`MAX_RETRY_AFTER`. The waits are
+    ``sleep``'s, :func:`time.sleep` if ``None``.
 
     Raises
     ------
@@ -191,8 +219,18 @@ def retrying(
         except SourceUnavailable as exc:
             if not _transient(exc):
                 raise
-        (time.sleep if sleep is None else sleep)(delay)
+            wait = _wait(delay, exc)
+        (time.sleep if sleep is None else sleep)(wait)
     return attempt()
+
+
+def _wait(delay: float, error: SourceUnavailable) -> float:
+    """Seconds to wait after ``error`` before trying again: ``delay``, or
+    the server's longer ``Retry-After`` up to :data:`MAX_RETRY_AFTER`."""
+    asked = error.retry_after if isinstance(error, HttpStatusError) else None
+    if asked is None:
+        return delay
+    return max(delay, min(asked, MAX_RETRY_AFTER))
 
 
 Downloader: TypeAlias = Callable[[str], bytes]

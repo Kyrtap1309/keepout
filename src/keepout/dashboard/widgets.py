@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Final, Literal, TypeVar
 import streamlit as st
 
 from keepout._text import utc
-from keepout.dashboard.context import DashboardContext
+from keepout.dashboard.context import DashboardContext, open_existing
 from keepout.dashboard.routes import CONTEXT_KEY, cancel_job_key
 from keepout.dashboard.text import NOT_COMPUTED, literal, unrated
 from keepout.errors import KeepoutError
@@ -189,27 +189,28 @@ def show_error(error: KeepoutError | ValueError) -> None:
 
 
 def _read_jobs(store_path: Path, job_ids: Sequence[int]) -> list[Job]:
-    """The jobs ``job_ids`` as they are now, read in one transaction.
+    """The jobs ``job_ids`` as they are now, read in one transaction; one
+    no longer in the store (purged) is left out.
 
     Raises
     ------
     StoreError
-        If the store cannot be opened or a job is not in it.
+        If the store cannot be opened or read.
     """
-    from keepout.store import JobQueue, open_store
+    from keepout.store import JobQueue
 
-    with open_store(store_path, create=False) as store:
-        return JobQueue(store).jobs_by_id(job_ids)
+    with open_existing(store_path) as store:
+        return JobQueue(store).jobs_by_id(job_ids, missing_ok=True)
 
 
 def _cancel(store_path: Path, job_id: int) -> None:
     """Cancel a job; if it cannot be (it has ended meanwhile, the store
     cannot be used), say why in a toast, which outlives the rerun that
     follows and is not kept for another run or page."""
-    from keepout.store import JobQueue, open_store
+    from keepout.store import JobQueue
 
     try:
-        with open_store(store_path, create=False) as store:
+        with open_existing(store_path) as store:
             JobQueue(store).cancel(job_id)
     except KeepoutError as exc:
         st.toast(literal(str(exc)), icon=":material/error:")
@@ -269,7 +270,8 @@ def job_status(
 
     While a job is queued or running, the status is read again every
     :data:`JOB_REFRESH_SECONDS` (an ``st.fragment``); once all have ended,
-    it is shown once and no longer polled. A failed job's error is shown
+    it is shown once and no longer polled; a job no longer in the store
+    (purged) is left out. A failed job's error is shown
     with ``st.error``, a store error with :func:`show_error` (while
     polling, until a later read succeeds) and a refused cancel's error in
     a toast.

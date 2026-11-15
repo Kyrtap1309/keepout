@@ -222,6 +222,7 @@ def test_outcome_of_a_real_rescreen_round_trips() -> None:
     outcome = plan_event(
         found.event, catalog=fixture, catalog_label="fixture", grid=SMALL_GRID
     )
+    assert outcome.burns
     assert all(burn.rescreen is not None for burn in outcome.burns)
     payload = outcome_to_json(outcome)
     back = outcome_from_json(through_text(payload), outcome.event)

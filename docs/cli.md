@@ -7,22 +7,14 @@ collision-avoidance burn and checks keepout's Pc against NASA CARA's test
 cases. It is a thin layer over the library functions the other pages
 describe, so it computes exactly what they do.
 
-```bash
-pip install "keepout[cli] @ git+https://github.com/Kyrtap1309/keepout"
-keepout --help
-```
+It needs the `cli` extra ([Install](index.md#install)), which adds
+[Typer](https://typer.tiangolo.com/), and Rich for the tables. The library
+itself never imports either. Without the extra, `keepout` prints the line
+to install it and exits with status 1. `python -m keepout.cli` is the same
+command.
 
 The examples below read files committed to the repository. Run them from a
-clone, after `uv sync --extra cli` (see [Install](index.md#install)), with
-`uv run keepout ...` or in the activated environment.
-
-The `cli` extra installs [Typer](https://typer.tiangolo.com/), and Rich for
-the tables. The library itself never imports either. Without the extra,
-`keepout` prints the line to install it and exits with status 1.
-`python -m keepout.cli` is the same command.
-
-Command, option and API names use the US spelling `maneuver`, as the CCSDS
-keywords do. The prose of these pages uses the British "manoeuvre".
+clone, with `uv run keepout ...` or in the activated environment.
 
 | Command | What it does |
 |---|---|
@@ -72,7 +64,7 @@ TCA (UTC)         Objects        Miss (m)  CDMs        Pc  Level   Action
 2026-10-10 14:08  25544 / 49773      2751     1  1.09e-18  green   ignore
 2026-10-11 10:56  38771 / 30131      2019     1  2.67e-10  green   ignore
 2026-10-12 11:28  38771 / 35196       212     1  4.86e-06  yellow  monitor
-28 element sets left out (stale, future epochs, SGP4 failures; --json lists them).
+28 element sets left out (28 stale; --json lists them).
 3befe6f1305d: monitor (latest Pc 7.38e-06 is yellow, 2.50 d before TCA; trend undetermined)
   diagnostic: 2-D Pc assumptions questionable: the encounter lasts about 2.51e+03 s, 2.9% of the primary's orbital period (limit 1%); a 3-D Pc may differ
   diagnostic: the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used
@@ -149,14 +141,7 @@ soon reuses the cached copy instead of downloading.
   downloaded again. `validate` fetches CARA's files itself when they are
   missing.
 
-The options of the `fetch` commands:
-
-| Option | `catalog` | `cdm` | `cara` | `kelvins` | Meaning |
-|---|---|---|---|---|---|
-| `--source celestrak\|spacetrack` | yes | | | | where the catalog comes from (default `celestrak`) |
-| `--cache-dir DIR` | yes | yes | yes | yes | the cache root (default `$KEEPOUT_CACHE_DIR`, else the user cache directory) |
-| `--json` | yes | yes | yes | yes | print the result as one JSON document |
-
+`keepout fetch COMMAND --help` lists each command's options.
 Space-Track needs an account, read from `SPACETRACK_IDENTITY` and
 `SPACETRACK_PASSWORD` (see [Space-Track data](spacetrack.md)).
 
@@ -315,20 +300,12 @@ clean, so the command exits with status 0 and shows both.
 
 ### Options
 
-| Option | Meaning |
-|---|---|
-| `CDM...` | the CDM files of one event; or `--event ID` |
-| `--event ID` | plan a [stored event](#stored-events) instead of CDM files |
-| `--store FILE` | the store `--event` is read from (default `$KEEPOUT_STORE`) |
-| `--target-pc PC` | the Pc a burn must stay below (default: the settings' `target_pc`, else 1e-5), compared on the conservative basis as in `assess` |
-| `--burn-before HOURS`, `--dv M/S` | given together: report that one burn with the event's method instead of the smallest burn each way |
-| `--hbr METRES` | the combined hard-body radius, as for `assess` |
-| `--settings FILE` | the [operator settings](#settings), which also give the target |
-| `--catalog FILE` or `--source celestrak\|spacetrack` | re-screen each burn against this catalog for 7 days from the burn, as `screen` reads it |
-| `--workers N` | processes for the re-screen (default: one per CPU, at most 4) |
-| `--cache-dir DIR` | the cache root, as for `fetch` |
-| `--queue` | leave the plan of `--event` to a [background job](#jobs) |
-| `--json` | print the result as one JSON document |
+`keepout maneuver --help` lists the options. `--target-pc` defaults to the
+settings' `target_pc`, else 1e-5, and is compared on the conservative
+basis, as in `assess`. `--burn-before HOURS` and `--dv M/S`, given
+together, report that one burn with the event's method instead of the
+smallest burn each way. `--catalog FILE` or `--source` re-screens each
+burn for 7 days from the burn, reading the catalog as `screen` does.
 
 A burn given with `--burn-before` and `--dv` may be off the grid. The
 whole grid is still computed first, so this takes as long as a plan.
@@ -398,9 +375,7 @@ The exceptions:
 ## `store`
 
 `keepout store` keeps CDMs, their events and their Pc in a
-[conjunction store](store.md), a SQLite file. It needs the `store` extra
-(`pip install "keepout[cli,store] @ git+https://github.com/Kyrtap1309/keepout"`,
-or `uv sync --extra cli --extra store` in a clone). Without it, any
+[conjunction store](store.md), a SQLite file. It needs the `store` extra ([Install](index.md#install)). Without it, any
 command that uses a store prints the line to install it and exits with
 status 1. Every `store` command takes the file as `--store FILE`, or from
 `$KEEPOUT_STORE`, as `maneuver --event` does. `assess` and `screen` ignore
@@ -454,7 +429,7 @@ and whose trend runs over all of them. The exit status is that of
   gives the [operator settings](#settings).
 - **`store upgrade`** brings a store made by an older keepout to this
   keepout's schema, and prints the revisions, e.g.
-  `Upgraded keepout.db: base -> 0001.` Any other command refuses such a
+  `Upgraded keepout.db: 0002 -> 0003.` Any other command refuses such a
   store and says to run it ([Upgrading](store.md#upgrading)).
 - **`store rebuild`** computes the Pc of every stored CDM that the store
   lacks for the settings, and prints how many. It takes the settings only
@@ -565,15 +540,12 @@ options, pages and demo.
 Pc. It prints the cases passed and the worst relative error per suite and
 method, as in the table at the top of the
 [validation report](validation.md). It exits with status 1 if a case fails.
-It downloads CARA's files at the pinned commit on first use. The published
-report itself is generated in the repository by
-`tools/validation_report.py`.
-
-- `--monte-carlo` runs the Monte Carlo cases instead of the others. They
-  take minutes to hours.
-- `--workers N` sets the processes (default: one per CPU, at most 4).
-- `--cache-dir DIR` sets the cache root, as for `fetch`.
-- `--json` prints the result as one JSON document.
+It downloads CARA's files at the pinned commit on first use, and reads
+their spreadsheets with the `validation` extra
+([Install](index.md#install)); without it, it prints the line to install
+it and exits with status 1. The published report itself is generated in
+the repository by `tools/validation_report.py`. `--monte-carlo` runs the
+Monte Carlo cases instead of the others; they take minutes to hours.
 
 ## Threads
 

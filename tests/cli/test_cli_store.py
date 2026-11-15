@@ -1,13 +1,12 @@
 import json
 import os
 import re
-import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 import typer
-from builders import base_revision_store
+from builders import base_revision_store, counting_parses, loaded_after
 from cli_builders import (
     FIXTURE_CSV,
     block_store_extra,
@@ -75,19 +74,12 @@ def test_store_add_reads_no_other_stored_event(
     with open_store(db, create=False) as store:
         (unrelated,) = store.events()
     (unrelated_cdm,) = unrelated.cdms
-    parsed: list[str] = []
-    loads = keepout_cdm.loads
-
-    def counted(text: str) -> keepout_cdm.Cdm:
-        made = loads(text)
-        parsed.append(made.message_id)
-        return made
-
-    monkeypatch.setattr(keepout_cdm, "loads", counted)
+    parsed = counting_parses(monkeypatch)
     result = keepout("store", "add", yellow, "--store", str(db), "--json")
     assert result.exit_code == ExitCode.OK
     assert len(json.loads(result.stdout)["events"]) == 1
-    assert unrelated_cdm.message_id not in parsed
+    assert parsed
+    assert unrelated_cdm.message_id not in {cdm.message_id for cdm in parsed}
 
 
 def test_store_add_twice_reports_already_stored(tmp_path: Path) -> None:
@@ -118,7 +110,7 @@ def test_store_add_exits_with_3_as_assess(tmp_path: Path) -> None:
         in result.stdout
     )
     assert result.stdout.endswith(
-        "At least one event needs a manoeuvre (exit status 3).\n"
+        "At least one event needs a maneuver (exit status 3).\n"
     )
 
 
@@ -281,7 +273,10 @@ def test_upgrade_of_no_store_is_an_error(tmp_path: Path) -> None:
     db = tmp_path / "keepout.db"
     result = keepout("store", "upgrade", "--store", str(db))
     assert result.exit_code == ExitCode.ERROR
-    assert result.stderr == f"Error: no store at {db}\n"
+    assert result.stderr == (
+        f"Error: no store at {db}: make one by adding CDMs to it, "
+        f"keepout store add CDM... --store {db}\n"
+    )
     assert not db.exists()
 
 
@@ -342,7 +337,10 @@ def test_rebuild_and_purge_do_not_create_a_store(tmp_path: Path) -> None:
     for command in (("rebuild",), ("purge", "--before", "2030-01-01", "--yes")):
         result = keepout("store", *command, "--store", str(db))
         assert result.exit_code == ExitCode.ERROR
-        assert result.stderr == f"Error: no store at {db}\n"
+        assert result.stderr == (
+            f"Error: no store at {db}: make one by adding CDMs to it, "
+            f"keepout store add CDM... --store {db}\n"
+        )
     assert not db.exists()
 
 
@@ -404,7 +402,6 @@ def test_purge_needs_a_time(tmp_path: Path) -> None:
 
 def test_help_does_not_import_the_store() -> None:
     code = (
-        "import sys\n"
         "from keepout.cli.app import app\n"
         "for args in (['--help'], ['store', '--help'], ['store', 'add', '--help'],"
         " ['assess', '--help'], ['screen', '--help'], ['jobs', '--help'],"
@@ -414,14 +411,10 @@ def test_help_does_not_import_the_store() -> None:
         "        app(args, prog_name='keepout')\n"
         "    except SystemExit:\n"
         "        pass\n"
-        "print(sorted(m for m in sys.modules if m.partition('.')[0] in"
-        " ('sqlalchemy', 'alembic') or m.startswith('keepout.store')))\n"
     )
-    loaded = subprocess.run(  # noqa: S603 (this interpreter, fixed code)
-        [sys.executable, "-c", code], capture_output=True, text=True, check=True
-    )
-    assert "keepout store" in loaded.stdout
-    assert loaded.stdout.endswith("[]\n")
+    shown = loaded_after(code, ["sqlalchemy", "alembic", "keepout.store"])
+    assert "keepout store" in shown.printed
+    assert shown.loaded == []
 
 
 @pytest.mark.parametrize("command", ["add", "upgrade", "rebuild", "purge"])

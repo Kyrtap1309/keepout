@@ -43,14 +43,14 @@ def test_event_data_path(seed_db: Path) -> None:
     page = read_page(seed_db, settings, as_of=seed.seed_as_of())
     view = event_data.read_event(seed_db, page.items[0].event_id, settings)
     assert view is not None
-    assert not view.missing
+    assert not view.detail.missing
     trend = event_data.trend_of(view, settings)
     assert trend is not None
     # Every CDM of an upcoming event is a point of its trend.
-    assert trend.labels == tuple(cdm.message_id for cdm in view.event.cdms)
+    assert trend.labels == tuple(cdm.message_id for cdm in view.detail.event.cdms)
     assert _names(event_data.trend_plot(trend))
     conjunction = event_data.latest_conjunction(view, settings)
-    assert conjunction.tca == view.event.latest.tca
+    assert conjunction.tca == view.detail.event.latest.tca
     # The seed's covariances are from the GP age model: not a max-Pc.
     assert not event_data.is_max_pc(view, conjunction)
     encounter = _names(event_data.encounter_plot(conjunction, max_pc=False))

@@ -1,9 +1,14 @@
 """Builders, constants and Hypothesis strategies shared by the test packages."""
 
+import ast
 import math
+import re
 import sqlite3
+import subprocess
+import sys
+from collections.abc import Iterable
 from pathlib import Path
-from typing import TypedDict, Unpack
+from typing import NamedTuple, TypedDict, Unpack
 
 import astropy.units as u
 import numpy as np
@@ -15,8 +20,9 @@ from hypothesis import strategies as st
 from hypothesis.extra.numpy import arrays
 from scipy.spatial.transform import Rotation
 
+import keepout.cdm
 from keepout._types import FloatArray, override
-from keepout.cdm import CovarianceMethod, Maneuverable, ObjectMetadata, make_cdm
+from keepout.cdm import Cdm, CovarianceMethod, Maneuverable, ObjectMetadata, make_cdm
 from keepout.conjunction import Conjunction
 from keepout.covariance import Covariance
 from keepout.events import ConjunctionEvent
@@ -38,10 +44,23 @@ CDM_DATA = Path(__file__).parent / "cdm" / "data"
 B1_KVN = CDM_DATA / "b1_example.kvn"
 """CCSDS 508.0-B-1 annex example, KVN."""
 
+B1_TEXT = B1_KVN.read_text(encoding="utf-8")
+"""The text of :data:`B1_KVN`: created 2010-03-12T22:31:12.000, TCA
+2010-03-13T22:37:52.618 (:data:`EPOCH`), objects 12345 and 30337, no HBR."""
+
+
+def set_keyword(text: str, keyword: str, value: str) -> str:
+    """KVN ``text`` with the first ``keyword = ...`` line set to ``value``."""
+    line = re.compile(rf"^{keyword}\s*=.*$", re.MULTILINE)
+    assert line.search(text), keyword
+    return line.sub(f"{keyword} = {value}", text, count=1)
+
+
 KELVINS_EXCERPT = Path(__file__).parent / "sources" / "data" / "kelvins_excerpt.csv"
 """Every row of six events of ESA's Kelvins raw table."""
 
 EPOCH = Time("2010-03-13T22:37:52.618", scale="utc")
+"""The TCA of the CCSDS annex example (:data:`B1_TEXT`)."""
 
 LEO_R = np.array([7000e3, 0.0, 0.0])
 """A LEO position [m], GCRF."""
@@ -335,12 +354,30 @@ SMALL_GRID = BurnGrid(steps_per_orbit=1, delta_v_per_direction=6)
 fraction of a second."""
 
 
-def _crossing_object(object_id: str, r: npt.ArrayLike, angle: float) -> ObjectState:
-    """An object of :func:`leo_crossing`, at ``r`` on a circular orbit
+CROSSING_SIGMA = 100.0
+"""The position sigma of each object of :func:`crossing_conjunction` [m]."""
+
+CROSSING_MISS = 150.0
+"""The radial miss of :func:`crossing_conjunction` [m]."""
+
+CROSSING_INCLINATION = 0.9
+"""The inclination of :func:`crossing_conjunction`'s primary [rad]; the
+secondary's is its opposite."""
+
+
+def _crossing_object(
+    object_id: str,
+    r: npt.ArrayLike,
+    angle: float,
+    *,
+    speed: float,
+    sigma: float,
+    velocity_sigma: float,
+) -> ObjectState:
+    """An object of :func:`crossing_conjunction`, at ``r`` on a circular orbit
     inclined by ``angle``."""
-    speed = math.sqrt(EARTH_MU / CROSSING_RADIUS)
     v = speed * np.array([0.0, math.cos(angle), math.sin(angle)])
-    covariance = np.diag([100.0**2] * 3 + [0.01**2] * 3)
+    covariance = np.diag([sigma**2] * 3 + [velocity_sigma**2] * 3)
     return ObjectState(
         object_id,
         StateVector(CROSSING_TCA, r, v, "GCRF"),
@@ -349,14 +386,36 @@ def _crossing_object(object_id: str, r: npt.ArrayLike, angle: float) -> ObjectSt
     )
 
 
-def leo_crossing() -> ConjunctionEvent:
-    """A fast crossing in LEO, 150 m apart radially, 25 h before TCA, as the
-    planner's tests make it: Pc about 5e-3."""
-    conjunction = Conjunction(
-        _crossing_object("1001", [CROSSING_RADIUS, 0.0, 0.0], 0.9),
-        _crossing_object("2002", [CROSSING_RADIUS + 150.0, 0.0, 0.0], -0.9),
+def crossing_conjunction(
+    sigma: float = CROSSING_SIGMA,
+    *,
+    velocity_sigma: float = 0.01,
+    radius: float = CROSSING_RADIUS,
+) -> Conjunction:
+    """A fast crossing at :data:`CROSSING_TCA` on circular orbits of
+    ``radius``, :data:`CROSSING_MISS` apart radially, HBR 20 m: Pc about 5e-3
+    as given."""
+    options = {
+        "speed": math.sqrt(EARTH_MU / radius),
+        "sigma": sigma,
+        "velocity_sigma": velocity_sigma,
+    }
+    return Conjunction(
+        _crossing_object("1001", [radius, 0.0, 0.0], CROSSING_INCLINATION, **options),
+        _crossing_object(
+            "2002",
+            [radius + CROSSING_MISS, 0.0, 0.0],
+            -CROSSING_INCLINATION,
+            **options,
+        ),
         20.0,
     )
+
+
+def leo_crossing() -> ConjunctionEvent:
+    """:func:`crossing_conjunction` 25 h before TCA, as the planner's tests
+    make it."""
+    conjunction = crossing_conjunction()
     method = CovarianceMethod.CALCULATED
     cdm = make_cdm(
         conjunction,
@@ -367,3 +426,44 @@ def leo_crossing() -> ConjunctionEvent:
         created=CROSSING_TCA - 25 * HOUR * u.s,
     )
     return ConjunctionEvent.from_cdms([cdm], event_id="EVENT-7")
+
+
+def counting_parses(monkeypatch: pytest.MonkeyPatch) -> list[Cdm]:
+    """The CDMs :func:`keepout.cdm.loads` parses from now on, in order."""
+    parsed: list[Cdm] = []
+    loads = keepout.cdm.loads
+
+    def counted(text: str) -> Cdm:
+        made = loads(text)
+        parsed.append(made)
+        return made
+
+    monkeypatch.setattr(keepout.cdm, "loads", counted)
+    return parsed
+
+
+class Imports(NamedTuple):
+    """What :func:`loaded_after` saw."""
+
+    printed: str
+    """What the code printed."""
+    loaded: list[str]
+    """The modules asked about that the code imported, sorted."""
+
+
+def loaded_after(code: str, modules: Iterable[str]) -> Imports:
+    """Run ``code`` in a fresh interpreter (this one's): what it printed and
+    which of ``modules``, or of their submodules, it imported."""
+    wanted = sorted(set(modules))
+    probe = (
+        f"{code}\nimport sys\n"
+        "print(sorted(m for m in sys.modules"
+        f" if any(m == p or m.startswith(p + '.') for p in {wanted!r})))\n"
+    )
+    done = subprocess.run(  # noqa: S603 (this interpreter, fixed code)
+        [sys.executable, "-c", probe], capture_output=True, text=True, check=True
+    )
+    printed, _, last = done.stdout.removesuffix("\n").rpartition("\n")
+    loaded = ast.literal_eval(last)
+    assert isinstance(loaded, list)
+    return Imports(printed, [str(name) for name in loaded])

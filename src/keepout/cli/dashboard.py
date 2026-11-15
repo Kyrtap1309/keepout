@@ -93,7 +93,7 @@ def dashboard_command(
     """Run the dashboard on a store (needs the dashboard extra).
 
     Serves the dashboard on http://127.0.0.1:PORT, this machine only, until
-    stopped with Ctrl+C: the events, each event's risk and the manoeuvre
+    stopped with Ctrl+C: the events, each event's risk and the maneuver
     planner. It reads the store and queues jobs for keepout worker; it
     computes no Pc or plan itself. The store must exist and be at this
     keepout's schema (keepout store upgrade). Exits with Streamlit's status.

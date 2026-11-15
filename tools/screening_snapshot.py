@@ -97,6 +97,7 @@ from snapshot_files import (
     read_body,
 )
 
+from keepout._text import isot
 from keepout.equinoctial import semi_major_axis
 from keepout.errors import SourceUnavailable
 from keepout.omm import Omm, load
@@ -559,8 +560,8 @@ def summarise_socrates(
             for a in approaches
         ),
         comparable=len(comparable(approaches, omms)),
-        first_tca=by_tca[0].tca.isot,
-        last_tca=by_tca[-1].tca.isot,
+        first_tca=isot(by_tca[0].tca),
+        last_tca=isot(by_tca[-1].tca),
         newest_epoch=Time(newest, format="jd", scale="utc").isot[:16],
     )
 

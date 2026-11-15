@@ -9,6 +9,7 @@ import pytest
 from dashboard_builders import TIMEOUT
 from hypothesis import given
 from hypothesis import strategies as st
+from sqlalchemy import delete
 from streamlit.testing.v1 import AppTest
 
 from keepout.dashboard import widgets
@@ -17,7 +18,7 @@ from keepout.errors import StoreError
 from keepout.figures import PROVENANCE_LABELS, RISK_COLOURS
 from keepout.risk import RiskLevel
 from keepout.settings import load_settings
-from keepout.store import Job, JobQueue, JobStatus, open_store
+from keepout.store import Job, JobQueue, JobStatus, models, open_store
 
 
 def _chips(level: str | None, action: str | None) -> None:
@@ -127,7 +128,24 @@ def test_job_status_of_a_missing_job(seed_db: Path) -> None:
         _jobs, args=(str(seed_db), [999]), default_timeout=TIMEOUT
     ).run()
     assert not app.exception
-    assert [item.value for item in app.error] == ["no job 999 in the store"]
+    assert not app.error
+    assert not app.markdown
+
+
+def test_a_job_purged_while_shown_is_left_out(seed_copy: Path) -> None:
+    # Not "no job N" on every poll: the purged job is no longer shown.
+    job_id = _queued_job(seed_copy)
+    app = AppTest.from_function(
+        _jobs, args=(str(seed_copy), [job_id]), default_timeout=TIMEOUT
+    ).run()
+    assert f"Job {job_id} (maneuver): **queued**" in app.markdown[0].value
+    with open_store(seed_copy) as store, store.write() as session:
+        session.execute(delete(models.Job).where(models.Job.id == job_id))
+    app.run()
+    assert not app.exception
+    assert not app.error
+    assert not app.markdown
+    assert not app.button
 
 
 def _queued_job(path: Path) -> int:
@@ -137,19 +155,6 @@ def _queued_job(path: Path) -> int:
         job = JobQueue(store).submit(event, settings).job
     assert job is not None
     return job.id
-
-
-@pytest.fixture
-def worker_first(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Every cancel of a job comes after a worker's: the worker ends the
-    job between the page's read and the click."""
-    cancel = JobQueue.cancel
-
-    def cancelled_first(queue: JobQueue, job: int) -> Job:
-        cancel(queue, job)
-        return cancel(queue, job)
-
-    monkeypatch.setattr(JobQueue, "cancel", cancelled_first)
 
 
 @pytest.mark.usefixtures("worker_first")

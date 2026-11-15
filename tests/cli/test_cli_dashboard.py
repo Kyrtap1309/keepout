@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 from alembic import command
+from builders import loaded_after
 from cli_builders import keepout, usage_error
 from sqlalchemy import create_engine
 
@@ -147,7 +148,10 @@ def test_cli_dashboard_refuses_a_missing_store(
 ) -> None:
     result = keepout("dashboard", "--store", str(tmp_path / "none.db"))
     assert result.exit_code == ExitCode.ERROR
-    assert result.stderr == f"Error: no store at {tmp_path / 'none.db'}\n"
+    assert result.stderr == (
+        f"Error: no store at {tmp_path / 'none.db'}: make one by adding CDMs to it, "
+        f"keepout store add CDM... --store {tmp_path / 'none.db'}\n"
+    )
     assert not (tmp_path / "none.db").exists()
     assert fake_run.calls == []
 
@@ -186,18 +190,13 @@ def test_cli_dashboard_help() -> None:
 
 def test_help_does_not_import_dashboard() -> None:
     code = (
-        "import sys\n"
         "from keepout.cli.app import app\n"
         "for args in (['--help'], ['dashboard', '--help']):\n"
         "    try:\n"
         "        app(args, prog_name='keepout')\n"
         "    except SystemExit:\n"
         "        pass\n"
-        "print(sorted(m for m in sys.modules if m.partition('.')[0] in"
-        " ('streamlit', 'plotly') or m.startswith('keepout.dashboard')))\n"
     )
-    loaded = subprocess.run(  # noqa: S603 (this interpreter, fixed code)
-        [sys.executable, "-c", code], capture_output=True, text=True, check=True
-    )
-    assert "dashboard" in loaded.stdout
-    assert loaded.stdout.endswith("[]\n")
+    shown = loaded_after(code, ["streamlit", "plotly", "keepout.dashboard"])
+    assert "dashboard" in shown.printed
+    assert shown.loaded == []

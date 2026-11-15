@@ -34,7 +34,6 @@ from __future__ import annotations
 
 import argparse
 import datetime
-import math
 import os
 import platform
 import re
@@ -43,7 +42,6 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, Literal, TypedDict
 
-import matplotlib as mpl
 import numpy as np
 import screening_snapshot as snapshot
 from astropy.time import Time
@@ -54,9 +52,10 @@ from generated import (
     json_text,
     minute_text,
     positive,
-    read_json,
+    read_timings,
     readme_with,
     relative,
+    save_svg,
     second_text,
     significant,
     table,
@@ -74,6 +73,7 @@ from synthetic_operator_report import FLEET, level_key, shown, window_start
 from keepout._defaults import TCA_TOLERANCE
 from keepout._methods import Method
 from keepout._text import pc_text, plural
+from keepout._validation import require_positive
 from keepout._workers import DEFAULT_WORKERS, ONE_THREAD
 from keepout.cdm import Cdm, load
 from keepout.events import ConjunctionEvent, group_events, time_to_tca
@@ -1017,37 +1017,32 @@ def heatmap_figure(figure: GridFigure, title: str) -> Figure:
     left) and hours before TCA."""
     cmap = LinearSegmentedColormap.from_list("pc", SEQUENTIAL).with_extremes(bad=NO_PC)
     retrograde, prograde = figure.directions
-    with mpl.rc_context({"svg.hashsalt": "keepout", "svg.fonttype": "none"}):
-        drawing = Figure(figsize=(9.0, 4.8))
-        grid = drawing.add_gridspec(1, 3, width_ratios=(1.0, 1.0, 0.05), wspace=0.12)
-        left = drawing.add_subplot(grid[0, 0])
-        right = drawing.add_subplot(grid[0, 1], sharey=left)
-        _panel(left, figure, retrograde, cmap)
-        mesh = _panel(right, figure, prograde, cmap)
-        left.invert_xaxis()
-        left.set_ylabel("burn time before TCA (h)", color=MUTED)
-        right.tick_params(labelleft=False)
-        colourbar = drawing.colorbar(
-            mesh, cax=drawing.add_subplot(grid[0, 2]), extend="min"
-        )
-        colourbar.set_label("log10 Pc (Foster)", color=MUTED)
-        colourbar.ax.axhline(figure.target_log_pc, color=TARGET_COLOUR, linewidth=2.0)
-        colourbar.ax.tick_params(colors=MUTED)
-        colourbar.outline.set_edgecolor(RULE)
-        _legend(drawing, figure)
-        drawing.suptitle(title, color=INK, fontsize=11)
-        drawing.subplots_adjust(left=0.08, right=0.93, top=0.84, bottom=0.2)
+    drawing = Figure(figsize=(9.0, 4.8))
+    grid = drawing.add_gridspec(1, 3, width_ratios=(1.0, 1.0, 0.05), wspace=0.12)
+    left = drawing.add_subplot(grid[0, 0])
+    right = drawing.add_subplot(grid[0, 1], sharey=left)
+    _panel(left, figure, retrograde, cmap)
+    mesh = _panel(right, figure, prograde, cmap)
+    left.invert_xaxis()
+    left.set_ylabel("burn time before TCA (h)", color=MUTED)
+    right.tick_params(labelleft=False)
+    colourbar = drawing.colorbar(
+        mesh, cax=drawing.add_subplot(grid[0, 2]), extend="min"
+    )
+    colourbar.set_label("log10 Pc (Foster)", color=MUTED)
+    colourbar.ax.axhline(figure.target_log_pc, color=TARGET_COLOUR, linewidth=2.0)
+    colourbar.ax.tick_params(colors=MUTED)
+    colourbar.outline.set_edgecolor(RULE)
+    _legend(drawing, figure)
+    drawing.suptitle(title, color=INK, fontsize=11)
+    drawing.subplots_adjust(left=0.08, right=0.93, top=0.84, bottom=0.2)
     return drawing
 
 
 def plot(figure: GridFigure, title: str, path: Path) -> None:
     """The heatmap of a plan (:func:`heatmap_figure`), saved as a
     reproducible SVG."""
-    drawing = heatmap_figure(figure, title)
-    with mpl.rc_context({"svg.hashsalt": "keepout", "svg.fonttype": "none"}):
-        drawing.savefig(
-            path, format="svg", metadata={"Date": None}, facecolor="white", dpi=200
-        )
+    save_svg(heatmap_figure(figure, title), path, facecolor="white", dpi=200)
 
 
 def heatmap_title(plan: Plan) -> str:
@@ -1057,19 +1052,6 @@ def heatmap_title(plan: Plan) -> str:
         f"{primary_text(plan)} vs {secondary}\nTCA {minute_text(plan['tca'])} UTC, "
         f"Pc {plan['baseline']['pc']:.2e} without a burn"
     )
-
-
-def read_timings(path: Path) -> Timings | None:
-    """The timings of the committed JSON at ``path``, if it exists.
-
-    Raises
-    ------
-    ValueError
-        If the file is not a JSON file this tool writes.
-    """
-    if not path.exists():
-        return None
-    return read_json(path, Summary)["timings"]
 
 
 def load_event(path: Path) -> tuple[ConjunctionEvent, str]:
@@ -1097,8 +1079,10 @@ def positive_radius(text: str) -> float:
         If ``text`` is not one.
     """
     value = float(text)
-    if not (math.isfinite(value) and value > 0.0):
-        raise argparse.ArgumentTypeError(f"must be finite and above 0, got {text}")
+    try:
+        require_positive(value, "hard-body radius")
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
     return value
 
 
@@ -1211,7 +1195,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.workers,
     )
     timings = (
-        read_timings(args.page.with_suffix(".json"))
+        read_timings(args.page.with_suffix(".json"), Summary)
         if committed_timings
         else measured_timings(args.repeat, wall, cpu)
     )

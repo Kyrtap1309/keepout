@@ -1,95 +1,12 @@
 """Close approaches of primaries with a catalog: a sieve on a time grid, then TCA.
 
-:class:`ApproachSearch` finds every local minimum of the distance (range)
-between a primary and a catalog object that lies inside the primary's
-screening volume over a window. Both objects are sampled on a uniform time
-grid (:func:`time_grid`, step ``h``); two sieves rule out the grid intervals
-in which the pair cannot come inside the volume; in the others, the sign
-changes of ``f = rho . drho/dt`` (``rho`` the position of the catalog object
-relative to the primary, ``f`` half the derivative of ``|rho|^2``) bracket
-the minima, and :func:`scipy.optimize.brentq` finds each time of closest
-approach (TCA) as the root of ``f``.
-
-**Sieves.** For an interval ``[ta, tb]`` of length ``h`` with relative
-positions ``rho_a`` and ``rho_b`` at its ends, and ``R`` the bounding radius
-of the volume (:attr:`~keepout.screening.volume.ScreeningVolume.bounding_radius`;
-no point of the volume is farther):
-
-1. *Speed sieve.* Each object's speed is below :func:`speed_bounds` (the
-   speed at perigee of the most eccentric orbit inside the object's radius
-   bounds, widened by the relative margin :data:`SPEED_BOUND_MARGIN` and by
-   :data:`GRAVITY_MARGIN` on ``mu``), so the relative speed is below ``V =
-   v_p + v_s`` and every point of the interval is within ``V (t - ta)`` of
-   ``rho_a`` and ``V (tb - t)`` of ``rho_b``. A point inside ``R`` needs
-   ``|rho_a| + |rho_b| <= 2 R + V h``, and the range never exceeds
-   ``rho_up = (|rho_a| + |rho_b| + V h) / 2`` (``speed_range_bound`` in the
-   code).
-2. *Chord sieve.* With ``A`` a bound on the relative acceleration, the
-   relative position is within ``A (t - ta) (tb - t) / 2 <= A h^2 / 8`` of
-   the chord from ``rho_a`` to ``rho_b``; a point inside ``R`` needs the
-   chord to pass within ``R + A h^2 / 8`` of the primary. ``A`` is the
-   difference of the two objects' gravity, at most the gravity gradient
-   (``2 mu / r^3`` for a point mass, times :data:`GRAVITY_MARGIN` for the
-   zonal terms) times the largest range over the interval, ``r`` being the
-   lowest radius on the segment joining the objects (from their radius
-   bounds and ``rho_up``); or at most the sum of both gravities; plus twice
-   :data:`PERTURBATION`, a bound on every other acceleration (drag, the Sun
-   and Moon, SGP4's own terms). The largest range is the smaller of
-   ``rho_up`` and the chord's own bound, ``max(|rho_a|, |rho_b|) + A h^2 /
-   8``, solved for the range.
-
-Both sieves hold for any step, so the step only trades propagation (one
-state per object per step) against the work on the intervals that pass.
-
-**Minima.** ``f`` is computed from positions only, by a central difference
-over :data:`DERIVATIVE_STEP`: SGP4's velocity is not exactly the derivative
-of its position (by up to 12 m/s), which would move the TCA of a slow pair
-by seconds. In an interval that passes the sieves, ``f`` is increasing where
-``f' = |drho/dt|^2 + rho . d2rho/dt2 > 0``. The relative velocity stays
-within ``A h / 2`` of the chord velocity ``c = (rho_b - rho_a) / h``, so
-this holds over the whole interval when ``(|c| - A h / 2)^2 > rho_max A``
-(``rho_max`` the largest range over the interval); then the interval holds
-a minimum exactly when ``f`` goes from negative at ``ta`` to non-negative at
-``tb``. Over a week of the public catalog (20 LEO primaries, 5 km sphere,
-default step) every interval in which the pair moves faster than 0.5 km/s
-is decided this way. Any other interval (a slow, co-orbital pair) is
-resampled every :data:`SLOW_STEP` and each sign change of ``f`` between the
-samples is a minimum: there, a minimum and a maximum of the range less than
-:data:`SLOW_STEP` apart are not told apart (on the frozen fixture the
-closest are 75 s apart).
-
-Within ``2 DERIVATIVE_STEP`` of the window's ends the central difference
-takes positions outside the window. An error SGP4 reports there (an object
-decaying a second after the window) is not the object's: ``f`` at such a
-time comes from a one-sided fourth-order difference over five positions
-inside the window instead.
-
-**Inside the volume.** A minimum counts when the catalog object's position
-relative to the primary at TCA, in the primary's RTN frame, is inside the
-volume (:meth:`~keepout.screening.volume.ScreeningVolume.contains_position`).
-For an ellipsoid, a pass that crosses the volume away from its point of
-closest approach does not count.
-
-**Window.** A minimum counts when its TCA lies in the window ``(start,
-start + duration]``: a range still falling at the end of the window or
-already rising at its start has its minimum outside, so consecutive windows
-together find the minima of their union, each once.
-
-**Same object.** A pair at exactly the same position at both ends of an
-interval is taken as one object over it, with no minimum: CelesTrak gives
-docked spacecraft the element set of their station.
-
-**Failures.** An object fails when SGP4 reports an error for it at a
-time in the window: on the grid, or while an interval is refined. A failure
-while refining an interval loses that interval's minima only; the pair's
-other intervals are refined as if it had none.
-
-**Determinism.** Each interval is decided from the states of its own pair
-only, and so is each failure found while refining it, so the result does
-not depend on how the grid is cut into chunks (``max_states``), nor on how
-the catalog is cut into parts searched apart (e.g. one per worker) and
-merged with
-:meth:`~keepout.screening.search_result.SearchResult.merge`.
+:class:`ApproachSearch` samples a primary and the catalog objects on a
+uniform time grid (:func:`time_grid`), rules out the intervals in which a
+pair cannot come inside the primary's screening volume (a speed sieve and a
+chord sieve), and finds every local minimum of the range in the others as a
+root of ``rho . drho/dt`` (:func:`scipy.optimize.brentq`). The sieves, their
+bounds and the guarantee are in the guide's "The search and its guarantee"
+(``docs/screening.md``).
 """
 
 from __future__ import annotations

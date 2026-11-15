@@ -1,9 +1,13 @@
 """Setup shared by the tests of the report tools: a data directory holding the
-test fixture, a README with a tool's markers, and the write-then-check run."""
+test fixture, a README with a tool's markers, the write-then-check run and a
+fake base interpreter for the benchmarks' comparisons."""
 
 import gzip
+import json
 import shutil
-from collections.abc import Callable, Sequence
+import stat
+import sys
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 import screening_snapshot as snapshot
@@ -53,3 +57,17 @@ def assert_writes_then_checks(
     assert main([*args, "--check"]) == 1
     assert main([*args]) == 0
     assert main([*args, "--check"]) == 0
+
+
+def fake_python(
+    folder: Path, measurement: Mapping[str, float], *, when: str | None = None
+) -> str:
+    """``folder/fake-python``, an executable printing ``measurement`` as JSON
+    whatever it is asked (only when ``when`` is one of its arguments, if
+    given), for a benchmark's ``--base-python``."""
+    path = folder / "fake-python"
+    line = f"print({json.dumps(json.dumps(dict(measurement)))})"
+    body = line if when is None else f"if {when!r} in sys.argv: {line}"
+    path.write_text(f"#!{sys.executable}\nimport sys\n{body}\n")
+    path.chmod(path.stat().st_mode | stat.S_IXUSR)
+    return str(path)

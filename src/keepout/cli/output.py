@@ -63,7 +63,7 @@ class ExitCode(enum.IntEnum):
     USAGE = 2
     """A wrong command line (Typer's status for it)."""
     MANEUVER = 3
-    """``keepout assess``: at least one event's decision is to manoeuvre."""
+    """``keepout assess``: at least one event's decision is to maneuver."""
     NO_SAFE_BURN = 4
     """``keepout maneuver``: no burn exists, the burn given misses the target,
     or every burn brings an approach at red or the event's pair back above the

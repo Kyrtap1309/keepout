@@ -101,7 +101,9 @@ from `compute_pc` even in `auto` mode.
 **Applicability warnings.** A warning of the 2-D assumptions, such as
 "states are ... m from closest approach along the relative velocity; 2-D
 Pc uses the straight-line closest approach", is attached to the result
-whenever it fires, in `auto` and with an explicit method alike.
+whenever it fires, in `auto` and with an explicit method alike. The
+result's `diagnostics` give the conjunction's own first (covariance
+repairs, unknown covariances), then these warnings, then the method's.
 
 ??? note "Exceptions"
     - At zero relative velocity there is no encounter plane, and no such

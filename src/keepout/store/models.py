@@ -30,7 +30,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.types import TypeDecorator, TypeEngine
 
-from keepout._types import override
+from keepout._types import JsonValue, override
 from keepout.cdm import CdmFormat
 from keepout.errors import StoreError
 from keepout.units import elapsed_seconds
@@ -367,7 +367,7 @@ class Result(Base):
     )
     key: Mapped[str] = mapped_column(String(64))
     """What was computed, and with which options."""
-    payload: Mapped[dict[str, Any]] = mapped_column(JSON)
+    payload: Mapped[dict[str, JsonValue]] = mapped_column(JSON)
     created_at: Mapped[Time] = mapped_column(UtcTime)
 
     cdm: Mapped[Cdm] = relationship(back_populates="results", lazy="raise")
@@ -404,7 +404,7 @@ class Job(Base):
     """The CDM the computation is pinned to: the event's latest when queued."""
     key: Mapped[str] = mapped_column(String(64))
     """The key its result is cached under."""
-    params: Mapped[dict[str, Any]] = mapped_column(JSON)
+    params: Mapped[dict[str, JsonValue]] = mapped_column(JSON)
     """What the computation needs, e.g. the settings."""
     status: Mapped[JobStatus] = mapped_column(StrEnumText(JobStatus))
     attempt: Mapped[int] = mapped_column(Integer, default=0)

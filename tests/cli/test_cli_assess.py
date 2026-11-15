@@ -66,10 +66,10 @@ TCA (UTC)         Objects        Miss (m)  CDMs        Pc  Level  Action        
 2 events from 2 CDMs: 1 maneuver, 1 prepare maneuver.
 2 of 2 events rest on assumed covariances (COVARIANCE_METHOD = DEFAULT), not orbit determination.
 2a85ed50c4e6: maneuver (latest Pc 4.25e-02 is red, 0.82 d before TCA; trend undetermined; within the decision point (2.00 d before TCA))
-3befe6f1305d: prepare maneuver (latest Pc 1.73e-02 is red, 2.50 d before TCA; trend undetermined; before the decision point (2.00 d before TCA): prepare a manoeuvre)
+3befe6f1305d: prepare maneuver (latest Pc 1.73e-02 is red, 2.50 d before TCA; trend undetermined; before the decision point (2.00 d before TCA): prepare a maneuver)
   diagnostic: 2-D Pc assumptions questionable: the encounter lasts about 3.5e+03 s, 4.1% of the primary's orbital period (limit 1%); a 3-D Pc may differ
   diagnostic: the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used
-At least one event needs a manoeuvre (exit status 3).
+At least one event needs a maneuver (exit status 3).
 """)
     assert result.stderr == ""
     as_json = keepout("assess", *files, "--hbr", "1000", "--json")

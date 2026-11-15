@@ -55,7 +55,9 @@ def test_a_fleet_file_is_read() -> None:
 
 
 def test_an_integer_radius_is_read_as_a_float() -> None:
-    assert isinstance(read_fleet(TEXT).satellites[0].hard_body_radius, float)
+    radius = read_fleet(TEXT).satellites[0].hard_body_radius
+    assert type(radius) is float
+    assert radius == 50.0
 
 
 def test_a_satellite_is_found_by_its_catalog_number() -> None:

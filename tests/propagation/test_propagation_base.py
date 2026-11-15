@@ -81,7 +81,7 @@ def linear(count: int) -> LinearPropagator:
     )
 
 
-def test_describe_error() -> None:
+def test_an_error_code_is_described_in_words() -> None:
     assert describe_error(NO_ERROR) == "no error"
     assert describe_error(1) == "error 1: mean eccentricity outside the range 0 to 1"
     assert describe_error(6) == "error 6: decayed: orbit radius below one Earth radius"

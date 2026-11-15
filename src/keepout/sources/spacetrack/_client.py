@@ -269,7 +269,9 @@ class SpaceTrackClient:
         its class's interval, logging in if needed, and checking again.
 
         Another process may have queried while this one logged in, so the
-        ledger is read again after the login and what it holds is kept.
+        ledger is read again after the login and what it holds is kept; that
+        read, check and write hold the ledger's lock, so of two processes
+        only one passes.
 
         Raises
         ------
@@ -289,9 +291,10 @@ class SpaceTrackClient:
         if not self._logged_in:
             self._login()
             now = self._now()
-        ledger = self._ledger.read()
-        self._check_interval(query, ledger, now)
-        self._ledger.write({**ledger, query.request_class: now})
+        with self._ledger.locked():
+            ledger = self._ledger.read()
+            self._check_interval(query, ledger, now)
+            self._ledger.write({**ledger, query.request_class: now})
 
     def _check_interval(
         self, query: Query, ledger: Mapping[str, float], now: float

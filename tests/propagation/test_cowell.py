@@ -2,15 +2,13 @@
 
 import math
 import pickle
-import subprocess
-import sys
 from typing import Any, Final
 
 import astropy.units as u
 import numpy as np
 import pytest
 from astropy.time import Time
-from builders import EARTH_ROTATION_RATE
+from builders import EARTH_ROTATION_RATE, loaded_after
 from screening_data import FIXTURE_START, fixture_by_number
 
 from keepout._types import FloatArray
@@ -317,7 +315,7 @@ def test_subset_gives_identical_numbers() -> None:
     np.testing.assert_array_equal(ephemeris.v, WHOLE.v[[2, 0]])
 
 
-def test_empty_subset() -> None:
+def test_an_empty_subset_propagates_no_object() -> None:
     ephemeris = PROPAGATOR.subset(np.array([], dtype=int)).propagate(EPOCH, OFFSETS)
     assert ephemeris.r.shape == (0, 137, 3)
 
@@ -588,8 +586,4 @@ def test_drag_decays_a_circular_orbit_at_the_analytic_rate(altitude: float) -> N
 
 def test_importing_the_module_does_not_load_scipy() -> None:
     """scipy.integrate takes 0.2 s to import, on every command that screens."""
-    code = "import sys, keepout.propagation.cowell; print('scipy' in sys.modules)"
-    loaded = subprocess.run(  # noqa: S603 (this interpreter, fixed code)
-        [sys.executable, "-c", code], capture_output=True, text=True, check=True
-    )
-    assert loaded.stdout == "False\n"
+    assert loaded_after("import keepout.propagation.cowell", ["scipy"]).loaded == []

@@ -1,9 +1,9 @@
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from spacetrack_builders import HOUR
 
 from keepout.sources.spacetrack import Throttle
+from keepout.units import HOUR
 
 CLOCK_ROUNDING = 1e-9
 """Seconds of rounding in a fake clock's sum."""

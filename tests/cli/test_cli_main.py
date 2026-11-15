@@ -1,10 +1,10 @@
 import os
 import runpy
-import subprocess
 import sys
 from importlib.metadata import entry_points
 
 import pytest
+from builders import loaded_after
 
 import keepout
 from keepout import cli
@@ -80,18 +80,5 @@ def test_python_m_keepout_cli_runs_main(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_the_library_does_not_import_the_extra() -> None:
-    done = subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            (
-                "import sys, keepout, keepout.cli, keepout.synthetic,"
-                " keepout.validation;"
-                "print(sorted({'typer', 'rich'} & set(sys.modules)))"
-            ),
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    assert done.stdout == "[]\n"
+    code = "import keepout, keepout.cli, keepout.synthetic, keepout.validation"
+    assert loaded_after(code, ["typer", "rich"]).loaded == []

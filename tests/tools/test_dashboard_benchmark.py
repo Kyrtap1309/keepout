@@ -9,6 +9,7 @@ import dashboard_benchmark as benchmark
 import dashboard_timing as timing
 import pytest
 from benchmark_runs import Comparison
+from report_builders import fake_python
 
 from keepout.settings import Settings
 from keepout.store import open_store
@@ -137,22 +138,11 @@ def test_render_comparison_of_a_skipped_base() -> None:
     )
 
 
-def fake_python(tmp_path: Path, cpu: float) -> str:
-    """An executable printing one measurement whatever it is asked (and
-    nothing when asked to build a store)."""
-    path = tmp_path / "fake-python"
-    measurement = {
-        "list_wall": cpu,
-        "list_cpu": cpu,
-        "event_wall": cpu,
-        "event_cpu": cpu,
-    }
-    path.write_text(
-        f"#!{sys.executable}\nimport sys\n"
-        f"if 'time' in sys.argv: print({json.dumps(json.dumps(measurement))})\n"
-    )
-    path.chmod(path.stat().st_mode | stat.S_IXUSR)
-    return str(path)
+def base_python(tmp_path: Path, cpu: float) -> str:
+    """A base printing one measurement when asked to time (and nothing when
+    asked to build a store)."""
+    keys = ("list_wall", "list_cpu", "event_wall", "event_cpu")
+    return fake_python(tmp_path, dict.fromkeys(keys, cpu), when="time")
 
 
 def compare_arguments(base_python: str) -> list[str]:
@@ -176,7 +166,7 @@ def test_compare_main_against_a_faster_base_fails(
 ) -> None:
     step_summary = tmp_path / "summary.md"
     monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(step_summary))
-    args = compare_arguments(fake_python(tmp_path, 1e-6))
+    args = compare_arguments(base_python(tmp_path, 1e-6))
     assert benchmark.main(args) == 1
     out = capsys.readouterr().out
     assert out.startswith("Dashboard benchmark: 4 events, 8 CDMs, 1 run per tree.")

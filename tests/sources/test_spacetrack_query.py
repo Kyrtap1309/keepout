@@ -1,9 +1,9 @@
 from typing import cast
 
 import pytest
-from spacetrack_builders import HOUR
 
 from keepout.sources.spacetrack import CATALOG, CLASS_INTERVALS, Query, RequestClass
+from keepout.units import HOUR
 
 CDM_QUERY = Query("cdm_public", "TCA/>now/orderby/TCA asc/format/json", "upcoming")
 

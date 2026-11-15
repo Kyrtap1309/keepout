@@ -64,14 +64,22 @@ def test_parse_value_errors(
         parse_value(keyword, text, unit)
 
 
-def test_unitless_keyword_accepts_placeholder_units() -> None:
-    assert parse_value(SEGMENT["WEIGHTED_RMS"], "0.864", "n/a") == 0.864
-    assert parse_value(SEGMENT["WEIGHTED_RMS"], "0.864", "") == 0.864
-
-
-def test_parse_int_and_text() -> None:
-    assert parse_value(SEGMENT["OBS_USED"], "579", None) == 579
-    assert parse_value(SEGMENT["OBJECT_TYPE"], "SPACE STATION", None) == "SPACE STATION"
+@pytest.mark.parametrize(
+    ("keyword", "text", "unit", "expected"),
+    [
+        # A unitless keyword accepts the placeholder units.
+        ("WEIGHTED_RMS", "0.864", "n/a", 0.864),
+        ("WEIGHTED_RMS", "0.864", "", 0.864),
+        ("OBS_USED", "579", None, 579),
+        ("OBJECT_TYPE", "SPACE STATION", None, "SPACE STATION"),
+    ],
+)
+def test_a_value_is_parsed_to_its_keywords_kind(
+    keyword: str, text: str, unit: str | None, expected: object
+) -> None:
+    parsed = parse_value(SEGMENT[keyword], text, unit)
+    assert parsed == expected
+    assert type(parsed) is type(expected)
 
 
 @pytest.mark.parametrize(

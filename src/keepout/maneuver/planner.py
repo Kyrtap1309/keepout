@@ -737,7 +737,7 @@ def _prepare(
     if cdm.object1.maneuverable == Maneuverable.NO:
         raise ManeuverError(
             f"event {event.event_id}: the primary {cdm.object1.object_id} cannot "
-            "manoeuvre (MANEUVERABLE = NO)"
+            "maneuver (MANEUVERABLE = NO)"
         )
     if grid is not None and time_to_tca(cdm) < grid.latest_lead:
         raise ManeuverError(

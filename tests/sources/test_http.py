@@ -1,3 +1,4 @@
+import email.message
 import gzip
 import http.client
 import io
@@ -211,3 +212,29 @@ def test_retrying_raises_the_last_failure_when_attempts_run_out() -> None:
     with pytest.raises(SourceUnavailable, match="second"):
         _http.retrying(attempt, delays=(1.0,), sleep=waits.append)
     assert waits == [1.0]
+
+
+def _refused(status: int, retry_after: str) -> urllib.error.HTTPError:
+    headers = email.message.Message()
+    headers["Retry-After"] = retry_after
+    return urllib.error.HTTPError(URL, status, "busy", headers, None)
+
+
+@pytest.mark.parametrize(
+    ("status", "retry_after", "wait"),
+    [
+        (429, "60", 60.0),
+        (503, "60", 60.0),
+        (503, "1", 5.0),
+        (429, "86400", _http.MAX_RETRY_AFTER),
+        (503, "Wed, 21 Oct 2026 07:28:00 GMT", 5.0),
+        (500, "60", 5.0),
+    ],
+    ids=["429", "503", "shorter", "capped", "http date", "not 429 or 503"],
+)
+def test_a_retry_waits_as_long_as_the_server_asks(
+    monkeypatch: pytest.MonkeyPatch, status: int, retry_after: str, wait: float
+) -> None:
+    web = FakeUrlopen(monkeypatch, _refused(status, retry_after), b"body")
+    assert _http.http_download(URL, retry_delays=(5.0,)) == b"body"
+    assert web.waits == [wait]

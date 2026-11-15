@@ -19,7 +19,7 @@ from faults import (
 
 from keepout.conjunction import Conjunction
 from keepout.errors import CovarianceError, PcConvergenceError
-from keepout.pc import PcResult, foster, hall3d, montecarlo
+from keepout.pc import MonteCarloOptions, PcResult, foster, hall3d, montecarlo
 
 
 def interval(result: PcResult) -> tuple[float, float]:
@@ -90,17 +90,19 @@ def test_stops_when_the_interval_is_narrow_enough(
 
 
 @pytest.mark.parametrize(
-    "options", [{"samples": 6_000}, {"rtol": 0.15, "max_samples": 100_000}]
+    "options",
+    [{"samples": 6_000, "seed": 7}, {"rtol": 0.15, "max_samples": 100_000, "seed": 7}],
 )
 def test_processes_give_the_result_of_one(
-    monkeypatch: pytest.MonkeyPatch, options: dict[str, float]
+    monkeypatch: pytest.MonkeyPatch, options: MonteCarloOptions
 ) -> None:
     # Each batch has its own stream of the seed: two processes sample the
     # same batches, and stop after the same one.
     monte_carlo_batches(monkeypatch, 2_000)
     conjunction = head_on(8.0, 10.0, 20.0, 5.0)
-    alone = montecarlo(conjunction, seed=7, **options)  # type: ignore[arg-type]
-    shared = montecarlo(conjunction, seed=7, workers=2, **options)  # type: ignore[arg-type]
+    alone = montecarlo(conjunction, **options)
+    in_two: MonteCarloOptions = {**options, "workers": 2}
+    shared = montecarlo(conjunction, **in_two)
     assert alone.details["samples"] > 2_000
     assert (shared.value, shared.interval) == (alone.value, alone.interval)
     assert shared.details == alone.details
@@ -150,9 +152,9 @@ def test_unknown_covariance_is_rejected() -> None:
         ({"workers": 0}, "workers must be at least 1"),
     ],
 )
-def test_bad_arguments_are_rejected(options: dict[str, float], message: str) -> None:
+def test_bad_arguments_are_rejected(options: MonteCarloOptions, message: str) -> None:
     with pytest.raises(ValueError, match=message):
-        montecarlo(TYPICAL_HEAD_ON, **options)  # type: ignore[arg-type]
+        montecarlo(TYPICAL_HEAD_ON, **options)
 
 
 def test_no_encounter_in_the_window_runs_no_trial() -> None:

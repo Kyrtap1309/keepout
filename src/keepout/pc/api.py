@@ -13,7 +13,6 @@ from typing import (
     Self,
     TypeAlias,
     TypedDict,
-    cast,
     overload,
 )
 
@@ -43,7 +42,7 @@ if TYPE_CHECKING:
     # out of the dependencies.
     from collections.abc import Callable, Mapping
 
-    from typing_extensions import Unpack
+    from typing_extensions import TypeIs, Unpack
 
     from keepout.conjunction import Conjunction
     from keepout.pc.result import Method, PcResult
@@ -251,42 +250,19 @@ def compute_pc(
 ) -> PcResult:
     """Probability of collision of a conjunction.
 
+    ``"auto"`` picks ``"hall3d"`` at zero relative velocity or when a 2-D
+    assumption is questionable (:func:`keepout.pc.api.applicability`), a maximum Pc
+    (``"alfano"``, ``"frisbee"``) when a covariance is unknown, and
+    ``"foster"`` otherwise; it falls back to a seeded ``"montecarlo"`` when
+    Hall's integral fails. The rules, the fallback and the cost of each
+    method are in the guide's "Choosing a method" (``docs/pc-3d.md``).
+
     Parameters
     ----------
     conjunction
         The conjunction at TCA.
     method
-        A method name, or ``"auto"`` (default), which picks:
-
-        1. ``"hall3d"`` if the relative velocity is zero (both covariances
-           must then be known and both orbits elliptic);
-        2. ``"alfano"`` if both covariances are unknown, ``"frisbee"`` if one
-           is (maximum Pc: upper bounds);
-        3. ``"hall3d"`` if a 2-D assumption is questionable (see
-           :func:`keepout.pc.api.applicability`), both orbits are elliptic and both
-           covariances have a velocity block, with the 2-D Pc kept in
-           ``details["pc_2d"]``;
-        4. ``"foster"`` otherwise, with a note when a 2-D assumption is
-           questionable but a covariance is known only in position (zero
-           velocity block, e.g. a synthetic covariance; see
-           :attr:`~keepout.conjunction.Conjunction.position_only_covariance`):
-           the 3-D methods would take its velocity as exact.
-
-        However chosen, ``"hall3d"`` and ``"montecarlo"`` note a covariance
-        known only in position: they take its velocity as exact.
-
-        When ``"hall3d"`` raises :class:`PcConvergenceError` after its
-        encounter scan (the peak-overlap iteration failed where the rate
-        matters, the rate cannot be computed at a quadrature node, or Nc is
-        not finite), ``"auto"`` falls back to ``"montecarlo"`` with at most 1,000,000
-        samples and the seed 0
-        (:data:`~keepout.pc.api.AUTO_MC_SAMPLES`,
-        :data:`~keepout.pc.api.AUTO_MC_SEED`), so ``"auto"`` is
-        reproducible. A failure of the encounter scan itself
-        is not covered: Monte Carlo reuses that scan, so its error
-        propagates.
-        The 2-D and maximum-Pc methods take milliseconds; ``"hall3d"`` about
-        1-60 s and the Monte Carlo fallback up to about a minute.
+        A method name, or ``"auto"`` (default).
     **options
         The keyword-only parameters of an explicitly chosen method (e.g.
         ``rtol``, ``order``, ``window``, ``samples``, ``seed``), as
@@ -300,18 +276,8 @@ def compute_pc(
         The Pc (``value``) and the ``method`` that computed it, its ``kind``
         (an estimate or an upper bound), a confidence ``interval`` (Monte
         Carlo only), ``diluted`` (dilution only), method-specific
-        ``details`` and the ``diagnostics``.
-
-        The diagnostics start with the conjunction's own (covariance
-        repairs, unknown covariances), then the applicability warnings, then
-        the method's. Applicability warnings are added whatever the method,
-        whenever the encounter plane is defined (non-zero relative velocity)
-        and they fire. That includes a covariance unknown (maximum Pc): the
-        distance from closest approach along the relative velocity does not
-        depend on the covariances, and a duration from the known covariance
-        alone is a lower bound, so its warning still holds.
-        ``details["encounter_duration_s"]`` is added only when both
-        covariances are known.
+        ``details`` and the ``diagnostics``: the conjunction's own, then the
+        applicability warnings (whatever the method), then the method's.
 
     Raises
     ------
@@ -328,26 +294,8 @@ def compute_pc(
     PcConvergenceError
         If ``"hall3d"`` was chosen explicitly and did not converge; if
         ``"montecarlo"`` was chosen and its encounter scan failed; with
-        ``"auto"``, if the encounter scan failed (its encounters need more
-        detection points than allowed, the rate is significant where the
-        screen ruled it negligible, or the rate cannot be computed on the scan
-        grid), since the Monte Carlo fallback shares that scan.
-
-    Examples
-    --------
-    ```python
-    from keepout import cdm, compute_pc
-
-    # A sample CDM in the repository.
-    message = cdm.load("tests/cdm/data/tracss_v2.kvn")
-    # The CDM gives no HBR for OBJECT2: give the combined radius [m].
-    conjunction = message.conjunction(combined_hard_body_radius=20.0)
-    result = compute_pc(conjunction)  # "auto"
-    print(result.method, f"{result.value:.3e}", result.kind)
-    # hall3d 4.504e-02 estimate
-    print(f"{compute_pc(conjunction, 'foster', rtol=1e-8).value:.3e}")
-    # 4.503e-02
-    ```
+        ``"auto"``, if the encounter scan failed, since the Monte Carlo
+        fallback shares that scan.
     """
     return _compute(conjunction, method, options)
 
@@ -421,13 +369,16 @@ def _spec(method: str) -> MethodSpec:
     ValueError
         If ``method`` names no method (nor does ``"auto"``: it is a choice).
     """
-    # A name that is no method is only looked up: it finds nothing.
-    spec = METHODS.get(cast("Method", method))
-    if spec is None:
+    if not _is_method(method):
         raise ValueError(
             f"unknown Pc method {method!r}; expected 'auto' or one of {tuple(METHODS)}"
         )
-    return spec
+    return METHODS[method]
+
+
+def _is_method(name: str) -> TypeIs[Method]:
+    """Whether ``name`` is a method of :data:`METHODS`."""
+    return name in METHODS
 
 
 @dataclass(frozen=True, eq=False, slots=True)

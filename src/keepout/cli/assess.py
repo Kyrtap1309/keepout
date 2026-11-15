@@ -14,7 +14,7 @@ from keepout.cli.events import show_assessed
 from keepout.cli.options import (
     HardBodyRadius,
     JsonFlag,
-    SettingsFile,
+    OverriddenSettingsFile,
     operator_settings,
 )
 from keepout.cli.output import duration_words
@@ -82,7 +82,7 @@ def assess_command(
     *,
     method: MethodOption = None,
     hbr: HardBodyRadius = None,
-    settings: SettingsFile = None,
+    settings: OverriddenSettingsFile = None,
     store: StoreOption = None,
     as_json: JsonFlag = False,
 ) -> None:
@@ -91,12 +91,12 @@ def assess_command(
     CDMs of the same two objects whose TCAs are within {tca_tolerance} form one
     event. Each CDM's Pc is computed from its states and covariances, and
     the event's risk level, Pc trend and recommended action are decided as
-    of the latest CDM's creation date (a manoeuvre needs a red Pc within
+    of the latest CDM's creation date (a maneuver needs a red Pc within
     {decision_point} of TCA). With --store the CDMs are added to the store
     and each event is the stored one, with its id and every CDM stored of
     it. --settings gives the Pc method, covariance policy, hard-body radius
     and risk thresholds; --method and --hbr win over it. Exits with status 3
-    if at least one event's action is to manoeuvre.
+    if at least one event's action is to maneuver.
     """
     from keepout.pc import computation
 

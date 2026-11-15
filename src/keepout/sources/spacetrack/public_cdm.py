@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Final
 from astropy.time import Time
 
 from keepout._validation import (
+    is_number,
     require_at_least,
     require_non_negative,
     require_probability,
@@ -253,7 +254,7 @@ def _cell(value: object, column: str) -> str | None:
     """
     if value is None:
         return None
-    if isinstance(value, bool) or not isinstance(value, str | int | float):
+    if not (isinstance(value, str) or is_number(value)):
         raise ValueError(f"{column} must be text or a number, got {value!r}")
     text = str(value).strip()
     return text or None

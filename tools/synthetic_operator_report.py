@@ -43,7 +43,7 @@ from generated import (
     write_or_check,
 )
 
-from keepout._text import pc_text
+from keepout._text import isot, pc_text
 from keepout._workers import DEFAULT_WORKERS
 from keepout.ccsds.message import UNKNOWN
 from keepout.cdm import kvn
@@ -194,7 +194,7 @@ def _satellite(satellite: FleetSatellite, omm: Omm, approaches: int) -> Satellit
         "regime": str(orbit_regime(omm)),
         "hard_body_radius": satellite.hard_body_radius,
         "maneuverable": satellite.maneuverable,
-        "epoch": omm.epoch.utc.isot,
+        "epoch": isot(omm.epoch),
         "approaches": approaches,
     }
 
@@ -281,7 +281,7 @@ def summarise(
     return {
         "settings": {
             "fleet": fleet,
-            "start": screening.start.utc.isot,
+            "start": isot(screening.start),
             "days": screening.duration / DAY,
             "volume": DEFAULT_VOLUME.label,
             "catalog_hard_body_radius": result.fleet.catalog_hard_body_radius,

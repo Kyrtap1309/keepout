@@ -21,7 +21,7 @@ import json
 from typing import TYPE_CHECKING, Final, TypeVar, cast
 
 import keepout
-from keepout._validation import require_choice
+from keepout._validation import is_number, require_choice
 from keepout.errors import StoreError
 from keepout.risk.observation import PC_KINDS, PcObservation
 from keepout.settings import settings_to_data
@@ -107,7 +107,7 @@ def _number(data: Mapping[str, object], key: str) -> float | None:
     value = data[key]
     if value is None:
         return None
-    if isinstance(value, bool) or not isinstance(value, int | float):
+    if not is_number(value):
         raise StoreError(f"{_WHERE}{key} must be a number, got {value!r}")
     return float(value)
 

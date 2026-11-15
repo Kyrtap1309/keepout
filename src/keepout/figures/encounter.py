@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Final
 
 import numpy as np
 
-from keepout._linalg import symmetric_part
+from keepout._linalg import sigma_axes, symmetric_part
 from keepout._types import FloatArray, read_only
 from keepout._validation import require_at_least, require_positive
 
@@ -75,9 +75,7 @@ def encounter_figure(
     angles = np.linspace(0.0, 2.0 * np.pi, points)
     unit = np.column_stack((np.cos(angles), np.sin(angles)))
     unit[-1] = unit[0]
-    eigenvalues, eigenvectors = np.linalg.eigh(symmetric_part(plane.covariance))
-    # The axes of the 1-sigma ellipse, as rows: sqrt(λ) along each eigenvector.
-    axes = np.sqrt(np.clip(eigenvalues, 0.0, None))[:, np.newaxis] * eigenvectors.T
+    axes = sigma_axes(symmetric_part(plane.covariance))
     miss = np.asarray(plane.miss_vector, dtype=np.float64)
     ellipses = tuple(miss + k * (unit @ axes) for k in SIGMAS)
     circle = hbr * unit

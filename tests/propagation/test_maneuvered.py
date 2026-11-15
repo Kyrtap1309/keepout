@@ -269,6 +269,7 @@ def test_radius_bounds_hold_the_spline_between_its_nodes() -> None:
     assert radii.max() <= bounds.highest[0]
 
 
+@pytest.mark.slow
 def test_radius_bounds_hold_a_burn_that_reshapes_the_orbit() -> None:
     bounds = maneuvered(2000.0).radius_bounds(START, 7 * DAY)
     radii = dense_radii(maneuvered(2000.0), 7 * DAY)

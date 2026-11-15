@@ -30,7 +30,7 @@ from keepout.objects import ObjectState
 from keepout.risk import DEFAULT_DECISION_CONFIG, Provenance, RiskLevel
 from keepout.settings import Settings, load_settings
 from keepout.state import StateVector
-from keepout.store import CdmInput, Job, JobKind, JobQueue, models, open_store
+from keepout.store import CdmInput, JobKind, JobQueue, models, open_store
 from keepout.store.codec import result_key
 from keepout.units import HOUR
 
@@ -204,7 +204,7 @@ def test_no_event_param(app_test: OpenApp) -> None:
     assert app.get("plotly_chart") == []
 
 
-def test_unknown_event(app_test: OpenApp) -> None:
+def test_an_unknown_event_is_a_warning_with_the_way_back(app_test: OpenApp) -> None:
     app = app_test("event", query={"event": "nope"})
     assert not app.exception
     assert not app.error
@@ -316,6 +316,7 @@ def test_missing_pc_offers_compute(
     assert shown(again).count(f"Job {job.id} (refresh): **queued**") == 1
 
 
+@pytest.mark.usefixtures("worker_first")
 def test_a_refused_cancel_is_a_toast_left_on_its_page(
     app_test: OpenApp, seed_copy: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -328,13 +329,6 @@ def test_a_refused_cancel_is_a_toast_left_on_its_page(
         job = JobQueue(store).submit_refresh(event_id, load_settings(seed.SETTINGS))
     assert job.job is not None
     job_id = job.job.id
-    cancel = JobQueue.cancel
-
-    def worker_first(queue: JobQueue, job: int) -> Job:
-        cancel(queue, job)
-        return cancel(queue, job)
-
-    monkeypatch.setattr(JobQueue, "cancel", worker_first)
     monkeypatch.setenv("KEEPOUT_STORE", str(seed_copy))
     app = app_test("event", query={"event": event_id})
     app.button(key=f"cancel-job-{job_id}").click().run()
@@ -389,7 +383,7 @@ def test_max_pc_event_has_no_ellipse(app_test: OpenApp, own_store: Path) -> None
     assert not app.exception
     assert not app.error
     text = shown(app)
-    assert "no covariance: max-Pc" in text
+    assert "No covariance: the Pc shown is an upper bound (maximum Pc)." in text
     assert PROVENANCE_LABELS[Provenance.MAX_PC] in text
     _, encounter, geometry = _charts(app)
     names = [trace["name"] for trace in encounter["data"]]

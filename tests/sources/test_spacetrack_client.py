@@ -8,7 +8,6 @@ import pytest
 from celestrak_builders import SAMPLE
 from spacetrack_builders import (
     CREDENTIALS,
-    HOUR,
     IDENTITY,
     LOGGED_OUT,
     LOGIN_FAILED,
@@ -48,16 +47,12 @@ from keepout.sources.spacetrack import (
     fetch_catalog,
     read_catalog,
 )
+from keepout.units import HOUR
 
 GP = space_track_gp()
 CDM_QUERY = Query("cdm_public", "TCA/>now/orderby/TCA asc/format/json", "upcoming")
 ISS_CDMS = Query("cdm_public", "SAT_1_ID/25544/format/json", "iss")
 ISS_GP = Query("gp", "NORAD_CAT_ID/25544/format/json", "iss")
-
-
-@pytest.fixture
-def clock() -> Clock:
-    return Clock()
 
 
 @pytest.fixture(autouse=True)

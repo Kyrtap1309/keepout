@@ -8,9 +8,7 @@ cores, so BLAS and OpenMP threads would only compete for them.
 from __future__ import annotations
 
 import contextlib
-import multiprocessing
 import os
-from concurrent.futures import ProcessPoolExecutor
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Final
 
@@ -18,8 +16,15 @@ from keepout._validation import require_at_least
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Mapping
+    from concurrent.futures import ProcessPoolExecutor
 
-__all__ = ["DEFAULT_WORKERS", "ONE_THREAD", "process_pool", "resolve_workers"]
+__all__ = [
+    "DEFAULT_WORKERS",
+    "ONE_THREAD",
+    "environment",
+    "process_pool",
+    "resolve_workers",
+]
 
 DEFAULT_WORKERS: Final = 4
 """Most processes used when their number is not given. Screening a fleet
@@ -53,6 +58,35 @@ def resolve_workers(workers: int | None) -> int:
 
 
 @contextlib.contextmanager
+def environment(values: Mapping[str, str], *, override: bool) -> Generator[None]:
+    """``values`` in this process's environment while in the context;
+    restored on the way out.
+
+    Parameters
+    ----------
+    values
+        The variables to set.
+    override
+        Whether a variable set already takes its value from ``values``;
+        if ``False`` it keeps its own.
+    """
+    saved = {name: os.environ.get(name) for name in values}
+    for name, value in values.items():
+        if override:
+            os.environ[name] = value
+        else:
+            os.environ.setdefault(name, value)
+    try:
+        yield
+    finally:
+        for name, before in saved.items():
+            if before is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = before
+
+
+@contextlib.contextmanager
 def process_pool(workers: int) -> Generator[ProcessPoolExecutor]:
     """A pool of ``workers`` spawned processes, each with :data:`ONE_THREAD`.
 
@@ -61,15 +95,11 @@ def process_pool(workers: int) -> Generator[ProcessPoolExecutor]:
     afterwards; this process's own libraries are already loaded, so their
     threads do not change.
     """
-    saved = {name: os.environ.get(name) for name in ONE_THREAD}
-    os.environ.update(ONE_THREAD)
-    try:
+    # Imported here: ``import keepout.cli`` reads ONE_THREAD only.
+    import multiprocessing
+    from concurrent.futures import ProcessPoolExecutor
+
+    with environment(ONE_THREAD, override=True):
         context = multiprocessing.get_context("spawn")
         with ProcessPoolExecutor(max_workers=workers, mp_context=context) as pool:
             yield pool
-    finally:
-        for name, value in saved.items():
-            if value is None:
-                os.environ.pop(name, None)
-            else:
-                os.environ[name] = value

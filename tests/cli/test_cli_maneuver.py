@@ -15,16 +15,14 @@ import functools
 import json
 import re
 import shutil
-import subprocess
-import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any, Final
+from typing import Final, TypedDict, Unpack
 
 import astropy.units as u
 import pytest
 from astropy.time import Time
-from builders import SMALL_GRID
+from builders import SMALL_GRID, loaded_after
 from cli_builders import (
     FIXTURE_CSV,
     START,
@@ -52,9 +50,11 @@ from keepout import maneuver
 from keepout._defaults import SCREENING_DURATION
 from keepout.cli.output import ExitCode, minute
 from keepout.cli.store import STORE_HINT
+from keepout.covariance import Policy
 from keepout.errors import StoreError
 from keepout.events import ConjunctionEvent
 from keepout.maneuver import (
+    BurnGrid,
     ManeuverOption,
     ManeuverPlan,
     NewApproach,
@@ -63,7 +63,8 @@ from keepout.maneuver import (
 )
 from keepout.omm import Omm, load
 from keepout.omm.celestrak import dumps_csv
-from keepout.risk import RiskLevel
+from keepout.pc import PcComputation
+from keepout.risk import RiskLevel, Thresholds
 from keepout.screening import CloseApproach, screen
 from keepout.store import Store, planning
 
@@ -83,9 +84,23 @@ def small_grid(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(outcome, "plan_maneuver", small_plan)
 
 
-def small_plan(event: ConjunctionEvent, **settings: Any) -> ManeuverPlan:
+class PlanSettings(TypedDict, total=False):
+    """The keyword arguments of :func:`keepout.maneuver.plan_maneuver`."""
+
+    target_pc: float
+    grid: BurnGrid
+    compute: PcComputation
+    policy: Policy
+    combined_hard_body_radius: float | None
+    thresholds: Thresholds
+
+
+def small_plan(
+    event: ConjunctionEvent, **settings: Unpack[PlanSettings]
+) -> ManeuverPlan:
     """The plan of ``event`` on :data:`SMALL_GRID` instead of the grid given."""
-    return FULL_PLAN(event, **{**settings, "grid": SMALL_GRID})
+    small: PlanSettings = {**settings, "grid": SMALL_GRID}
+    return FULL_PLAN(event, **small)
 
 
 def catalog_of(folder: Path, numbers: frozenset[int] = NEIGHBOURS) -> str:
@@ -666,19 +681,15 @@ def test_missing_hbr_exits_one(tmp_path: Path) -> None:
 
 def test_help_loads_no_numerical_library() -> None:
     code = (
-        "import sys\n"
         "from keepout.cli.app import app\n"
         "try:\n"
         "    app(['maneuver', '--help'], prog_name='keepout')\n"
         "except SystemExit:\n"
-        "    print(sorted(m for m in ('numpy', 'scipy', 'astropy', 'erfa', 'sgp4')"
-        " if m in sys.modules))\n"
+        "    pass\n"
     )
-    loaded = subprocess.run(  # noqa: S603 (this interpreter, fixed code)
-        [sys.executable, "-c", code], capture_output=True, text=True, check=True
-    )
-    assert "keepout maneuver" in loaded.stdout
-    assert loaded.stdout.endswith("[]\n")
+    shown = loaded_after(code, ["numpy", "scipy", "astropy", "erfa", "sgp4"])
+    assert "keepout maneuver" in shown.printed
+    assert shown.loaded == []
 
 
 def test_help_gives_the_exit_status_and_the_library_defaults() -> None:
@@ -745,7 +756,7 @@ def test_a_file_that_is_no_cdm_is_named(tmp_path: Path) -> None:
 def test_a_primary_that_cannot_manoeuvre_exits_one(tmp_path: Path) -> None:
     result = keepout("maneuver", write(tmp_path, "drifting.kvn", operator_kvn()[1]))
     assert result.exit_code == ExitCode.ERROR
-    assert "cannot manoeuvre (MANEUVERABLE = NO)" in result.stderr
+    assert "cannot maneuver (MANEUVERABLE = NO)" in result.stderr
 
 
 def test_a_catalog_that_cannot_be_read_is_reported_before_planning(
@@ -772,7 +783,9 @@ def test_a_primary_missing_from_the_catalog_exits_one(tmp_path: Path) -> None:
 def test_a_direction_without_an_option_is_said(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def one_way(event: ConjunctionEvent, **settings: Any) -> ManeuverPlan:
+    def one_way(
+        event: ConjunctionEvent, **settings: Unpack[PlanSettings]
+    ) -> ManeuverPlan:
         plan = small_plan(event, **settings)
         return dataclasses.replace(plan, retrograde=None)
 
@@ -1053,7 +1066,10 @@ def test_unknown_event_id_is_named(tmp_path: Path) -> None:
     missing = tmp_path / "missing.db"
     result = keepout("maneuver", "--event", "deadbeef", "--store", str(missing))
     assert result.exit_code == ExitCode.ERROR
-    assert result.stderr == f"Error: no store at {missing}\n"
+    assert result.stderr == (
+        f"Error: no store at {missing}: make one by adding CDMs to it, "
+        f"keepout store add CDM... --store {missing}\n"
+    )
     assert not missing.exists()
 
 
@@ -1110,7 +1126,9 @@ def planned(monkeypatch: pytest.MonkeyPatch) -> list[ConjunctionEvent]:
     """The events the planner is called on (on :data:`SMALL_GRID`), in order."""
     seen: list[ConjunctionEvent] = []
 
-    def counted(event: ConjunctionEvent, **settings: Any) -> ManeuverPlan:
+    def counted(
+        event: ConjunctionEvent, **settings: Unpack[PlanSettings]
+    ) -> ManeuverPlan:
         seen.append(event)
         return small_plan(event, **settings)
 

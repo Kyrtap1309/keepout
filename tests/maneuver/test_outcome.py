@@ -42,6 +42,7 @@ def test_plan_event_matches_plan_maneuver(
     assert np.array_equal(outcome.grid.burn_leads, plan.burn_leads)
     assert np.array_equal(outcome.grid.delta_v, plan.delta_v)
     assert np.array_equal(outcome.grid.range_at_tca, plan.range_at_tca, equal_nan=True)
+    assert outcome.burns
     assert all(b.rescreen is None for b in outcome.burns)
     assert outcome.catalog_label is None
     assert outcome.assumed_covariance is event.latest.assumed_covariance

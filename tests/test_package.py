@@ -4,6 +4,7 @@ import subprocess
 import sys
 
 import pytest
+from builders import loaded_after
 
 import keepout
 from keepout import errors
@@ -77,44 +78,28 @@ def test_public_modules_declare_resolvable_names(name: str) -> None:
 def test_importing_loads_no_numerical_library(module: str) -> None:
     # keepout --help and import keepout stay fast: numpy, scipy and astropy
     # load on first use of a name that needs them.
-    code = (
-        f"import sys, {module}; "
-        "print(sorted(m for m in ('numpy', 'scipy', 'astropy', 'erfa', 'sgp4') "
-        "if m in sys.modules))"
-    )
-    loaded = subprocess.run(  # noqa: S603 (this interpreter, fixed code)
-        [sys.executable, "-c", code], capture_output=True, text=True, check=True
-    )
-    assert loaded.stdout == "[]\n"
+    numerical = ["numpy", "scipy", "astropy", "erfa", "sgp4"]
+    assert loaded_after(f"import {module}", numerical).loaded == []
 
 
 def test_importing_keepout_loads_no_sqlalchemy() -> None:
     # The store and its database libraries (the store extra) load only when
     # a store is opened.
-    code = (
-        "import sys, keepout; "
-        "print(sorted(m for m in ('sqlalchemy', 'alembic', 'keepout.store') "
-        "if m in sys.modules))"
-    )
-    loaded = subprocess.run(  # noqa: S603 (this interpreter, fixed code)
-        [sys.executable, "-c", code], capture_output=True, text=True, check=True
-    )
-    assert loaded.stdout == "[]\n"
+    store = ["sqlalchemy", "alembic", "keepout.store"]
+    assert loaded_after("import keepout", store).loaded == []
 
 
 def test_importing_the_store_loads_no_figures_or_screening() -> None:
     # Every command and worker opening a store imports it: the presentation
     # layer and the synthetic operator (screening, SGP4) stay unloaded.
-    code = (
-        "import sys, keepout.store; "
-        "print(sorted(m for m in ('keepout.figures', 'keepout.maneuver', "
-        "'keepout.synthetic.operator', 'keepout.screening', 'sgp4') "
-        "if m in sys.modules))"
-    )
-    loaded = subprocess.run(  # noqa: S603 (this interpreter, fixed code)
-        [sys.executable, "-c", code], capture_output=True, text=True, check=True
-    )
-    assert loaded.stdout == "[]\n"
+    unwanted = [
+        "keepout.figures",
+        "keepout.maneuver",
+        "keepout.synthetic.operator",
+        "keepout.screening",
+        "sgp4",
+    ]
+    assert loaded_after("import keepout.store", unwanted).loaded == []
 
 
 def test_importing_reads_no_metadata() -> None:
