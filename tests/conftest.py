@@ -40,6 +40,9 @@ settings.register_profile("default", deadline=None)
 settings.register_profile("ci", derandomize=True, print_blob=True, deadline=None)
 settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE", "default"))
 
+NETWORKED = ("validation", "e2e")
+"""The markers of the tests that may use the network."""
+
 MAX_AUTO_WORKERS = 4
 
 
@@ -72,17 +75,23 @@ def _offline_iers() -> Iterator[None]:
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
-    """Let the validation tests download their data: every other test runs
-    with sockets disabled (``--disable-socket``, pytest-socket)."""
+    """Let the validation tests download their data and the e2e tests drive
+    a browser: every other test runs with sockets disabled
+    (``--disable-socket``, pytest-socket)."""
     for item in items:
-        if item.get_closest_marker("validation") is not None:
+        if _networked(item):
             item.add_marker(pytest.mark.enable_socket)
+
+
+def _networked(item: pytest.Item) -> bool:
+    """Whether ``item`` may use the network: a validation or e2e test."""
+    return any(item.get_closest_marker(name) is not None for name in NETWORKED)
 
 
 @pytest.fixture(autouse=True)
 def no_network(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
     """Fail a test that reaches the network; tests that fake it patch again."""
-    if request.node.get_closest_marker("validation") is not None:
+    if _networked(request.node):
         return
 
     def refuse(*args: object, **kwargs: object) -> None:

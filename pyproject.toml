@@ -139,19 +139,21 @@ ignore-words-list = "aas,oint,precesses"
 testpaths = ["tests"]
 pythonpath = ["tools"]
 # --disable-socket: no test reaches the network; conftest.py lets the
-# validation tests, which download their data, open sockets. The slow tests
+# validation tests, which download their data, and the e2e tests, which
+# drive a browser, open sockets. The slow tests
 # run in CI (-m "not validation"), not by default.
 addopts = [
     "-ra",
     "--strict-markers",
     "-m",
-    "not validation and not slow",
+    "not validation and not slow and not e2e",
     "--disable-socket",
     "--allow-unix-socket",
 ]
 filterwarnings = ["error"]
 markers = [
     "slow: tests of tens of seconds (full burn grids, week-long integrations, the screening and synthetic operator reports on the committed GP data); CI runs them",
+    "e2e: the Playwright scenario against a running docker compose up (KEEPOUT_E2E_URL); CI's e2e job runs it",
     "validation: slow checks against reference data (NASA CARA and ESA Kelvins data download on first run; the Space-Track answers check needs KEEPOUT_SPACETRACK_RAW)",
 ]
 
@@ -183,6 +185,7 @@ dev = [
     "mkdocs-material>=9.8.0",
     "mkdocstrings[python]>=1.0.8",
     "mypy>=2.4.0",
+    "playwright>=1.65.2",
     "pre-commit>=4.7.0",
     "pytest>=9.1.1",
     "pytest-alembic>=0.13.2",
