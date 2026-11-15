@@ -4,7 +4,8 @@ The dashboard shows a [conjunction store](store.md) in a web browser: the
 events to come with their risk, each event's Pc trend and geometry, and
 its manoeuvre plan. It also takes new CDM files and queues the work a
 [worker](store.md#background-jobs) does. It is a Streamlit app run by
-`keepout dashboard`, on the machine that holds the store.
+`keepout dashboard`, on the machine that holds the store, or with its
+worker and a demo store by `docker compose up` ([Deployment](deployment.md)).
 
 It needs the `dashboard` extra ([Install](index.md#install)), which adds
 [Streamlit](https://streamlit.io/) and
@@ -49,8 +50,13 @@ The options (`keepout dashboard --help` lists them all):
   settings the store was filled with: a Pc cached with another method,
   covariance policy or hard-body radius shows as not computed (see
   [Jobs](#jobs)).
-- **`--port N`**: the port, 8501 by default. The address is always
-  127.0.0.1.
+- **`--host ADDRESS`**: the IP address to listen on, 127.0.0.1 (this
+  machine only) by default. Any address that is not a loopback address,
+  such as `0.0.0.0` (every interface), prints a warning: the dashboard has
+  no authentication. A container needs `0.0.0.0` to be reached from its
+  host; [Deployment](deployment.md) publishes it on the host's 127.0.0.1
+  only. A value that is not an IP address is a usage error.
+- **`--port N`**: the port, 8501 by default.
 - **`--as-of TIME`**: see [Data time](#data-time-as-of).
 
 `keepout dashboard` runs headless (no browser opens) until Ctrl+C.
@@ -77,6 +83,14 @@ with the past ones. Every covariance is assumed (badge
 `assumed (GP age model)`), and every run screened the same element sets,
 so each event's Pc trend is flat: only the time to TCA, and so the
 decision, changes from one CDM to the next.
+
+`docker compose up` serves the same events, with their Pc computed and the
+manoeuvre of event `3befe6f1305d` planned when the image is built, seen at
+2026-10-07 18:00 UTC: 6 events are ahead. `examples/dashboard/demo/` holds
+one more CDM of that event, issued at 18:00 with a smaller miss and
+covariance: upload it on the Events page and, once the worker has computed
+it, the event turns red and its trend rises
+([Deployment](deployment.md#the-demo)).
 
 NASA CARA's Metop-B test CDM can be added too:
 `uv run python tools/dashboard_seed.py --cara` copies it from keepout's

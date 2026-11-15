@@ -30,7 +30,7 @@ clone, with `uv run keepout ...` or in the activated environment.
 | `keepout store upgrade\|rebuild\|purge --store FILE` | Upgrade a store's schema, compute its missing Pc, delete its old events |
 | `keepout jobs list\|cancel --store FILE` | List a store's [background jobs](store.md#background-jobs), cancel one |
 | `keepout worker --store FILE [--until-idle] [--workers N]` | Compute the jobs queued: manoeuvre plans (`maneuver --event ID --queue`) and the dashboard's Pc refreshes |
-| `keepout dashboard --store FILE [--port N] [--as-of TIME]` | Show a store in the browser, on this machine only ([dashboard](dashboard.md)) |
+| `keepout dashboard --store FILE [--host ADDRESS] [--port N] [--as-of TIME]` | Show a store in the browser, on this machine only by default ([dashboard](dashboard.md)) |
 
 `keepout COMMAND --help` lists every option of a command.
 
@@ -529,8 +529,10 @@ and geometry, and its manoeuvre plan. It needs the `dashboard`
 keepout dashboard --store keepout.db --as-of 2026-10-06
 ```
 
-It listens on 127.0.0.1 only and has no authentication: see
-[the warning](dashboard.md). It computes no Pc or plan itself but queues
+It listens on 127.0.0.1 unless `--host` gives another address, and has no
+authentication: see [the warning](dashboard.md). In a container,
+[Docker Compose](deployment.md) runs it with `--host 0.0.0.0` and
+publishes its port on the host's 127.0.0.1 only. It computes no Pc or plan itself but queues
 them for a [worker](#worker). [The dashboard](dashboard.md) describes its
 options, pages and demo.
 

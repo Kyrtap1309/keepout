@@ -28,4 +28,7 @@ The features in the order they were added:
   the `dashboard` extra), with CDM uploads and refresh jobs. `keepout.figures`
   and a colour-blind-safe palette shared by the reports and the dashboard
   (the report SVGs changed colours). Store schema revision `0003`:
-  `keepout store upgrade` migrates an older store.
+  `keepout store upgrade` migrates an older store. `docker compose up`
+  runs the dashboard and a worker on a demo store
+  ([Deployment](deployment.md)); `keepout dashboard --host` sets the
+  address it listens on, warning off loopback.

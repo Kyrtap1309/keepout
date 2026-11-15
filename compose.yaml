@@ -19,6 +19,9 @@ services:
 
   dashboard:
     <<: *keepout
+    # keepout dashboard runs Streamlit in a child process: an init process
+    # forwards signals to it and reaps it.
+    init: true
     command:
       - keepout
       - dashboard
@@ -54,6 +57,9 @@ services:
   # Computes the queued jobs: Pc refreshes after an upload, manoeuvre plans.
   worker:
     <<: *keepout
+    # Each job runs in a child process; an init process reaps the ones the
+    # worker kills (docs/store.md, Deployment).
+    init: true
     command: ["keepout", "worker", "--store", "/data/keepout.db"]
     depends_on:
       init:

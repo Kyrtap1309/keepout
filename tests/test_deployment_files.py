@@ -39,6 +39,8 @@ def test_compose_file() -> None:
             "init": {"condition": "service_completed_successfully"}
         }
         assert service["volumes"] == ["data:/data"]
+        # Both run child processes (a job, Streamlit): an init reaps them.
+        assert service["init"] is True
     assert worker["stop_signal"] == "SIGTERM"
     assert worker["stop_grace_period"] == "30s"
     assert worker["restart"] == "unless-stopped"
