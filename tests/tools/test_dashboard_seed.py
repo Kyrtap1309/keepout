@@ -266,3 +266,73 @@ def test_the_cara_cdm_is_the_maneuver_reports() -> None:
     import maneuver_report
 
     assert seed.CARA_CDM_ID == maneuver_report.CDM_ID
+
+
+def test_demo_event_is_upcoming_and_yellow(tmp_path: Path) -> None:
+    path = seed.seed_store(tmp_path / "seed.db")
+    settings = load_settings(seed.SETTINGS)
+    with open_store(path, create=False) as store:
+        page = store.summaries(settings, as_of=seed.seed_as_of(), limit=200)
+    [summary] = [item for item in page.items if item.event_id == seed.DEMO_EVENT]
+    assert summary.latest is not None
+    assert summary.latest.pc is not None
+    assert settings.thresholds.green_below <= summary.latest.pc
+    assert summary.latest.pc < settings.thresholds.red_from
+
+
+def test_demo_update_joins_event_and_is_red(tmp_path: Path) -> None:
+    from keepout.store import CdmInput
+
+    path = seed.seed_store(tmp_path / "seed.db")
+    settings = load_settings(seed.SETTINGS)
+    name, text = seed.demo_update()
+    update = CdmInput.parse(text, name)
+    with open_store(path, create=False) as store:
+        report = store.ingest([update])
+        store.refresh(settings)
+        observations = store.observations(seed.DEMO_EVENT, settings)
+    assert report.events == (seed.DEMO_EVENT,)
+    assert len(observations) == seed.ISSUES + 1
+    latest = observations[-1]
+    assert latest.message_id == update.cdm.message_id
+    assert latest.pc is not None
+    assert latest.pc >= settings.thresholds.red_from
+    assert update.cdm.creation_date.utc.isot == seed.DEMO_AS_OF.utc.isot
+    assert update.cdm.header.comments[0] == seed.DEMO_COMMENT
+    assert name == f"{update.cdm.message_id}.kvn"
+
+
+def test_demo_update_file_is_current() -> None:
+    [path] = sorted(seed.DEMO_DIR.glob("*.kvn"))
+    name, text = seed.demo_update()
+    assert path.name == name
+    assert path.read_text(encoding="utf-8") == text
+
+
+@pytest.mark.slow
+def test_demo_store_has_plan(tmp_path: Path) -> None:
+    path = seed.demo_store(tmp_path / "demo.db")
+    with open_store(path, create=False) as store:
+        outcome = store.maneuver(seed.DEMO_EVENT, load_settings(seed.SETTINGS))
+    assert outcome is not None
+    assert outcome.catalog_label is not None
+    assert outcome.catalog_label.startswith("stored copy of ")
+
+
+@pytest.mark.slow
+def test_demo_store_has_no_wal(tmp_path: Path) -> None:
+    seed.demo_store(tmp_path / "demo.db")
+    assert sorted(p.name for p in tmp_path.iterdir()) == [
+        "demo.db",
+        "demo.db.catalogs",
+    ]
+
+
+@pytest.mark.parametrize("other", [["--check"], ["--cara"], ["--dir", "x"]])
+def test_store_option_exclusive(
+    other: list[str], capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        seed.main(["--store", "x.db", *other])
+    assert exit_info.value.code == 2
+    assert "not allowed with argument" in capsys.readouterr().err
