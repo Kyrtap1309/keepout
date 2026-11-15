@@ -31,7 +31,9 @@ from `Dockerfile`:
   previous `up` or your own, is left as it is.
 - **`dashboard`** is `keepout dashboard` on that store. Inside the container
   it listens on every address (`--host 0.0.0.0`, which prints a warning in
-  its log); the host publishes it on 127.0.0.1:8501 only. Its healthcheck
+  its log); the host publishes it on 127.0.0.1:8501 only. It names
+  itself `http://localhost:8501` in its log, so Streamlit does not look the
+  machine's public IP up over the network. Its healthcheck
   asks Streamlit's `/_stcore/health`, and `up --wait` waits for it.
 - **`worker`** is `keepout worker` on the same store: it computes the Pc of
   uploaded CDMs and the manoeuvre plans queued from the dashboard.
@@ -78,12 +80,16 @@ path it had when the image was built, kept by the store as a label.
     ```
 
 - **Your settings.** The services read `/opt/keepout/settings.toml`, a
-  copy of `examples/dashboard/settings.toml`. Mount your own over it in a
-  `compose.override.yaml` next to `compose.yaml`, which Compose reads too:
+  copy of `examples/dashboard/settings.toml`. Mount your own over it, in
+  both services, in a `compose.override.yaml` next to `compose.yaml`, which
+  Compose reads too:
 
     ```yaml
     services:
       dashboard:
+        volumes:
+          - ./settings.toml:/opt/keepout/settings.toml:ro
+      worker:
         volumes:
           - ./settings.toml:/opt/keepout/settings.toml:ro
     ```
@@ -112,9 +118,16 @@ docker compose start
 ## Updating
 
 After `git pull`, rebuild and restart: `docker compose up --build --wait`.
-The volume keeps its store; if the new keepout changed the store's schema,
-the dashboard says so, and `docker compose exec worker keepout store
-upgrade --store /data/keepout.db` migrates it ([Upgrading](store.md#upgrading)).
+The volume keeps its store. If the new keepout changed the store's schema,
+the dashboard and the worker stop at start, saying so in their logs
+(`docker compose logs`), and restart over and over; `up --wait` reports the
+dashboard unhealthy. Migrate the store in a container of its own, then
+start again ([Upgrading](store.md#upgrading)):
+
+```bash
+docker compose run --rm --no-deps worker keepout store upgrade --store /data/keepout.db
+docker compose up --wait
+```
 
 The base images (`python:3.13-slim` and `uv`) are pinned by digest in
 `Dockerfile`, so a build gives the same image until they are changed. To

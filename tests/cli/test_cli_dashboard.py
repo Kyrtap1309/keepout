@@ -89,6 +89,8 @@ def test_cli_dashboard_runs_streamlit_bound_to_localhost(
         "1",
         "--browser.gatherUsageStats",
         "false",
+        "--browser.serverAddress",
+        "127.0.0.1",
         "--server.headless",
         "true",
         "--client.showErrorDetails",
@@ -191,6 +193,21 @@ def test_host_ipv6_loopback_quiet(fake_run: FakeRun, store: Path) -> None:
     [(args, _)] = fake_run.calls
     assert args[args.index("--server.address") + 1] == "::1"
     assert result.stderr == ""
+
+
+@pytest.mark.parametrize(
+    ("host", "server_address"),
+    [("127.0.0.1", "127.0.0.1"), ("0.0.0.0", "localhost"), ("::", "localhost")],  # noqa: S104 (the option under test)
+)
+def test_no_external_ip_lookup(
+    fake_run: FakeRun, store: Path, host: str, server_address: str
+) -> None:
+    # Streamlit looks the public IP up over the network (to print an
+    # "External URL") unless browser.serverAddress is given.
+    result = keepout("dashboard", "--store", str(store), "--host", host)
+    assert result.exit_code == ExitCode.OK, result.stderr
+    [(args, _)] = fake_run.calls
+    assert args[args.index("--browser.serverAddress") + 1] == server_address
 
 
 @pytest.mark.parametrize("value", ["example.com", "0.0.0.0:80", ""])

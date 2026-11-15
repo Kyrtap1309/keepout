@@ -122,6 +122,12 @@ def _host(value: str) -> str:
     return value
 
 
+def _server_address(host: str) -> str:
+    """The address the dashboard names in its URL: ``localhost`` when it
+    listens on every address (``0.0.0.0``, ``::``), else ``host``."""
+    return "localhost" if ipaddress.ip_address(host).is_unspecified else host
+
+
 def dashboard_command(
     *,
     store: StorePath,
@@ -167,6 +173,11 @@ def dashboard_command(
         str(MAX_UPLOAD_MB),
         "--browser.gatherUsageStats",
         "false",
+        # Given, Streamlit prints this address instead of looking the
+        # machine's public IP up over the network (as it does when it
+        # listens on every address).
+        "--browser.serverAddress",
+        _server_address(address),
         # No browser opened and no first-run e-mail prompt on the terminal.
         "--server.headless",
         "true",
