@@ -10,20 +10,13 @@ data are seen at. An error is shown as its message, and the page stops.
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Final
-
 import streamlit as st
 
 from keepout.dashboard.context import DashboardContext, context_from_env
+from keepout.dashboard.routes import CONTEXT_KEY, EVENT_PAGE, EVENTS_PAGE, PLANNER_PAGE
 from keepout.dashboard.text import literal
-from keepout.dashboard.widgets import CONTEXT_KEY, as_of_header, show_error
+from keepout.dashboard.widgets import as_of_header, show_error
 from keepout.errors import KeepoutError
-
-# Not "pages": Streamlit would take a pages folder beside the entry script
-# for its older multipage apps and run a page's script without this one.
-# (No docstring: Streamlit would show a bare string here as Markdown.)
-VIEWS: Final = Path(__file__).parent / "views"
 
 
 def _context() -> DashboardContext:
@@ -35,10 +28,10 @@ def _context() -> DashboardContext:
         context = context_from_env()
         # Refused without a change to the file if made by an older keepout.
         open_store(context.store_path, create=False).close()
-    except KeepoutError as exc:
+    except (KeepoutError, ValueError) as exc:
         show_error(exc)
         st.stop()
-    except (ValueError, OSError) as exc:
+    except OSError as exc:
         st.error(literal(str(exc)))
         st.stop()
     return context
@@ -52,9 +45,9 @@ def main() -> None:
     st.session_state[CONTEXT_KEY] = context
     page = st.navigation(
         [
-            st.Page(VIEWS / "events.py", title="Events", default=True),
-            st.Page(VIEWS / "event.py", title="Event"),
-            st.Page(VIEWS / "planner.py", title="Manoeuvre planner"),
+            st.Page(EVENTS_PAGE, title="Events", default=True),
+            st.Page(EVENT_PAGE, title="Event"),
+            st.Page(PLANNER_PAGE, title="Manoeuvre planner"),
         ]
     )
     as_of_header(context)

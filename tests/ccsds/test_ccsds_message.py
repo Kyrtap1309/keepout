@@ -126,3 +126,9 @@ def test_decode_file_with_a_cap_refuses_broken_gzip(data: bytes, match: str) -> 
     # As without a cap.
     with pytest.raises(FAMILY_A.parse_error, match="invalid gzip data"):
         files.decode_file(data, "f", FAMILY_A)
+
+
+@pytest.mark.parametrize("max_bytes", [None, 1000])
+def test_decode_file_allows_zero_padding_after_gzip(max_bytes: int | None) -> None:
+    padded = gzip.compress(b"A = 1\n") + bytes(16)
+    assert files.decode_file(padded, "f", FAMILY_A, max_bytes=max_bytes) == "A = 1\n"

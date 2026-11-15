@@ -77,7 +77,13 @@ from keepout._text import pc_text, plural
 from keepout._workers import DEFAULT_WORKERS, ONE_THREAD
 from keepout.cdm import Cdm, load
 from keepout.events import ConjunctionEvent, group_events, time_to_tca
-from keepout.figures import LOWEST_LOG_PC, SEQUENTIAL, grid_figure
+from keepout.figures import (
+    LOWEST_LOG_PC,
+    NO_PC,
+    SEQUENTIAL,
+    TARGET_COLOUR,
+    grid_figure,
+)
 from keepout.maneuver import (
     DEFAULT_BURN_GRID,
     TARGET_PC,
@@ -128,10 +134,6 @@ DEMONSTRATION_TARGET: Final = THRESHOLDS.green_below
 TOLERANCE: Final = f"{TCA_TOLERANCE / MINUTE:g} minutes"
 """How far apart the TCAs of one approach may be, for the page."""
 
-NO_PC: Final = "#e4e2dc"
-"""Cells without a Pc (no closest approach to trust): a neutral grey."""
-
-TARGET_COLOUR: Final = "#eb6834"
 INK: Final = "#0b0b0b"
 MUTED: Final = "#52514e"
 RULE: Final = "#c3c2b7"
@@ -962,15 +964,12 @@ def _panel(
         edgecolors="none",
         rasterized=True,
     )
-    # The contour stops at cells without a Pc: none is below the target.
-    known = values[np.isfinite(values)]
-    target = figure.target_log_pc
-    if min(values.shape) > 1 and known.size and known.min() < target < known.max():
+    if panel.crosses(figure.target_log_pc):
         axes.contour(
             panel.delta_v_centres,
             panel.hour_centres,
             np.ma.masked_invalid(values),
-            levels=[target],
+            levels=[figure.target_log_pc],
             colors=TARGET_COLOUR,
             linewidths=2.0,
             linestyles="solid",

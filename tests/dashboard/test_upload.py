@@ -17,9 +17,11 @@ from keepout.cdm import kvn
 from keepout.dashboard.upload import (
     MAX_FILE_BYTES,
     MAX_FILES,
+    UploadError,
     UploadResult,
     ingest_upload,
 )
+from keepout.errors import StoreError
 from keepout.settings import load_settings
 from keepout.store import JobKind, JobQueue, JobStatus, Store, open_store
 
@@ -117,7 +119,9 @@ def test_upload_too_many_files(store: Store) -> None:
     before = _cdm_count(store)
     files = [(f"{i}.kvn", _fresh()) for i in range(MAX_FILES + 1)]
     result = ingest_upload(store, SETTINGS, files)
-    assert result.errors == (("", f"at most {MAX_FILES} files per upload, not 51"),)
+    assert result.errors == (
+        UploadError(None, f"at most {MAX_FILES} files per upload, not {MAX_FILES + 1}"),
+    )
     _nothing_ingested(store, result, before)
 
 
@@ -133,6 +137,25 @@ def test_upload_ingests_and_queues_refresh(store: Store) -> None:
     assert job.kind is JobKind.REFRESH
     assert job.event_id == result.report.events[0]
     assert _active_jobs(store) == [job_id]
+
+
+def test_upload_ingests_though_a_job_cannot_be_queued(
+    store: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def locked(*_: object) -> None:
+        raise StoreError("database is locked")
+
+    monkeypatch.setattr(JobQueue, "submit_refresh", locked)
+    before = _cdm_count(store)
+    result = ingest_upload(store, SETTINGS, [("new.kvn", _fresh())])
+    assert result.report is not None
+    assert len(result.report.added) == 1
+    assert _cdm_count(store) == before + 1
+    (event_id,) = result.report.events
+    assert result.errors == (
+        UploadError(None, f"event {event_id}: database is locked"),
+    )
+    assert result.jobs == ()
 
 
 def test_upload_of_stored_cdms_queues_nothing(store: Store) -> None:
@@ -187,7 +210,7 @@ def _check(result: UploadResult) -> None:
         assert result.errors
         assert result.jobs == ()
     else:
-        assert all(name == "" for name, _ in result.errors)
+        assert all(error.file is None for error in result.errors)
 
 
 FUZZ = settings(

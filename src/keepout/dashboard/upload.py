@@ -14,9 +14,10 @@ dashboard computes none.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, NamedTuple
 
 import keepout.cdm
+from keepout._environment import MAX_UPLOAD_MB
 from keepout.errors import CdmParseError, KeepoutError
 from keepout.store import CdmInput, IngestReport, JobQueue
 
@@ -30,13 +31,16 @@ __all__ = [
     "MAX_FILES",
     "MAX_FILE_BYTES",
     "ORIGIN_PREFIX",
+    "UploadError",
     "UploadResult",
     "ingest_upload",
 ]
 
-MAX_FILE_BYTES: Final = 1_000_000
+MAX_FILE_BYTES: Final = MAX_UPLOAD_MB * 1_000_000
 """Most bytes an uploaded file holds, and most its data holds once
-decompressed if it is gzip data (:func:`keepout.cdm.decode_text`)."""
+decompressed if it is gzip data (:func:`keepout.cdm.decode_text`):
+:data:`keepout._environment.MAX_UPLOAD_MB`, which Streamlit's uploader
+enforces too, checked again here for gzip data."""
 
 MAX_FILES: Final = 50
 """Most files one upload holds."""
@@ -48,6 +52,23 @@ _TRAILING: Final = ",;:"
 """What may follow a word of a store error's message."""
 
 
+class UploadError(NamedTuple):
+    """An error of an upload.
+
+    Parameters
+    ----------
+    file
+        The name of the file it is of; ``None`` when it is not of one file
+        (too many files, a store error naming none of the uploaded
+        ``MESSAGE_ID``, a job that could not be queued).
+    message
+        The error, not repeating the file's name.
+    """
+
+    file: str | None
+    message: str
+
+
 @dataclass(frozen=True, slots=True)
 class UploadResult:
     """What an upload did.
@@ -57,48 +78,43 @@ class UploadResult:
     report
         What the ingest stored; ``None`` if nothing was ingested.
     errors
-        Each error as (file name, message), the message not repeating the
-        name; the name is empty when the error is not of one file (too many
-        files, a store error naming none of the uploaded ``MESSAGE_ID``, a
-        job that could not be queued).
+        Each error, naming its file if it is of one.
     jobs
         The id of each ``refresh`` job queued, or already queued or
         running, for the events the upload touched.
     """
 
     report: IngestReport | None
-    errors: tuple[tuple[str, str], ...]
+    errors: tuple[UploadError, ...]
     jobs: tuple[int, ...]
 
 
 def _parsed(
     files: Sequence[tuple[str, bytes]],
-) -> tuple[list[CdmInput], list[tuple[str, str]]]:
-    """The CDM of each file, and the error of each that has none (its
-    message without the file's name, which the error is paired with)."""
+) -> tuple[list[CdmInput], list[UploadError]]:
+    """The CDM of each file, and the error of each that has none."""
     messages: list[CdmInput] = []
-    errors: list[tuple[str, str]] = []
+    errors: list[UploadError] = []
     for name, data in files:
         try:
             text = keepout.cdm.decode_text(data, name, max_bytes=MAX_FILE_BYTES)
-            cdm = keepout.cdm.loads(text)
+            message = CdmInput.parse(text, ORIGIN_PREFIX + name)
         except CdmParseError as exc:
-            errors.append((name, str(exc).removeprefix(f"{name}: ")))
+            errors.append(UploadError(name, str(exc).removeprefix(f"{name}: ")))
             continue
-        format_ = keepout.cdm.format_of(text)
-        messages.append(CdmInput(cdm, text, format_, ORIGIN_PREFIX + name))
+        messages.append(message)
     return messages, errors
 
 
-def _named(error: KeepoutError, messages: Sequence[CdmInput]) -> tuple[str, str]:
-    """A store error as (file name, message): the first file whose
-    ``MESSAGE_ID`` is a word of the message, else no file."""
+def _named(error: KeepoutError, messages: Sequence[CdmInput]) -> UploadError:
+    """A store error, of the first file whose ``MESSAGE_ID`` is a word of
+    its message, else of no file."""
     text = str(error)
     words = {word.rstrip(_TRAILING) for word in text.split()}
     for message in messages:
         if message.cdm.message_id in words:
-            return message.origin.removeprefix(ORIGIN_PREFIX), text
-    return "", text
+            return UploadError(message.origin.removeprefix(ORIGIN_PREFIX), text)
+    return UploadError(None, text)
 
 
 def ingest_upload(
@@ -130,7 +146,7 @@ def ingest_upload(
     """
     if len(files) > MAX_FILES:
         message = f"at most {MAX_FILES} files per upload, not {len(files)}"
-        return UploadResult(None, (("", message),), ())
+        return UploadResult(None, (UploadError(None, message),), ())
     messages, errors = _parsed(files)
     if errors:
         return UploadResult(None, tuple(errors), ())
@@ -146,7 +162,7 @@ def ingest_upload(
         try:
             submission = queue.submit_refresh(event_id, settings)
         except (KeepoutError, ValueError) as exc:
-            errors.append(("", f"event {event_id}: {exc}"))
+            errors.append(UploadError(None, f"event {event_id}: {exc}"))
             continue
         if submission.job is not None:
             jobs.append(submission.job.id)

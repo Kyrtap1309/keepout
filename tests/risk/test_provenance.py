@@ -1,11 +1,16 @@
+"""What a Pc rests on: the covariance behind it, or none."""
+
 import astropy.units as u
 import pytest
 from builders import TYPICAL_HEAD_ON
 
 from keepout.cdm import Cdm, CovarianceMethod, ObjectMetadata, make_cdm
-from keepout.figures import Provenance, covariance_provenance, provenance
-from keepout.risk import PcKind, PcObservation
-from keepout.synthetic.operator import HEADER_COMMENTS
+from keepout.risk import PcKind, PcObservation, Provenance
+from keepout.risk.provenance import (
+    HEADER_COMMENTS,
+    covariance_provenance,
+    provenance,
+)
 from keepout.units import HOUR
 
 
@@ -26,26 +31,41 @@ def observation(*, kind: PcKind = "estimate", assumed: bool = False) -> PcObserv
     )
 
 
+def unread() -> tuple[str, ...]:
+    raise AssertionError("the header comments were read")
+
+
 @pytest.mark.parametrize(
     ("item", "comments", "expected"),
     [
-        (observation(kind="upper_bound"), (), Provenance.MAX_PC),
-        (
-            observation(kind="upper_bound", assumed=True),
-            HEADER_COMMENTS,
-            Provenance.MAX_PC,
-        ),
         (observation(assumed=True), HEADER_COMMENTS, Provenance.GP_AGE_MODEL),
         (observation(assumed=True), (), Provenance.ASSUMED),
         (observation(assumed=True), HEADER_COMMENTS[:1], Provenance.ASSUMED),
-        (observation(), (), Provenance.CDM_COVARIANCE),
-        (observation(), HEADER_COMMENTS, Provenance.CDM_COVARIANCE),
+        (
+            observation(assumed=True),
+            (*HEADER_COMMENTS, "another comment"),
+            Provenance.GP_AGE_MODEL,
+        ),
     ],
 )
-def test_provenance(
+def test_provenance_of_an_assumed_covariance(
     item: PcObservation, comments: tuple[str, ...], expected: Provenance
 ) -> None:
-    assert provenance(item, cdm(comments)) is expected
+    assert provenance(item, lambda: comments) is expected
+
+
+@pytest.mark.parametrize(
+    ("item", "expected"),
+    [
+        (observation(kind="upper_bound"), Provenance.MAX_PC),
+        (observation(kind="upper_bound", assumed=True), Provenance.MAX_PC),
+        (observation(), Provenance.CDM_COVARIANCE),
+    ],
+)
+def test_provenance_reads_no_comments_unless_assumed(
+    item: PcObservation, expected: Provenance
+) -> None:
+    assert provenance(item, unread) is expected
 
 
 @pytest.mark.parametrize(
@@ -62,10 +82,7 @@ def test_covariance_provenance(
     assert covariance_provenance(cdm(comments, assumed=assumed)) is expected
 
 
-def test_provenance_labels() -> None:
-    assert [str(item) for item in Provenance] == [
-        "CDM covariance",
-        "assumed (GP age model)",
-        "assumed covariance",
-        "max-Pc (no covariance)",
-    ]
+def test_the_synthetic_operator_marks_its_cdms() -> None:
+    from keepout.synthetic import operator
+
+    assert operator.HEADER_COMMENTS is HEADER_COMMENTS

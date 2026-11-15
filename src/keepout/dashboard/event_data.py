@@ -11,14 +11,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from keepout.dashboard import plots
-from keepout.figures import (
-    Provenance,
-    encounter_figure,
-    geometry_figure,
-    provenance,
-    trend_figure,
-)
-from keepout.risk import DEFAULT_DECISION_CONFIG, assess
+from keepout.figures import encounter_figure, geometry_figure, trend_figure
+from keepout.risk import DEFAULT_DECISION_CONFIG, Provenance, assess, provenance
 from keepout.units import HOUR
 
 if TYPE_CHECKING:
@@ -198,7 +192,7 @@ def latest_conjunction(view: EventView, settings: Settings) -> Conjunction:
         combined_hard_body_radius=settings.combined_hard_body_radius,
         policy=settings.policy,
     )
-    conjunction.plane  # noqa: B018 (built and cached, or GeometryError)
+    _ = conjunction.plane  # Built and cached here, or GeometryError.
     return conjunction
 
 
@@ -220,13 +214,12 @@ def is_max_pc(view: EventView, conjunction: Conjunction) -> bool:
     """
     latest = view.event.latest
     observation = view.observations.get(latest.message_id)
-    if observation is not None and provenance(observation, latest) is (
-        Provenance.MAX_PC
+    if (
+        observation is not None
+        and provenance(observation, lambda: latest.header.comments) is Provenance.MAX_PC
     ):
         return True
-    return conjunction.primary.covariance is None and (
-        conjunction.secondary.covariance is None
-    )
+    return len(conjunction.unknown_covariance) == 2
 
 
 def encounter_plot(conjunction: Conjunction, *, max_pc: bool) -> go.Figure:

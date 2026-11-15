@@ -1,38 +1,19 @@
 """A benchmark of the dashboard's reads on a store of 1 000 events and
 20 000 CDMs, and of two trees.
 
-Usage::
+``run`` times the events list's first page and the event page's data path on
+a synthetic store, without Streamlit, against their targets (under 1 s and
+under 2 s; ``docs/dashboard.md``, Speed).
 
-    uv run python tools/dashboard_benchmark.py run [--store PATH]
-        [--events N] [--cdms N] [--seed N] [--repeat N]
-    uv run python tools/dashboard_benchmark.py compare --base-python PYTHON
-        [--events N] [--cdms N] [--seed N] [--repeat N] [--threshold FRACTION]
+``compare`` is CI's regression check: it times both reads with this tree's
+Python and with ``--base-python`` (the merge base's environment), alternately
+in fresh processes (``tools/benchmark_runs.py``), and appends its summary to
+``$GITHUB_STEP_SUMMARY`` when that is set. A base without the dashboard is
+skipped; one that cannot be timed otherwise is skipped with a warning.
 
-``run`` builds a synthetic store (:func:`build_store`; in a temporary
-directory, or at ``--store``, where an existing store is timed as it is),
-times the events list's first page and the event page's data path without
-Streamlit (:func:`measure`, the median of ``--repeat`` reads after a warm
-one) and prints both with their targets (spec §8): the list under 1 s and
-the event page under 2 s. It fails (exit 1) when a median wall time misses
-its target.
-
-``compare`` is CI's regression check, as ``tools/screening_benchmark.py
-compare`` (both use ``tools/benchmark_runs.py``): it builds the store once
-with this tree's Python and once with ``--base-python``, the Python
-environment of the merge base, each with ``tools/dashboard_timing.py``
-(this tree's file, so both trees are measured alike), then times both reads
-in fresh processes, alternately (this tree, base, base, this tree, ...),
-``--repeat`` times (5) per tree. It fails (exit 1) when this tree's median
-CPU time of either read exceeds the base's by more than ``--threshold``
-(0.2). A base without the dashboard (no ``keepout.dashboard.listing``) is
-skipped (exit 0); one that cannot be timed for another reason is skipped
-too, with a GitHub Actions warning; one without
-``keepout.dashboard.event_data`` is compared on the list only. ``compare``
-also appends its Markdown summary to ``$GITHUB_STEP_SUMMARY`` when that is
-set (in GitHub Actions).
-
-Both commands report a failure of this tree's build or measurement as
-``Error: ...`` and exit 1.
+Exit status: 1 if ``run`` misses a target, ``compare`` finds this tree's
+median CPU time of a read more than ``--threshold`` above the base's, or this
+tree cannot be built or timed (``Error: ...``); else 0.
 """
 
 from __future__ import annotations
@@ -42,17 +23,26 @@ import statistics
 import sys
 import tempfile
 import time
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
-from benchmark_runs import TimingFailed, alternate, run_process, write_step_summary
+from benchmark_runs import (
+    SIDES,
+    Comparison,
+    Side,
+    TimingFailed,
+    alternate,
+    cpu_change,
+    run_process,
+    skipped_lines,
+    verdict_line,
+    write_step_summary,
+)
 from dashboard_timing import (
     CDMS,
     EVENTS,
     NO_DASHBOARD,
     REPEAT,
-    TimingOutput,
     Timings,
     build_store,
     measure,
@@ -63,15 +53,12 @@ from keepout._text import plural
 from keepout.errors import KeepoutError
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Sequence
 
 __all__ = [
-    "Comparison",
-    "Run",
     "TimingFailed",
     "Timings",
     "build_store",
-    "compare",
     "main",
     "measure",
     "render_comparison",
@@ -82,10 +69,10 @@ TIMING: Final = Path(__file__).resolve().with_name("dashboard_timing.py")
 TOOL: Final = "tools/dashboard_benchmark.py"
 
 LIST_TARGET: Final = 1.0
-"""The events list's first page must take less than this [s] (spec §8)."""
+"""The events list's first page must take less than this [s]."""
 
 EVENT_TARGET: Final = 2.0
-"""The event page must take less than this [s] (spec §8)."""
+"""The event page must take less than this [s]."""
 
 COMPARE_REPEAT: Final = 5
 """Timing processes per tree of ``compare`` unless told otherwise (median)."""
@@ -95,26 +82,7 @@ THRESHOLD: Final = 0.2
 base's by more than this fraction, unless told otherwise."""
 
 
-@dataclass(frozen=True, slots=True)
-class Run:
-    """One timing process of ``compare`` (``tools/dashboard_timing.py time``).
-
-    Parameters
-    ----------
-    list_wall, list_cpu
-        Wall and CPU time [s] of the events list's first page.
-    event_wall, event_cpu
-        Wall and CPU time [s] of the event page's data path; ``None`` if
-        the tree has no ``keepout.dashboard.event_data``.
-    """
-
-    list_wall: float
-    list_cpu: float
-    event_wall: float | None
-    event_cpu: float | None
-
-
-def run_timing(command: Sequence[str]) -> Run:
+def run_timing(command: Sequence[str]) -> Timings:
     """The measurement printed by a timing process run as ``command``.
 
     Raises
@@ -124,114 +92,26 @@ def run_timing(command: Sequence[str]) -> Run:
     ValueError
         If it prints something other than a measurement.
     """
-    output = parse_json(
-        run_process(command), TimingOutput, f"the output of {command[0]}"
-    )
-    return Run(
-        list_wall=output["list_wall"],
-        list_cpu=output["list_cpu"],
-        event_wall=output["event_wall"],
-        event_cpu=output["event_cpu"],
-    )
+    return parse_json(run_process(command), Timings, f"the output of {command[0]}")
 
 
-@dataclass(frozen=True, slots=True)
-class Comparison:
-    """The runs of this tree and of the base.
-
-    Parameters
-    ----------
-    head
-        This tree's runs.
-    base
-        The base's runs; empty if it could not run.
-    skipped
-        Why the base could not run (empty if it did).
-    """
-
-    head: tuple[Run, ...]
-    base: tuple[Run, ...]
-    skipped: str = ""
-
-    @property
-    def list_change(self) -> float:
-        """Relative change of the list's median CPU time from the base to
-        this tree."""
-        head = [run.list_cpu for run in self.head]
-        base = [run.list_cpu for run in self.base]
-        return _median(head) / _median(base) - 1.0
-
-    @property
-    def event_change(self) -> float | None:
-        """Relative change of the event page's median CPU time from the base
-        to this tree; ``None`` if a tree has no event page."""
-        head = [run.event_cpu for run in self.head]
-        base = [run.event_cpu for run in self.base]
-        if None in head or None in base:
-            return None
-        return _median(head) / _median(base) - 1.0
-
-    @property
-    def quiet_skip(self) -> bool:
-        """Whether the base was skipped for having no dashboard (no
-        warning then)."""
-        return NO_DASHBOARD in self.skipped
+def _seconds(values: Sequence[float]) -> str:
+    """The median of ``values`` [s]."""
+    return f"{statistics.median(values):.3f} s"
 
 
-def _median(values: Sequence[float | None]) -> float:
-    return statistics.median(value for value in values if value is not None)
-
-
-def compare(
-    head: Sequence[str],
-    base: Sequence[str],
-    *,
-    repeat: int,
-    run: Callable[[Sequence[str]], Run] = run_timing,
-) -> Comparison:
-    """Timings of ``head`` and ``base`` commands, ``repeat`` times each,
-    alternately (:func:`benchmark_runs.alternate`).
-
-    Raises
-    ------
-    TimingFailed
-        If a run of this tree fails.
-    """
-    head_runs, base_runs, skipped = alternate(head, base, repeat=repeat, run=run)
-    return Comparison(head_runs, base_runs, skipped)
-
-
-def _seconds(values: Sequence[float | None]) -> str:
-    """The median of ``values`` [s], ``-`` if there are none."""
-    if not values or None in values:
-        return "-"
-    return f"{_median(values):.3f} s"
-
-
-def _range(values: Sequence[float | None]) -> str:
-    """The range of ``values`` [s], ``-`` if there are none."""
-    known = [value for value in values if value is not None]
-    if not values or len(known) < len(values):
-        return "-"
-    return f"{min(known):.3f} - {max(known):.3f} s"
-
-
-def _verdict(name: str, change: float, threshold: float) -> tuple[str, bool]:
-    """A read's line of the comparison, and whether it is a regression."""
-    regression = change > threshold
-    verdict = "slower than allowed" if regression else "within the limit"
-    line = f"{name}: CPU time change {change:+.1%} (limit {threshold:+.0%}): {verdict}."
-    return line, regression
+def _range(values: Sequence[float]) -> str:
+    """The range of ``values`` [s]."""
+    return f"{min(values):.3f} - {max(values):.3f} s"
 
 
 def render_comparison(
-    comparison: Comparison, setting: str, threshold: float
+    comparison: Comparison[Timings], setting: str, threshold: float
 ) -> tuple[str, bool]:
     """The comparison as Markdown, and whether it is a regression."""
     lines = [f"Dashboard benchmark: {setting}.", ""]
     if comparison.skipped:
-        lines.append("The base cannot run the benchmark, so there is no comparison:")
-        lines += ["", "```text", comparison.skipped, "```"]
+        lines += skipped_lines(comparison.skipped)
         return "\n".join(lines), False
     header = (
         "Tree",
@@ -242,35 +122,36 @@ def render_comparison(
         "Events list: median wall time",
         "Event page: median wall time",
     )
-    rows = []
-    for name, runs in (("base", comparison.base), ("this", comparison.head)):
-        list_cpu = [run.list_cpu for run in runs]
-        event_cpu = [run.event_cpu for run in runs]
-        rows.append(
-            (
-                name,
-                _seconds(list_cpu),
-                _range(list_cpu),
-                _seconds(event_cpu),
-                _range(event_cpu),
-                _seconds([run.list_wall for run in runs]),
-                _seconds([run.event_wall for run in runs]),
-            )
+    runs: dict[Side, tuple[Timings, ...]] = {
+        "head": comparison.head,
+        "base": comparison.base,
+    }
+    list_cpu = {side: [run["list_cpu"] for run in runs[side]] for side in runs}
+    event_cpu = {side: [run["event_cpu"] for run in runs[side]] for side in runs}
+    trees: tuple[tuple[str, Side], ...] = (("base", "base"), ("this", "head"))
+    rows: list[tuple[str, ...]] = [
+        (
+            name,
+            _seconds(list_cpu[side]),
+            _range(list_cpu[side]),
+            _seconds(event_cpu[side]),
+            _range(event_cpu[side]),
+            _seconds([run["list_wall"] for run in runs[side]]),
+            _seconds([run["event_wall"] for run in runs[side]]),
         )
+        for name, side in trees
+    ]
     lines += [*table(header, rows), ""]
-    text, regression = _verdict("Events list", comparison.list_change, threshold)
-    lines.append(text)
-    event_change = comparison.event_change
-    if event_change is None:
-        lines.append(
-            "Event page: the base has no event page data path "
-            "(keepout.dashboard.event_data)."
+    verdicts = [
+        verdict_line(
+            f"{name}: CPU time change",
+            cpu_change(cpu["head"], cpu["base"]),
+            threshold,
         )
-    else:
-        text, slower = _verdict("Event page", event_change, threshold)
-        lines.append(text)
-        regression = regression or slower
-    return "\n".join(lines), regression
+        for name, cpu in (("Events list", list_cpu), ("Event page", event_cpu))
+    ]
+    lines += [text for text, _ in verdicts]
+    return "\n".join(lines), any(slower for _, slower in verdicts)
 
 
 def _command(python: str, action: str, store: Path, *options: str) -> list[str]:
@@ -278,7 +159,7 @@ def _command(python: str, action: str, store: Path, *options: str) -> list[str]:
     return [python, str(TIMING), action, str(store), *options]
 
 
-def _compared(args: argparse.Namespace, directory: Path) -> Comparison:
+def _compared(args: argparse.Namespace, directory: Path) -> Comparison[Timings]:
     """The comparison of this tree with the base, each timing its own store
     built in ``directory`` (the base's schema may differ).
 
@@ -287,7 +168,7 @@ def _compared(args: argparse.Namespace, directory: Path) -> Comparison:
     TimingFailed
         If this tree cannot build its store or time it.
     """
-    pythons = {"head": sys.executable, "base": args.base_python}
+    pythons: dict[Side, str] = {"head": sys.executable, "base": args.base_python}
     stores = {side: directory / f"{side}.db" for side in pythons}
     size = ["--events", str(args.events), "--cdms", str(args.cdms)]
     size += ["--seed", str(args.seed)]
@@ -298,9 +179,9 @@ def _compared(args: argparse.Namespace, directory: Path) -> Comparison:
         return Comparison((), (), str(error))
     head, base = (
         _command(pythons[side], "time", stores[side], "--repeat", str(REPEAT))
-        for side in ("head", "base")
+        for side in SIDES
     )
-    return compare(head, base, repeat=args.repeat)
+    return alternate(head, base, repeat=args.repeat, run=run_timing)
 
 
 def _warning(text: str) -> str:
@@ -332,7 +213,8 @@ def compare_main(args: argparse.Namespace) -> int:
     )
     text, regression = render_comparison(comparison, setting, args.threshold)
     print(text)
-    if comparison.skipped and not comparison.quiet_skip:
+    # A base without the dashboard is skipped quietly; any other failure warns.
+    if comparison.skipped and NO_DASHBOARD not in comparison.skipped:
         print(_warning(comparison.skipped))
     write_step_summary(text)
     return 1 if regression else 0
@@ -384,9 +266,10 @@ def run_main(args: argparse.Namespace) -> int:
         return 1
     reads = plural(args.repeat, "read")
     print(f"Median of {reads} after a warm one, without Streamlit:")
-    lines = [_target("Events list (first page)", timings.list_s, LIST_TARGET)]
-    if timings.event_s is not None:
-        lines.append(_target("Event page", timings.event_s, EVENT_TARGET))
+    lines = [
+        _target("Events list (first page)", timings["list_wall"], LIST_TARGET),
+        _target("Event page", timings["event_wall"], EVENT_TARGET),
+    ]
     for text, _ in lines:
         print(text)
     return 1 if any(missed for _, missed in lines) else 0

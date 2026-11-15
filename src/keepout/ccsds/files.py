@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import gzip
 import zlib
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
@@ -63,9 +62,11 @@ def read_file(path: str | Path, family: Family) -> str:
     return decode_file(Path(path).read_bytes(), path, family)
 
 
-def _gunzip(data: bytes, path: str | Path, family: Family, max_bytes: int) -> bytes:
+def _gunzip(
+    data: bytes, path: str | Path, family: Family, max_bytes: int | None
+) -> bytes:
     """Gzip ``data`` decompressed, refused once it grows past ``max_bytes``
-    (nothing more is inflated).
+    (nothing more is inflated); ``None`` for no limit.
 
     Raises
     ------
@@ -80,16 +81,19 @@ def _gunzip(data: bytes, path: str | Path, family: Family, max_bytes: int) -> by
             raise family.parse_error(f"{path}: invalid gzip data: trailing bytes")
         unpacker = zlib.decompressobj(_GZIP_WBITS)
         try:
-            out += unpacker.decompress(rest, max_bytes + 1 - len(out))
+            # A max_length of 0 inflates it all.
+            limit = 0 if max_bytes is None else max_bytes + 1 - len(out)
+            out += unpacker.decompress(rest, limit)
         except zlib.error as exc:
             raise family.parse_error(f"{path}: invalid gzip data: {exc}") from exc
-        if len(out) > max_bytes:
+        if max_bytes is not None and len(out) > max_bytes:
             raise family.parse_error(
                 f"{path}: larger than {max_bytes} bytes once decompressed"
             )
         if not unpacker.eof:
             raise family.parse_error(f"{path}: invalid gzip data: truncated")
-        rest = unpacker.unused_data
+        # Zero padding after a member is allowed, as gzip.decompress allows it.
+        rest = unpacker.unused_data.lstrip(b"\x00")
     return bytes(out)
 
 
@@ -125,13 +129,7 @@ def decode_file(
     if max_bytes is not None and len(data) > max_bytes:
         raise family.parse_error(f"{path}: larger than {max_bytes} bytes")
     if data.startswith(_GZIP_MAGIC):
-        if max_bytes is not None:
-            data = _gunzip(data, path, family, max_bytes)
-        else:
-            try:
-                data = gzip.decompress(data)
-            except (OSError, EOFError, zlib.error) as exc:
-                raise family.parse_error(f"{path}: invalid gzip data: {exc}") from exc
+        data = _gunzip(data, path, family, max_bytes)
     try:
         return data.decode("utf-8-sig")
     except UnicodeDecodeError as exc:

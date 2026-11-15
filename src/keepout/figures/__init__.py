@@ -8,44 +8,51 @@ plan (:class:`GridFigure`, a :class:`GridPanel` per direction),
 :func:`encounter_figure` the encounter-plane picture
 (:class:`EncounterFigure`) and :func:`geometry_figure` the 3-D relative
 geometry at TCA in the primary's RTN frame (:class:`GeometryFigure`).
-:mod:`~keepout.figures.palette` holds the shared colour-blind-safe colours,
-and :func:`provenance` labels what a Pc rests on (:class:`Provenance`),
-:func:`covariance_provenance` that of a plan on a CDM's covariances.
+:mod:`~keepout.figures.palette` holds the shared colour-blind-safe colours
+and the words of risk levels, actions and what a Pc rests on
+(:data:`PROVENANCE_LABELS`, explained by :data:`PROVENANCE_HELP`, for a
+:class:`keepout.risk.Provenance`).
 """
 
 from keepout.figures.encounter import SIGMAS, EncounterFigure, encounter_figure
 from keepout.figures.geometry import GeometryFigure, geometry_figure
 from keepout.figures.grid import LOWEST_LOG_PC, GridFigure, GridPanel, grid_figure
 from keepout.figures.palette import (
-    ACTION_COLOURS,
     ACTION_LABELS,
+    FIT_COLOUR,
+    NO_PC,
+    PROVENANCE_HELP,
+    PROVENANCE_LABELS,
     RISK_COLOURS,
     RISK_LABELS,
     SEQUENTIAL,
     SERIES,
+    TARGET_COLOUR,
+    THRESHOLD_LABELS,
 )
-from keepout.figures.provenance import Provenance, covariance_provenance, provenance
 from keepout.figures.trend import TrendFigure, trend_figure
 
 __all__ = [
-    "ACTION_COLOURS",
     "ACTION_LABELS",
+    "FIT_COLOUR",
     "LOWEST_LOG_PC",
+    "NO_PC",
+    "PROVENANCE_HELP",
+    "PROVENANCE_LABELS",
     "RISK_COLOURS",
     "RISK_LABELS",
     "SEQUENTIAL",
     "SERIES",
     "SIGMAS",
+    "TARGET_COLOUR",
+    "THRESHOLD_LABELS",
     "EncounterFigure",
     "GeometryFigure",
     "GridFigure",
     "GridPanel",
-    "Provenance",
     "TrendFigure",
-    "covariance_provenance",
     "encounter_figure",
     "geometry_figure",
     "grid_figure",
-    "provenance",
     "trend_figure",
 ]

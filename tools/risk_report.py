@@ -43,7 +43,7 @@ from generated import (
 from matplotlib.figure import Figure
 
 from keepout._text import plural
-from keepout.figures import RISK_COLOURS, trend_figure
+from keepout.figures import FIT_COLOUR, RISK_COLOURS, THRESHOLD_LABELS, trend_figure
 from keepout.risk import (
     Action,
     Assessment,
@@ -103,12 +103,6 @@ PLOT_DAYS: Final = 7.5
 
 LOWEST_AXIS: Final = 1e-12
 """The Pc axis reaches at least this low (lower if an event needs it)."""
-
-THRESHOLD_LABELS: Final[Mapping[RiskLevel, str]] = {
-    RiskLevel.YELLOW: "green below",
-    RiskLevel.RED: "red from",
-}
-"""The legend of the threshold line at which each level starts."""
 
 
 def level_label(level: RiskLevel | None) -> str:
@@ -489,7 +483,7 @@ def trend_plot(figure: TrendFigure, title: str) -> Figure:
         if figure.fit is not None:
             hours, values = figure.fit
             axes.plot(
-                hours * HOUR / DAY, values, color="#757575", linewidth=1.0, zorder=1
+                hours * HOUR / DAY, values, color=FIT_COLOUR, linewidth=1.0, zorder=1
             )
         for day, value, level, floored in zip(
             days, figure.pc, figure.levels, figure.below_floor, strict=True

@@ -674,6 +674,13 @@ def test_run_job_plans_a_maneuver_job(
     assert run_job(path, job, 3) == {"workers": 3}
 
 
+def test_run_job_of_an_unknown_kind_is_a_bug(path: str, job: Job) -> None:
+    # Every kind is dispatched: a new one without its computation fails loud.
+    unknown = dataclasses.replace(job, kind="audit")  # type: ignore[arg-type]
+    with pytest.raises(AssertionError):
+        run_job(path, unknown, None)
+
+
 def no_observations(path: str, job: Job, workers: int | None) -> dict[str, JsonValue]:
     """A refresh's result without its observations."""
     return {"ok": True}

@@ -1,5 +1,6 @@
 """What ``keepout dashboard`` passes to the dashboard: the environment
-variables, and the UTC times the command line and the dashboard both read.
+variables, the upload limit, and the UTC times the command line and the
+dashboard both read.
 
 Below both :mod:`keepout.cli` and :mod:`keepout.dashboard`, which may not
 import each other. Astropy and ERFA are imported in the functions:
@@ -19,6 +20,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "AS_OF_VARIABLE",
+    "MAX_UPLOAD_MB",
     "SETTINGS_VARIABLE",
     "STORE_VARIABLE",
     "dubious_years_ignored",
@@ -36,6 +38,11 @@ defaults."""
 AS_OF_VARIABLE: Final = "KEEPOUT_AS_OF"
 """The time the dashboard sees its data at, ISO 8601 UTC; unset: the
 clock."""
+
+MAX_UPLOAD_MB: Final = 1
+"""The largest file [MB] the dashboard takes (a CDM is a few kB): Streamlit's
+upload limit, and the most bytes (10^6 per MB) the dashboard reads of a
+file or of its decompressed data."""
 
 
 @contextmanager

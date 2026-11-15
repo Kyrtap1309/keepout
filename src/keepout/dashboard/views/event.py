@@ -9,13 +9,12 @@ the store has are shown; the trend and the risk wait for all of them.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
 import numpy as np
 import streamlit as st
 
-from keepout._text import pc_text, plural, utc
+from keepout._text import plural, utc
 from keepout.dashboard.event_data import (
     EventView,
     encounter_plot,
@@ -27,31 +26,39 @@ from keepout.dashboard.event_data import (
     trend_of,
     trend_plot,
 )
-from keepout.dashboard.text import FAILED, literal, unrated
+from keepout.dashboard.routes import (
+    EVENT_PARAM,
+    EVENTS_PAGE,
+    PLANNER_PAGE,
+    refresh_job_key,
+)
+from keepout.dashboard.text import NOT_COMPUTED, literal, pc_cell
 from keepout.dashboard.widgets import (
-    NOT_COMPUTED,
+    assessment_chip,
     job_status,
     page_context,
     provenance_badge,
     risk_chip,
     show_error,
+    state,
+    table_header,
+    table_row,
 )
 from keepout.errors import GeometryError, HardBodyRadiusError, KeepoutError
 from keepout.events import missing_hard_body_radius, time_to_tca
-from keepout.figures import RISK_LABELS, provenance
+from keepout.figures import PROVENANCE_LABELS, RISK_LABELS
+from keepout.risk import provenance
 from keepout.units import HOUR
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from keepout.cdm import Cdm
     from keepout.conjunction import Conjunction
     from keepout.dashboard.context import DashboardContext
-    from keepout.risk import PcObservation, RiskLevel
+    from keepout.risk import PcObservation, Provenance, RiskLevel
 
-# (No docstrings on the names below: Streamlit would show a bare string as
-# Markdown.)
-EVENTS_PAGE: Final = Path(__file__).with_name("events.py")
-PLANNER_PAGE: Final = Path(__file__).with_name("planner.py")
-EVENT_PARAM: Final = "event"
+# (No docstring: Streamlit would show a bare string as Markdown.)
 COLUMNS: Final = (
     ("CDM", 4),
     ("Created (UTC)", 3),
@@ -61,25 +68,6 @@ COLUMNS: Final = (
     ("Provenance", 3),
     ("Risk", 3),
 )
-
-
-def _job_key(event_id: str) -> str:
-    """The session-state key of the refresh job queued for the event."""
-    return f"event-refresh-{event_id}"
-
-
-def _read(ctx: DashboardContext, event_id: str) -> EventView | None:
-    """The event, read in one transaction; ``None`` if there is no such
-    event.
-
-    Raises
-    ------
-    StoreError
-        If the store cannot be opened or read.
-    CdmParseError, EventError
-        If its stored CDMs no longer parse or make an event.
-    """
-    return read_event(ctx.store_path, event_id, ctx.settings)
 
 
 def _to_list() -> None:
@@ -94,14 +82,9 @@ def _to_planner(event_id: str) -> None:
     )
 
 
-def _level_of(data: EventView, message_id: str) -> RiskLevel | None:
-    """The risk level of a CDM's point on the trend, if it has one."""
-    if data.assessment is None:
-        return None
-    for point in data.assessment.trend.points:
-        if point.observation.message_id == message_id:
-            return point.level
-    return None
+def _provenance(observation: PcObservation, cdm: Cdm) -> Provenance:
+    """What the Pc of ``cdm`` rests on."""
+    return provenance(observation, lambda: cdm.header.comments)
 
 
 def _header(data: EventView) -> None:
@@ -116,29 +99,16 @@ def _header(data: EventView) -> None:
     )
     pc, origin, risk = st.columns([2, 3, 4], vertical_alignment="center")
     observation = data.observations.get(latest.message_id)
-    if observation is None:
-        pc.markdown(f"Latest Pc: {NOT_COMPUTED}")
-    else:
-        pc.markdown(f"Latest Pc: {_pc_cell(observation)}")
+    pc.markdown(f"Latest Pc: {pc_cell(observation)}")
+    if observation is not None:
         with origin:
-            provenance_badge(provenance(observation, latest))
+            provenance_badge(_provenance(observation, latest))
     assessment = data.assessment
     with risk:
-        if assessment is None:
-            risk_chip(None, None)
-        elif assessment.level is None:
-            risk_chip(None, None, missing=unrated(assessment))
-        else:
-            risk_chip(assessment.level, assessment.decision.action)
+        assessment_chip(assessment)
     if assessment is not None:
         for reason in assessment.decision.reasons:
             st.caption(reason)
-
-
-def _pc_cell(observation: PcObservation) -> str:
-    """A CDM's Pc as the page shows it, :data:`~keepout.dashboard.text.FAILED`
-    if it could not be computed."""
-    return FAILED if observation.pc is None else pc_text(observation.pc)
 
 
 def _compute(ctx: DashboardContext, event_id: str) -> None:
@@ -149,15 +119,12 @@ def _compute(ctx: DashboardContext, event_id: str) -> None:
     try:
         with open_store(ctx.store_path, create=False) as store:
             submission = JobQueue(store).submit_refresh(event_id, ctx.settings)
-    except KeepoutError as exc:
+    except (KeepoutError, ValueError) as exc:
         show_error(exc)
-        return
-    except ValueError as exc:
-        st.error(literal(str(exc)))
         return
     if submission.job is None:
         st.rerun()
-    st.session_state[_job_key(event_id)] = submission.job.id
+    st.session_state[refresh_job_key(event_id)] = submission.job.id
 
 
 def _not_computed(ctx: DashboardContext, data: EventView) -> None:
@@ -176,9 +143,9 @@ def _not_computed(ctx: DashboardContext, data: EventView) -> None:
 def _jobs(ctx: DashboardContext, data: EventView) -> None:
     """The status of the event's refresh jobs: those the store has queued
     or running, and the one this session queued (also once it ended)."""
-    queued = st.session_state.get(_job_key(data.event.event_id))
+    queued = state(refresh_job_key(data.event.event_id), int)
     ids = list(data.refresh_jobs)
-    if isinstance(queued, int) and queued not in ids:
+    if queued is not None and queued not in ids:
         ids.append(queued)
     if ids:
         job_status(ctx.store_path, ids)
@@ -191,18 +158,20 @@ def _trend(ctx: DashboardContext, data: EventView) -> None:
     if data.missing:
         _not_computed(ctx, data)
     _jobs(ctx, data)
-    assessment = data.assessment
     figure = trend_of(data, ctx.settings)
-    if assessment is None or figure is None:
+    if figure is None:
         return
     if not figure.labels:
         st.info("No Pc before TCA to draw.")
         return
     st.plotly_chart(trend_plot(figure))
+    # Assessed: every CDM has its observation.
     cdms = {cdm.message_id: cdm for cdm in data.event.cdms}
     origins = [
-        provenance(point.observation, cdms[label]).value if label in cdms else ""
-        for point, label in zip(assessment.trend.points, figure.labels, strict=True)
+        PROVENANCE_LABELS[_provenance(data.observations[label], cdms[label])]
+        if label in cdms
+        else ""
+        for label in figure.labels
     ]
     st.dataframe(
         {
@@ -212,28 +181,29 @@ def _trend(ctx: DashboardContext, data: EventView) -> None:
             "risk": [RISK_LABELS[level] for level in figure.levels],
             "provenance": origins,
         },
+        column_config={
+            "hours to TCA": st.column_config.NumberColumn(format="%.1f"),
+            "Pc": st.column_config.NumberColumn(format="%.2e"),
+        },
         hide_index=True,
     )
 
 
-def _cdm_row(data: EventView, cdm: Cdm) -> None:
+def _cdm_row(data: EventView, cdm: Cdm, level: RiskLevel | None) -> None:
     """A CDM of the event: when it was made, its miss, its Pc next to its
-    provenance and the risk of its point on the trend ("-" until the event
-    is assessed, or if it has no point)."""
-    cells = st.columns([width for _, width in COLUMNS], vertical_alignment="center")
-    name, created, before, miss, pc, origin, risk = cells
+    provenance and the risk ``level`` of its point on the trend ("-" until
+    the event is assessed, or if it has no point)."""
+    name, created, before, miss, pc, origin, risk = table_row(COLUMNS)
     name.markdown(literal(cdm.message_id))
     created.markdown(utc(cdm.creation_date))
     before.markdown(f"{time_to_tca(cdm) / HOUR:.1f} h")
     miss.markdown(f"{cdm.miss_distance:.1f}")
     observation = data.observations.get(cdm.message_id)
+    pc.markdown(pc_cell(observation))
     if observation is None:
-        pc.markdown(NOT_COMPUTED)
         return
-    pc.markdown(_pc_cell(observation))
     with origin:
-        provenance_badge(provenance(observation, cdm))
-    level = _level_of(data, cdm.message_id)
+        provenance_badge(_provenance(observation, cdm))
     with risk:
         if level is None:
             st.markdown("-")
@@ -241,15 +211,24 @@ def _cdm_row(data: EventView, cdm: Cdm) -> None:
             risk_chip(level, None)
 
 
+def _levels(data: EventView) -> Mapping[str | None, RiskLevel]:
+    """The risk level of each CDM's point on the trend, by ``MESSAGE_ID``;
+    none until the event is assessed."""
+    if data.assessment is None:
+        return {}
+    return {
+        point.observation.message_id: point.level
+        for point in data.assessment.trend.points
+    }
+
+
 def _cdms(data: EventView) -> None:
     """Every CDM of the event, oldest first."""
     st.subheader("CDMs")
-    for column, (title, _) in zip(
-        st.columns([width for _, width in COLUMNS]), COLUMNS, strict=True
-    ):
-        column.markdown(f"**{title}**")
+    table_header(COLUMNS)
+    levels = _levels(data)
     for cdm in data.event.cdms:
-        _cdm_row(data, cdm)
+        _cdm_row(data, cdm, levels.get(cdm.message_id))
 
 
 def _conjunction(ctx: DashboardContext, data: EventView) -> Conjunction | None:
@@ -282,7 +261,7 @@ def _encounter(conjunction: Conjunction, *, max_pc: bool) -> None:
         st.caption("no covariance: max-Pc")
     st.plotly_chart(encounter_plot(conjunction, max_pc=max_pc))
     sigmas = np.sqrt(np.clip(np.linalg.eigvalsh(plane.covariance), 0.0, None))
-    x, z = (float(value) for value in plane.miss_vector)
+    x, z = plane.miss_vector.item(0), plane.miss_vector.item(1)
     rows = [
         ("miss x [m]", x),
         ("miss z [m]", z),
@@ -291,8 +270,8 @@ def _encounter(conjunction: Conjunction, *, max_pc: bool) -> None:
     ]
     if not max_pc:
         rows += [
-            ("1 sigma, major axis [m]", float(sigmas[1])),
-            ("1 sigma, minor axis [m]", float(sigmas[0])),
+            ("1 sigma, major axis [m]", sigmas.item(1)),
+            ("1 sigma, minor axis [m]", sigmas.item(0)),
         ]
     st.dataframe(
         {
@@ -343,21 +322,21 @@ def main() -> None:
     """The event page."""
     ctx = page_context()
     event_id = st.query_params.get(EVENT_PARAM)
-    if not event_id:
+    data: EventView | None = None
+    error: KeepoutError | None = None
+    if event_id:
+        try:
+            data = read_event(ctx.store_path, event_id, ctx.settings)
+        except KeepoutError as exc:
+            error = exc
+    if not event_id or data is None:
         st.title("Event")
-        st.info("Pick an event from the list.")
-        _to_list()
-        return
-    try:
-        data = _read(ctx, event_id)
-    except KeepoutError as exc:
-        st.title("Event")
-        show_error(exc)
-        _to_list()
-        return
-    if data is None:
-        st.title("Event")
-        st.warning(f"No such event: {literal(event_id)}")
+        if not event_id:
+            st.info("Pick an event from the list.")
+        elif error is not None:
+            show_error(error)
+        else:
+            st.warning(f"No such event: {literal(event_id)}")
         _to_list()
         return
     st.title(f"Event {event_id}")

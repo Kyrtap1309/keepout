@@ -1,5 +1,6 @@
-"""What the dashboard's pages share: the context, the time the data are seen
-at, risk chips, provenance badges, errors and job status.
+"""What the dashboard's pages share: the context and the session's state,
+the time the data are seen at, tables, risk chips, provenance badges,
+errors and job status.
 
 Risk is shown as colour and words together: a chip filled with the level's
 colour (:data:`~keepout.figures.RISK_COLOURS`) carries its label and the
@@ -13,45 +14,52 @@ from __future__ import annotations
 
 import html
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Final, Literal
+from typing import TYPE_CHECKING, Final, Literal, TypeVar
 
 import streamlit as st
 
 from keepout._text import utc
 from keepout.dashboard.context import DashboardContext
-from keepout.dashboard.text import literal
+from keepout.dashboard.routes import CONTEXT_KEY, cancel_job_key
+from keepout.dashboard.text import NOT_COMPUTED, literal, unrated
 from keepout.errors import KeepoutError
-from keepout.figures import ACTION_LABELS, RISK_COLOURS, RISK_LABELS, Provenance
+from keepout.figures import (
+    ACTION_LABELS,
+    PROVENANCE_HELP,
+    PROVENANCE_LABELS,
+    RISK_COLOURS,
+    RISK_LABELS,
+)
+from keepout.risk import Provenance
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
     from pathlib import Path
 
-    from keepout.risk import Action, RiskLevel
+    from streamlit.delta_generator import DeltaGenerator
+
+    from keepout.risk import Action, Assessment, RiskLevel
     from keepout.store import Job
 
 __all__ = [
-    "CONTEXT_KEY",
     "JOB_REFRESH_SECONDS",
-    "NOT_COMPUTED",
     "as_of_header",
+    "assessment_chip",
     "ink",
     "job_status",
     "page_context",
     "provenance_badge",
     "risk_chip",
     "show_error",
+    "state",
+    "table_header",
+    "table_row",
 ]
-
-CONTEXT_KEY: Final = "context"
-"""The key of the :class:`~keepout.dashboard.context.DashboardContext` in
-``st.session_state``, set by the app before a page runs."""
 
 JOB_REFRESH_SECONDS: Final = 2
 """How often [s] the status of a queued or running job is read again."""
 
-NOT_COMPUTED: Final = "not computed"
-"""The chip of an event without a Pc for the settings."""
+_T = TypeVar("_T")
 
 _BadgeColour = Literal["blue", "orange", "violet", "gray"]
 
@@ -65,29 +73,18 @@ _PROVENANCE_COLOURS: Final[Mapping[Provenance, _BadgeColour]] = MappingProxyType
 )
 """The colour of each provenance badge; the badge names it in words."""
 
-_PROVENANCE_HELP: Final[Mapping[Provenance, str]] = MappingProxyType(
-    {
-        Provenance.CDM_COVARIANCE: (
-            "The Pc uses the covariances the CDM gives, from orbit determination."
-        ),
-        Provenance.GP_AGE_MODEL: (
-            "The covariances are assumed by keepout's synthetic operator from "
-            "the age of the GP data, not from orbit determination."
-        ),
-        Provenance.ASSUMED: (
-            "The CDM marks its covariances as assumed (COVARIANCE_METHOD = "
-            "DEFAULT), from a model it does not name."
-        ),
-        Provenance.MAX_PC: ("A maximum Pc: an upper bound found without a covariance."),
-    }
-)
-"""What each provenance means, shown on hovering its badge."""
-
 _CHIP_STYLE: Final = (
     "display:inline-block;padding:0.1rem 0.6rem;border-radius:999px;"
     "border:1px solid rgba(128,128,128,0.7);font-weight:600;font-size:0.9rem;"
 )
 """The pill of a risk chip; its fill and text colour are added."""
+
+
+def state(key: str, kind: type[_T]) -> _T | None:
+    """What ``st.session_state`` keeps under ``key``, if it is a ``kind``;
+    else ``None``."""
+    value = st.session_state.get(key)
+    return value if isinstance(value, kind) else None
 
 
 def page_context() -> DashboardContext:
@@ -100,8 +97,8 @@ def page_context() -> DashboardContext:
         page run without the app), the page shows how to start the
         dashboard and stops (``st.stop``).
     """
-    context = st.session_state.get(CONTEXT_KEY)
-    if not isinstance(context, DashboardContext):
+    context = state(CONTEXT_KEY, DashboardContext)
+    if context is None:
         st.error("No dashboard context: start it with keepout dashboard --store FILE")
         st.stop()
     return context
@@ -115,9 +112,24 @@ def as_of_header(ctx: DashboardContext) -> None:
     st.markdown(f"Data as of {stamp} UTC{fixed}")
 
 
+def table_header(columns: Sequence[tuple[str, int]]) -> None:
+    """The titles of a table's columns, each ``(title, width)``, in bold."""
+    cells = st.columns([width for _, width in columns])
+    for cell, (title, _) in zip(cells, columns, strict=True):
+        cell.markdown(f"**{title}**")
+
+
+def table_row(columns: Sequence[tuple[str, int]]) -> list[DeltaGenerator]:
+    """The cells of a row of a table of ``columns`` (as
+    :func:`table_header`), their content centred vertically."""
+    return st.columns([width for _, width in columns], vertical_alignment="center")
+
+
 def provenance_badge(p: Provenance) -> None:
     """A badge naming what a Pc rests on, with its meaning on hover."""
-    st.badge(p.value, color=_PROVENANCE_COLOURS[p], help=_PROVENANCE_HELP[p])
+    st.badge(
+        PROVENANCE_LABELS[p], color=_PROVENANCE_COLOURS[p], help=PROVENANCE_HELP[p]
+    )
 
 
 def _luminance(colour: str) -> float:
@@ -158,14 +170,26 @@ def risk_chip(
     )
 
 
-def show_error(error: KeepoutError) -> None:
-    """A keepout error as the page shows it: its message, verbatim
+def assessment_chip(assessment: Assessment | None) -> None:
+    """An event's risk as a chip (:func:`risk_chip`): its level and action;
+    without a level, why (:func:`~keepout.dashboard.text.unrated`); without
+    an assessment, not computed."""
+    if assessment is None:
+        risk_chip(None, None)
+    elif assessment.level is None:
+        risk_chip(None, None, missing=unrated(assessment))
+    else:
+        risk_chip(assessment.level, assessment.decision.action)
+
+
+def show_error(error: KeepoutError | ValueError) -> None:
+    """An error as the page shows it: its message, verbatim
     (:func:`~keepout.dashboard.text.literal`), no traceback."""
     st.error(literal(str(error)))
 
 
 def _read_jobs(store_path: Path, job_ids: Sequence[int]) -> list[Job]:
-    """The jobs ``job_ids`` as they are now.
+    """The jobs ``job_ids`` as they are now, read in one transaction.
 
     Raises
     ------
@@ -175,120 +199,63 @@ def _read_jobs(store_path: Path, job_ids: Sequence[int]) -> list[Job]:
     from keepout.store import JobQueue, open_store
 
     with open_store(store_path, create=False) as store:
-        queue = JobQueue(store)
-        return [queue.job(job_id) for job_id in job_ids]
+        return JobQueue(store).jobs_by_id(job_ids)
 
 
-_REFUSALS_KEY: Final = "job-cancel-refusals"
-"""The session-state key of the refused cancels not yet seen through: job
-id to the error."""
-
-_POLLED_KEY: Final = "job-status-polled"
-"""The session-state key of the jobs whose polling reran the page: the
-next run is the polling's doing, not the user's."""
-
-
-def _refusals() -> dict[int, KeepoutError]:
-    """The refused cancels kept for the page, by job id."""
-    kept = st.session_state.get(_REFUSALS_KEY)
-    return dict(kept) if isinstance(kept, dict) else {}
-
-
-def _polled(job_ids: Sequence[int]) -> None:
-    """Mark the next run of the page as the polling's doing for ``job_ids``."""
-    polled = st.session_state.get(_POLLED_KEY)
-    st.session_state[_POLLED_KEY] = (
-        set(polled) if isinstance(polled, set) else set()
-    ) | set(job_ids)
-
-
-def _cancel(store_path: Path, job_id: int) -> bool:
+def _cancel(store_path: Path, job_id: int) -> None:
     """Cancel a job; if it cannot be (it has ended meanwhile, the store
-    cannot be used), keep why for the page.
-
-    Returns
-    -------
-    bool
-        Whether the job was cancelled.
-    """
+    cannot be used), say why in a toast, which outlives the rerun that
+    follows and is not kept for another run or page."""
     from keepout.store import JobQueue, open_store
 
     try:
         with open_store(store_path, create=False) as store:
             JobQueue(store).cancel(job_id)
     except KeepoutError as exc:
-        st.session_state[_REFUSALS_KEY] = {**_refusals(), job_id: exc}
-        return False
-    return True
+        st.toast(literal(str(exc)), icon=":material/error:")
 
 
-def _job_rows(
-    store_path: Path,
-    jobs: Sequence[Job],
-    job_ids: Sequence[int],
-    labels: Mapping[int, str],
-) -> None:
+def _job_rows(store_path: Path, jobs: Sequence[Job], labels: Mapping[int, str]) -> None:
     """A line per job: its kind and status with its label under them, a
-    Cancel button while it is active, the error if it failed, and why a
-    cancel of it was refused.
-
-    A cancel reruns the page: as the user's doing if it is done, and as the
-    polling's if it is refused, which keeps the refusal shown until the
-    user's next interaction (the job has ended: the next poll reruns the
-    page anyway).
-    """
-    refused = _refusals()
+    Cancel button while it is active, and the error if it failed. A cancel,
+    done or refused, reruns the page, which shows the jobs as they are
+    then."""
     for job in jobs:
         text, button = st.columns([5, 1], vertical_alignment="center")
         text.markdown(f"Job {job.id} ({job.kind.value}): **{job.status.value}**")
         if job.id in labels:
             text.caption(labels[job.id])
-        if job.status.is_active and button.button("Cancel", key=f"cancel-job-{job.id}"):
-            if not _cancel(store_path, job.id):
-                _polled(job_ids)
+        if job.status.is_active and button.button("Cancel", key=cancel_job_key(job.id)):
+            _cancel(store_path, job.id)
             st.rerun()
         if job.error:
             st.error(literal(job.error))
-        if job.id in refused:
-            show_error(refused[job.id])
-
-
-def _error_key(job_ids: Sequence[int]) -> str:
-    """The session-state key of the store error that stopped the polling of
-    ``job_ids``."""
-    return "job-status-error-" + ",".join(map(str, job_ids))
 
 
 @st.fragment(run_every=JOB_REFRESH_SECONDS)
 def _live_jobs(
-    store_path: Path, job_ids: Sequence[int], labels: Mapping[int, str]
+    store_path: Path,
+    job_ids: Sequence[int],
+    labels: Mapping[int, str],
+    first: list[list[Job]],
 ) -> None:
     """The jobs' status, read again every :data:`JOB_REFRESH_SECONDS`. Once
-    none is active, or the store cannot be read, the whole page runs again,
-    without this fragment (the error is kept for :func:`job_status`)."""
+    none is active, the whole page runs again, without this fragment. If
+    the store cannot be read, the error shows in place of the jobs until a
+    later read succeeds.
+
+    ``first`` holds the jobs the page has just read, which the fragment's
+    first run shows and takes out; its later runs (the fragment keeps its
+    arguments) read them again.
+    """
     try:
-        jobs = _read_jobs(store_path, job_ids)
+        jobs = first.pop() if first else _read_jobs(store_path, job_ids)
     except KeepoutError as exc:
-        st.session_state[_error_key(job_ids)] = exc
-        _polled(job_ids)
-        st.rerun()
-    _job_rows(store_path, jobs, job_ids, labels)
+        show_error(exc)
+        return
+    _job_rows(store_path, jobs, labels)
     if not any(job.status.is_active for job in jobs):
-        _polled(job_ids)
         st.rerun()
-
-
-def _seen_refusals(job_ids: Sequence[int]) -> None:
-    """Keep the refused cancels of jobs whose polling reran the page, drop
-    the others (the user has acted since), and clear the marks; show those
-    of jobs not among ``job_ids`` (the page no longer shows the job)."""
-    polled = st.session_state.pop(_POLLED_KEY, None)
-    marked = set(polled) if isinstance(polled, set) else set()
-    kept = {job_id: exc for job_id, exc in _refusals().items() if job_id in marked}
-    st.session_state[_REFUSALS_KEY] = kept
-    for job_id, exc in kept.items():
-        if job_id not in job_ids:
-            show_error(exc)
 
 
 def job_status(
@@ -296,19 +263,16 @@ def job_status(
     job_ids: Sequence[int],
     *,
     labels: Mapping[int, str] | None = None,
-) -> None:
+) -> bool:
     """The status of jobs of the store, with a Cancel button per queued or
     running one.
 
     While a job is queued or running, the status is read again every
     :data:`JOB_REFRESH_SECONDS` (an ``st.fragment``); once all have ended,
     it is shown once and no longer polled. A failed job's error is shown
-    with ``st.error``. A store error is shown once with :func:`show_error`,
-    and stops the polling until the page runs again (the next interaction
-    tries again). A refused cancel's error stays, through the polls and
-    the reruns they make, until the user's next interaction, even if the
-    job is no longer among ``job_ids``. Call it once per page run (with no
-    job, it shows only such errors).
+    with ``st.error``, a store error with :func:`show_error` (while
+    polling, until a later read succeeds) and a refused cancel's error in
+    a toast.
 
     Parameters
     ----------
@@ -318,21 +282,23 @@ def job_status(
         The jobs to show, in order.
     labels
         A line under a job's status, by job id (e.g. its settings).
+
+    Returns
+    -------
+    bool
+        Whether a job is queued or running, as read now; ``False`` if the
+        store cannot be read.
     """
-    _seen_refusals(job_ids)
     if not job_ids:
-        return
+        return False
     named = dict(labels or {})
-    stopped = st.session_state.pop(_error_key(job_ids), None)
-    if isinstance(stopped, KeepoutError):
-        show_error(stopped)
-        return
     try:
         jobs = _read_jobs(store_path, job_ids)
     except KeepoutError as exc:
         show_error(exc)
-        return
+        return False
     if any(job.status.is_active for job in jobs):
-        _live_jobs(store_path, tuple(job_ids), named)
-    else:
-        _job_rows(store_path, jobs, job_ids, named)
+        _live_jobs(store_path, tuple(job_ids), named, [jobs])
+        return True
+    _job_rows(store_path, jobs, named)
+    return False

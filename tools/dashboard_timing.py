@@ -10,10 +10,9 @@ Usage::
 ``build`` makes ``STORE`` a store of ``--events`` events (1 000) and
 ``--cdms`` CDMs (20 000) with their Pc cached (:func:`build_store`); it
 prints how long that took. ``time`` reads it as the dashboard does, without
-Streamlit (:func:`measure`), and prints one JSON object: the median wall
-and CPU time [s] of the events list's first page and of the event page's
-data path (``null`` when this keepout has no
-``keepout.dashboard.event_data``).
+Streamlit (:func:`measure`), and prints one JSON object (:class:`Timings`):
+the median wall and CPU time [s] of the events list's first page and of the
+event page's data path.
 
 ``tools/dashboard_benchmark.py`` runs both, and its ``compare`` command
 runs this file of the tree being tested with the Python environment of an
@@ -28,8 +27,8 @@ its dashboard: ``keepout.cdm`` (``make_cdm``, ``ObjectMetadata``),
 ``keepout.store`` (``open_store``, ``CdmInput``, ``Store.ingest``,
 ``Store.cache``), ``keepout.dashboard.listing`` (``read_page``: the
 events page's read) and ``keepout.dashboard.event_data`` (the event page's
-data path, without Streamlit). A keepout without ``listing`` cannot be
-timed; one without ``event_data`` is timed on the list only.
+data path, without Streamlit). A keepout without ``keepout.dashboard``
+cannot be timed.
 """
 
 from __future__ import annotations
@@ -41,7 +40,6 @@ import math
 import statistics
 import sys
 import time
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, TypedDict
 
@@ -66,10 +64,11 @@ if TYPE_CHECKING:
     from keepout.store import CdmInput, Store
 
 EVENTS: Final = 1000
-"""Events of the benchmark's store unless told otherwise (spec §8)."""
+"""Events of the benchmark's store unless told otherwise (the store the
+targets of ``docs/dashboard.md``, Speed, are set on)."""
 
 CDMS: Final = 20_000
-"""CDMs of the benchmark's store unless told otherwise (spec §8)."""
+"""CDMs of the benchmark's store unless told otherwise (as :data:`EVENTS`)."""
 
 REPEAT: Final = 5
 """Timed reads of each path unless told otherwise (median)."""
@@ -96,35 +95,17 @@ _SETTINGS: Final = Settings()
 """The settings the Pc are cached and read with: keepout's defaults."""
 
 
-@dataclass(frozen=True, slots=True)
-class Timings:
-    """The median times of the dashboard's reads [s].
-
-    Parameters
-    ----------
-    list_s, list_cpu
-        Wall and CPU time of the events list's first page.
-    event_s, event_cpu
-        Wall and CPU time of the event page's data path; ``None`` if this
-        keepout has no ``keepout.dashboard.event_data``.
-    """
-
-    list_s: float
-    list_cpu: float
-    event_s: float | None
-    event_cpu: float | None
-
-
-class TimingOutput(TypedDict):
-    """What ``time`` prints, as JSON: :class:`Timings`."""
+class Timings(TypedDict):
+    """The median times of the dashboard's reads [s], as ``time`` prints
+    them (JSON)."""
 
     list_wall: float
     """Wall time of the events list's first page [s]."""
     list_cpu: float
     """Its CPU time [s]."""
-    event_wall: float | None
-    """Wall time of the event page's data path [s]; ``null`` without it."""
-    event_cpu: float | None
+    event_wall: float
+    """Wall time of the event page's data path [s]."""
+    event_cpu: float
     """Its CPU time [s]."""
 
 
@@ -312,19 +293,11 @@ NO_DASHBOARD: Final = "no dashboard to time"
 
 
 def missing_dashboard() -> str:
-    """Why this keepout cannot be timed (it has no
-    ``keepout.dashboard.listing``); empty if it can."""
+    """Why this keepout cannot be timed (it has no ``keepout.dashboard``);
+    empty if it can."""
     if importlib.util.find_spec("keepout.dashboard") is None:
         return f"{NO_DASHBOARD}: this keepout has no keepout.dashboard"
-    if importlib.util.find_spec("keepout.dashboard.listing") is None:
-        return f"{NO_DASHBOARD}: this keepout has no keepout.dashboard.listing"
     return ""
-
-
-def has_event_page() -> bool:
-    """Whether this keepout has the event page's data path without
-    Streamlit (``keepout.dashboard.event_data``)."""
-    return importlib.util.find_spec("keepout.dashboard.event_data") is not None
 
 
 def measure(path: Path, *, repeat: int = REPEAT) -> Timings:
@@ -344,8 +317,7 @@ def measure(path: Path, *, repeat: int = REPEAT) -> Timings:
     Returns
     -------
     Timings
-        The median times; the event page's ``None`` if this keepout has no
-        ``keepout.dashboard.event_data``.
+        The median times.
 
     Raises
     ------
@@ -357,20 +329,13 @@ def measure(path: Path, *, repeat: int = REPEAT) -> Timings:
     first = _list_page(path)
     if first is None:
         raise ValueError(f"{path}: no event upcoming at {AS_OF.isot}")
-    list_s, list_cpu = _timed(lambda: _list_page(path), repeat)
-    if not has_event_page():
-        return Timings(list_s, list_cpu, None, None)
-    event_s, event_cpu = _timed(lambda: _event_page(path, first), repeat)
-    return Timings(list_s, list_cpu, event_s, event_cpu)
-
-
-def output_of(timings: Timings) -> TimingOutput:
-    """What ``time`` prints of ``timings``."""
+    list_wall, list_cpu = _timed(lambda: _list_page(path), repeat)
+    event_wall, event_cpu = _timed(lambda: _event_page(path, first), repeat)
     return {
-        "list_wall": timings.list_s,
-        "list_cpu": timings.list_cpu,
-        "event_wall": timings.event_s,
-        "event_cpu": timings.event_cpu,
+        "list_wall": list_wall,
+        "list_cpu": list_cpu,
+        "event_wall": event_wall,
+        "event_cpu": event_cpu,
     }
 
 
@@ -423,7 +388,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"in {elapsed:.1f} s"
         )
         return 0
-    print(json.dumps(output_of(measure(args.store, repeat=args.repeat))))
+    print(json.dumps(measure(args.store, repeat=args.repeat)))
     return 0
 
 

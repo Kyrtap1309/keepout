@@ -13,7 +13,7 @@ module.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, assert_never
 
 from keepout.settings import plan_arguments
 from keepout.store.codec import observation_to_json
@@ -234,3 +234,5 @@ def run_job(path: str, job: Job, workers: int | None) -> dict[str, JsonValue]:
             return run_maneuver_job(path, job, workers)
         case JobKind.REFRESH:
             return run_refresh_job(path, job, workers)
+        case _:
+            assert_never(job.kind)

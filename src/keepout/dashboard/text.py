@@ -1,26 +1,29 @@
-"""Words of the dashboard's pages: how far a TCA is, why an event has no
-risk level, and text from data (CDMs, file names, the query) put in
-Markdown verbatim."""
+"""Words of the dashboard's pages: how far a TCA is, a Pc or why there is
+none, why an event has no risk level, and text from data (CDMs, file names,
+the query) put in Markdown verbatim."""
 
 from __future__ import annotations
 
 import re
 from typing import TYPE_CHECKING, Final
 
+from keepout._text import pc_text
 from keepout.units import DAY, HOUR, MINUTE, elapsed_seconds
 
 if TYPE_CHECKING:
     from astropy.time import Time
 
-    from keepout.risk import Assessment
+    from keepout.risk import Assessment, PcObservation
 
 __all__ = [
     "AFTER_TCA",
     "DAYS_FROM",
     "FAILED",
     "HOURS_FROM",
+    "NOT_COMPUTED",
     "countdown",
     "literal",
+    "pc_cell",
     "unrated",
 ]
 
@@ -29,6 +32,9 @@ HOURS_FROM: Final = 2 * HOUR
 
 DAYS_FROM: Final = 72 * HOUR
 """Time [s] beyond which a time is counted in days."""
+
+NOT_COMPUTED: Final = "not computed"
+"""The Pc, and the risk, of a CDM or event without a Pc for the settings."""
 
 FAILED: Final = "failed"
 """The risk of an event whose latest Pc before TCA could not be computed."""
@@ -86,3 +92,13 @@ def unrated(assessment: Assessment) -> str:
     if assessment.trend.latest_observation is None:
         return AFTER_TCA
     return FAILED
+
+
+def pc_cell(observation: PcObservation | None) -> str:
+    """A cached Pc as the pages show it: :data:`NOT_COMPUTED` without one,
+    :data:`FAILED` if it could not be computed."""
+    if observation is None:
+        return NOT_COMPUTED
+    if observation.pc is None:
+        return FAILED
+    return pc_text(observation.pc)

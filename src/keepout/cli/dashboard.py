@@ -18,7 +18,12 @@ from typing import Annotated, Final, TypeAlias
 
 import typer
 
-from keepout._environment import AS_OF_VARIABLE, SETTINGS_VARIABLE, STORE_VARIABLE
+from keepout._environment import (
+    AS_OF_VARIABLE,
+    MAX_UPLOAD_MB,
+    SETTINGS_VARIABLE,
+    STORE_VARIABLE,
+)
 from keepout.cli.options import SettingsFile, operator_settings, time_option
 from keepout.cli.output import ExitCode, fail, isot
 from keepout.cli.store import StorePath, open_cli_store
@@ -37,9 +42,6 @@ _DASHBOARD_MODULES: Final = ("streamlit", "plotly")
 
 ADDRESS: Final = "127.0.0.1"
 """The only address the dashboard listens on: this machine."""
-
-MAX_UPLOAD_MB: Final = 1
-"""The largest file [MB] the dashboard takes (a CDM is a few kB)."""
 
 Port: TypeAlias = Annotated[
     int,

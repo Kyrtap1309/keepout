@@ -102,6 +102,21 @@ def test_importing_keepout_loads_no_sqlalchemy() -> None:
     assert loaded.stdout == "[]\n"
 
 
+def test_importing_the_store_loads_no_figures_or_screening() -> None:
+    # Every command and worker opening a store imports it: the presentation
+    # layer and the synthetic operator (screening, SGP4) stay unloaded.
+    code = (
+        "import sys, keepout.store; "
+        "print(sorted(m for m in ('keepout.figures', 'keepout.maneuver', "
+        "'keepout.synthetic.operator', 'keepout.screening', 'sgp4') "
+        "if m in sys.modules))"
+    )
+    loaded = subprocess.run(  # noqa: S603 (this interpreter, fixed code)
+        [sys.executable, "-c", code], capture_output=True, text=True, check=True
+    )
+    assert loaded.stdout == "[]\n"
+
+
 def test_importing_reads_no_metadata() -> None:
     # importlib.metadata is most of the import time: __version__ is lazy.
     code = (

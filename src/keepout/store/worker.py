@@ -14,8 +14,9 @@ supervisor alone writes the job's end and its result.
 How a job ends:
 
 - an answer: the job succeeds, with its result cached on the job's CDM;
-- an answer the store cannot cache
-  (:class:`~keepout.store.jobs.JobResultError`): it fails with the reason;
+- an answer the store cannot cache (a :class:`~keepout.errors.StoreError`
+  of :meth:`~keepout.store.jobs.JobQueue.finish`): it fails with the
+  reason;
 - an error of keepout (:class:`~keepout.errors.KeepoutError`): it fails
   with the error's message, and any other error with ``internal error``,
   the child's traceback in the log; neither is tried again;
@@ -47,9 +48,9 @@ from typing import TYPE_CHECKING, Final, Protocol, TypeAlias, cast
 
 from keepout._text import duration_words
 from keepout._workers import ONE_THREAD
-from keepout.errors import KeepoutError
+from keepout.errors import KeepoutError, StoreError
 from keepout.store.db import open_store
-from keepout.store.jobs import LEASE_SECONDS, Job, JobQueue, JobResultError
+from keepout.store.jobs import LEASE_SECONDS, Job, JobQueue
 from keepout.store.planning import run_job
 
 if TYPE_CHECKING:
@@ -425,8 +426,10 @@ def _record_answer(queue: JobQueue, job: Job, answer: object) -> None:
         case _Answer(payload=payload):
             try:
                 held = queue.finish(job, payload)
-            except JobResultError as exc:
-                # A result that cannot be cached is a bug of the computation.
+            except StoreError as exc:
+                # A result that cannot be cached is a bug of the computation;
+                # a store that cannot be used fails this write too, and the
+                # error goes on.
                 held = queue.fail(job, str(exc))
                 if held:
                     logger.error("job %d failed: %s", job.id, exc)

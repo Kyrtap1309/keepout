@@ -520,9 +520,9 @@ the time limit and what happens to the job of a worker that dies.
 ## `worker`
 
 `keepout worker --store FILE` computes the jobs queued, one at a time, and
-caches each result in the store: a manoeuvre plan, or the Pc of a `refresh`
-job the [dashboard](dashboard.md#jobs) queued. It runs until stopped (SIGTERM or Ctrl+C):
-its job then goes back to the queue. With `--until-idle` it stops once the
+caches each result in the store: a manoeuvre plan, or the Pc of a refresh
+job the [dashboard](dashboard.md#jobs) queued. It runs until stopped
+(SIGTERM or Ctrl+C): its job then goes back to the queue. With `--until-idle` it stops once the
 queue is empty, and says how many jobs it ran. Its log goes to standard
 error:
 
@@ -546,25 +546,18 @@ running one in a container.
 ## `dashboard`
 
 `keepout dashboard --store FILE` shows a store in the browser, at
-http://127.0.0.1:8501, until Ctrl+C: the events with their risk, each
-event's trend and geometry, and its manoeuvre plan. It needs the
-`dashboard` extra
-(`pip install "keepout[cli,dashboard] @ git+https://github.com/Kyrtap1309/keepout"`,
-or `uv sync --extra cli --extra dashboard` in a clone). It takes the store
-as `--store FILE` or `$KEEPOUT_STORE`, the [settings](#settings) as
-`--settings FILE`, the port as `--port N` and a fixed time to see the data
-at as `--as-of TIME`. After the walk-through above:
+http://127.0.0.1:8501: the events with their risk, each event's Pc trend
+and geometry, and its manoeuvre plan. It needs the `dashboard`
+[extra](index.md#install). After the walk-through above:
 
 ```bash
 keepout dashboard --store keepout.db --as-of 2026-10-06
 ```
 
-It listens on 127.0.0.1 only and has no authentication: do not expose it.
-An unexpected exception shows only its type in the browser; its message
-and traceback go to the terminal.
-It computes no Pc or plan itself but queues them for a [worker](#worker).
-[The dashboard](dashboard.md) describes its pages, the demo store and the
-uploads.
+It listens on 127.0.0.1 only and has no authentication: see
+[the warning](dashboard.md). It computes no Pc or plan itself but queues
+them for a [worker](#worker). [The dashboard](dashboard.md) describes its
+options, pages and demo.
 
 ## `validate`
 
@@ -595,9 +588,9 @@ manoeuvre plan no faster, at 20 times the CPU time (see
 
 `assess`, `screen`, `maneuver`, `store add`, `store rebuild` and
 `dashboard` take the operator's settings from a TOML file,
-`--settings FILE`. Every key is
-optional and takes the library's default when missing; an unknown key is
-an error, so that a typo does not pass for a default:
+`--settings FILE`. Every key is optional and takes the library's default
+when missing; an unknown key is an error, so that a typo does not pass for
+a default:
 
 ```toml
 [pc]

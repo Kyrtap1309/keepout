@@ -55,6 +55,29 @@ class GridPanel:
     log_pc: FloatArray
     minimum: tuple[float, float] | None
 
+    def crosses(self, target_log_pc: float) -> bool:
+        """Whether the cells' Pc pass a target, so that its contour can be
+        drawn: some known Pc on either side of it, on at least two rows and
+        columns. The contour stops at cells without a Pc.
+
+        Parameters
+        ----------
+        target_log_pc
+            log10 of the target Pc.
+
+        Returns
+        -------
+        bool
+            ``True`` if a contour of the target crosses the cells.
+        """
+        values = self.log_pc
+        known = values[np.isfinite(values)]
+        return bool(
+            min(values.shape) > 1
+            and known.size
+            and known.min() < target_log_pc < known.max()
+        )
+
 
 @dataclass(frozen=True, eq=False, slots=True)
 class GridFigure:

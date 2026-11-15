@@ -59,22 +59,25 @@ def test_trend_colours_points_by_level_hollow_below_floor() -> None:
         RISK_COLOURS[RiskLevel.RED],
     ]
     assert [trace["text"] for trace in points] == [["A"], ["B"], ["C"]]
-    lines = [shape["y0"] for shape in figure["layout"]["shapes"]]
-    assert lines == [1e-4, 1e-7]
-    notes = [note["text"] for note in figure["layout"]["annotations"]]
-    assert notes == ["red from 1e-04", "green below 1e-07"]
+    lines = {shape["y0"] for shape in figure["layout"]["shapes"]}
+    assert lines == {1e-4, 1e-7}
+    notes = {note["text"] for note in figure["layout"]["annotations"]}
+    assert notes == {"red from 1e-04", "green below 1e-07"}
     assert figure["layout"]["yaxis"]["type"] == "log"
     assert figure["layout"]["xaxis"]["autorange"] == "reversed"
 
 
 def test_trend_marks_the_decision_point() -> None:
     plain = plots.trend(_trend()).to_dict()
-    assert [shape["type"] for shape in plain["layout"]["shapes"]] == ["line", "line"]
+    assert sorted(shape["type"] for shape in plain["layout"]["shapes"]) == [
+        "line",
+        "line",
+    ]
     figure = plots.trend(_trend(), decision_point_hours=120.0).to_dict()
     vertical = [s for s in figure["layout"]["shapes"] if s["x0"] == s["x1"]]
     assert [s["x0"] for s in vertical] == [120.0]
     assert vertical[0]["line"]["dash"] == "dot"
-    notes = [note["text"] for note in figure["layout"]["annotations"]]
+    notes = {note["text"] for note in figure["layout"]["annotations"]}
     assert "decision point" in notes
 
 
@@ -187,7 +190,11 @@ def test_geometry_draws_path_ellipsoid_and_sphere() -> None:
     assert drawn["layout"]["scene"]["xaxis"]["title"]["text"] == "R [m]"
 
 
-def _panel(direction: BurnDirection, log_pc: np.ndarray) -> GridPanel:
+def _panel(
+    direction: BurnDirection,
+    log_pc: np.ndarray,
+    minimum: tuple[float, float] | None = (2.0, 0.03),
+) -> GridPanel:
     return GridPanel(
         direction=direction,
         hours_before_tca=np.array([0.5, 1.5, 2.5, 3.5]),
@@ -195,7 +202,7 @@ def _panel(direction: BurnDirection, log_pc: np.ndarray) -> GridPanel:
         hour_centres=np.array([1.0, 2.0, 3.0]),
         delta_v_centres=np.array([0.01, 0.03]),
         log_pc=log_pc,
-        minimum=(2.0, 0.03),
+        minimum=minimum,
     )
 
 
@@ -245,3 +252,26 @@ def test_grid_without_a_crossing_has_no_contour() -> None:
     traces = _traces(plots.grid(figure).to_dict())
     assert [trace for trace in traces if trace["type"] == "contour"] == []
     assert "no Pc" not in [trace.get("name") for trace in traces]
+
+
+def test_grid_legend_names_what_only_the_second_panel_draws() -> None:
+    # No retrograde burn meets the target: the contour and the smallest
+    # burn are drawn on the prograde panel alone, and the legend names them.
+    above = np.array([[-3.0, -4.0], [-3.5, -4.5], [-3.2, -4.2]])
+    crossing = np.array([[-3.0, -6.0], [-4.0, -7.0], [-4.5, -8.0]])
+    figure = GridFigure(
+        directions=(
+            _panel(BurnDirection.RETROGRADE, above, minimum=None),
+            _panel(BurnDirection.PROGRADE, crossing),
+        ),
+        target_pc=1e-5,
+        target_log_pc=-5.0,
+        top_log_pc=-3.0,
+    )
+    traces = _traces(plots.grid(figure).to_dict())
+    names = [trace["name"] for trace in traces if trace.get("showlegend")]
+    assert names == ["target Pc 1e-05", "smallest burn meeting it"]
+    assert [trace["xaxis"] for trace in traces if trace.get("showlegend")] == [
+        "x2",
+        "x2",
+    ]

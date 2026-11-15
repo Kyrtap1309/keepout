@@ -1,5 +1,6 @@
 import sqlite3
 from pathlib import Path
+from typing import Final
 
 import pytest
 from alembic import command
@@ -19,7 +20,7 @@ from sqlalchemy import (
 from sqlalchemy.exc import IntegrityError
 
 from keepout.errors import StoreError
-from keepout.store import Store, db, models, open_store, upgrade
+from keepout.store import JobQueue, Store, db, models, open_store, upgrade
 from keepout.store.db import HEAD
 from keepout.store.models import Base, JobKind
 
@@ -117,10 +118,11 @@ def test_the_schema_holds_its_rules(tmp_path: Path) -> None:
     assert "ix_jobs_status" not in indexes
     assert "ix_jobs_event_id" not in indexes  # 0003: a prefix of event_id, status
     assert schema["jobs"]["checks"] == [
+        ("ck_jobs_kind", "kind IN ('maneuver', 'refresh')"),
         (
             "ck_jobs_status",
             "status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')",
-        )
+        ),
     ]
 
 
@@ -287,12 +289,12 @@ def test_a_migration_that_breaks_a_foreign_key_is_rolled_back(tmp_path: Path) ->
         assert _counts(store) == before
 
 
-def _job(status: str = "queued") -> TextClause:
+def _job(status: str = "queued", kind: str = "maneuver") -> TextClause:
     return text(
         "INSERT INTO jobs (event_id, message_id, key, params, status,"
-        " attempt, claims, created_at)"
-        " VALUES ('0123abcd', 'm', 'k', '{}', :status, 0, 0, 't')"
-    ).bindparams(status=status)
+        " attempt, claims, created_at, kind)"
+        " VALUES ('0123abcd', 'm', 'k', '{}', :status, 0, 0, 't', :kind)"
+    ).bindparams(status=status, kind=kind)
 
 
 def test_a_job_id_is_never_reused(tmp_path: Path) -> None:
@@ -318,6 +320,49 @@ def test_a_job_needs_a_known_status(tmp_path: Path) -> None:
             session.execute(CDM.bindparams(event="0123abcd", format="kvn"))
         with pytest.raises(IntegrityError, match="CHECK"):
             _insert(store, _job(status="done"))
+
+
+def test_a_job_needs_a_known_kind(tmp_path: Path) -> None:
+    with open_store(tmp_path / "keepout.db") as store:
+        with store.write() as session:
+            session.execute(EVENT)
+            session.execute(CDM.bindparams(event="0123abcd", format="kvn"))
+        with pytest.raises(IntegrityError, match="CHECK"):
+            _insert(store, _job(kind="audit"))
+
+
+_SET_JOB: Final = {
+    "kind": text("UPDATE jobs SET kind = :value"),
+    "status": text("UPDATE jobs SET status = :value"),
+}
+
+
+@pytest.mark.parametrize(
+    ("column", "value", "enum"),
+    [("kind", "audit", "JobKind"), ("status", "done", "JobStatus")],
+)
+def test_a_job_of_an_unknown_kind_or_status_is_a_store_error(
+    tmp_path: Path, column: str, value: str, enum: str
+) -> None:
+    # A store written by hand, its checks off: the job reads as a store
+    # error, not a bare ValueError of the enum.
+    with open_store(tmp_path / "keepout.db") as store:
+        with store.write() as session:
+            session.execute(EVENT)
+            session.execute(CDM.bindparams(event="0123abcd", format="kvn"))
+            session.execute(text("PRAGMA ignore_check_constraints = ON"))
+            session.execute(
+                text(
+                    "INSERT INTO jobs (event_id, message_id, key, params, status,"
+                    " attempt, claims, created_at, kind)"
+                    " VALUES ('0123abcd', 'm', 'k', '{}', 'queued', 0, 0,"
+                    " '2026-11-12T12:00:00.000000000', 'maneuver')"
+                )
+            )
+            session.execute(_SET_JOB[column], {"value": value})
+            session.execute(text("PRAGMA ignore_check_constraints = OFF"))
+        with pytest.raises(StoreError, match=f"^unknown {enum} '{value}' in "):
+            JobQueue(store).jobs()
 
 
 def test_upgrade_0002_to_0003_keeps_jobs(tmp_path: Path) -> None:

@@ -2,16 +2,22 @@
 
 import astropy.units as u
 import pytest
-from sqlalchemy import delete
-from store_builders import FOSTER, TCA, message
+from store_builders import (
+    FOSTER,
+    TCA,
+    cdm_text,
+    drop_result,
+    message,
+    missing_pc,
+)
 
 import keepout.cdm
 from keepout.cdm import Cdm
 from keepout.errors import StoreError
-from keepout.figures import Provenance
+from keepout.risk import Provenance
+from keepout.risk.provenance import HEADER_COMMENTS
 from keepout.settings import Settings
-from keepout.store import JobKind, JobQueue, Store, models
-from keepout.store.codec import result_key
+from keepout.store import CdmInput, JobKind, JobQueue, Store
 from keepout.store.summaries import complete_of, decoded
 
 BEFORE = TCA - 10 * u.day
@@ -95,28 +101,22 @@ def test_summary_with_missing_pc(store: Store) -> None:
         [message("A"), message("B", tca=1.0, created=-60.0)]
     ).events
     store.refresh(FOSTER)
-    assert store.missing_pc(event_id, FOSTER) == ()
-    with store.write() as session:
-        session.execute(
-            delete(models.Result).where(
-                models.Result.message_id == "A",
-                models.Result.key == result_key(FOSTER),
-            )
-        )
+    assert missing_pc(store, event_id, FOSTER) == ()
+    drop_result(store, "A", FOSTER)
     (item,) = store.summaries(FOSTER, as_of=BEFORE).items
     assert item.assessment is None
     assert item.latest is not None
     assert item.latest.message_id == "B"
     assert item.provenance is Provenance.CDM_COVARIANCE
     assert item.cdm_count == 2
-    assert store.missing_pc(event_id, FOSTER) == ("A",)
+    assert missing_pc(store, event_id, FOSTER) == ("A",)
 
 
 def test_summary_without_the_latest_pc(store: Store) -> None:
     (event_id,) = store.ingest([message("A")]).events
     (item,) = store.summaries(FOSTER, as_of=BEFORE).items
     assert (item.latest, item.assessment, item.provenance) == (None, None, None)
-    assert store.missing_pc(event_id, FOSTER) == ("A",)
+    assert missing_pc(store, event_id, FOSTER) == ("A",)
 
 
 def test_summary_shows_the_active_job(store: Store) -> None:
@@ -130,44 +130,9 @@ def test_summary_shows_the_active_job(store: Store) -> None:
     assert item.active_job is None
 
 
-def test_summaries_parse_only_listed_latest_cdms(
-    store: Store, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _events(store, 30)
-    parsed: list[str] = []
-    loads = keepout.cdm.loads
-
-    def spy(text: str) -> Cdm:
-        made = loads(text)
-        parsed.append(made.message_id)
-        return made
-
-    monkeypatch.setattr(keepout.cdm, "loads", spy)
-    page = store.summaries(FOSTER, as_of=BEFORE)
-    latest = [item.latest for item in page.items if item.latest is not None]
-    assert sorted(parsed) == sorted(str(o.message_id) for o in latest)
-    assert len(parsed) == len(page.items) == 25
-
-
-def test_missing_pc_of_an_unknown_event(store: Store) -> None:
-    with pytest.raises(StoreError, match="no event nothing"):
-        store.missing_pc("nothing", FOSTER)
-
-
 def test_summaries_of_an_empty_store(store: Store) -> None:
     page = store.summaries(FOSTER, as_of=BEFORE, limit=10)
     assert (page.items, page.total, page.offset, page.limit) == ((), 0, 0, 10)
-
-
-def _drop_result(store: Store, message_id: str) -> None:
-    """Forget the Pc of a CDM cached for :data:`~store_builders.FOSTER`."""
-    with store.write() as session:
-        session.execute(
-            delete(models.Result).where(
-                models.Result.message_id == message_id,
-                models.Result.key == result_key(FOSTER),
-            )
-        )
 
 
 def test_cached_observations_with_one_missing(store: Store) -> None:
@@ -176,7 +141,7 @@ def test_cached_observations_with_one_missing(store: Store) -> None:
     ).events
     store.refresh(FOSTER)
     complete = store.observations(event_id, FOSTER)
-    _drop_result(store, "A")
+    drop_result(store, "A", FOSTER)
     pairs = store.cached_observations(event_id, FOSTER)
     assert [message_id for message_id, _ in pairs] == ["A", "B"]
     assert pairs[0][1] is None
@@ -208,7 +173,7 @@ def test_detail_reads_event_pc_and_refresh_jobs(store: Store) -> None:
     ]
     assert detail.refresh_jobs == ()
 
-    _drop_result(store, "A")
+    drop_result(store, "A", FOSTER)
     queue = JobQueue(store)
     job = queue.submit_refresh(event_id, FOSTER).job
     assert job is not None
@@ -236,3 +201,54 @@ def test_complete_of_needs_every_observation(store: Store) -> None:
     assert complete_of([observation, None]) is None
     assert complete_of([]) == ()
     assert decoded([None]) == (None,)
+
+
+def _assumed(message_id: str, comments: tuple[str, ...]) -> CdmInput:
+    """The CDM of :func:`~store_builders.cdm_text` with its primary's
+    covariance assumed (``COVARIANCE_METHOD = DEFAULT``) and ``comments`` in
+    its header."""
+    first, rest = cdm_text(message_id).split("\n", 1)
+    rest = rest.replace("= CALCULATED", "= DEFAULT", 1)
+    header = "".join(f"COMMENT {comment}\n" for comment in comments)
+    made = keepout.cdm.loads(f"{first}\n{header}{rest}")
+    return CdmInput.of(made, origin="test")
+
+
+def test_summaries_parse_no_cdm_of_a_pc_on_its_own_covariance(
+    store: Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _events(store, 3)
+
+    def unparsed(text: str) -> Cdm:
+        raise AssertionError("a CDM was parsed")
+
+    monkeypatch.setattr(keepout.cdm, "loads", unparsed)
+    page = store.summaries(FOSTER, as_of=BEFORE)
+    assert [item.provenance for item in page.items] == [Provenance.CDM_COVARIANCE] * 3
+
+
+@pytest.mark.parametrize(
+    ("comments", "expected"),
+    [(HEADER_COMMENTS, Provenance.GP_AGE_MODEL), ((), Provenance.ASSUMED)],
+)
+def test_summary_of_an_assumed_covariance_reads_its_cdm(
+    store: Store,
+    monkeypatch: pytest.MonkeyPatch,
+    comments: tuple[str, ...],
+    expected: Provenance,
+) -> None:
+    store.ingest([_assumed("A", comments)])
+    store.refresh(FOSTER)
+    parsed: list[str] = []
+    loads = keepout.cdm.loads
+
+    def counted(text: str) -> Cdm:
+        parsed.append(text)
+        return loads(text)
+
+    monkeypatch.setattr(keepout.cdm, "loads", counted)
+    (item,) = store.summaries(FOSTER, as_of=BEFORE).items
+    assert item.latest is not None
+    assert item.latest.assumed_covariance
+    assert item.provenance is expected
+    assert len(parsed) == 1

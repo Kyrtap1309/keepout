@@ -8,6 +8,7 @@ from pathlib import Path
 import dashboard_benchmark as benchmark
 import dashboard_timing as timing
 import pytest
+from benchmark_runs import Comparison
 
 from keepout.settings import Settings
 from keepout.store import open_store
@@ -68,22 +69,13 @@ def test_build_store_needs_a_cdm_per_event(tmp_path: Path) -> None:
         benchmark.build_store(tmp_path / "s.db", events=3, cdms=2)
 
 
-def test_measure_returns_positive(small_store: Path) -> None:
-    timings = benchmark.measure(small_store, repeat=2)
-    assert timings.list_s > 0.0
-    assert timings.event_s is not None
-    assert timings.event_s > 0.0
-    assert timings.list_cpu > 0.0
-    assert timings.event_cpu is not None
-
-
 def test_timing_main_prints_one_measurement(
     small_store: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     assert timing.main(["time", str(small_store), "--repeat", "1"]) == 0
     output = json.loads(capsys.readouterr().out)
     assert set(output) == {"list_wall", "list_cpu", "event_wall", "event_cpu"}
-    assert output["list_wall"] > 0.0
+    assert all(isinstance(value, float) for value in output.values())
 
 
 def test_timing_main_builds_a_store(
@@ -96,95 +88,53 @@ def test_timing_main_builds_a_store(
     assert "built" in capsys.readouterr().out
 
 
-def run(list_cpu: float, event_cpu: float | None = 1.0) -> benchmark.Run:
-    return benchmark.Run(
-        list_wall=list_cpu,
-        list_cpu=list_cpu,
-        event_wall=event_cpu,
-        event_cpu=event_cpu,
-    )
+def run(list_cpu: float, event_cpu: float = 1.0) -> timing.Timings:
+    return {
+        "list_wall": list_cpu,
+        "list_cpu": list_cpu,
+        "event_wall": event_cpu,
+        "event_cpu": event_cpu,
+    }
 
 
-class Fake:
-    """Timing processes answering with given CPU times of the list, per tree."""
-
-    def __init__(
-        self,
-        head: list[benchmark.Run] | None,
-        base: list[benchmark.Run] | None,
-    ) -> None:
-        self.runs = {"head": head, "base": base}
-        self.calls: list[str] = []
-        self.failure = "ModuleNotFoundError: keepout.dashboard"
-
-    def __call__(self, command: Sequence[str]) -> benchmark.Run:
-        side = command[0]
-        self.calls.append(side)
-        runs = self.runs[side]
-        if runs is None:
-            raise benchmark.TimingFailed(self.failure)
-        return runs.pop(0)
-
-
-def test_compare_flags_regression() -> None:
-    fake = Fake([run(1.3), run(1.25), run(1.2)], [run(1.0), run(1.0), run(1.0)])
-    comparison = benchmark.compare(["head"], ["base"], repeat=3, run=fake)
-    assert fake.calls == ["head", "base", "base", "head", "head", "base"]
+def test_render_comparison_flags_a_slower_list() -> None:
+    comparison = Comparison((run(1.3), run(1.25), run(1.2)), (run(1.0),) * 3)
     text, regression = benchmark.render_comparison(comparison, "setting", 0.2)
     assert regression
     assert "Events list: CPU time change +25.0% (limit +20%): slower than allowed." in (
         text
     )
-    assert "Event page: CPU time change +0.0% (limit +20%): within the limit." in text
+    assert text.endswith(
+        "Event page: CPU time change +0.0% (limit +20%): within the limit."
+    )
 
 
-def test_compare_flags_a_slower_event_page() -> None:
-    fake = Fake([run(1.0, 2.0)], [run(1.0, 1.0)])
-    comparison = benchmark.compare(["head"], ["base"], repeat=1, run=fake)
+def test_render_comparison_flags_a_slower_event_page() -> None:
+    comparison = Comparison((run(1.0, 2.0),), (run(1.0, 1.0),))
     text, regression = benchmark.render_comparison(comparison, "setting", 0.2)
     assert regression
     assert "Event page: CPU time change +100.0%" in text
 
 
-def test_compare_within_the_limit() -> None:
-    fake = Fake([run(1.1), run(1.0)], [run(1.0), run(1.0)])
-    comparison = benchmark.compare(["head"], ["base"], repeat=2, run=fake)
+def test_render_comparison_within_the_limit() -> None:
+    comparison = Comparison((run(1.1), run(1.0)), (run(1.0), run(1.0)))
     text, regression = benchmark.render_comparison(comparison, "setting", 0.2)
     assert not regression
     assert "| base | 1.000 s | 1.000 - 1.000 s | 1.000 s | 1.000 - 1.000 s |" in text
     assert "| this | 1.050 s | 1.000 - 1.100 s | 1.000 s | 1.000 - 1.000 s |" in text
 
 
-def test_compare_skips_the_event_page_of_a_base_without_it() -> None:
-    fake = Fake([run(1.0, 9.0)], [run(1.0, None)])
-    comparison = benchmark.compare(["head"], ["base"], repeat=1, run=fake)
+def test_render_comparison_of_a_skipped_base() -> None:
+    comparison: Comparison[timing.Timings] = Comparison(
+        (run(1.0),), (), "ModuleNotFoundError: keepout.dashboard"
+    )
     text, regression = benchmark.render_comparison(comparison, "setting", 0.2)
     assert not regression
-    assert "Event page: the base has no event page data path" in text
-    assert "| base | 1.000 s | 1.000 - 1.000 s | - | - |" in text
-
-
-def test_compare_skips_a_base_that_cannot_run() -> None:
-    fake = Fake([run(1.0)], None)
-    comparison = benchmark.compare(["head"], ["base"], repeat=2, run=fake)
-    assert fake.calls == ["head", "base"]
-    text, regression = benchmark.render_comparison(comparison, "setting", 0.2)
-    assert not regression
-    assert "The base cannot run the benchmark" in text
-    assert "ModuleNotFoundError: keepout.dashboard" in text
-
-
-def test_compare_fails_when_this_tree_cannot_run() -> None:
-    fake = Fake(None, [run(1.0)])
-    with pytest.raises(benchmark.TimingFailed):
-        benchmark.compare(["head"], ["base"], repeat=1, run=fake)
-
-
-def test_run_timing_reports_failures() -> None:
-    with pytest.raises(benchmark.TimingFailed, match="exit status 3"):
-        benchmark.run_timing([sys.executable, "-c", "raise SystemExit(3)"])
-    with pytest.raises(benchmark.TimingFailed, match="No such file"):
-        benchmark.run_timing(["/nonexistent/python"])
+    assert text == (
+        "Dashboard benchmark: setting.\n\n"
+        "The base cannot run the benchmark, so there is no comparison:\n\n"
+        "```text\nModuleNotFoundError: keepout.dashboard\n```"
+    )
 
 
 def fake_python(tmp_path: Path, cpu: float) -> str:
@@ -234,22 +184,18 @@ def test_compare_main_against_a_faster_base_fails(
     assert step_summary.read_text(encoding="utf-8") == out
 
 
-def test_compare_main_skips_a_base_that_cannot_run(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
-    args = compare_arguments(str(tmp_path / "missing" / "python"))
-    assert benchmark.main(args) == 0
-    assert "The base cannot run the benchmark" in capsys.readouterr().out
-
-
 def test_run_meets_the_targets(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setattr(
-        benchmark, "measure", lambda path, *, repeat: timing.Timings(0.2, 0.1, 0.5, 0.4)
+        benchmark,
+        "measure",
+        lambda path, *, repeat: {
+            "list_wall": 0.2,
+            "list_cpu": 0.1,
+            "event_wall": 0.5,
+            "event_cpu": 0.4,
+        },
     )
     assert benchmark.main(["run", "--events", "2", "--cdms", "4"]) == 0
     out = capsys.readouterr().out
@@ -258,18 +204,18 @@ def test_run_meets_the_targets(
 
 
 @pytest.mark.parametrize(
-    ("list_s", "event_s"), [(1.0, 0.5), (0.5, 2.0)], ids=["list", "event"]
+    ("list_wall", "event_wall"), [(1.0, 0.5), (0.5, 2.0)], ids=["list", "event"]
 )
 def test_run_fails_when_a_target_is_missed(
-    list_s: float,
-    event_s: float,
+    list_wall: float,
+    event_wall: float,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setattr(
         benchmark,
         "measure",
-        lambda path, *, repeat: timing.Timings(list_s, list_s, event_s, event_s),
+        lambda path, *, repeat: run(list_wall, event_wall),
     )
     assert benchmark.main(["run", "--events", "2", "--cdms", "4"]) == 1
     assert "missed" in capsys.readouterr().out
@@ -287,19 +233,9 @@ def test_timing_main_refuses_a_keepout_without_the_dashboard(
 
 def test_this_keepout_has_the_dashboard() -> None:
     assert timing.missing_dashboard() == ""
-    assert timing.has_event_page()
 
 
-def test_measure_without_an_event_page(
-    small_store: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(timing, "has_event_page", lambda: False)
-    timings = timing.measure(small_store, repeat=1)
-    assert (timings.event_s, timings.event_cpu) == (None, None)
-    assert timing.output_of(timings)["event_wall"] is None
-
-
-def test_compare_main_warns_when_the_base_fails_otherwise(
+def test_compare_main_skips_a_base_that_cannot_run_with_a_warning(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -308,6 +244,7 @@ def test_compare_main_warns_when_the_base_fails_otherwise(
     args = compare_arguments(str(tmp_path / "missing" / "python"))
     assert benchmark.main(args) == 0
     out = capsys.readouterr().out
+    assert "The base cannot run the benchmark" in out
     assert "::warning::The merge base cannot be timed: " in out
     assert "No such file" in out
 

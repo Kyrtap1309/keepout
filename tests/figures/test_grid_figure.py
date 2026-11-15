@@ -1,10 +1,11 @@
 import dataclasses
+import math
 
 import numpy as np
 import pytest
 from builders import SMALL_GRID, leo_crossing
 
-from keepout.figures import LOWEST_LOG_PC, GridFigure, grid, grid_figure
+from keepout.figures import LOWEST_LOG_PC, GridFigure, GridPanel, grid, grid_figure
 from keepout.maneuver import (
     BurnDirection,
     ManeuverGrid,
@@ -154,3 +155,31 @@ def test_an_outcome_without_a_burn_in_a_direction_has_no_minimum(
 def test_an_outcome_without_a_grid_is_an_error(plan: ManeuverPlan) -> None:
     with pytest.raises(ValueError, match="no grid"):
         grid_figure(_outcome(plan, grid=False))
+
+
+def _cells(log_pc: list[list[float]]) -> GridPanel:
+    values = np.array(log_pc)
+    rows, columns = values.shape
+    return GridPanel(
+        direction=BurnDirection.PROGRADE,
+        hours_before_tca=np.arange(rows + 1.0),
+        delta_v=np.geomspace(0.01, 1.0, columns + 1),
+        hour_centres=np.linspace(0.5, rows - 0.5, rows),
+        delta_v_centres=np.geomspace(0.01, 1.0, columns),
+        log_pc=values,
+        minimum=None,
+    )
+
+
+@pytest.mark.parametrize(
+    ("log_pc", "crosses"),
+    [
+        ([[-3.0, -6.0], [-4.0, math.nan]], True),
+        ([[-3.0, -4.0], [-3.5, -4.5]], False),  # all above the target
+        ([[-6.0, -7.0], [-8.0, -9.0]], False),  # all below
+        ([[-3.0, -6.0, -7.0]], False),  # one row: no contour
+        ([[math.nan, math.nan], [math.nan, math.nan]], False),
+    ],
+)
+def test_panel_crosses_the_target(log_pc: list[list[float]], crosses: bool) -> None:
+    assert _cells(log_pc).crosses(-5.0) is crosses

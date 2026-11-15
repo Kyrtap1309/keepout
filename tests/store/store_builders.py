@@ -7,13 +7,14 @@ from pathlib import Path
 import astropy.units as u
 from astropy.time import Time
 from builders import CDM_DATA
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 
 import keepout.cdm
 from keepout.cdm import Cdm
 from keepout.pc import computation
 from keepout.settings import Settings
 from keepout.store import CdmInput, Store, models
+from keepout.store.codec import result_key
 
 B1_TEXT = (CDM_DATA / "b1_example.kvn").read_text(encoding="utf-8")
 """Created 2010-03-12T22:31:12.000, TCA 2010-03-13T22:37:52.618, objects
@@ -105,3 +106,21 @@ def count_rows(store: Store, table: type[models.Base]) -> int:
     """How many rows ``table`` of ``store`` has."""
     with store.read() as session:
         return session.scalar(select(func.count()).select_from(table)) or 0
+
+
+def drop_result(store: Store, message_id: str, settings: Settings) -> None:
+    """Forget the Pc of a CDM cached for ``settings``."""
+    with store.write() as session:
+        session.execute(
+            delete(models.Result).where(
+                models.Result.message_id == message_id,
+                models.Result.key == result_key(settings),
+            )
+        )
+
+
+def missing_pc(store: Store, event_id: str, settings: Settings) -> tuple[str, ...]:
+    """The CDMs of a stored event whose Pc is not cached for ``settings``,
+    oldest first."""
+    pairs = store.cached_observations(event_id, settings)
+    return tuple(message_id for message_id, item in pairs if item is None)

@@ -17,7 +17,7 @@ from keepout.cdm import kvn
 from keepout.dashboard import text
 from keepout.dashboard.text import literal
 from keepout.dashboard.upload import MAX_FILE_BYTES
-from keepout.figures import RISK_LABELS
+from keepout.figures import PROVENANCE_LABELS, RISK_LABELS
 from keepout.settings import load_settings
 from keepout.store import CdmInput, EventSummary, JobKind, JobQueue, open_store
 from keepout.units import elapsed_seconds
@@ -82,7 +82,7 @@ def test_events_list_shows_rows(app_test: OpenApp, seed_db: Path) -> None:
         assert summary.latest.pc is not None
         assert pc == f"{summary.latest.pc:.2e}"
         assert summary.provenance is not None
-        assert summary.provenance.value in origin
+        assert PROVENANCE_LABELS[summary.provenance] in origin
         assert summary.assessment is not None
         level = summary.assessment.level
         assert level is not None

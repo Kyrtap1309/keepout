@@ -156,11 +156,13 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["keepout", "tools"]
+# Directories, not the package's name: AppTest runs the dashboard's pages as
+# scripts (__main__), which a package source would not measure.
+source = ["src/keepout", "tools"]
 
 [tool.coverage.report]
 # The dashboard is measured (AppTest runs it in-process) but left out of the
-# threshold, which is the core's.
+# threshold, which is the core's; CI holds it to its own (85 %).
 omit = ["*/keepout/dashboard/*"]
 fail_under = 90
 exclude_also = ["assert_never\\("]
@@ -208,8 +210,11 @@ typeCheckingMode = "standard"
 reportImplicitOverride = "error"
 reportDeprecated = "error"
 # The store and the settings hold untyped data (JSON, SQL rows, the
-# environment): there, every value has a known type.
+# environment): there, every value has a known type. So in the dashboard
+# (st.session_state holds Any), but for the members of Streamlit, whose own
+# signatures are partly unknown.
 executionEnvironments = [
+    { root = "src/keepout/dashboard", extraPaths = ["src"], reportUnknownVariableType = "error", reportUnknownArgumentType = "error", reportAny = "error" },
     { root = "src/keepout/store", extraPaths = ["src"], reportUnknownVariableType = "error", reportUnknownArgumentType = "error", reportUnknownMemberType = "error", reportAny = "error", reportUnnecessaryIsInstance = "error", reportUnnecessaryComparison = "error" },
     { root = "src/keepout/settings.py", extraPaths = ["src"], reportUnknownVariableType = "error", reportUnknownArgumentType = "error", reportUnknownMemberType = "error", reportAny = "error", reportUnnecessaryIsInstance = "error", reportUnnecessaryComparison = "error" },
     { root = ".", extraPaths = ["tests", "tools"] },
@@ -255,6 +260,12 @@ layers = [
     "keepout._types | keepout._validation | keepout._methods | keepout._defaults | keepout._text | keepout._environment | keepout.errors",
     "keepout.units",
 ]
+
+[[tool.importlinter.contracts]]
+name = "The store does not draw: no figures in the store"
+type = "forbidden"
+source_modules = ["keepout.store"]
+forbidden_modules = ["keepout.figures"]
 
 [[tool.importlinter.contracts]]
 name = "Only the command line uses the cli extra"

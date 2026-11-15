@@ -50,7 +50,7 @@ from astropy.time import Time
 from generated import REPO, write_or_check
 
 from keepout._workers import DEFAULT_WORKERS
-from keepout.cdm import format_of, kvn, load, loads, read_text
+from keepout.cdm import kvn, load, read_text
 from keepout.errors import SourceUnavailable
 from keepout.screening import DEFAULT_DURATION, DEFAULT_VOLUME
 from keepout.settings import load_settings
@@ -294,7 +294,7 @@ def _seed_input(file: Path) -> CdmInput:
     origin = (
         file.relative_to(REPO).as_posix() if file.is_relative_to(REPO) else str(file)
     )
-    return CdmInput(loads(text), text, format_of(text), origin)
+    return CdmInput.parse(text, origin)
 
 
 def seed_store(path: Path, *, cara: bool = False) -> Path:

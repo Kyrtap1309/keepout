@@ -9,14 +9,19 @@ import pytest
 
 from keepout._types import FloatArray
 from keepout.figures import (
-    ACTION_COLOURS,
     ACTION_LABELS,
+    FIT_COLOUR,
+    NO_PC,
+    PROVENANCE_HELP,
+    PROVENANCE_LABELS,
     RISK_COLOURS,
     RISK_LABELS,
     SEQUENTIAL,
     SERIES,
+    TARGET_COLOUR,
+    THRESHOLD_LABELS,
 )
-from keepout.risk import Action, RiskLevel
+from keepout.risk import Action, Provenance, RiskLevel
 
 HEX = re.compile(r"^#[0-9a-f]{6}$")
 
@@ -121,8 +126,9 @@ def test_ciede2000_matches_sharmas_reference_pair() -> None:
     [
         (RISK_COLOURS, RiskLevel),
         (RISK_LABELS, RiskLevel),
-        (ACTION_COLOURS, Action),
         (ACTION_LABELS, Action),
+        (PROVENANCE_LABELS, Provenance),
+        (PROVENANCE_HELP, Provenance),
     ],
 )
 def test_palette_is_distinct_and_hex(
@@ -130,7 +136,7 @@ def test_palette_is_distinct_and_hex(
 ) -> None:
     assert set(mapping) == set(members)
     assert len(set(mapping.values())) == len(mapping)
-    if mapping in (RISK_COLOURS, ACTION_COLOURS):
+    if mapping is RISK_COLOURS:
         assert all(HEX.match(colour) for colour in mapping.values())
 
 
@@ -140,8 +146,28 @@ def test_sequences_are_distinct_and_hex() -> None:
         assert all(HEX.match(colour) for colour in colours)
 
 
+def test_marks_are_hex() -> None:
+    assert all(HEX.match(colour) for colour in (TARGET_COLOUR, NO_PC, FIT_COLOUR))
+
+
+def test_threshold_labels_name_where_each_level_starts() -> None:
+    assert dict(THRESHOLD_LABELS) == {
+        RiskLevel.YELLOW: "green below",
+        RiskLevel.RED: "red from",
+    }
+
+
 def test_risk_labels_are_the_level_names() -> None:
     assert [RISK_LABELS[level] for level in RiskLevel] == ["green", "yellow", "red"]
+
+
+def test_provenance_labels() -> None:
+    assert [PROVENANCE_LABELS[item] for item in Provenance] == [
+        "CDM covariance",
+        "assumed (GP age model)",
+        "assumed covariance",
+        "max-Pc (no covariance)",
+    ]
 
 
 @pytest.mark.parametrize("simulation", [DEUTERANOPIA, PROTANOPIA])

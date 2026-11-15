@@ -11,7 +11,7 @@ from pathlib import Path
 
 import dashboard_seed as seed
 import pytest
-from dashboard_builders import OpenApp, open_app
+from dashboard_builders import OpenApp, open_app, use_store
 
 
 @pytest.fixture(autouse=True)
@@ -43,7 +43,5 @@ def app_test(seed_db: Path, monkeypatch: pytest.MonkeyPatch) -> OpenApp:
     The variables ``keepout dashboard`` passes are set for the test; a test
     may change them (``monkeypatch.setenv``) before opening the app.
     """
-    monkeypatch.setenv("KEEPOUT_STORE", str(seed_db))
-    monkeypatch.setenv("KEEPOUT_SETTINGS", str(seed.SETTINGS))
-    monkeypatch.setenv("KEEPOUT_AS_OF", str(seed.seed_as_of().utc.isot))
+    use_store(monkeypatch, seed_db, seed.SETTINGS, seed.seed_as_of())
     return open_app

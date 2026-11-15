@@ -59,6 +59,12 @@ jobs:
       - run: uv run pytest -n auto -m "not validation" --cov --cov-report=term-missing
         env:
           HYPOTHESIS_PROFILE: ci
+      # The dashboard's own floor, from the same data. --omit replaces the
+      # configured one (which leaves the dashboard out); the views package
+      # is never imported: Streamlit runs its pages as scripts.
+      - run: >-
+          uv run coverage report --include='*/keepout/dashboard/*'
+          --omit='*/keepout/dashboard/views/__init__.py' --fail-under=85
 
   validation:
     runs-on: ubuntu-latest

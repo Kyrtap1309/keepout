@@ -4,7 +4,7 @@ provenance, and a refresh job for the Pc not computed."""
 
 import base64
 import json
-from collections.abc import Iterator
+import re
 from pathlib import Path
 from typing import Any
 
@@ -13,23 +13,24 @@ import dashboard_seed as seed
 import numpy as np
 import numpy.typing as npt
 import pytest
+from astropy.time import Time
 from builders import EPOCH, LEO_R, LEO_V
-from dashboard_builders import OpenApp
+from dashboard_builders import OpenApp, shown, use_store, walk
 from sqlalchemy import delete
 from streamlit.testing.v1 import AppTest
-from streamlit.testing.v1.element_tree import Block, Element, Node, PageLink
+from streamlit.testing.v1.element_tree import Block, Element, PageLink
 
 from keepout._text import pc_text
 from keepout.cdm import Cdm, CovarianceMethod, ObjectMetadata, make_cdm
 from keepout.conjunction import Conjunction
 from keepout.covariance import Covariance
 from keepout.dashboard.text import AFTER_TCA, literal
-from keepout.figures import Provenance
+from keepout.figures import PROVENANCE_LABELS, RISK_LABELS
 from keepout.objects import ObjectState
-from keepout.risk import DEFAULT_DECISION_CONFIG
+from keepout.risk import DEFAULT_DECISION_CONFIG, Provenance, RiskLevel
 from keepout.settings import Settings, load_settings
 from keepout.state import StateVector
-from keepout.store import CdmInput, JobKind, JobQueue, models, open_store
+from keepout.store import CdmInput, Job, JobKind, JobQueue, models, open_store
 from keepout.store.codec import result_key
 from keepout.units import HOUR
 
@@ -41,24 +42,31 @@ SECTIONS = ("Pc trend", "Encounter plane", "Geometry at TCA")
 
 CALCULATED = CovarianceMethod.CALCULATED
 
+CDM_COLUMNS = 7
+"""Cells in a row of the CDMs table."""
 
-def _walk(node: Node) -> Iterator[Node]:
-    """The elements under ``node``, depth first, in the page's order."""
-    if isinstance(node, Block):
-        for child in node.children.values():
-            yield from _walk(child)
-    else:
-        yield node
+_MARKUP = re.compile(r"<[^>]*>")
 
 
-def _elements(app: AppTest) -> list[Node]:
-    """The elements of the page's main area, in order."""
-    return list(_walk(app.main))
+def _cell(cell: Block) -> str:
+    """What a cell of a table shows: its elements' values, a risk chip's
+    words without its markup."""
+    return " ".join(
+        _MARKUP.sub("", str(getattr(node, "value", "")))
+        for node in cell.children.values()
+    )
 
 
-def _shown(app: AppTest) -> str:
-    """Every text of the page's main area, one per line."""
-    return "\n".join(str(getattr(node, "value", "")) for node in _elements(app))
+def _cdm_rows(app: AppTest) -> dict[str, list[str]]:
+    """The cells of each row of the CDMs table, by ``MESSAGE_ID``: created,
+    before TCA, miss, Pc, provenance, risk."""
+    cells = [_cell(column) for column in app.columns]
+    start = cells.index("**CDM**") + CDM_COLUMNS
+    rows = [
+        cells[index : index + CDM_COLUMNS]
+        for index in range(start, len(cells) - CDM_COLUMNS + 1, CDM_COLUMNS)
+    ]
+    return {row[0]: row[1:] for row in rows}
 
 
 def _charts(app: AppTest) -> list[dict[str, Any]]:
@@ -95,6 +103,17 @@ def _seed_event(seed_db: Path) -> str:
     with open_store(seed_db, create=False) as store:
         page = store.summaries(load_settings(seed.SETTINGS), as_of=seed.seed_as_of())
     return page.items[0].event_id
+
+
+def _forget_pc(path: Path, message_id: str) -> None:
+    """Drop a CDM's Pc cached for the seed's settings."""
+    with open_store(path, create=False) as store, store.write() as session:
+        session.execute(
+            delete(models.Result).where(
+                models.Result.message_id == message_id,
+                models.Result.key == result_key(load_settings(seed.SETTINGS)),
+            )
+        )
 
 
 def _object(
@@ -172,9 +191,7 @@ def own_store(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     """The store the test makes, seen early in 2010 with the default
     settings."""
     path = tmp_path / "own.db"
-    monkeypatch.setenv("KEEPOUT_STORE", str(path))
-    monkeypatch.delenv("KEEPOUT_SETTINGS")
-    monkeypatch.setenv("KEEPOUT_AS_OF", "2010-03-01T00:00:00")
+    use_store(monkeypatch, path, as_of=Time("2010-03-01T00:00:00", scale="utc"))
     return path
 
 
@@ -191,6 +208,8 @@ def test_unknown_event(app_test: OpenApp) -> None:
     app = app_test("event", query={"event": "nope"})
     assert not app.exception
     assert not app.error
+    assert app.query_params["event"] == "nope"
+    assert [item.value for item in app.title] == ["Event"]
     assert [item.value for item in app.warning] == ["No such event: nope"]
     _links_to_the_list(app)
     assert app.get("plotly_chart") == []
@@ -220,12 +239,12 @@ def test_event_page_sections(app_test: OpenApp, seed_db: Path) -> None:
     assert [h for h in headings if h in SECTIONS] == list(SECTIONS)
     assert len(app.get("plotly_chart")) == 3
     # Every chart is followed by its data table.
-    kinds = [node.type for node in _elements(app)]
+    kinds = [node.type for node in walk(app.main)]
     charts = [i for i, kind in enumerate(kinds) if kind == "plotly_chart"]
     assert len(charts) == 3
     for index in charts:
         assert kinds[index + 1] == "dataframe"
-    assert "Data as of 2026-10-07T12:00:00 UTC (fixed)" in _shown(app)
+    assert "Data as of 2026-10-07T12:00:00 UTC (fixed)" in shown(app)
 
 
 def test_event_page_badges(app_test: OpenApp, seed_db: Path) -> None:
@@ -234,14 +253,14 @@ def test_event_page_badges(app_test: OpenApp, seed_db: Path) -> None:
         event = store.event(event_id)
     app = app_test("event", query={"event": event_id})
     assert not app.exception
-    shown = _shown(app)
+    rows = _cdm_rows(app)
     assert len(event.cdms) > 1
-    for cdm in event.cdms:
-        row = shown.split(cdm.message_id, 1)[1].split("\n")[:12]
-        assert any(Provenance.GP_AGE_MODEL.value in line for line in row), cdm
+    assert list(rows) == [cdm.message_id for cdm in event.cdms]
+    for row in rows.values():
+        assert row[4] == f":orange-badge[{PROVENANCE_LABELS[Provenance.GP_AGE_MODEL]}]"
     # The trend's table names each point's provenance too.
     trend = app.dataframe[0].value
-    assert set(trend["provenance"]) == {Provenance.GP_AGE_MODEL.value}
+    assert set(trend["provenance"]) == {PROVENANCE_LABELS[Provenance.GP_AGE_MODEL]}
 
 
 def test_missing_pc_offers_compute(
@@ -252,31 +271,25 @@ def test_missing_pc_offers_compute(
     with open_store(seed_copy, create=False) as store:
         cdms = [cdm.message_id for cdm in store.event(event_id).cdms]
         cached = store.observations(event_id, settings)
-        first = cdms[0]
-        with store.write() as session:
-            session.execute(
-                delete(models.Result).where(
-                    models.Result.message_id == first,
-                    models.Result.key == result_key(settings),
-                )
-            )
+    first = cdms[0]
+    _forget_pc(seed_copy, first)
     monkeypatch.setenv("KEEPOUT_STORE", str(seed_copy))
     app = app_test("event", query={"event": event_id})
     assert not app.exception
     assert not app.error
-    shown = _shown(app)
-    assert f"Pc not computed for 1 of {len(cdms)} CDMs ({first})" in shown
+    text = shown(app)
+    assert f"Pc not computed for 1 of {len(cdms)} CDMs ({first})" in text
     # Each CDM's row: its Pc, its provenance badge and its risk, which
     # waits for every Pc; the cached Pc are shown.
-    lines = shown.splitlines()
-    rows = [lines[lines.index(message_id) + 4 :][:3] for message_id in cdms]
-    assert rows[0][0] == "not computed"
-    badge = f":orange-badge[{Provenance.GP_AGE_MODEL.value}]"
-    for row, observation in zip(rows[1:], cached[1:], strict=True):
-        assert row == [pc_text(observation.pc), badge, "-"]
+    rows = _cdm_rows(app)
+    assert list(rows) == cdms
+    assert rows[first][3:] == ["not computed", "", ""]
+    badge = f":orange-badge[{PROVENANCE_LABELS[Provenance.GP_AGE_MODEL]}]"
+    for message_id, observation in zip(cdms[1:], cached[1:], strict=True):
+        assert rows[message_id][3:] == [pc_text(observation.pc), badge, "-"]
     # The latest Pc, as the events list shows it; no risk yet.
-    assert f"Latest Pc: {pc_text(cached[-1].pc)}" in lines
-    assert "not computed</span>" in shown
+    assert f"Latest Pc: {pc_text(cached[-1].pc)}" in text.splitlines()
+    assert "not computed</span>" in text
     # No trend without every Pc, but the geometry still shows.
     assert len(app.get("plotly_chart")) == 2
     compute = app.button(key=f"event-compute-{event_id}")
@@ -289,18 +302,55 @@ def test_missing_pc_offers_compute(
         (job,) = JobQueue(store).jobs()
     assert job.kind is JobKind.REFRESH
     assert job.event_id == event_id
-    assert f"Job {job.id} (refresh): **queued**" in _shown(app)
+    assert f"Job {job.id} (refresh): **queued**" in shown(app)
 
     app.button(key=f"event-compute-{event_id}").click().run()
     assert not app.exception
     with open_store(seed_copy, create=False) as store:
         assert [item.id for item in JobQueue(store).jobs()] == [job.id]
-    assert _shown(app).count(f"Job {job.id} (refresh): **queued**") == 1
+    assert shown(app).count(f"Job {job.id} (refresh): **queued**") == 1
 
     # A new session (a reload) finds the job in the store.
     again = app_test("event", query={"event": event_id})
     assert not again.exception
-    assert _shown(again).count(f"Job {job.id} (refresh): **queued**") == 1
+    assert shown(again).count(f"Job {job.id} (refresh): **queued**") == 1
+
+
+def test_a_refused_cancel_is_a_toast_left_on_its_page(
+    app_test: OpenApp, seed_copy: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A refresh job queued elsewhere (keepout CLI, another session), which a
+    # worker cancels between the page's read and the click: the page then
+    # no longer lists a job, and the refusal must not wait for another page.
+    event_id = _seed_event(seed_copy)
+    with open_store(seed_copy, create=False) as store:
+        _forget_pc(seed_copy, store.event(event_id).cdms[0].message_id)
+        job = JobQueue(store).submit_refresh(event_id, load_settings(seed.SETTINGS))
+    assert job.job is not None
+    job_id = job.job.id
+    cancel = JobQueue.cancel
+
+    def worker_first(queue: JobQueue, job: int) -> Job:
+        cancel(queue, job)
+        return cancel(queue, job)
+
+    monkeypatch.setattr(JobQueue, "cancel", worker_first)
+    monkeypatch.setenv("KEEPOUT_STORE", str(seed_copy))
+    app = app_test("event", query={"event": event_id})
+    app.button(key=f"cancel-job-{job_id}").click().run()
+    assert not app.exception
+    assert [item.value for item in app.toast] == [
+        f"job {job_id} has already ended: cancelled"
+    ]
+    assert not app.error
+    assert f"Job {job_id} " not in shown(app)
+    # Nothing of it is left for the next page.
+    app.switch_page("views/planner.py")
+    app.query_params.update({"event": event_id})
+    app.run()
+    assert not app.exception
+    assert not app.error
+    assert not app.toast
 
 
 def test_trend_of_a_changing_pc(app_test: OpenApp, own_store: Path) -> None:
@@ -326,9 +376,9 @@ def test_trend_of_a_changing_pc(app_test: OpenApp, own_store: Path) -> None:
     table = app.dataframe[0].value
     assert list(table["CDM"]) == ["T0", "T1", "T2"]
     assert list(table["Pc"]) == pytest.approx(sorted(pc))
-    assert set(table["provenance"]) == {Provenance.CDM_COVARIANCE.value}
+    assert set(table["provenance"]) == {PROVENANCE_LABELS[Provenance.CDM_COVARIANCE]}
     # The latest Pc is red, in colour and words.
-    assert "red" in _shown(app)
+    assert _cdm_rows(app)["T2"][5] == RISK_LABELS[RiskLevel.RED]
 
 
 def test_max_pc_event_has_no_ellipse(app_test: OpenApp, own_store: Path) -> None:
@@ -338,9 +388,9 @@ def test_max_pc_event_has_no_ellipse(app_test: OpenApp, own_store: Path) -> None
     app = app_test("event", query={"event": event_id})
     assert not app.exception
     assert not app.error
-    shown = _shown(app)
-    assert "no covariance: max-Pc" in shown
-    assert Provenance.MAX_PC.value in shown
+    text = shown(app)
+    assert "no covariance: max-Pc" in text
+    assert PROVENANCE_LABELS[Provenance.MAX_PC] in text
     _, encounter, geometry = _charts(app)
     names = [trace["name"] for trace in encounter["data"]]
     assert not [name for name in names if "sigma" in name]
@@ -358,7 +408,7 @@ def test_encounter_ellipses_with_a_covariance(
     names = [trace["name"] for trace in encounter["data"]]
     assert names[:3] == ["1 sigma", "2 sigma", "3 sigma"]
     assert any("ellipsoid" in t["name"] for t in geometry["data"])
-    assert "no covariance" not in _shown(app)
+    assert "no covariance" not in shown(app)
 
 
 def test_missing_hard_body_radius(app_test: OpenApp, own_store: Path) -> None:
@@ -373,7 +423,7 @@ def test_missing_hard_body_radius(app_test: OpenApp, own_store: Path) -> None:
         "and the settings give none (hbr_m)."
     )
     assert notes.count(expected) == 1
-    assert "not computed" in _shown(app)
+    assert "not computed" in shown(app)
 
 
 def test_zero_relative_speed(app_test: OpenApp, own_store: Path) -> None:
@@ -418,9 +468,9 @@ def test_unrated_event_says_why(app_test: OpenApp, own_store: Path) -> None:
     app = app_test("event", query={"event": event_id})
     assert not app.exception
     assert not app.error
-    shown = _shown(app)
-    assert f"{AFTER_TCA}</span>" in shown
-    assert "not computed</span>" not in shown
+    text = shown(app)
+    assert f"{AFTER_TCA}</span>" in text
+    assert "not computed</span>" not in text
     assert [item.value for item in app.info] == ["No Pc before TCA to draw."]
 
 
@@ -429,6 +479,6 @@ def test_cdm_text_shown_verbatim(app_test: OpenApp, own_store: Path) -> None:
     event_id = _store(own_store, [_crossing(30.0, 24.0, CRAFTED)], None)
     app = app_test("event", query={"event": event_id})
     assert not app.exception
-    shown = _shown(app)
-    assert literal(CRAFTED) in shown
-    assert CRAFTED not in shown.replace(literal(CRAFTED), "")
+    text = shown(app)
+    assert literal(CRAFTED) in text
+    assert CRAFTED not in text.replace(literal(CRAFTED), "")

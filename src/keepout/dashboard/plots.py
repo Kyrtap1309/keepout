@@ -7,6 +7,7 @@ Every trace is named, so the legend says in words what colour shows.
 
 from __future__ import annotations
 
+from collections import defaultdict
 from typing import TYPE_CHECKING, Final, Literal
 
 import numpy as np
@@ -14,14 +15,17 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from keepout.figures import (
+    FIT_COLOUR,
     LOWEST_LOG_PC,
+    NO_PC,
     RISK_COLOURS,
     RISK_LABELS,
     SEQUENTIAL,
     SERIES,
     SIGMAS,
+    TARGET_COLOUR,
+    THRESHOLD_LABELS,
 )
-from keepout.risk import RiskLevel
 
 if TYPE_CHECKING:
     from keepout._types import FloatArray
@@ -32,27 +36,15 @@ if TYPE_CHECKING:
         GridPanel,
         TrendFigure,
     )
+    from keepout.risk import RiskLevel
 
 __all__ = ["encounter", "geometry", "grid", "trend"]
-
-TARGET_COLOUR: Final = "#eb6834"
-"""The target contour and the smallest burn meeting it, as in the
-manoeuvre report."""
-
-NO_PC: Final = "#e4e2dc"
-"""Cells without a Pc: a neutral grey behind the heatmap."""
-
-FIT_COLOUR: Final = "#757575"
-"""The line joining an event's Pc, and the decision point's: a mid grey
-that shows on light and dark themes."""
-
-_THRESHOLD_LABELS: Final = {RiskLevel.YELLOW: "green below", RiskLevel.RED: "red from"}
-"""The words of the threshold line at which each level starts."""
 
 _COLOURSCALE: Final = tuple(
     (i / (len(SEQUENTIAL) - 1), colour) for i, colour in enumerate(SEQUENTIAL)
 )
-"""The heatmap's colours, light (low Pc) to dark."""
+"""The heatmap's colours, light (low Pc) to dark, evenly spaced (the
+stubs do not take a bare list of colours)."""
 
 
 def _decision_side(
@@ -66,6 +58,53 @@ def _decision_side(
     nearer = decision_point_hours - float(hours.min())
     further = float(hours.max()) - decision_point_hours
     return "top left" if further > nearer else "top right"
+
+
+def _fit_trace(fit: tuple[FloatArray, FloatArray]) -> go.Scatter:
+    """The line joining an event's Pc."""
+    hours, values = fit
+    return go.Scatter(
+        x=hours,
+        y=values,
+        mode="lines",
+        name="trend",
+        line={"color": FIT_COLOUR, "width": 1},
+        hoverinfo="skip",
+    )
+
+
+def _point_traces(fig: TrendFigure) -> list[go.Scatter]:
+    """The observations, a trace per risk level and kind of Pc (below the
+    floor: hollow; maximum Pc), in the order each first appears."""
+    groups: defaultdict[tuple[RiskLevel, bool, bool], list[int]] = defaultdict(list)
+    for index, key in enumerate(
+        zip(fig.levels, fig.below_floor, fig.upper_bound, strict=True)
+    ):
+        groups[key].append(index)
+    traces: list[go.Scatter] = []
+    for (level, floored, bound), indices in groups.items():
+        name = RISK_LABELS[level]
+        if floored:
+            name += " (below floor)"
+        elif bound:
+            name += " (max-Pc)"
+        traces.append(
+            go.Scatter(
+                x=fig.hours_to_tca[indices],
+                y=fig.pc[indices],
+                mode="markers",
+                name=name,
+                text=[fig.labels[i] for i in indices],
+                marker={
+                    "color": RISK_COLOURS[level],
+                    "size": 10,
+                    "symbol": "circle-open" if floored else "circle",
+                    "line": {"color": RISK_COLOURS[level], "width": 2},
+                },
+                hovertemplate="%{text}<br>%{x:.1f} h to TCA<br>Pc %{y:.2e}",
+            )
+        )
+    return traces
 
 
 def trend(fig: TrendFigure, *, decision_point_hours: float | None = None) -> go.Figure:
@@ -82,49 +121,14 @@ def trend(fig: TrendFigure, *, decision_point_hours: float | None = None) -> go.
     """
     drawing = go.Figure()
     if fig.fit is not None:
-        hours, values = fig.fit
-        drawing.add_trace(
-            go.Scatter(
-                x=hours,
-                y=values,
-                mode="lines",
-                name="trend",
-                line={"color": FIT_COLOUR, "width": 1},
-                hoverinfo="skip",
-            )
-        )
-    groups: dict[tuple[RiskLevel, bool, bool], list[int]] = {}
-    for index, key in enumerate(
-        zip(fig.levels, fig.below_floor, fig.upper_bound, strict=True)
-    ):
-        groups.setdefault(key, []).append(index)
-    for (level, floored, bound), indices in groups.items():
-        name = RISK_LABELS[level]
-        if floored:
-            name += " (below floor)"
-        elif bound:
-            name += " (max-Pc)"
-        drawing.add_trace(
-            go.Scatter(
-                x=fig.hours_to_tca[indices],
-                y=fig.pc[indices],
-                mode="markers",
-                name=name,
-                text=[fig.labels[i] for i in indices],
-                marker={
-                    "color": RISK_COLOURS[level],
-                    "size": 10,
-                    "symbol": "circle-open" if floored else "circle",
-                    "line": {"color": RISK_COLOURS[level], "width": 2},
-                },
-                hovertemplate="%{text}<br>%{x:.1f} h to TCA<br>Pc %{y:.2e}",
-            )
-        )
+        drawing.add_trace(_fit_trace(fig.fit))
+    for trace in _point_traces(fig):
+        drawing.add_trace(trace)
     for value, level in reversed(fig.thresholds):
         drawing.add_hline(
             y=value,
             line={"color": RISK_COLOURS[level], "dash": "dash", "width": 1},
-            annotation_text=f"{_THRESHOLD_LABELS[level]} {value:.0e}",
+            annotation_text=f"{THRESHOLD_LABELS[level]} {value:.0e}",
             annotation_position="top left",
         )
     if decision_point_hours is not None:
@@ -246,12 +250,73 @@ def geometry(fig: GeometryFigure, *, covariance: bool = True) -> go.Figure:
     return drawing
 
 
-def _crosses(panel: GridPanel, target: float) -> bool:
-    """Whether the panel's Pc pass the target: the contour is drawn then."""
-    values = panel.log_pc
-    known = values[np.isfinite(values)]
-    return bool(
-        min(values.shape) > 1 and known.size and known.min() < target < known.max()
+def _heatmap(panel: GridPanel, fig: GridFigure, *, scale: bool) -> go.Heatmap:
+    """One direction's cells; with ``scale``, the colour bar."""
+    return go.Heatmap(
+        x=panel.delta_v,
+        y=panel.hours_before_tca,
+        z=panel.log_pc,
+        zmin=LOWEST_LOG_PC,
+        zmax=fig.top_log_pc,
+        colorscale=_COLOURSCALE,
+        showscale=scale,
+        colorbar={"title": {"text": "log10 Pc"}},
+        name=str(panel.direction),
+        hovertemplate=(
+            "|Δv| %{x:.3g} m/s<br>%{y:.1f} h before TCA<br>"
+            "log10 Pc %{z:.2f}<extra></extra>"
+        ),
+    )
+
+
+def _target_contour(panel: GridPanel, fig: GridFigure, *, legend: bool) -> go.Contour:
+    """The target contour over one direction's cells."""
+    return go.Contour(
+        x=panel.delta_v_centres,
+        y=panel.hour_centres,
+        z=panel.log_pc,
+        contours={
+            "start": fig.target_log_pc,
+            "end": fig.target_log_pc,
+            "size": 1.0,
+            "coloring": "none",
+        },
+        line={"color": TARGET_COLOUR, "width": 2},
+        showscale=False,
+        name=f"target Pc {fig.target_pc:.0e}",
+        showlegend=legend,
+        legendgroup="target",
+        hoverinfo="skip",
+    )
+
+
+def _minimum_marker(minimum: tuple[float, float], *, legend: bool) -> go.Scatter:
+    """The smallest burn meeting the target in one direction."""
+    hours, delta_v = minimum
+    return go.Scatter(
+        x=[delta_v],
+        y=[hours],
+        mode="markers",
+        name="smallest burn meeting it",
+        marker={
+            "color": TARGET_COLOUR,
+            "size": 12,
+            "line": {"color": "#ffffff", "width": 1.5},
+        },
+        showlegend=legend,
+        legendgroup="minimum",
+    )
+
+
+def _no_pc_key() -> go.Scatter:
+    """The legend's key of the cells without a Pc (an empty trace)."""
+    return go.Scatter(
+        x=[None],
+        y=[None],
+        mode="markers",
+        name="no Pc",
+        marker={"color": NO_PC, "size": 12, "symbol": "square"},
+        showlegend=True,
     )
 
 
@@ -262,7 +327,7 @@ def grid(fig: GridFigure) -> go.Figure:
 
     The colour scale runs from :data:`~keepout.figures.LOWEST_LOG_PC` (lower
     Pc share its lightest colour) to the figure's top; cells without a Pc
-    are left grey (:data:`NO_PC`).
+    are left grey (:data:`~keepout.figures.NO_PC`).
     """
     drawing = make_subplots(
         rows=1,
@@ -272,79 +337,23 @@ def grid(fig: GridFigure) -> go.Figure:
         subplot_titles=[str(panel.direction) for panel in fig.directions],
     )
     last = len(fig.directions)
+    # The legend names the contour and the marker once, on the first panel
+    # that draws them (a direction may have neither).
+    contoured = marked = False
     for column, panel in enumerate(fig.directions, start=1):
-        first = column == 1
-        drawing.add_trace(
-            go.Heatmap(
-                x=panel.delta_v,
-                y=panel.hours_before_tca,
-                z=panel.log_pc,
-                zmin=LOWEST_LOG_PC,
-                zmax=fig.top_log_pc,
-                colorscale=_COLOURSCALE,
-                showscale=column == last,
-                colorbar={"title": {"text": "log10 Pc"}},
-                name=str(panel.direction),
-                hovertemplate=(
-                    "|Δv| %{x:.3g} m/s<br>%{y:.1f} h before TCA<br>"
-                    "log10 Pc %{z:.2f}<extra></extra>"
-                ),
-            ),
-            row=1,
-            col=column,
-        )
-        if _crosses(panel, fig.target_log_pc):
-            drawing.add_trace(
-                go.Contour(
-                    x=panel.delta_v_centres,
-                    y=panel.hour_centres,
-                    z=panel.log_pc,
-                    contours={
-                        "start": fig.target_log_pc,
-                        "end": fig.target_log_pc,
-                        "size": 1.0,
-                        "coloring": "none",
-                    },
-                    line={"color": TARGET_COLOUR, "width": 2},
-                    showscale=False,
-                    name=f"target Pc {fig.target_pc:.0e}",
-                    showlegend=first,
-                    legendgroup="target",
-                    hoverinfo="skip",
-                ),
-                row=1,
-                col=column,
-            )
+        traces: list[go.Heatmap | go.Contour | go.Scatter] = [
+            _heatmap(panel, fig, scale=column == last)
+        ]
+        if panel.crosses(fig.target_log_pc):
+            traces.append(_target_contour(panel, fig, legend=not contoured))
+            contoured = True
         if panel.minimum is not None:
-            hours, delta_v = panel.minimum
-            drawing.add_trace(
-                go.Scatter(
-                    x=[delta_v],
-                    y=[hours],
-                    mode="markers",
-                    name="smallest burn meeting it",
-                    marker={
-                        "color": TARGET_COLOUR,
-                        "size": 12,
-                        "line": {"color": "#ffffff", "width": 1.5},
-                    },
-                    showlegend=first,
-                    legendgroup="minimum",
-                ),
-                row=1,
-                col=column,
-            )
+            traces.append(_minimum_marker(panel.minimum, legend=not marked))
+            marked = True
+        for trace in traces:
+            drawing.add_trace(trace, row=1, col=column)
     if any(np.isnan(panel.log_pc).any() for panel in fig.directions):
-        drawing.add_trace(
-            go.Scatter(
-                x=[None],
-                y=[None],
-                mode="markers",
-                name="no Pc",
-                marker={"color": NO_PC, "size": 12, "symbol": "square"},
-                showlegend=True,
-            )
-        )
+        drawing.add_trace(_no_pc_key())
     drawing.update_xaxes(type="log", title={"text": "|Δv| [m/s]"})
     drawing.update_xaxes(autorange="reversed", row=1, col=1)
     drawing.update_yaxes(title={"text": "burn time before TCA (h)"}, row=1, col=1)

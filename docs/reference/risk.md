@@ -27,3 +27,9 @@ From Pc observations to a risk level, a trend and an action. See [Risk assessmen
     options:
       heading_level: 3
       members: false
+
+::: keepout.risk.provenance
+    options:
+      heading_level: 3
+      members:
+        - HEADER_COMMENTS

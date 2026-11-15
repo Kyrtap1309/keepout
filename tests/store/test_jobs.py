@@ -9,7 +9,7 @@ import astropy.units as u
 import pytest
 from astropy.time import Time
 from sqlalchemy import select, update
-from store_builders import FOSTER, count_rows, message
+from store_builders import FOSTER, count_rows, message, missing_pc
 
 from keepout._types import JsonValue
 from keepout.errors import HardBodyRadiusError, StoreError
@@ -22,7 +22,6 @@ from keepout.store.jobs import (
     MAX_ATTEMPTS,
     JobKind,
     JobQueue,
-    JobResultError,
     JobStatus,
     SubmissionOutcome,
 )
@@ -551,9 +550,74 @@ def test_submit_refresh_idempotent_and_cached(
     assert job.kind is JobKind.REFRESH
     assert queue.finish(job, run_refresh_job(str(store.path), job, None))
     assert queue.job(job.id).status is JobStatus.SUCCEEDED
-    assert store.missing_pc(event_id, FOSTER) == ()
+    assert missing_pc(store, event_id, FOSTER) == ()
     cached = queue.submit_refresh(event_id, FOSTER)
     assert (cached.outcome, cached.job) == (SubmissionOutcome.CACHED, None)
+
+
+def _refresh_jobs(store: Store) -> list[tuple[str, JobStatus]]:
+    """The refresh jobs of ``store``, oldest first: their CDM and status."""
+    with store.read() as session:
+        rows = session.execute(
+            select(models.Job.message_id, models.Job.status)
+            .where(models.Job.kind == JobKind.REFRESH)
+            .order_by(models.Job.id)
+        ).all()
+    return [(message_id, status) for message_id, status in rows]
+
+
+def test_a_queued_refresh_follows_the_newest_cdm(
+    queue: JobQueue, store: Store, event_id: str
+) -> None:
+    first = queue.submit_refresh(event_id, FOSTER)
+    assert first.job is not None
+    assert first.job.message_id == "B"
+    # A CDM ingested before a worker takes the job: no second job, which a
+    # second worker would run at once and compute A's and B's Pc again.
+    store.ingest([message("C", tca=2.0, created=-30.0)])
+    again = queue.submit_refresh(event_id, FOSTER)
+    assert again.outcome is SubmissionOutcome.EXISTING
+    assert again.job is not None
+    assert again.job.id == first.job.id
+    assert again.job.message_id == "C"
+    assert _refresh_jobs(store) == [("C", JobStatus.QUEUED)]
+    job = queue.claim("w1")
+    assert job is not None
+    assert job.message_id == "C"
+    observations = run_refresh_job(str(store.path), job, None)["observations"]
+    assert isinstance(observations, dict)
+    assert sorted(observations) == ["A", "B", "C"]
+
+
+def test_a_running_refresh_is_followed_by_one_queued_at_most(
+    queue: JobQueue, store: Store, event_id: str
+) -> None:
+    first = queue.submit_refresh(event_id, FOSTER).job
+    assert first is not None
+    running = queue.claim("w1")
+    assert running is not None
+    # Its CDM is still the latest: the running job is the one.
+    same = queue.submit_refresh(event_id, FOSTER)
+    assert same.outcome is SubmissionOutcome.EXISTING
+    assert same.job is not None
+    assert same.job.id == first.id
+    store.ingest([message("C", tca=2.0, created=-30.0)])
+    after = queue.submit_refresh(event_id, FOSTER)
+    assert after.outcome is SubmissionOutcome.QUEUED
+    assert after.job is not None
+    assert after.job.message_id == "C"
+    store.ingest([message("D", tca=3.0, created=-20.0)])
+    last = queue.submit_refresh(event_id, FOSTER)
+    assert last.outcome is SubmissionOutcome.EXISTING
+    assert last.job is not None
+    assert last.job.id == after.job.id
+    assert last.job.message_id == "D"
+    assert _refresh_jobs(store) == [
+        ("B", JobStatus.RUNNING),
+        ("D", JobStatus.QUEUED),
+    ]
+    # The running job keeps its own CDM: its worker's result is of it.
+    assert queue.job(running.id).message_id == "B"
 
 
 def test_submit_refresh_of_an_unknown_event(queue: JobQueue) -> None:
@@ -593,7 +657,7 @@ def test_a_refresh_is_pinned_to_the_latest_cdm(
     assert isinstance(observations, dict)
     assert sorted(observations) == ["A", "B"]
     assert queue.finish(job, {"observations": observations})
-    assert store.missing_pc(event_id, FOSTER) == ("C",)
+    assert missing_pc(store, event_id, FOSTER) == ("C",)
     # The new CDM lacks its Pc: another refresh, pinned to it.
     later = queue.submit_refresh(event_id, FOSTER)
     assert later.outcome is SubmissionOutcome.QUEUED
@@ -644,11 +708,30 @@ def test_a_malformed_refresh_result_is_refused(
     good = run_refresh_job(str(store.path), job, None)
     # A broken observation is named, as the others are.
     named = "^a refresh job's observation of A: " if case == "broken" else None
-    with pytest.raises(JobResultError, match=named):
+    with pytest.raises(StoreError, match=named or "^a refresh job's"):
         queue.finish(job, _malformed(case, good))
     assert queue.job(job.id).status is JobStatus.RUNNING
     assert count_rows(store, models.Result) == 0
     assert queue.finish(job, good)  # the right result is still taken
+
+
+def test_finish_checks_a_refresh_result_where_it_writes(
+    queue: JobQueue, store: Store, event_id: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The CDMs a result is checked against are read in the transaction that
+    # caches it, not in a read transaction before.
+    queue.submit_refresh(event_id, FOSTER)
+    job = queue.claim("w1")
+    assert job is not None
+    good = run_refresh_job(str(store.path), job, None)
+
+    def no_read() -> None:
+        raise AssertionError("finish opened a read transaction")
+
+    monkeypatch.setattr(store, "read", no_read)
+    assert queue.finish(job, good)
+    monkeypatch.undo()
+    assert missing_pc(store, event_id, FOSTER) == ()
 
 
 def test_run_refresh_job_without_hbr(

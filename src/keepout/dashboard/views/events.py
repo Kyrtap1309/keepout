@@ -3,27 +3,32 @@ the upload of CDM files."""
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, cast
 
 import streamlit as st
 
-from keepout._text import pc_text, plural, utc
+from keepout._environment import MAX_UPLOAD_MB
+from keepout._text import plural, utc
 from keepout.dashboard import text
 from keepout.dashboard.listing import PAGE_SIZE, read_page
-from keepout.dashboard.upload import (
-    MAX_FILE_BYTES,
-    MAX_FILES,
-    UploadResult,
-    ingest_upload,
+from keepout.dashboard.routes import (
+    EVENT_PAGE,
+    EVENT_PARAM,
+    OFFSET_KEY,
+    PAST_KEY,
+    PLANNER_PAGE,
+    UPLOAD_KEY,
 )
+from keepout.dashboard.upload import MAX_FILES, UploadResult, ingest_upload
 from keepout.dashboard.widgets import (
-    NOT_COMPUTED,
+    assessment_chip,
     job_status,
     page_context,
     provenance_badge,
-    risk_chip,
     show_error,
+    state,
+    table_header,
+    table_row,
 )
 from keepout.errors import KeepoutError
 
@@ -33,14 +38,7 @@ if TYPE_CHECKING:
     from keepout.dashboard.context import DashboardContext
     from keepout.store import EventSummary, IngestReport, SummaryPage
 
-# (No docstrings on the names below: Streamlit would show a bare string as
-# Markdown.)
-EVENT_PAGE: Final = Path(__file__).with_name("event.py")
-PLANNER_PAGE: Final = Path(__file__).with_name("planner.py")
-EVENT_PARAM: Final = "event"
-OFFSET_KEY: Final = "events-offset"
-PAST_KEY: Final = "events-past"
-UPLOAD_KEY: Final = "events-upload"
+# (No docstring: Streamlit would show a bare string as Markdown.)
 COLUMNS: Final = (
     ("Event", 3),
     ("Objects", 3),
@@ -81,35 +79,23 @@ def _ingest(ctx: DashboardContext, files: list[tuple[str, bytes]]) -> None:
         show_error(exc)
 
 
-def _any_active(ctx: DashboardContext, job_ids: tuple[int, ...]) -> bool:
-    """Whether any of the jobs is queued or running; ``False`` if the store
-    cannot be read (the job status shows why)."""
-    from keepout.store import JobQueue, open_store
-
-    try:
-        with open_store(ctx.store_path, create=False) as store:
-            queue = JobQueue(store)
-            return any(queue.job(job_id).status.is_active for job_id in job_ids)
-    except KeepoutError:
-        return False
-
-
 def _last_upload(ctx: DashboardContext) -> None:
     """The outcome of the session's last upload: its errors, each naming its
     file, or what it stored and the status of the jobs it queued. It is
     shown once, and again only while a job it queued is queued or running."""
-    result = st.session_state.pop(UPLOAD_KEY, None)
-    if not isinstance(result, UploadResult):
+    result = state(UPLOAD_KEY, UploadResult)
+    st.session_state.pop(UPLOAD_KEY, None)
+    if result is None:
         return
-    for name, message in result.errors:
-        shown = text.literal(message)
-        st.error(f"{text.literal(name)}: {shown}" if name else shown)
+    for error in result.errors:
+        shown = text.literal(error.message)
+        st.error(
+            shown if error.file is None else f"{text.literal(error.file)}: {shown}"
+        )
     if result.report is not None:
         st.success(_upload_message(result.report, len(result.jobs)))
-    if result.jobs:
-        job_status(ctx.store_path, result.jobs)
-        if _any_active(ctx, result.jobs):
-            st.session_state[UPLOAD_KEY] = result
+    if result.jobs and job_status(ctx.store_path, result.jobs):
+        st.session_state[UPLOAD_KEY] = result
 
 
 def _upload(ctx: DashboardContext) -> None:
@@ -119,12 +105,18 @@ def _upload(ctx: DashboardContext) -> None:
         with st.form("upload", clear_on_submit=True):
             uploaded = st.file_uploader(
                 f"CDM files (KVN or XML, gzip-compressed or not; at most "
-                f"{MAX_FILES} files of {MAX_FILE_BYTES // 1_000_000} MB each)",
+                f"{MAX_FILES} files of {MAX_UPLOAD_MB} MB each)",
                 accept_multiple_files=True,
+                max_upload_size=MAX_UPLOAD_MB,
             )
             submitted = st.form_submit_button("Ingest")
         if submitted:
-            _ingest(ctx, [(file.name, file.getvalue()) for file in uploaded or []])
+            # An UploadedFile's name is typed as BinaryIO's (str | Any);
+            # Streamlit sets it from the upload's name, a str.
+            files = [
+                (cast("str", file.name), file.getvalue()) for file in uploaded or []
+            ]
+            _ingest(ctx, files)
         _last_upload(ctx)
 
 
@@ -142,24 +134,16 @@ def _read_page(ctx: DashboardContext, *, include_past: bool) -> SummaryPage:
         ctx.settings,
         as_of=ctx.as_of,
         include_past=include_past,
-        offset=int(st.session_state.get(OFFSET_KEY, 0)),
+        offset=state(OFFSET_KEY, int) or 0,
     )
     st.session_state[OFFSET_KEY] = page.offset
     return page
 
 
-def _header() -> None:
-    """The column titles of the list."""
-    for column, (title, _) in zip(
-        st.columns([width for _, width in COLUMNS]), COLUMNS, strict=True
-    ):
-        column.markdown(f"**{title}**")
-
-
 def _row(summary: EventSummary, as_of: Time) -> None:
     """An event of the list, its id a link to its page; a link to its
     manoeuvre planner."""
-    cells = st.columns([width for _, width in COLUMNS], vertical_alignment="center")
+    cells = table_row(COLUMNS)
     event, objects, tca, countdown, pc, origin, risk, cdms, job, plan = cells
     with event:
         st.page_link(
@@ -170,24 +154,12 @@ def _row(summary: EventSummary, as_of: Time) -> None:
     objects.markdown(text.literal(f"{summary.object1} / {summary.object2}"))
     tca.markdown(utc(summary.tca))
     countdown.markdown(text.countdown(summary.tca, as_of))
-    latest = summary.latest
-    if latest is None:
-        pc.markdown(NOT_COMPUTED)
-    elif latest.pc is None:
-        pc.markdown(text.FAILED)
-    else:
-        pc.markdown(pc_text(latest.pc))
+    pc.markdown(text.pc_cell(summary.latest))
     if summary.provenance is not None:
         with origin:
             provenance_badge(summary.provenance)
     with risk:
-        assessment = summary.assessment
-        if assessment is None:
-            risk_chip(None, None)
-        elif assessment.level is None:
-            risk_chip(None, None, missing=text.unrated(assessment))
-        else:
-            risk_chip(assessment.level, assessment.decision.action)
+        assessment_chip(summary.assessment)
     cdms.markdown(str(summary.cdm_count))
     if summary.active_job is not None:
         job.markdown(summary.active_job.value)
@@ -207,7 +179,7 @@ def _reset_offset() -> None:
 def _move(step: int) -> None:
     """``step`` pages on (back if negative)."""
     st.session_state[OFFSET_KEY] = max(
-        0, int(st.session_state.get(OFFSET_KEY, 0)) + step * PAGE_SIZE
+        0, (state(OFFSET_KEY, int) or 0) + step * PAGE_SIZE
     )
 
 
@@ -244,7 +216,7 @@ def _events(ctx: DashboardContext) -> None:
     if not page.items:
         st.info("No events in the store." if include_past else "No upcoming events.")
         return
-    _header()
+    table_header(COLUMNS)
     for summary in page.items:
         _row(summary, ctx.as_of)
     _pager(page)
