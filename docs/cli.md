@@ -37,7 +37,8 @@ keywords do. The prose of these pages uses the British "manoeuvre".
 | `keepout store add CDM... --store FILE` | Keep CDMs in a [conjunction store](store.md), each in its event, and assess the events |
 | `keepout store upgrade\|rebuild\|purge --store FILE` | Upgrade a store's schema, compute its missing Pc, delete its old events |
 | `keepout jobs list\|cancel --store FILE` | List a store's [background jobs](store.md#background-jobs), cancel one |
-| `keepout worker --store FILE [--until-idle] [--workers N]` | Compute the manoeuvre plans queued with `maneuver --event ID --queue` |
+| `keepout worker --store FILE [--until-idle] [--workers N]` | Compute the jobs queued: manoeuvre plans (`maneuver --event ID --queue`) and the dashboard's Pc refreshes |
+| `keepout dashboard --store FILE [--port N] [--as-of TIME]` | Show a store in the browser, on this machine only ([dashboard](dashboard.md)) |
 
 `keepout COMMAND --help` lists every option of a command.
 
@@ -507,8 +508,9 @@ Job 1 queued for event 3befe6f1305d.
 Two commands look after the queue. Both take the store as `--store FILE`
 or `$KEEPOUT_STORE`:
 
-- **`jobs list`** lists the jobs, the newest first, with their status and
-  the error of a failed one.
+- **`jobs list`** lists the jobs, the newest first, with their kind
+  (`maneuver`, or `refresh` for the Pc the [dashboard](dashboard.md#jobs)
+  queues), their status and the error of a failed one.
 - **`jobs cancel ID`** cancels a queued or running job. A running job's
   worker stops computing it when it next checks in.
 
@@ -518,7 +520,8 @@ the time limit and what happens to the job of a worker that dies.
 ## `worker`
 
 `keepout worker --store FILE` computes the jobs queued, one at a time, and
-caches each plan in the store. It runs until stopped (SIGTERM or Ctrl+C):
+caches each result in the store: a manoeuvre plan, or the Pc of a `refresh`
+job the [dashboard](dashboard.md#jobs) queued. It runs until stopped (SIGTERM or Ctrl+C):
 its job then goes back to the queue. With `--until-idle` it stops once the
 queue is empty, and says how many jobs it ran. Its log goes to standard
 error:
@@ -539,6 +542,29 @@ store, not re-screened, since `store add` stored no catalog:
 most 4). `keepout worker` has no `--json`. [Running a
 worker](store.md#running-a-worker) covers several workers on one store and
 running one in a container.
+
+## `dashboard`
+
+`keepout dashboard --store FILE` shows a store in the browser, at
+http://127.0.0.1:8501, until Ctrl+C: the events with their risk, each
+event's trend and geometry, and its manoeuvre plan. It needs the
+`dashboard` extra
+(`pip install "keepout[cli,dashboard] @ git+https://github.com/Kyrtap1309/keepout"`,
+or `uv sync --extra cli --extra dashboard` in a clone). It takes the store
+as `--store FILE` or `$KEEPOUT_STORE`, the [settings](#settings) as
+`--settings FILE`, the port as `--port N` and a fixed time to see the data
+at as `--as-of TIME`. After the walk-through above:
+
+```bash
+keepout dashboard --store keepout.db --as-of 2026-10-06
+```
+
+It listens on 127.0.0.1 only and has no authentication: do not expose it.
+An unexpected exception shows only its type in the browser; its message
+and traceback go to the terminal.
+It computes no Pc or plan itself but queues them for a [worker](#worker).
+[The dashboard](dashboard.md) describes its pages, the demo store and the
+uploads.
 
 ## `validate`
 
@@ -567,8 +593,9 @@ manoeuvre plan no faster, at 20 times the CPU time (see
 
 ## Settings
 
-`assess`, `screen`, `maneuver`, `store add` and `store rebuild` take the
-operator's settings from a TOML file, `--settings FILE`. Every key is
+`assess`, `screen`, `maneuver`, `store add`, `store rebuild` and
+`dashboard` take the operator's settings from a TOML file,
+`--settings FILE`. Every key is
 optional and takes the library's default when missing; an unknown key is
 an error, so that a typo does not pass for a default:
 

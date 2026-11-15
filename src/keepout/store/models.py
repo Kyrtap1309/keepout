@@ -43,6 +43,8 @@ __all__ = [
     "Event",
     "EventId",
     "Job",
+    "JobKind",
+    "JobKindText",
     "JobStatus",
     "JobStatusText",
     "MessageId",
@@ -75,6 +77,17 @@ class JobStatus(enum.StrEnum):
     def is_active(self) -> bool:
         """Whether a job of this status has not ended: queued or running."""
         return self in {JobStatus.QUEUED, JobStatus.RUNNING}
+
+
+class JobKind(enum.StrEnum):
+    """What a job computes: a manoeuvre plan, or the Pc an event lacks."""
+
+    MANEUVER = "maneuver"
+    """A manoeuvre plan of the event at its pinned CDM, cached there under
+    :func:`~keepout.store.codec.maneuver_key`."""
+    REFRESH = "refresh"
+    """The Pc observations the event's CDMs up to the pinned one lack,
+    cached under :func:`~keepout.store.codec.result_key`."""
 
 
 NAMING_CONVENTION: Final = {
@@ -215,6 +228,57 @@ class JobStatusText(TypeDecorator[JobStatus]):
         return None if value is None else JobStatus(value)
 
 
+class JobKindText(TypeDecorator[JobKind]):
+    """A :class:`JobKind` as its text."""
+
+    impl: TypeEngine[Any] | type[TypeEngine[Any]] = String
+    cache_ok: bool | None = True
+
+    @override
+    def process_bind_param(
+        self,
+        value: JobKind | None,
+        dialect: Dialect,  # noqa: ARG002 (SQLite only)
+    ) -> str | None:
+        """The text of a kind.
+
+        Parameters
+        ----------
+        value
+            The kind to store, or None.
+        dialect
+            The database dialect (not used).
+
+        Returns
+        -------
+        str or None
+            The kind's text, or None for None.
+        """
+        return None if value is None else JobKind(value).value
+
+    @override
+    def process_result_value(
+        self,
+        value: str | None,
+        dialect: Dialect,  # noqa: ARG002 (SQLite only)
+    ) -> JobKind | None:
+        """The kind of a text.
+
+        Parameters
+        ----------
+        value
+            The stored text, or None.
+        dialect
+            The database dialect (not used).
+
+        Returns
+        -------
+        JobKind or None
+            The kind, or None for None.
+        """
+        return None if value is None else JobKind(value)
+
+
 class Base(DeclarativeBase):
     """Base class of the store's tables."""
 
@@ -225,7 +289,10 @@ class Event(Base):
     """A conjunction event: the CDMs of one encounter of two objects."""
 
     __tablename__ = "events"
-    __table_args__: tuple[object, ...] = (Index(None, "object1", "object2", "tca_min"),)
+    __table_args__: tuple[object, ...] = (
+        Index(None, "object1", "object2", "tca_min"),
+        Index(None, "tca_max"),
+    )
 
     id: Mapped[EventId] = mapped_column(String(12), primary_key=True)
     object1: Mapped[str] = mapped_column(String)
@@ -330,11 +397,12 @@ class Result(Base):
 
 
 class Job(Base):
-    """A manoeuvre plan queued on an event's CDM, and how far it got."""
+    """A computation queued on an event's CDM, and how far it got."""
 
     __tablename__ = "jobs"
     __table_args__: tuple[object, ...] = (
         Index(None, "status", "created_at"),
+        Index(None, "event_id", "status"),
         CheckConstraint(
             f"status IN ({', '.join(repr(s.value) for s in JobStatus)})",
             name="status",
@@ -346,8 +414,9 @@ class Job(Base):
     """Never reused (SQLite ``AUTOINCREMENT``): a worker's stale write to a
     deleted job cannot reach a new one."""
     event_id: Mapped[EventId] = mapped_column(
-        String(12), ForeignKey("events.id", ondelete="CASCADE"), index=True
+        String(12), ForeignKey("events.id", ondelete="CASCADE")
     )
+    """Indexed with :attr:`status` (``ix_jobs_event_id_status``)."""
     message_id: Mapped[MessageId] = mapped_column(
         String, ForeignKey("cdms.message_id", ondelete="CASCADE"), index=True
     )
@@ -373,3 +442,9 @@ class Job(Base):
     finished_at: Mapped[Time | None] = mapped_column(UtcTime)
     error: Mapped[str | None] = mapped_column(String)
     """Why it failed."""
+    # Last: migration 0003 added it to the end of the table.
+    kind: Mapped[JobKind] = mapped_column(
+        JobKindText, server_default=JobKind.MANEUVER.value
+    )
+    """What it computes; the jobs of a store from before kinds are
+    manoeuvre plans."""

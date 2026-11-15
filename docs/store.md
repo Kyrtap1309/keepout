@@ -49,7 +49,8 @@ error naming its version.
   There is one per settings, catalog and keepout version.
   `keepout maneuver --event ID` and [background jobs](#background-jobs)
   both write them. After a newer CDM, the event is planned again.
-- **Jobs**: the manoeuvre plans queued for a worker, and how far each got.
+- **Jobs**: the manoeuvre plans and Pc refreshes queued for a worker, and
+  how far each got.
 
 ### Event ids
 
@@ -119,6 +120,18 @@ Planning an event takes tens of seconds, up to minutes with a re-screen
 or a slow Pc method. A job leaves that work to a worker. The plan is then
 read from the store at once.
 
+A job is of one of two kinds, which `keepout jobs list` shows:
+
+- **`maneuver`**: the manoeuvre plan of an event, queued by `keepout
+  maneuver --event ID --queue` or the [dashboard](dashboard.md#jobs)'s
+  planner;
+- **`refresh`**: the Pc an event's CDMs lack for the settings, queued by
+  the dashboard after an upload or by its Compute button. The worker
+  computes them and caches each on its CDM, as `keepout store rebuild`
+  would. Like a plan, a refresh is pinned to the event's latest CDM when
+  queued: a CDM stored later is left for another refresh. A Pc cached
+  meanwhile, by `store add` say, is kept, not written twice.
+
 ```bash
 keepout maneuver --event 3befe6f1305d --store keepout.db --queue   # Job 1 queued
 keepout worker --store keepout.db --until-idle   # or leave it running; Ctrl+C stops it
@@ -171,7 +184,8 @@ is `queued` until a worker takes it, then `running`. It ends in one of
 three statuses:
 
 - `succeeded`: its plan is cached, as if `keepout maneuver --event ID`
-  had computed it. If both computed it, the first plan is kept.
+  had computed it. If both computed it, the first plan is kept. A
+  `refresh` job's Pc are cached likewise.
 - `failed`: `jobs list` shows the error. A job whose computation raises
   an error is not tried again, since it would fail the same way. A
   keepout error, such as an unknown covariance or a stored catalog copy
@@ -215,8 +229,10 @@ loses one of its processes fails at the time limit.
     meant for the worker alone. So the wait never ends, and the job fails
     at the time limit.
 
-The jobs are a table of the store's schema since revision `0002`. A store
-made before needs `keepout store upgrade`.
+The jobs are a table of the store's schema since revision `0002`, and
+have a kind since `0003`, which also adds the indexes of the dashboard's
+events list; the jobs of an older store are `maneuver` jobs. A store made
+before needs `keepout store upgrade`.
 
 ## Concurrent use and backups
 
@@ -263,6 +279,28 @@ with open_store("keepout.db") as store:
 keeps Pc computed elsewhere, as `screen --store` does with the Pc of its
 screening; the [reference](reference/store.md) has the rest.
 
-`JobQueue(store).submit(event_id, settings)` queues a plan and
+`JobQueue(store).submit(event_id, settings)` queues a plan,
+`submit_refresh(event_id, settings)` the missing Pc of an event, and
 `keepout.store.worker.run_worker(path)` runs a worker, as the commands do
 (see the [reference](reference/store.md#keepout.store.worker)).
+
+The dashboard reads the store through three methods that compute nothing,
+so a page never waits for a Pc:
+
+- `store.summaries(settings, as_of=..., include_past=False, offset=0,
+  limit=25)`: one page of the events list (a `SummaryPage` of
+  `EventSummary`), the events whose latest TCA is after `as_of`, the
+  soonest first. Each has its latest Pc, its provenance and its risk,
+  assessed from the Pc cached for the settings; an event that lacks one
+  has no risk. The page takes a fixed number of queries, whatever its
+  length.
+- `store.detail(event_id, settings)`: one event for its page (an
+  `EventDetail`), with its CDMs, their cached Pc and its refresh jobs
+  queued or running, read in one transaction.
+- `store.cached_observations(event_id, settings)`: each CDM of an event
+  with its cached Pc, or `None` where there is none yet.
+
+`store.missing_pc(event_id, settings)` names the CDMs that lack a Pc.
+For the planner, `JobQueue(store).plan_jobs(event_id, settings)` reads an
+event's manoeuvre jobs in one transaction (a `PlanJobs`): those queued or
+running, and the job of the settings on its latest CDM.

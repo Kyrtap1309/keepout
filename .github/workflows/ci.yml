@@ -88,6 +88,7 @@ jobs:
       - run: uv run python tools/screening_benchmark.py --check
       - run: uv run python tools/screening_benchmark.py --source spacetrack --check
       - run: uv run python tools/synthetic_operator_report.py --check
+      - run: uv run python tools/dashboard_seed.py --check
       - run: uv run python tools/maneuver_report.py --check
       - run: uv run python tools/validation_report.py
       - run: git add --intent-to-add docs && git diff --exit-code -- docs README.md
@@ -101,7 +102,8 @@ jobs:
             README.md
 
   benchmark:
-    # Screening speed of this tree against the merge base, on the same runner.
+    # Screening and dashboard speed of this tree against the merge base, on the
+    # same runner.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -132,6 +134,13 @@ jobs:
           BASE_PYTHON: ${{ steps.base.outputs.python }}
         run: >-
           uv run python tools/screening_benchmark.py compare
+          --base-python "$BASE_PYTHON"
+      # Skipped (exit 0) when the merge base has no dashboard.
+      - if: steps.base.outputs.python
+        env:
+          BASE_PYTHON: ${{ steps.base.outputs.python }}
+        run: >-
+          uv run python tools/dashboard_benchmark.py compare
           --base-python "$BASE_PYTHON"
 
   docs:

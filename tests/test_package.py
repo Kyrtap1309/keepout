@@ -53,10 +53,15 @@ def test_every_error_and_method_type_is_exported_from_the_package() -> None:
     assert keepout.MethodChoice is MethodChoice
 
 
+DASHBOARD_SCRIPTS = ("keepout.dashboard.app", "keepout.dashboard.views.")
+"""The dashboard's entry script and pages: Streamlit runs them, nothing
+imports them (an import would run them)."""
+
 PUBLIC_MODULES = sorted(
     module.name
     for module in pkgutil.walk_packages(keepout.__path__, "keepout.")
     if not any(part.startswith("_") for part in module.name.split("."))
+    and not module.name.startswith(DASHBOARD_SCRIPTS)
 )
 
 

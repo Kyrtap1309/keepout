@@ -1,0 +1,111 @@
+CCSDS_CDM_VERS                 = 2.0
+COMMENT keepout synthetic operator: screening of public GP data with SGP4
+COMMENT Covariances are assumed (a model, not orbit determination)
+CREATION_DATE                  = 2026-10-07T00:00:00.000
+ORIGINATOR                     = KEEPOUT
+MESSAGE_FOR                    = METOP-B
+MESSAGE_ID                     = 38771_29734_20261009T092050.228Z_20261007T000000.000Z
+COMMENT SCREEN_VOLUME_X, _Y and _Z are the semi-axes of the RTN ellipsoid
+TCA                            = 2026-10-09T09:20:50.228
+MISS_DISTANCE                  = 1476.482 [m]
+RELATIVE_SPEED                 = 14770.63 [m/s]
+RELATIVE_POSITION_R            = 1415.965 [m]
+RELATIVE_POSITION_T            = -89.85431 [m]
+RELATIVE_POSITION_N            = 408.6201 [m]
+RELATIVE_VELOCITY_R            = -1.675167 [m/s]
+RELATIVE_VELOCITY_T            = -14427.47 [m/s]
+RELATIVE_VELOCITY_N            = -3165.387 [m/s]
+START_SCREEN_PERIOD            = 2026-10-07T00:00:00.000
+STOP_SCREEN_PERIOD             = 2026-10-13T00:00:00.000
+SCREEN_VOLUME_FRAME            = RTN
+SCREEN_VOLUME_SHAPE            = ELLIPSOID
+SCREEN_VOLUME_X                = 5000.0 [m]
+SCREEN_VOLUME_Y                = 5000.0 [m]
+SCREEN_VOLUME_Z                = 5000.0 [m]
+OBJECT                         = OBJECT1
+OBJECT_DESIGNATOR              = 38771
+CATALOG_NAME                   = SATCAT
+OBJECT_NAME                    = METOP-B
+INTERNATIONAL_DESIGNATOR       = 2012-049A
+OBJECT_TYPE                    = PAYLOAD
+EPHEMERIS_NAME                 = NONE
+COVARIANCE_METHOD              = DEFAULT
+MANEUVERABLE                   = YES
+REF_FRAME                      = GCRF
+HBR                            = 10.0 [m]
+X                              = -4920.038 [km]
+Y                              = 1863.383 [km]
+Z                              = 4908.412 [km]
+X_DOT                          = -4.119517 [km/s]
+Y_DOT                          = 3.181162 [km/s]
+Z_DOT                          = -5.321169 [km/s]
+COMMENT Synthetic covariance: keepout GP element-set age model, an assumption
+COMMENT sigma_T = f (sigma_T0 + k |t - epoch|); sigma_R, sigma_N constant
+COMMENT Regime LEO: sigma_R0 0.102 km, sigma_T0 0.471 km, sigma_N0 0.126 km
+COMMENT k 1.500 km/day, safety factor f 2
+COMMENT Element set epoch 2026-10-06T06:22:34.313952 UTC, age +3.124 days
+COMMENT Sigmas: R 0.204 km, T 10.313 km, N 0.252 km
+CR_R                           = 41616.0 [m**2]
+CT_R                           = 0.0 [m**2]
+CT_T                           = 106365900.0 [m**2]
+CN_R                           = 0.0 [m**2]
+CN_T                           = 0.0 [m**2]
+CN_N                           = 63504.0 [m**2]
+CRDOT_R                        = 0.0 [m**2/s]
+CRDOT_T                        = 0.0 [m**2/s]
+CRDOT_N                        = 0.0 [m**2/s]
+CRDOT_RDOT                     = 0.0 [m**2/s**2]
+CTDOT_R                        = 0.0 [m**2/s]
+CTDOT_T                        = 0.0 [m**2/s]
+CTDOT_N                        = 0.0 [m**2/s]
+CTDOT_RDOT                     = 0.0 [m**2/s**2]
+CTDOT_TDOT                     = 0.0 [m**2/s**2]
+CNDOT_R                        = 0.0 [m**2/s]
+CNDOT_T                        = 0.0 [m**2/s]
+CNDOT_N                        = 0.0 [m**2/s]
+CNDOT_RDOT                     = 0.0 [m**2/s**2]
+CNDOT_TDOT                     = 0.0 [m**2/s**2]
+CNDOT_NDOT                     = 0.0 [m**2/s**2]
+OBJECT                         = OBJECT2
+OBJECT_DESIGNATOR              = 29734
+CATALOG_NAME                   = SATCAT
+OBJECT_NAME                    = FENGYUN 1C DEB
+INTERNATIONAL_DESIGNATOR       = 1999-025Y
+EPHEMERIS_NAME                 = NONE
+COVARIANCE_METHOD              = DEFAULT
+MANEUVERABLE                   = N/A
+REF_FRAME                      = GCRF
+HBR                            = 1.0 [m]
+X                              = -4921.151 [km]
+Y                              = 1863.357 [km]
+Z                              = 4909.382 [km]
+X_DOT                          = 5.361017 [km/s]
+Y_DOT                          = -0.2374421 [km/s]
+Z_DOT                          = 5.47717 [km/s]
+COMMENT Synthetic covariance: keepout GP element-set age model, an assumption
+COMMENT sigma_T = f (sigma_T0 + k |t - epoch|); sigma_R, sigma_N constant
+COMMENT Regime LEO: sigma_R0 0.102 km, sigma_T0 0.471 km, sigma_N0 0.126 km
+COMMENT k 1.500 km/day, safety factor f 2
+COMMENT Element set epoch 2026-10-06T03:50:12.679008 UTC, age +3.230 days
+COMMENT Sigmas: R 0.204 km, T 10.631 km, N 0.252 km
+CR_R                           = 41616.0 [m**2]
+CT_R                           = 0.0 [m**2]
+CT_T                           = 113014000.0 [m**2]
+CN_R                           = 0.0 [m**2]
+CN_T                           = 0.0 [m**2]
+CN_N                           = 63504.0 [m**2]
+CRDOT_R                        = 0.0 [m**2/s]
+CRDOT_T                        = 0.0 [m**2/s]
+CRDOT_N                        = 0.0 [m**2/s]
+CRDOT_RDOT                     = 0.0 [m**2/s**2]
+CTDOT_R                        = 0.0 [m**2/s]
+CTDOT_T                        = 0.0 [m**2/s]
+CTDOT_N                        = 0.0 [m**2/s]
+CTDOT_RDOT                     = 0.0 [m**2/s**2]
+CTDOT_TDOT                     = 0.0 [m**2/s**2]
+CNDOT_R                        = 0.0 [m**2/s]
+CNDOT_T                        = 0.0 [m**2/s]
+CNDOT_N                        = 0.0 [m**2/s]
+CNDOT_RDOT                     = 0.0 [m**2/s**2]
+CNDOT_TDOT                     = 0.0 [m**2/s**2]
+CNDOT_NDOT                     = 0.0 [m**2/s**2]

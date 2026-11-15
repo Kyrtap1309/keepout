@@ -1,0 +1,3 @@
+# CARA's Metop-B CDM, added by tools/dashboard_seed.py --cara from the local
+# cache: CARA's files are not redistributed.
+cdms/*.cdm

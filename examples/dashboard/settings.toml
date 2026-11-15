@@ -1,0 +1,14 @@
+# The operator settings of the dashboard's seed (see keepout.settings for
+# the format): keepout's defaults, as the synthetic operator report uses
+# them. No hbr_m: each seed CDM gives its objects' hard-body radii (HBR).
+
+[pc]
+method = "auto"
+policy = "repair"
+
+[risk]
+green_below = 1e-7
+red_from = 1e-4
+
+[maneuver]
+target_pc = 1e-5

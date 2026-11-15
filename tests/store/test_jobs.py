@@ -3,6 +3,7 @@
 import multiprocessing
 import threading
 import time
+from typing import Final
 
 import astropy.units as u
 import pytest
@@ -10,18 +11,22 @@ from astropy.time import Time
 from sqlalchemy import select, update
 from store_builders import FOSTER, count_rows, message
 
-from keepout.errors import StoreError
-from keepout.pc import PcComputation
+from keepout._types import JsonValue
+from keepout.errors import HardBodyRadiusError, StoreError
+from keepout.pc import PcComputation, computation
 from keepout.settings import Settings, settings_to_data
 from keepout.store import Store, models, open_store
-from keepout.store.codec import maneuver_key
+from keepout.store.codec import maneuver_key, result_key
 from keepout.store.jobs import (
     LEASE_SECONDS,
     MAX_ATTEMPTS,
+    JobKind,
     JobQueue,
+    JobResultError,
     JobStatus,
     SubmissionOutcome,
 )
+from keepout.store.planning import run_refresh_job
 from keepout.store.repo import save_maneuver_in
 
 PAYLOAD = {"ok": True}
@@ -432,6 +437,63 @@ def test_jobs_are_listed_newest_first(
     assert queue.jobs(status=[JobStatus.FAILED]) == []
 
 
+def test_plan_jobs_of_an_event(
+    queue: JobQueue, store: Store, event_id: str, clock: Clock
+) -> None:
+    # Not the event's plans: a refresh, and another event's plan.
+    (other,) = store.ingest([message("X", secondary="99999")]).events
+    assert other != event_id
+    queue.submit_refresh(event_id, FOSTER)
+    queue.submit(other, FOSTER)
+    clock.advance(1.0)
+    others = queue.submit(event_id, Settings()).job
+    clock.advance(1.0)
+    mine = queue.submit(event_id, FOSTER).job
+    assert others is not None
+    assert mine is not None
+    plans = queue.plan_jobs(event_id, FOSTER)
+    assert plans is not None
+    assert [job.id for job in plans.active] == [mine.id, others.id]
+    assert plans.current is not None
+    assert plans.current.id == mine.id
+    # Ended, it is still the settings' job, no longer an active one.
+    queue.cancel(mine.id)
+    plans = queue.plan_jobs(event_id, FOSTER)
+    assert plans is not None
+    assert [job.id for job in plans.active] == [others.id]
+    assert plans.current is not None
+    assert plans.current.id == mine.id
+    assert plans.current.status is JobStatus.CANCELLED
+    # A CDM ingested since: no job of the settings on the event's latest.
+    store.ingest([message("C", tca=2.0, created=-30.0)])
+    plans = queue.plan_jobs(event_id, FOSTER)
+    assert plans is not None
+    assert plans.current is None
+    assert [job.id for job in plans.active] == [others.id]
+
+
+def test_plan_jobs_prefer_the_active_one(queue: JobQueue, event_id: str) -> None:
+    failed = queue.submit(event_id, FOSTER).job
+    job = queue.claim("w1")
+    assert job is not None
+    assert failed is not None
+    assert queue.fail(job, "no burn")
+    plans = queue.plan_jobs(event_id, FOSTER)
+    assert plans is not None
+    assert plans.current is not None
+    assert plans.current.status is JobStatus.FAILED
+    again = queue.submit(event_id, FOSTER).job
+    assert again is not None
+    plans = queue.plan_jobs(event_id, FOSTER)
+    assert plans is not None
+    assert plans.current is not None
+    assert plans.current.id == again.id
+
+
+def test_plan_jobs_of_an_unknown_event(queue: JobQueue, event_id: str) -> None:
+    assert queue.plan_jobs("12345678", FOSTER) is None
+
+
 def _claim(path: str, start: threading.Barrier, worker: str) -> int | None:
     """Claim once, when both processes are ready; the id claimed, if any."""
     with open_store(path) as store:
@@ -458,3 +520,142 @@ def test_two_processes_claim_one_job(store: Store, event_id: str) -> None:
     job = JobQueue(store).job(submission.job.id)
     assert job.status is JobStatus.RUNNING
     assert job.attempt == 1
+
+
+def test_a_submitted_plan_is_a_maneuver_job(queue: JobQueue, event_id: str) -> None:
+    job = queue.submit(event_id, FOSTER).job
+    assert job is not None
+    assert job.kind is JobKind.MANEUVER
+    assert queue.job(job.id).kind is JobKind.MANEUVER
+
+
+def test_submit_refresh_idempotent_and_cached(
+    queue: JobQueue, store: Store, event_id: str
+) -> None:
+    first = queue.submit_refresh(event_id, FOSTER)
+    assert first.outcome is SubmissionOutcome.QUEUED
+    assert first.job is not None
+    assert first.job.kind is JobKind.REFRESH
+    assert first.job.message_id == "B"  # the latest CDM
+    assert first.job.key == result_key(FOSTER)
+    again = queue.submit_refresh(event_id, FOSTER)
+    assert again.outcome is SubmissionOutcome.EXISTING
+    assert again.job is not None
+    assert again.job.id == first.job.id
+    # A plan of the same CDM is another job, of another kind.
+    plan = queue.submit(event_id, FOSTER)
+    assert plan.outcome is SubmissionOutcome.QUEUED
+    job = queue.claim("w1")
+    assert job is not None
+    assert job.id == first.job.id
+    assert job.kind is JobKind.REFRESH
+    assert queue.finish(job, run_refresh_job(str(store.path), job, None))
+    assert queue.job(job.id).status is JobStatus.SUCCEEDED
+    assert store.missing_pc(event_id, FOSTER) == ()
+    cached = queue.submit_refresh(event_id, FOSTER)
+    assert (cached.outcome, cached.job) == (SubmissionOutcome.CACHED, None)
+
+
+def test_submit_refresh_of_an_unknown_event(queue: JobQueue) -> None:
+    with pytest.raises(StoreError, match="no event nothing"):
+        queue.submit_refresh("nothing", FOSTER)
+
+
+def test_a_refresh_skips_the_observations_cached_meanwhile(
+    queue: JobQueue, store: Store, event_id: str
+) -> None:
+    submitted = queue.submit_refresh(event_id, FOSTER).job
+    assert submitted is not None
+    job = queue.claim("w1")
+    assert job is not None
+    payload = run_refresh_job(str(store.path), job, None)
+    observations = payload["observations"]
+    assert isinstance(observations, dict)
+    assert sorted(observations) == ["A", "B"]
+    assert store.refresh(FOSTER).computed == 2  # meanwhile, synchronously
+    with store.read() as session:
+        before = session.execute(select(models.Result.id, models.Result.payload)).all()
+    assert queue.finish(job, payload)
+    with store.read() as session:
+        after = session.execute(select(models.Result.id, models.Result.payload)).all()
+    assert after == before
+
+
+def test_a_refresh_is_pinned_to_the_latest_cdm(
+    queue: JobQueue, store: Store, event_id: str
+) -> None:
+    submitted = queue.submit_refresh(event_id, FOSTER).job
+    assert submitted is not None
+    store.ingest([message("C", tca=2.0, created=-30.0)])
+    job = queue.claim("w1")
+    assert job is not None
+    observations = run_refresh_job(str(store.path), job, None)["observations"]
+    assert isinstance(observations, dict)
+    assert sorted(observations) == ["A", "B"]
+    assert queue.finish(job, {"observations": observations})
+    assert store.missing_pc(event_id, FOSTER) == ("C",)
+    # The new CDM lacks its Pc: another refresh, pinned to it.
+    later = queue.submit_refresh(event_id, FOSTER)
+    assert later.outcome is SubmissionOutcome.QUEUED
+    assert later.job is not None
+    assert later.job.message_id == "C"
+
+
+def _malformed(case: str, good: dict[str, JsonValue]) -> dict[str, JsonValue]:
+    """A refresh result broken as ``case`` says, from ``good``'s
+    observations of CDMs A and B."""
+    observations = good["observations"]
+    assert isinstance(observations, dict)
+    of_a = observations["A"]
+    assert isinstance(of_a, dict)
+    match case:
+        case "no-observations":
+            return {"ok": True}
+        case "not-an-object":
+            return {"observations": {"A": 1}}
+        case "broken":
+            return {"observations": {"A": {"pc": 1.0}}}
+        case "not-a-cdm":
+            return {"observations": {"Z": {**of_a, "message_id": "Z"}}}
+        case "after-the-pinned-cdm":
+            return {"observations": {"C": {**of_a, "message_id": "C"}}}
+        case _:  # "mislabelled": A's observation given as B's
+            return {"observations": {"B": of_a}}
+
+
+MALFORMED: Final = (
+    "no-observations",
+    "not-an-object",
+    "broken",
+    "not-a-cdm",
+    "after-the-pinned-cdm",
+    "mislabelled",
+)
+
+
+@pytest.mark.parametrize("case", MALFORMED)
+def test_a_malformed_refresh_result_is_refused(
+    queue: JobQueue, store: Store, event_id: str, case: str
+) -> None:
+    queue.submit_refresh(event_id, FOSTER)
+    store.ingest([message("C", tca=2.0, created=-30.0)])  # after the pinned B
+    job = queue.claim("w1")
+    assert job is not None
+    good = run_refresh_job(str(store.path), job, None)
+    # A broken observation is named, as the others are.
+    named = "^a refresh job's observation of A: " if case == "broken" else None
+    with pytest.raises(JobResultError, match=named):
+        queue.finish(job, _malformed(case, good))
+    assert queue.job(job.id).status is JobStatus.RUNNING
+    assert count_rows(store, models.Result) == 0
+    assert queue.finish(job, good)  # the right result is still taken
+
+
+def test_run_refresh_job_without_hbr(
+    queue: JobQueue, store: Store, event_id: str
+) -> None:
+    queue.submit_refresh(event_id, Settings(compute=computation("foster")))
+    job = queue.claim("w1")
+    assert job is not None
+    with pytest.raises(HardBodyRadiusError, match="hard-body radius"):
+        run_refresh_job(str(store.path), job, None)

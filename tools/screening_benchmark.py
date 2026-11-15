@@ -54,7 +54,6 @@ import gzip
 import os
 import platform
 import statistics
-import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -64,6 +63,7 @@ from typing import TYPE_CHECKING, Any, Final, Protocol, TypedDict, TypeVar
 import screening_snapshot as snapshot
 import spacetrack_snapshot
 from astropy.time import Time
+from benchmark_runs import TimingFailed, alternate, run_process, write_step_summary
 from generated import (
     README,
     REPO,
@@ -79,7 +79,6 @@ from generated import (
 from screening_timing import TimingOutput, select, timed
 
 from keepout._text import plural
-from keepout._workers import ONE_THREAD
 from keepout.omm.celestrak import dumps_csv
 from keepout.screening import (
     DEFAULT_DURATION,
@@ -96,6 +95,17 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
     from keepout.omm import Omm
+
+__all__ = [
+    "Comparison",
+    "Run",
+    "TimingFailed",
+    "compare",
+    "cpu_model",
+    "main",
+    "render_comparison",
+    "run_timing",
+]
 
 TIMING: Final = Path(__file__).resolve().with_name("screening_timing.py")
 TOOL: Final = "tools/screening_benchmark.py"
@@ -541,10 +551,6 @@ class Run:
     approaches: int
 
 
-class TimingFailed(Exception):
-    """A timed screening could not run; the message says why."""
-
-
 def run_timing(command: Sequence[str]) -> Run:
     """The result read from a measurement process run as ``command``.
 
@@ -555,20 +561,9 @@ def run_timing(command: Sequence[str]) -> Run:
     ValueError
         If it prints something other than a measurement.
     """
-    try:
-        done = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            env={**os.environ, **ONE_THREAD},
-            check=False,
-        )
-    except OSError as error:
-        raise TimingFailed(f"{command[0]}: {error}") from error
-    if done.returncode != 0:
-        lines = done.stderr.strip().splitlines()[-5:]
-        raise TimingFailed("\n".join(lines) or f"exit status {done.returncode}")
-    output = parse_json(done.stdout, TimingOutput, f"the output of {command[0]}")
+    output = parse_json(
+        run_process(command), TimingOutput, f"the output of {command[0]}"
+    )
     return Run(wall=output["wall"], cpu=output["cpu"], approaches=output["approaches"])
 
 
@@ -618,18 +613,8 @@ def compare(
     TimingFailed
         If a run of this tree fails.
     """
-    runs: dict[str, list[Run]] = {"head": [], "base": []}
-    commands = {"head": head, "base": base}
-    for index in range(repeat):
-        order = ("head", "base") if index % 2 == 0 else ("base", "head")
-        for side in order:
-            try:
-                runs[side].append(run(commands[side]))
-            except TimingFailed as error:
-                if side == "head":
-                    raise
-                return Comparison(tuple(runs["head"]), (), str(error))
-    return Comparison(tuple(runs["head"]), tuple(runs["base"]))
+    head_runs, base_runs, skipped = alternate(head, base, repeat=repeat, run=run)
+    return Comparison(head_runs, base_runs, skipped)
 
 
 def render_comparison(
@@ -714,10 +699,7 @@ def compare_main(args: argparse.Namespace) -> int:
     )
     text, regression = render_comparison(comparison, setting, args.threshold)
     print(text)
-    summary = os.environ.get("GITHUB_STEP_SUMMARY")
-    if summary:
-        with Path(summary).open("a", encoding="utf-8") as stream:
-            stream.write(text + "\n")
+    write_step_summary(text)
     return 1 if regression else 0
 
 

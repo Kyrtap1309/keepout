@@ -18,11 +18,14 @@ import pytest
 from astropy.time import Time
 from cli_builders import write_fleet
 from generated import json_text, read_json, readme_with, relative
+from matplotlib.collections import QuadMesh
+from matplotlib.colors import to_hex
 from report_builders import fixture_data, readme_with_markers
 
 from keepout.cdm import Maneuverable, ObjectMetadata, kvn, make_cdm
 from keepout.conjunction import Conjunction
 from keepout.covariance import Covariance
+from keepout.figures import LOWEST_LOG_PC, SEQUENTIAL, grid_figure
 from keepout.objects import ObjectState
 from keepout.orbits import EARTH_MU
 from keepout.propagation import EARTH_RADIUS
@@ -212,8 +215,8 @@ def test_the_heatmap_is_a_reproducible_svg(generated: Path, tmp_path: Path) -> N
     plan, _, _ = report.timed_plan(event, 10.0, 1)
     title = report.heatmap_title(written(generated)["event"])
     one, two = tmp_path / "one.svg", tmp_path / "two.svg"
-    report.plot(plan, title, one)
-    report.plot(plan, title, two)
+    report.plot(grid_figure(plan), title, one)
+    report.plot(grid_figure(plan), title, two)
     assert one.read_bytes() == two.read_bytes()
     heatmap = generated / "docs" / "img" / "maneuver" / report.HEATMAP
     assert one.read_bytes() == heatmap.read_bytes()
@@ -387,12 +390,22 @@ def test_a_plan_without_options_says_so(generated: Path) -> None:
     assert "| prograde | - | - | none on the grid | - | - |" in text
 
 
-def test_edges_lie_midway_and_beyond_the_ends() -> None:
-    edges = report._edges(np.array([1.0, 2.0, 4.0]), geometric=False)
-    assert edges.tolist() == [0.5, 1.5, 3.0, 5.0]
-    geometric = report._edges(np.array([1e-2, 1e-1, 1.0]), geometric=True)
-    assert np.allclose(np.log10(geometric), [-2.5, -1.5, -0.5, 0.5])
-    assert report._edges(np.array([7.0]), geometric=False).tolist() == [6.5, 7.5]
+def test_plot_uses_figure_colours(generated: Path) -> None:
+    event, _ = report.load_event(generated / f"{NAME}.kvn")
+    plan, _, _ = report.timed_plan(event, 10.0, 1)
+    drawing = report.heatmap_figure(grid_figure(plan), "a heatmap")
+    meshes = [
+        mesh
+        for axes in drawing.axes[:2]
+        for mesh in axes.collections
+        if isinstance(mesh, QuadMesh)
+    ]
+    assert len(meshes) == 2
+    for mesh in meshes:
+        cmap = mesh.get_cmap()
+        assert to_hex(cmap(0.0)) == SEQUENTIAL[0]
+        assert to_hex(cmap(1.0)) == SEQUENTIAL[-1]
+        assert mesh.norm.vmin == LOWEST_LOG_PC
 
 
 def test_the_radius_names_its_source(generated: Path) -> None:

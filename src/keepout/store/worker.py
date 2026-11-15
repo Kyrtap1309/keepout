@@ -2,7 +2,8 @@
 
 :func:`run_worker` is a supervisor. It claims a job
 (:meth:`~keepout.store.jobs.JobQueue.claim`) and runs its computation (by
-default :func:`~keepout.store.planning.run_maneuver_job`) in a ``spawn``
+default :func:`~keepout.store.planning.run_job`, a plan or the missing Pc
+by the job's kind) in a ``spawn``
 child process, the only way to stop a computation at once.
 
 While the child computes, the supervisor renews the job's lease. It kills
@@ -13,6 +14,8 @@ supervisor alone writes the job's end and its result.
 How a job ends:
 
 - an answer: the job succeeds, with its result cached on the job's CDM;
+- an answer the store cannot cache
+  (:class:`~keepout.store.jobs.JobResultError`): it fails with the reason;
 - an error of keepout (:class:`~keepout.errors.KeepoutError`): it fails
   with the error's message, and any other error with ``internal error``,
   the child's traceback in the log; neither is tried again;
@@ -46,8 +49,8 @@ from keepout._text import duration_words
 from keepout._workers import ONE_THREAD
 from keepout.errors import KeepoutError
 from keepout.store.db import open_store
-from keepout.store.jobs import LEASE_SECONDS, Job, JobQueue
-from keepout.store.planning import run_maneuver_job
+from keepout.store.jobs import LEASE_SECONDS, Job, JobQueue, JobResultError
+from keepout.store.planning import run_job
 
 if TYPE_CHECKING:
     from multiprocessing.context import SpawnProcess
@@ -156,7 +159,7 @@ class _Step(enum.Enum):
 def run_worker(
     path: str | Path,
     *,
-    compute: Compute = run_maneuver_job,
+    compute: Compute = run_job,
     workers: int | None = None,
     until_idle: bool = False,
     stop: threading.Event | None = None,
@@ -420,9 +423,16 @@ def _record_answer(queue: JobQueue, job: Job, answer: object) -> None:
     """
     match answer:
         case _Answer(payload=payload):
-            held = queue.finish(job, payload)
-            if held:
-                logger.info("job %d succeeded", job.id)
+            try:
+                held = queue.finish(job, payload)
+            except JobResultError as exc:
+                # A result that cannot be cached is a bug of the computation.
+                held = queue.fail(job, str(exc))
+                if held:
+                    logger.error("job %d failed: %s", job.id, exc)
+            else:
+                if held:
+                    logger.info("job %d succeeded", job.id)
         case _Failure(message=message, from_keepout=from_keepout, traceback=text):
             error = message if from_keepout else _INTERNAL
             held = queue.fail(job, error)

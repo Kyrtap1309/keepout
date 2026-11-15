@@ -38,6 +38,7 @@ def _job_json(job: Job) -> dict[str, JsonOut]:
     """A job as JSON values."""
     return {
         "job": job.id,
+        "kind": job.kind.value,
         "event": job.event_id,
         "cdm": job.message_id,
         "status": job.status.value,
@@ -53,8 +54,9 @@ def _job_json(job: Job) -> dict[str, JsonOut]:
 def jobs_list(*, store: StorePath, as_json: JsonFlag = False) -> None:
     """List the store's jobs, the newest first.
 
-    A job is queued, running, succeeded, failed or cancelled; a failed job
-    gives its error.
+    A job is a manoeuvre plan (maneuver) or the Pc its event lacks
+    (refresh). It is queued, running, succeeded, failed or cancelled; a
+    failed job gives its error.
     """
     with importing_store():
         from keepout.store import JobQueue
@@ -69,12 +71,14 @@ def jobs_list(*, store: StorePath, as_json: JsonFlag = False) -> None:
         show(payload, f"No jobs in {store}.", as_json=as_json)
         return
     rows = table(f"Jobs in {store}")
-    for column in ("Job", "Event", "CDM", "Status", "Attempt", "Created (UTC)"):
+    columns = ("Job", "Kind", "Event", "CDM", "Status", "Attempt", "Created (UTC)")
+    for column in columns:
         rows.add_column(column, no_wrap=column != "CDM")
     rows.add_column("Error")
     for job in jobs:
         rows.add_row(
             str(job.id),
+            job.kind.value,
             job.event_id,
             job.message_id,
             job.status.value,

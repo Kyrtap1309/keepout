@@ -67,6 +67,7 @@ nav:
       - Command line: cli.md
       - JSON output: cli-json.md
       - Conjunction store: store.md
+      - Dashboard: dashboard.md
       - Space-Track data: spacetrack.md
   - Background:
       - Synthetic covariance model: assumptions.md
@@ -111,6 +112,9 @@ nav:
           - Kelvins data: reference/kelvins.md
           - Data cache: reference/cache.md
           - Conjunction store: reference/store.md
+      - Figures and dashboard:
+          - Figures: reference/figures.md
+          - Dashboard: reference/dashboard.md
       - Validation and errors:
           - Validation tooling: reference/validation.md
           - Errors: reference/errors.md

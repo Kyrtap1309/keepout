@@ -1,5 +1,7 @@
 """The walk-through of ``docs/cli.md``, run as written: each command's output
-is the block that follows it on the page."""
+is the block that follows it on the page; likewise the JSON sample of
+``docs/cli-json.md`` and the help of ``keepout dashboard`` in
+``docs/dashboard.md``."""
 
 import json
 import math
@@ -19,16 +21,16 @@ REPO: Final = Path(__file__).parents[2]
 PAGE: Final = REPO / "docs" / "cli.md"
 
 
-def documented(command: str) -> tuple[list[str], str]:
-    """The arguments of the ``bash`` block starting ``keepout COMMAND``, and
-    the ``text`` block after it."""
-    page = PAGE.read_text(encoding="utf-8")
+def documented(command: str, page_path: Path = PAGE) -> tuple[list[str], str]:
+    """The arguments of the ``bash`` block starting ``keepout COMMAND`` on
+    the page ``page_path``, and the ``text`` block after it."""
+    page = page_path.read_text(encoding="utf-8")
     found = re.search(
         rf"```bash\n(keepout {command} .*?)\n```\n\n```text\n(.*?)```",
         page,
         re.DOTALL,
     )
-    assert found is not None, f"no example of keepout {command} in {PAGE}"
+    assert found is not None, f"no example of keepout {command} in {page_path}"
     line = found[1].replace("\\\n", " ")
     return shlex.split(line)[1:], found[2]
 
@@ -120,3 +122,15 @@ def test_the_json_sample_is_what_assess_prints(
     result = keepout(*shlex.split(found[1])[1:])
     assert result.exit_code == ExitCode.MANEUVER
     assert _close(json.loads(result.stdout), json.loads(found[2]))
+
+
+DASHBOARD_PAGE: Final = REPO / "docs" / "dashboard.md"
+
+
+def test_the_dashboard_page_shows_its_help() -> None:
+    arguments, shown = documented("dashboard", DASHBOARD_PAGE)
+    assert arguments == ["dashboard", "--help"]
+    status, printed = run(arguments)
+    assert status == ExitCode.OK
+    # The page leaves out the blank lines around the help.
+    assert printed.strip("\n") == shown.rstrip("\n")

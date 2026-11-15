@@ -13,19 +13,25 @@ import functools
 import inspect
 import json
 from collections.abc import Callable, Mapping, Sequence
-from typing import TYPE_CHECKING, Final, NoReturn, ParamSpec, TypeAlias, TypeVar
+from typing import TYPE_CHECKING, NoReturn, ParamSpec, TypeAlias, TypeVar
 
 import typer
 from rich import box
 from rich.console import Console, RenderableType
 from rich.table import Table
 
-from keepout._text import duration_words, pc_text, plural
+from keepout._text import (
+    ASSUMED_COVARIANCES,
+    duration_words,
+    isot,
+    minute,
+    pc_text,
+    plural,
+    utc,
+)
 from keepout.errors import HardBodyRadiusError, KeepoutError
 
 if TYPE_CHECKING:
-    from astropy.time import Time
-
     from keepout.cdm import Cdm
 
 __all__ = [
@@ -44,13 +50,6 @@ __all__ = [
     "table",
     "utc",
 ]
-
-
-ASSUMED_COVARIANCES: Final = (
-    "Covariances are assumed (keepout's model of GP element set errors), "
-    "not orbit determination."
-)
-"""The line under a Pc on the synthetic covariance model."""
 
 
 class ExitCode(enum.IntEnum):
@@ -118,22 +117,6 @@ def fail(message: str, status: ExitCode = ExitCode.ERROR) -> NoReturn:
     """
     typer.echo(f"Error: {message}", err=True)
     raise typer.Exit(status)
-
-
-def isot(time: Time) -> str:
-    """``time`` in UTC, ISO 8601 to the millisecond, for JSON:
-    ``2026-10-06T19:36:42.123``."""
-    return str(time.utc.isot)
-
-
-def utc(time: Time) -> str:
-    """``time`` in UTC to the second, ISO 8601: ``2026-10-06T19:36:42``."""
-    return isot(time)[:19]
-
-
-def minute(time: Time) -> str:
-    """``time`` in UTC to the minute, for tables: ``2026-10-06 19:36``."""
-    return utc(time)[:16].replace("T", " ")
 
 
 def objects(cdm: Cdm) -> str:

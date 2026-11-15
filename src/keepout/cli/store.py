@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Annotated, Final, NoReturn, TypeAlias
 
 import typer
 
+from keepout._environment import STORE_VARIABLE
 from keepout.cli.cdm_input import CdmFiles, read_cdm_files
 from keepout.cli.events import Assessed, show_assessed
 from keepout.cli.options import (
@@ -64,9 +65,9 @@ missing."""
 _STORE_MODULES: Final = frozenset({"sqlalchemy", "alembic"})
 """The top-level packages of the ``store`` extra."""
 
-STORE_VARIABLE: Final = "KEEPOUT_STORE"
-"""The environment variable ``--store`` is read from when not given, by the
-``keepout store`` commands and ``keepout maneuver --event`` only."""
+# STORE_VARIABLE (keepout._environment): ``--store`` is read from it when
+# not given, by the store, jobs, worker and dashboard commands and keepout
+# maneuver --event only.
 
 _STORE_HELP: Final = "The conjunction store, a SQLite file"
 

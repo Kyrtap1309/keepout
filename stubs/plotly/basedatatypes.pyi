@@ -1,0 +1,3 @@
+# The base of Plotly's figures, which Streamlit's st.plotly_chart takes.
+
+class BaseFigure: ...

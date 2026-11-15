@@ -3,22 +3,26 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pytest
 import risk_report as report
 from builders import KELVINS_EXCERPT as EXCERPT
 from builders import series
+from matplotlib.collections import PathCollection
+from matplotlib.colors import to_rgba_array
 from report_builders import assert_writes_then_checks, readme_with_markers
 
+from keepout.figures import RISK_COLOURS, TrendFigure, trend_figure
 from keepout.risk import (
     Assessment,
     DecisionConfig,
     PcObservation,
+    RiskLevel,
     Thresholds,
     TrendConfig,
 )
 from keepout.risk import assess as real_assess
 from keepout.sources import kelvins
-from keepout.sources.kelvins import KelvinsEvent
 from keepout.units import DAY
 
 
@@ -134,12 +138,22 @@ def test_plots_use_the_reports_settings(
         return real_assess(observations, **kwargs)
 
     monkeypatch.setattr(report, "assess", spy)
+    figures: dict[int, Assessment] = {}
     plotted: dict[int, Assessment] = {}
 
-    def record(event: KelvinsEvent, assessment: Assessment, path: Path) -> None:
-        plotted[event.event_id] = assessment
+    def record(assessment: Assessment, drawn: Thresholds) -> TrendFigure:
+        assert drawn is thresholds
+        figure = trend_figure(assessment, drawn)
+        figures[id(figure)] = assessment
+        return figure
 
-    monkeypatch.setattr(report, "plot", record)
+    def draw(figure: TrendFigure, title: str, path: Path) -> None:
+        event_id = int(path.stem.removeprefix("event-"))
+        assert title.startswith(f"Kelvins event {event_id} ")
+        plotted[event_id] = figures[id(figure)]
+
+    monkeypatch.setattr(report, "trend_figure", record)
+    monkeypatch.setattr(report, "plot", draw)
     assert report.main(paths(tmp_path)) == 0
     expected = {
         "thresholds": thresholds,
@@ -173,3 +187,25 @@ def test_the_high_risk_table_is_explained(tmp_path: Path) -> None:
     summary["challenge_label"]["ignore"]["high"] = 1
     text = report.render_page(summary, "img")
     assert "keepout ignores 1 high-risk event: its high-risk label comes" in text
+
+
+def test_plot_uses_figure_colours() -> None:
+    items = [
+        PcObservation(5 * DAY, "ESA", pc=1e-30, kind="below_floor"),
+        PcObservation(4 * DAY, "ESA", pc=1e-5),
+        PcObservation(2 * DAY, "ESA", pc=1e-3),
+    ]
+    figure = trend_figure(report.assess_with_settings(items), report.THRESHOLDS)
+    assert figure.levels == (RiskLevel.GREEN, RiskLevel.YELLOW, RiskLevel.RED)
+    assert figure.below_floor == (True, False, False)
+    (axes,) = report.trend_plot(figure, "a trend").axes
+    points = [c for c in axes.collections if isinstance(c, PathCollection)]
+    assert len(points) == len(figure.levels)
+    for point, level, floored in zip(
+        points, figure.levels, figure.below_floor, strict=True
+    ):
+        colour = to_rgba_array([RISK_COLOURS[level]])
+        np.testing.assert_array_equal(to_rgba_array(point.get_edgecolor()), colour)
+        faces = to_rgba_array(point.get_facecolor())
+        # A point below the floor is hollow.
+        np.testing.assert_array_equal(faces, colour[:0] if floored else colour)

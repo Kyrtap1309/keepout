@@ -1,9 +1,11 @@
-"""Manoeuvre plans of stored events.
+"""Manoeuvre plans of stored events, and the computations of queued jobs.
 
 :func:`plan_stored` plans a stored event as it was at one of its CDMs. Its
 burns are re-screened against the store's copy of that CDM's catalog, if
 the CDM was made from one. :func:`run_maneuver_job` is the same plan as the
-computation of a queued job (:mod:`keepout.store.worker`).
+computation of a queued job (:mod:`keepout.store.worker`), and
+:func:`run_refresh_job` the computation of the Pc a stored event lacks.
+:func:`run_job` runs either, by the job's kind.
 
 The numerical libraries are imported when a plan is made, not with this
 module.
@@ -14,8 +16,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from keepout.settings import plan_arguments
+from keepout.store.codec import observation_to_json
 from keepout.store.db import open_store
-from keepout.store.repo import pinned_in
+from keepout.store.models import JobKind
+from keepout.store.repo import compute_missing, pinned_in
 
 if TYPE_CHECKING:
     from keepout._types import JsonValue
@@ -24,7 +28,7 @@ if TYPE_CHECKING:
     from keepout.store.jobs import Job
     from keepout.store.repo import Store
 
-__all__ = ["plan_stored", "run_maneuver_job"]
+__all__ = ["plan_stored", "run_job", "run_maneuver_job", "run_refresh_job"]
 
 
 def plan_stored(
@@ -147,3 +151,86 @@ def run_maneuver_job(
             grid=grid,
         )
     return outcome_to_json(planned)
+
+
+def run_refresh_job(
+    path: str,
+    job: Job,
+    workers: int | None,  # noqa: ARG001 (one process computes a Pc)
+) -> dict[str, JsonValue]:
+    """The Pc observations a job's event lacks, as JSON: those of its CDMs up
+    to the job's, computed with the job's settings, not written.
+
+    The worker that runs it writes them
+    (:meth:`~keepout.store.jobs.JobQueue.finish`), but those cached
+    meanwhile.
+
+    Parameters
+    ----------
+    path
+        The store's database file.
+    job
+        The job, claimed from the store's queue: a refresh.
+    workers
+        Not used: the Pc of a CDM is computed in one process.
+
+    Returns
+    -------
+    dict
+        ``{"observations": {MESSAGE_ID: observation}}``, each observation's
+        :func:`~keepout.store.codec.observation_to_json`, oldest CDM first.
+
+    Raises
+    ------
+    StoreError
+        If the store cannot be opened or no longer holds the job's event or
+        CDM.
+    HardBodyRadiusError
+        If the settings give no hard-body radius and a CDM lacks ``HBR``
+        (as :meth:`~keepout.store.Store.refresh` of given events).
+    CdmParseError
+        If a stored CDM no longer parses (a store edited by hand).
+    """
+    with open_store(path, create=False) as store:
+        computed = compute_missing(
+            store, job.event_id, job.settings, key=job.key, until=job.message_id
+        )
+    observations: dict[str, JsonValue] = {
+        message_id: observation_to_json(observation)
+        for message_id, observation in computed.items()
+    }
+    return {"observations": observations}
+
+
+def run_job(path: str, job: Job, workers: int | None) -> dict[str, JsonValue]:
+    """The computation of a job of either kind, as JSON: a plan
+    (:func:`run_maneuver_job`) or the missing Pc (:func:`run_refresh_job`).
+
+    Parameters
+    ----------
+    path
+        The store's database file.
+    job
+        The job, claimed from the store's queue.
+    workers
+        Processes of each re-screen of a plan.
+
+    Returns
+    -------
+    dict
+        The result of the job's computation.
+
+    Raises
+    ------
+    StoreError
+        As :func:`run_maneuver_job` and :func:`run_refresh_job`.
+    KeepoutError
+        As :func:`run_maneuver_job` and :func:`run_refresh_job`.
+    ValueError
+        As :func:`run_maneuver_job`.
+    """
+    match job.kind:
+        case JobKind.MANEUVER:
+            return run_maneuver_job(path, job, workers)
+        case JobKind.REFRESH:
+            return run_refresh_job(path, job, workers)

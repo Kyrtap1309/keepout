@@ -1,5 +1,5 @@
-"""``keepout worker``: the store's queued manoeuvre plans, computed one after
-another until stopped.
+"""``keepout worker``: the store's queued jobs (manoeuvre plans, missing Pc),
+computed one after another until stopped.
 
 ``keepout.store`` is imported in the functions, never here: ``keepout
 --help`` does not load it.
@@ -78,11 +78,12 @@ def worker_command(
     until_idle: UntilIdle = False,
     workers: Workers = None,
 ) -> None:
-    """Compute the store's queued manoeuvre plans, one at a time, until stopped.
+    """Compute the store's queued jobs, one at a time, until stopped.
 
-    Needs the store extra. Each job is computed in a child process and its
-    plan cached on the CDM it was queued for, where keepout maneuver
-    --event finds it. SIGTERM or Ctrl+C stops the worker: its job goes back
+    Needs the store extra. Each job is computed in a child process. A
+    manoeuvre plan is cached on the CDM it was queued for, where keepout
+    maneuver --event finds it; a refresh caches the Pc its event's CDMs
+    lacked. SIGTERM or Ctrl+C stops the worker: its job goes back
     to the queue, not counted as an attempt, and the worker exits with
     status 0. Its log is on standard error; the number of jobs it ran is
     printed on exit.
@@ -96,7 +97,7 @@ def worker_command(
         ran = run_worker(
             store,
             # Looked up now, not bound at import: a test replaces it.
-            compute=planning.run_maneuver_job,
+            compute=planning.run_job,
             workers=workers,
             until_idle=until_idle,
             stop=stop,

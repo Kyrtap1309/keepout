@@ -2,6 +2,7 @@ import sqlite3
 from pathlib import Path
 
 import pytest
+from alembic import command
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from builders import base_revision_store
@@ -18,9 +19,9 @@ from sqlalchemy import (
 from sqlalchemy.exc import IntegrityError
 
 from keepout.errors import StoreError
-from keepout.store import Store, db, open_store, upgrade
+from keepout.store import Store, db, models, open_store, upgrade
 from keepout.store.db import HEAD
-from keepout.store.models import Base
+from keepout.store.models import Base, JobKind
 
 EVENT = text(
     "INSERT INTO events (id, object1, object2, tca_min, tca_max, created_at)"
@@ -109,11 +110,12 @@ def test_the_schema_holds_its_rules(tmp_path: Path) -> None:
     assert {
         "ix_cdms_catalog_id",
         "ix_catalog_files_catalog_id",
-        "ix_jobs_event_id",
+        "ix_jobs_event_id_status",
         "ix_jobs_message_id",
         "ix_jobs_status_created_at",
     } <= indexes
     assert "ix_jobs_status" not in indexes
+    assert "ix_jobs_event_id" not in indexes  # 0003: a prefix of event_id, status
     assert schema["jobs"]["checks"] == [
         (
             "ck_jobs_status",
@@ -316,3 +318,49 @@ def test_a_job_needs_a_known_status(tmp_path: Path) -> None:
             session.execute(CDM.bindparams(event="0123abcd", format="kvn"))
         with pytest.raises(IntegrityError, match="CHECK"):
             _insert(store, _job(status="done"))
+
+
+def test_upgrade_0002_to_0003_keeps_jobs(tmp_path: Path) -> None:
+    path = tmp_path / "keepout.db"
+    engine = create_engine(f"sqlite:///{path}")
+    try:
+        with engine.begin() as connection:
+            command.upgrade(db._config(connection), "0002")
+            connection.execute(EVENT)
+            connection.execute(CDM.bindparams(event="0123abcd", format="kvn"))
+            connection.execute(
+                text(
+                    "INSERT INTO jobs (event_id, message_id, key, params, status,"
+                    " attempt, claims, created_at)"
+                    " VALUES ('0123abcd', 'm', 'k', '{}', 'queued', 0, 0,"
+                    " '2026-11-12T12:00:00.000000000')"
+                )
+            )
+    finally:
+        engine.dispose()
+    assert upgrade(path) == ("0002", HEAD)
+    with open_store(path, create=False) as store:
+        with store.read() as session:
+            kind = session.scalar(text("SELECT kind FROM jobs"))
+            row = session.get_one(models.Job, 1)
+        assert kind == "maneuver"
+        assert row.kind is JobKind.MANEUVER
+        assert row.status == "queued"
+
+
+def test_the_dashboard_indexes(tmp_path: Path) -> None:
+    with open_store(tmp_path / "keepout.db") as store:
+        schema = _schema(store.engine)
+    indexes = {
+        name: (columns, unique)
+        for rules in schema.values()
+        for name, columns, unique in rules["indexes"]  # type: ignore[attr-defined]
+    }
+    assert indexes["ix_events_tca_max"] == (("tca_max",), False)
+    assert indexes["ix_jobs_event_id_status"] == (("event_id", "status"), False)
+    # Those the first revisions made already serve the dashboard's queries.
+    assert indexes["ix_events_object1_object2_tca_min"][0][:2] == ("object1", "object2")
+    assert indexes["ix_cdms_event_id_creation_date"][0] == ("event_id", "creation_date")
+    assert ("uq_results_message_id_key", ("message_id", "key")) in schema["results"][
+        "unique"
+    ]  # type: ignore[operator]
