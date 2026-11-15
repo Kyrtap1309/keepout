@@ -13,6 +13,11 @@ against the public test cases of the
 keepout is not affiliated with NASA. CARA files are downloaded on demand and
 never redistributed.
 
+![The dashboard: events list, manoeuvre planner, a CDM uploaded and the event's Pc trend rising to red](docs/img/dashboard/dashboard.gif)
+
+The dashboard on its demo data, from a clone: `docker compose up`, then
+http://127.0.0.1:8501 ([Deployment](docs/deployment.md)).
+
 ## Install
 
 keepout needs Python 3.11 or later. It is not on PyPI yet:

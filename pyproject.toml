@@ -177,6 +177,7 @@ dev = [
     "codespell>=2.4.3",
     "deptry>=0.25.1",
     "hypothesis>=6.170.9",
+    "imageio-ffmpeg>=0.8.1",
     "import-linter>=2.15",
     "inline-snapshot>=0.36.1",
     "keepout[cli,validation,store,dashboard]",

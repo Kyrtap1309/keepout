@@ -118,6 +118,12 @@ def run_scenario(
         if pause_s:
             page.wait_for_timeout(pause_s * 1000)
 
+    def show(locator: Locator) -> None:
+        """Hold the view, then scroll to ``locator`` and hold it too."""
+        hold()
+        locator.first.scroll_into_view_if_needed()
+        hold()
+
     def events_list() -> None:
         page.goto(base_url)
         _visible(page.get_by_text(AS_OF_TEXT), timeout_s)
@@ -130,11 +136,13 @@ def run_scenario(
         _visible(page.locator(".js-plotly-plot"), timeout_s)
         _visible(page.get_by_text("Smallest burn each way"), timeout_s)
         _visible(page.get_by_text("Re-screen"), timeout_s)
+        show(page.locator(".js-plotly-plot"))  # The Pc heatmap over burn time and Δv.
 
     def event_before() -> None:
         page.goto(event_url)
         _visible(page.get_by_text(f"{ISSUES} CDMs"), timeout_s)
         _visible(page.get_by_text("Pc trend"), timeout_s)
+        show(page.locator(".js-plotly-plot"))  # The trend, 4 yellow points.
 
     def uploaded() -> None:
         page.goto(base_url)
@@ -152,7 +160,8 @@ def run_scenario(
         page.goto(event_url)
         _visible(page.get_by_text(f"{ISSUES + 1} CDMs"), timeout_s)
         _reload_until(page, page.get_by_text(RED), timeout_s)
-        page.get_by_text("Pc trend").scroll_into_view_if_needed()
+        show(page.locator(".js-plotly-plot"))  # The trend, a 5th point, red.
+        hold()
 
     for name, check in (
         ("events list", events_list),
