@@ -13,3 +13,6 @@ site/
 
 # Local secrets (Space-Track credentials): uv run --env-file .env
 .env
+
+# pytest-playwright traces and screenshots of failed e2e tests
+test-results/

@@ -99,7 +99,7 @@ def _last_upload(ctx: DashboardContext) -> None:
 def _upload(ctx: DashboardContext) -> None:
     """The upload form: CDM files ingested, their events' missing Pc queued;
     the outcome of the last upload (:func:`_last_upload`)."""
-    with st.expander("Upload CDMs"):
+    with st.expander("Upload CDMs", expanded=True):
         with st.form("upload", clear_on_submit=True):
             uploaded = st.file_uploader(
                 f"CDM files (KVN or XML, gzip-compressed or not; at most "

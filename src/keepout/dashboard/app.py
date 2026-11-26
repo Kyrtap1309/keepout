@@ -44,8 +44,10 @@ def main() -> None:
     page = st.navigation(
         [
             st.Page(EVENTS_PAGE, title="Events", default=True),
-            st.Page(EVENT_PAGE, title="Event"),
-            st.Page(PLANNER_PAGE, title="Manoeuvre planner"),
+            # Each shows the event in its address: reached from the list's
+            # links, not the navigation.
+            st.Page(EVENT_PAGE, title="Event", visibility="hidden"),
+            st.Page(PLANNER_PAGE, title="Manoeuvre planner", visibility="hidden"),
         ]
     )
     as_of_header(context)

@@ -33,3 +33,15 @@ keyword (its hard-body radius, 10 m, is only in a comment), so set
 `hbr_m = 10.0` under `[pc]` in the settings: without it, `keepout store
 add` skips its Pc, the dashboard shows it as not computed, and the refresh
 job (the Compute button) fails for want of a hard-body radius.
+
+## The demo's update
+
+`demo/*.kvn` is the CDM the Docker demo uploads to show an event's Pc
+rising: the seed's latest CDM of event `3befe6f1305d` (INTELSAT 39, 44476,
+against 55841), re-issued at 2026-10-07 18:00 UTC with the miss 10 times
+smaller (365 m) and each covariance's sigmas 5 times smaller, as fresher
+element sets would give. Its Pc is 3.2e-4, red, against 7.4e-6 (yellow) in
+the seed's four CDMs. It is an edit for the demo, not a screening result,
+and its first comment says so. The demo's store does not hold it:
+uploading it adds it to the event. `tools/dashboard_seed.py` writes it
+with the seed, and `--check` covers it.

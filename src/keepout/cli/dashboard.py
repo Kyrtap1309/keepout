@@ -10,11 +10,13 @@ check the store before Streamlit starts.
 from __future__ import annotations
 
 import importlib.util
+import ipaddress
 import os
+import signal
 import subprocess
 import sys
 from pathlib import Path
-from typing import Annotated, Final, TypeAlias
+from typing import TYPE_CHECKING, Annotated, Final, TypeAlias
 
 import typer
 
@@ -28,7 +30,10 @@ from keepout.cli.options import SettingsFile, operator_settings, time_option
 from keepout.cli.output import ExitCode, fail, isot
 from keepout.cli.store import StorePath, open_cli_store
 
-__all__ = ["DASHBOARD_HINT", "dashboard_command"]
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
+__all__ = ["DASHBOARD_HINT", "DEFAULT_HOST", "EXPOSED_WARNING", "dashboard_command"]
 
 DASHBOARD_HINT: Final = (
     "keepout dashboard needs the dashboard extra: "
@@ -40,19 +45,38 @@ missing."""
 _DASHBOARD_MODULES: Final = ("streamlit", "plotly")
 """The top-level packages of the ``dashboard`` extra."""
 
-ADDRESS: Final = "127.0.0.1"
-"""The only address the dashboard listens on: this machine."""
+DEFAULT_HOST: Final = "127.0.0.1"
+"""The address the dashboard listens on unless ``--host`` gives another:
+this machine only."""
+
+EXPOSED_WARNING: Final = (
+    "Warning: the dashboard listens on {host}, which other machines may "
+    "reach; it has no authentication (see the deployment docs)."
+)
+"""What ``keepout dashboard`` prints on standard error when ``--host`` is
+not a loopback address."""
+
+Host: TypeAlias = Annotated[
+    str,
+    typer.Option(
+        "--host",
+        metavar="ADDRESS",
+        help="The IP address to listen on (default: this machine only).",
+    ),
+]
+"""``--host``: the IP address the dashboard listens on."""
 
 Port: TypeAlias = Annotated[
     int,
     typer.Option("--port", min=1, max=65535, metavar="N", help="The port to serve on."),
 ]
-"""``--port``: the dashboard's TCP port on 127.0.0.1."""
+"""``--port``: the dashboard's TCP port."""
 
 AsOf: TypeAlias = Annotated[
     str | None,
     typer.Option(
         "--as-of",
+        envvar=AS_OF_VARIABLE,
         metavar="TIME",
         help=(
             "See the data at this time, ISO 8601 UTC: the events whose latest "
@@ -62,7 +86,7 @@ AsOf: TypeAlias = Annotated[
 ]
 """``--as-of``: the time the data are seen at, read by
 :func:`keepout._environment.parse_time`, as the dashboard reads it;
-``None``: the clock."""
+``None`` (unset or empty): the clock."""
 
 
 def _app_path() -> Path:
@@ -83,28 +107,84 @@ def _app_path() -> Path:
     return Path(spec.origin)
 
 
+def _host(value: str) -> str:
+    """The ``--host`` address ``value``, warned about on standard error if
+    it is not a loopback address.
+
+    Raises
+    ------
+    typer.BadParameter
+        If ``value`` is not an IP address.
+    """
+    try:
+        address = ipaddress.ip_address(value)
+    except ValueError:
+        raise typer.BadParameter(
+            f"{value!r} is not an IP address", param_hint="--host"
+        ) from None
+    if not address.is_loopback:
+        typer.echo(EXPOSED_WARNING.format(host=value), err=True)
+    return value
+
+
+def _server_address(host: str) -> str:
+    """The address the dashboard names in its URL: ``localhost`` when it
+    listens on every address (``0.0.0.0``, ``::``), else ``host``, in
+    brackets if it is an IPv6 address."""
+    address = ipaddress.ip_address(host)
+    if address.is_unspecified:
+        return "localhost"
+    return f"[{host}]" if address.version == 6 else host
+
+
+def _run(args: Sequence[str], env: Mapping[str, str]) -> int:
+    """Run ``args`` until it exits, passing SIGTERM on to it (a container's
+    stop): it stops cleanly rather than being killed with this process.
+
+    Returns
+    -------
+    int
+        Its exit status; 0 if Ctrl+C stopped it.
+    """
+    with subprocess.Popen(args, env=env) as child:  # noqa: S603 (this interpreter, fixed arguments)
+        previous = signal.signal(signal.SIGTERM, lambda *_: child.terminate())
+        try:
+            return child.wait()
+        except KeyboardInterrupt:
+            # Ctrl+C reaches Streamlit too (same process group): a stop,
+            # not an error, once it has stopped.
+            child.wait()
+            return ExitCode.OK
+        finally:
+            signal.signal(signal.SIGTERM, previous)
+
+
 def dashboard_command(
     *,
     store: StorePath,
     settings: SettingsFile = None,
+    host: Host = DEFAULT_HOST,
     port: Port = 8501,
     as_of: AsOf = None,
 ) -> None:
     """Run the dashboard on a store (needs the dashboard extra).
 
-    Serves the dashboard on http://127.0.0.1:PORT, this machine only, until
-    stopped with Ctrl+C: the events, each event's risk and the maneuver
-    planner. It reads the store and queues jobs for keepout worker; it
-    computes no Pc or plan itself. The store must exist and be at this
-    keepout's schema (keepout store upgrade). Exits with Streamlit's status.
+    Serves the dashboard on http://HOST:PORT (127.0.0.1, this machine only,
+    by default) until stopped with Ctrl+C: the events, each event's risk
+    and the maneuver planner. It reads the store and queues jobs for
+    keepout worker; it computes no Pc or plan itself. The store must exist
+    and be at this keepout's schema (keepout store upgrade). Exits with
+    Streamlit's status.
     """
+    address = _host(host)
     when = None if as_of is None else time_option(as_of, "--as-of")
     if settings is not None:
         operator_settings(settings)  # A bad file fails here, not in the browser.
     app_path = _app_path()
     open_cli_store(store, create=False).close()
     env = {**os.environ, STORE_VARIABLE: str(store.resolve())}
-    # Only the options decide: variables left in the shell are not passed on.
+    # Only the options (--as-of also read from its variable) decide: the
+    # shell's values are not passed on as they are.
     env.pop(SETTINGS_VARIABLE, None)
     env.pop(AS_OF_VARIABLE, None)
     if settings is not None:
@@ -118,13 +198,18 @@ def dashboard_command(
         "run",
         str(app_path),
         "--server.address",
-        ADDRESS,
+        address,
         "--server.port",
         str(port),
         "--server.maxUploadSize",
         str(MAX_UPLOAD_MB),
         "--browser.gatherUsageStats",
         "false",
+        # Given, Streamlit prints this address instead of looking the
+        # machine's public IP up over the network (as it does when it
+        # listens on every address).
+        "--browser.serverAddress",
+        _server_address(address),
         # No browser opened and no first-run e-mail prompt on the terminal.
         "--server.headless",
         "true",
@@ -132,11 +217,11 @@ def dashboard_command(
         # message and traceback stay on the terminal.
         "--client.showErrorDetails",
         "type",
+        # No Deploy button or developer options in the toolbar: an
+        # operator's page, not an app being written.
+        "--client.toolbarMode",
+        "minimal",
     ]
-    try:
-        completed = subprocess.run(args, env=env, check=False)  # noqa: S603 (this interpreter, fixed arguments)
-    except KeyboardInterrupt:
-        # Ctrl+C stops Streamlit too: a stop, not an error.
-        raise typer.Exit(ExitCode.OK) from None
-    if completed.returncode:
-        raise typer.Exit(completed.returncode)
+    status = _run(args, env)
+    if status:
+        raise typer.Exit(status)

@@ -1,0 +1,3 @@
+# Minimal stubs for imageio-ffmpeg: only what tools/dashboard_gif.py uses.
+
+def get_ffmpeg_exe() -> str: ...

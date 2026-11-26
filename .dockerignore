@@ -1,0 +1,19 @@
+# Only what the image's stages copy matters; keep the context small and
+# free of local state.
+.git
+.venv
+.superpowers
+site
+docs
+**/__pycache__
+.mypy_cache
+.ruff_cache
+.pytest_cache
+.hypothesis
+.import_linter_cache
+.coverage
+.env
+*.db
+*.db-*
+*.db.catalogs
+examples/dashboard/cdms/*.cdm

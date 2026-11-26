@@ -4,7 +4,8 @@ The dashboard shows a [conjunction store](store.md) in a web browser: the
 events to come with their risk, each event's Pc trend and geometry, and
 its manoeuvre plan. It also takes new CDM files and queues the work a
 [worker](store.md#background-jobs) does. It is a Streamlit app run by
-`keepout dashboard`, on the machine that holds the store.
+`keepout dashboard`, on the machine that holds the store, or with its
+worker and a demo store by `docker compose up` ([Deployment](deployment.md)).
 
 It needs the `dashboard` extra ([Install](index.md#install)), which adds
 [Streamlit](https://streamlit.io/) and
@@ -49,8 +50,13 @@ The options (`keepout dashboard --help` lists them all):
   settings the store was filled with: a Pc cached with another method,
   covariance policy or hard-body radius shows as not computed (see
   [Jobs](#jobs)).
-- **`--port N`**: the port, 8501 by default. The address is always
-  127.0.0.1.
+- **`--host ADDRESS`**: the IP address to listen on, 127.0.0.1 (this
+  machine only) by default. Any address that is not a loopback address,
+  such as `0.0.0.0` (every interface), prints a warning: the dashboard has
+  no authentication. A container needs `0.0.0.0` to be reached from its
+  host; [Deployment](deployment.md) publishes it on the host's 127.0.0.1
+  only. A value that is not an IP address is a usage error.
+- **`--port N`**: the port, 8501 by default.
 - **`--as-of TIME`**: see [Data time](#data-time-as-of).
 
 `keepout dashboard` runs headless (no browser opens) until Ctrl+C.
@@ -78,6 +84,10 @@ with the past ones. Every covariance is assumed (badge
 so each event's Pc trend is flat: only the time to TCA, and so the
 decision, changes from one CDM to the next.
 
+`docker compose up` serves the same events with their Pc and a manoeuvre
+plan precomputed, and an update CDM to upload that turns one event red
+([Deployment](deployment.md#the-demo)).
+
 NASA CARA's Metop-B test CDM can be added too:
 `uv run python tools/dashboard_seed.py --cara` copies it from keepout's
 cache. Add `examples/dashboard/cdms/*.cdm` to `keepout store add` and set
@@ -88,7 +98,8 @@ TCA is in 2020, so it is listed with the past events.
 
 Every page shows, at its top, the time it sees the data at:
 `Data as of 2026-10-07T12:00:00 UTC (fixed)`. By default it is the
-clock, read again on every page. `--as-of TIME` fixes it, so that frozen
+clock, read again on every page. `--as-of TIME` (or `KEEPOUT_AS_OF`; empty
+means the clock) fixes it, so that frozen
 data such as the demo's look as they did then, and the page says
 `(fixed)`. The time decides which events are past, how far each TCA is
 (`in 30 h`, `2.5 d ago`) and nothing else: the risk of an event comes from
@@ -96,10 +107,10 @@ its CDMs, whatever the time.
 
 ## The pages
 
-The sidebar has three pages. The Event page and the planner show the
-event named in the address, e.g.
-`http://127.0.0.1:8501/event?event=3befe6f1305d`; each row of the Events
-list links to both.
+The dashboard opens on the Events list. The Event page and the planner
+show the event named in the address, e.g.
+`http://127.0.0.1:8501/event?event=3befe6f1305d`: each row of the Events
+list links to both, and they are not in the navigation.
 
 ### Events list
 

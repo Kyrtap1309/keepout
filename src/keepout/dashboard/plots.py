@@ -7,6 +7,7 @@ Every trace is named, so the legend says in words what colour shows.
 
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 from typing import TYPE_CHECKING, Final, Literal
 
@@ -130,6 +131,9 @@ def trend(fig: TrendFigure, *, decision_point_hours: float | None = None) -> go.
             line={"color": RISK_COLOURS[level], "dash": "dash", "width": 1},
             annotation_text=f"{THRESHOLD_LABELS[level]} {value:.0e}",
             annotation_position="top left",
+            # Plotly places a line's label at y itself, which a log axis
+            # reads as 10**y: given as log10, it sits on its line.
+            annotation={"y": math.log10(value)},
         )
     if decision_point_hours is not None:
         drawing.add_vline(

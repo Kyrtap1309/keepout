@@ -106,6 +106,7 @@ class Figure(BaseFigure):
         y: float,
         *,
         line: _Properties | None = None,
+        annotation: _Properties | None = None,
         annotation_text: str | None = None,
         annotation_position: str | None = None,
     ) -> Self: ...

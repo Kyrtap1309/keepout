@@ -1,0 +1,76 @@
+# keepout's dashboard and worker on the demo's store: docker compose up,
+# then http://127.0.0.1:8501 (this machine only: the dashboard has no
+# authentication). See docs/deployment.md.
+
+# One image for every service, built once (by init's build); the others
+# never pull it.
+x-keepout: &keepout
+  image: keepout:local
+  pull_policy: never
+  volumes:
+    - data:/data
+
+services:
+  # Gives the volume the demo's store unless it has a store already.
+  init:
+    <<: *keepout
+    build: .
+    command: ["/opt/keepout/init-store.sh"]
+
+  dashboard:
+    <<: *keepout
+    # keepout dashboard runs Streamlit in a child process: an init process
+    # forwards signals to it and reaps it.
+    init: true
+    command:
+      - keepout
+      - dashboard
+      - --store
+      - /data/keepout.db
+      - --settings
+      - /opt/keepout/settings.toml
+      # All addresses inside the container; the host publishes the port on
+      # its 127.0.0.1 only (ports, below).
+      - --host
+      - 0.0.0.0
+    environment:
+      # The demo's fixed time; KEEPOUT_AS_OF= (empty) reads the clock, for
+      # your own data.
+      KEEPOUT_AS_OF: ${KEEPOUT_AS_OF-2026-10-07T18:00:00Z}
+      # The port the dashboard names in its log: the host's.
+      STREAMLIT_BROWSER_SERVER_PORT: ${KEEPOUT_PORT:-8501}
+    ports:
+      # The host's 127.0.0.1 only; KEEPOUT_PORT picks another port there.
+      - "127.0.0.1:${KEEPOUT_PORT:-8501}:8501"
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=3)"
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+  # Computes the queued jobs: Pc refreshes after an upload, manoeuvre plans.
+  worker:
+    <<: *keepout
+    # Each job runs in a child process; an init process reaps the ones the
+    # worker kills (docs/store.md, Deployment).
+    init: true
+    command: ["keepout", "worker", "--store", "/data/keepout.db"]
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    # keepout worker puts its job back in the queue on SIGTERM (Docker's
+    # stop signal); give it time to.
+    stop_grace_period: 30s
+
+volumes:
+  data:

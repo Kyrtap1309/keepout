@@ -139,19 +139,24 @@ ignore-words-list = "aas,oint,precesses"
 testpaths = ["tests"]
 pythonpath = ["tools"]
 # --disable-socket: no test reaches the network; conftest.py lets the
-# validation tests, which download their data, open sockets. The slow tests
-# run in CI (-m "not validation"), not by default.
+# validation tests, which download their data, and the e2e tests, which
+# drive a browser, open sockets. The slow tests run in CI
+# (-m "not validation and not e2e"), not by default.
 addopts = [
     "-ra",
     "--strict-markers",
     "-m",
-    "not validation and not slow",
+    "not validation and not slow and not e2e",
     "--disable-socket",
     "--allow-unix-socket",
 ]
+# A hung test (a browser, Streamlit, a worker) fails on its own rather than
+# waiting out the CI job's limit.
+timeout = 300
 filterwarnings = ["error"]
 markers = [
     "slow: tests of tens of seconds (full burn grids, week-long integrations, the screening and synthetic operator reports on the committed GP data); CI runs them",
+    "e2e: the Playwright scenario against a running docker compose up (--base-url); CI's e2e job runs it",
     "validation: slow checks against reference data (NASA CARA and ESA Kelvins data download on first run; the Space-Track answers check needs KEEPOUT_SPACETRACK_RAW)",
 ]
 
@@ -171,33 +176,47 @@ show_missing = true
 
 [dependency-groups]
 dev = [
+    { include-group = "seed" },
+    "actionlint-py>=1.7.12.25",
     "basedpyright>=1.40.2",
     "codespell>=2.4.3",
     "deptry>=0.25.1",
+    "hadolint-py>=2.15.1.3",
     "hypothesis>=6.170.9",
+    "imageio-ffmpeg>=0.8.1",
     "import-linter>=2.15",
     "inline-snapshot>=0.36.1",
     "keepout[cli,validation,store,dashboard]",
-    "matplotlib>=3.11.2",
     "mkdocs>=1.6,<2",
     "mkdocs-material>=9.8.0",
     "mkdocstrings[python]>=1.0.8",
     "mypy>=2.4.0",
+    "playwright>=1.65.2",
     "pre-commit>=4.7.0",
     "pytest>=9.1.1",
     "pytest-alembic>=0.13.2",
     "pytest-cov>=7.1.0",
+    "pytest-playwright>=0.10.0",
     "pytest-randomly>=5.0.0",
     "pytest-socket>=0.8.1",
     "pytest-timeout>=2.4.0",
     "pytest-xdist>=3.8.0",
+    "pyyaml>=6.0.3",
     "ruff>=0.17.1",
     "scipy-stubs>=1.17.1.5",
-    "typeguard>=4.6.0",
+    "shellcheck-py>=0.11.0.1",
     "types-openpyxl>=3.1.5.20261017",
+    "types-pyyaml>=6.0.12.20261113",
     "typing-extensions>=4.16.0",
     "xmlschema>=4.3.2",
     "zizmor>=1.31.1",
+]
+# What tools/dashboard_seed.py needs to build the demo's store (the image's
+# seed stage), beyond keepout[store].
+seed = [
+    "keepout[store]",
+    "matplotlib>=3.11.2",
+    "typeguard>=4.6.0",
 ]
 
 [tool.basedpyright]

@@ -68,6 +68,7 @@ nav:
       - JSON output: cli-json.md
       - Conjunction store: store.md
       - Dashboard: dashboard.md
+      - Deployment with Docker: deployment.md
       - Space-Track data: spacetrack.md
   - Background:
       - Synthetic covariance model: assumptions.md

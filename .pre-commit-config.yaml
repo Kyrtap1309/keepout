@@ -54,3 +54,19 @@ repos:
         language: system
         files: ^\.github/
         pass_filenames: false
+      - id: actionlint
+        name: actionlint
+        entry: uv run actionlint
+        language: system
+        files: ^\.github/workflows/
+        pass_filenames: false
+      - id: hadolint
+        name: hadolint
+        entry: uv run hadolint
+        language: system
+        files: (^|/)Dockerfile$
+      - id: shellcheck
+        name: shellcheck
+        entry: uv run shellcheck
+        language: system
+        types: [shell]
