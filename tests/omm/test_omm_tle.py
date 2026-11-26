@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 import sgp4
-from hypothesis import given, settings
+from hypothesis import given
 from omm_builders import (
     GOES_9_TLE,
     GOES_9_TLE_VALUES,
@@ -220,7 +220,6 @@ def test_invalid_tles_are_refused_with_their_place(text: str, message: str) -> N
         tle.loads(text)
 
 
-@settings(deadline=None)
 @given(element_sets())
 def test_satrec_is_sgp4s_initialisation_of_the_tle_values(
     element_set: tuple[str, dict[str, str]],

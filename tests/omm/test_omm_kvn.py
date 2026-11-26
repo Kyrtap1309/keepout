@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 from astropy.time import Time
-from hypothesis import given, settings
+from hypothesis import given
 from hypothesis import strategies as st
 from omm_builders import (
     CCSDS_KVN,
@@ -230,7 +230,6 @@ def test_a_file_is_read(tmp_path: Path) -> None:
     assert kvn.load(path) == kvn.loads(ISS_KVN)
 
 
-@settings(deadline=None)
 @given(st.lists(records(), max_size=4))
 def test_written_elements_read_back_equal(values: list[dict[str, str]]) -> None:
     omms = loads_csv(csv_text(values))

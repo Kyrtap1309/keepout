@@ -6,11 +6,10 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from keepout._defaults import TARGET_PC
 from keepout._methods import METHOD_CHOICES
 from keepout.covariance import POLICIES
 from keepout.errors import SettingsError
-from keepout.pc import AUTO, PcComputation
+from keepout.pc import PcComputation
 from keepout.risk import DEFAULT_THRESHOLDS, Thresholds
 from keepout.settings import (
     SETTINGS_KEYS,
@@ -39,13 +38,21 @@ def test_the_settings_keys_are_those_of_a_full_settings_file() -> None:
     } == {name: set(keys) for name, keys in SETTINGS_KEYS.items()}
 
 
-def test_settings_default_to_the_librarys() -> None:
+def test_settings_default_to_the_documented_values() -> None:
     settings = Settings()
-    assert settings.compute == AUTO
+    # The documented defaults, as literals: a changed library default fails here.
+    compute = settings.compute
+    assert (compute.method, dict(compute.options), compute.fallback) == (
+        "auto",
+        {},
+        None,
+    )
     assert settings.policy == "repair"
     assert settings.combined_hard_body_radius is None
-    assert settings.thresholds == DEFAULT_THRESHOLDS
-    assert settings.target_pc == TARGET_PC
+    assert settings.thresholds == Thresholds(
+        green_below=1e-7, red_from=1e-4, basis="conservative"
+    )
+    assert settings.target_pc == 1e-5
 
 
 @pytest.mark.parametrize(

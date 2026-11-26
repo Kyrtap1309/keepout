@@ -759,7 +759,7 @@ def test_count_before_counts_what_purge_deletes(
     assert store.count_before(before) == 0
 
 
-@settings(max_examples=25, deadline=None)
+@settings(max_examples=25)
 @given(cdms())
 def test_a_cdm_comes_back_from_the_store_as_it_went_in(cdm: keepout.cdm.Cdm) -> None:
     with (

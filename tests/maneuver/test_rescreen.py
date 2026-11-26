@@ -24,7 +24,7 @@ from typing import Any, Final
 import astropy.units as u
 import pytest
 from astropy.time import Time
-from builders import SMALL_GRID, DifferenceWidened
+from builders import SMALL_GRID, DifferenceWidened, approx
 from screening_data import FIXTURE_START, fixture_by_number, load_fixture
 
 from keepout._defaults import TCA_TOLERANCE
@@ -635,7 +635,7 @@ def test_a_new_red_approach_is_a_conflict_and_not_clean() -> None:
     (new,) = result.new_approaches
     assert new.approach.secondary_number == RECURRING
     assert new.approach.range_at_tca == pytest.approx(473.0, abs=1.0)
-    assert new.pc == pytest.approx(1.878e-6, rel=1e-3)
+    assert new.pc == approx(1.878e-6, rel=1e-3)
     assert new.level is RiskLevel.RED
     assert result.conflict
     assert result.event_returns == ()

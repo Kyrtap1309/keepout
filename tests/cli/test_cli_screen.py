@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 from astropy.time import Time
-from builders import cached_pc
+from builders import approx, cached_pc
 from cli_builders import (
     DAYS,
     FIXTURE_CSV,
@@ -105,7 +105,7 @@ def test_screen_prints_json(tmp_path: Path) -> None:
     (observation,) = first["observations"]
     assert observation["message_id"] == first["cdms"][0]
     assert observation["method"] == "foster"
-    assert observation["pc"] == first["pc"] == pytest.approx(4.367e-8, rel=1e-3)
+    assert observation["pc"] == first["pc"] == approx(4.367e-8, rel=1e-3)
     assert observation["error"] is None
     assert second["action"] == "monitor"
     assert second["level"] == "yellow"

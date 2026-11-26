@@ -212,7 +212,7 @@ def test_baseline_reproduces_the_cdm_pc(plan: ManeuverPlan) -> None:
     spread = 2.0 * SIGMA**2
     radius = plan.conjunction.combined_hard_body_radius
     exact = ncx2.cdf(radius**2 / spread, df=2, nc=MISS**2 / spread)
-    assert plan.baseline.pc == pytest.approx(exact, rel=1e-4)
+    assert plan.baseline.pc == approx(exact, rel=1e-4)
     assert plan.baseline.delta_v == 0.0
     assert plan.baseline.method == expected.method
     assert plan.baseline.range_at_tca == pytest.approx(MISS, rel=1e-9)

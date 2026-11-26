@@ -9,7 +9,7 @@ import numpy as np
 import numpy.typing as npt
 import pytest
 from astropy.time import Time
-from hypothesis import given, settings
+from hypothesis import given
 from hypothesis import strategies as st
 from screening_data import DATA, FIXTURE_START, SNAPSHOT, load_fixture
 from sgp4 import propagation as python_sgp4
@@ -137,8 +137,6 @@ def test_the_lunisolar_terms_stay_within_their_bound(
         assert max(abs(change) for change in lunisolar_changes) <= bound
 
 
-# An example propagates the fixture's objects: no 200 ms deadline.
-@settings(deadline=None)
 @given(
     start=st.floats(min_value=-20.0, max_value=10.0),
     duration=st.floats(min_value=0.0, max_value=10.0),

@@ -8,7 +8,7 @@ import astropy.units as u
 import numpy as np
 import pytest
 from astropy.time import Time
-from builders import EARTH_ROTATION_RATE, loaded_after
+from builders import EARTH_ROTATION_RATE, approx, loaded_after
 from screening_data import FIXTURE_START, fixture_by_number
 
 from keepout._types import FloatArray
@@ -138,7 +138,7 @@ def test_j2_secular_rates_match_analytical() -> None:
     for name, rate in expected.items():
         first = np.mean(osculating[name][:samples])
         last = np.mean(osculating[name][-samples:])
-        assert (last - first) / ((orbits - 1) * period) == pytest.approx(rate, rel=1e-3)
+        assert (last - first) / ((orbits - 1) * period) == approx(rate, rel=1e-3)
 
 
 def test_back_and_forth_round_trip() -> None:

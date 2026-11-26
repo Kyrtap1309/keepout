@@ -6,7 +6,7 @@ from typing import Any, Final
 import numpy as np
 import pytest
 from astropy.time import Time
-from builders import EARTH_ROTATION_RATE
+from builders import EARTH_ROTATION_RATE, approx
 from scipy.spatial.transform import Rotation
 from scipy.special import eval_legendre
 
@@ -233,7 +233,7 @@ def test_drag_scales_with_the_drag_term() -> None:
     r, v = positions()[:1], velocities()[:1]
     light = drag_of(ForceModel(Z, drag_term=0.01), r, v)
     heavy = drag_of(ForceModel(Z, drag_term=0.03), r, v)
-    assert heavy == pytest.approx(3.0 * light, rel=1e-6)
+    assert heavy == approx(3.0 * light, rel=1e-6)
 
 
 def test_no_drag_term_means_no_drag() -> None:

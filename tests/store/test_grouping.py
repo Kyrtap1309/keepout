@@ -64,7 +64,7 @@ def _partition(events: list[list[str]]) -> set[frozenset[str]]:
 
 
 @pytest.mark.slow
-@settings(max_examples=200, deadline=None)
+@settings(max_examples=200)
 @given(st.data())
 def test_grouping_equals_group_events_in_any_order_and_batching(
     data: st.DataObject,

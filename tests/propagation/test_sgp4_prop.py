@@ -9,7 +9,7 @@ import numpy as np
 import numpy.typing as npt
 import pytest
 from astropy.time import Time
-from hypothesis import given, settings
+from hypothesis import given
 from hypothesis import strategies as st
 from screening_data import FIXTURE_START, SGP4_FAILING, load_fixture
 
@@ -195,8 +195,6 @@ def test_subset_rejects_bad_indices(
         PROPAGATOR.subset(indices)  # type: ignore[arg-type]
 
 
-# An example propagates the fixture's objects: no 200 ms deadline.
-@settings(deadline=None)
 @given(
     cuts=st.lists(st.integers(min_value=0, max_value=len(OFFSETS)), max_size=4),
     objects=st.lists(

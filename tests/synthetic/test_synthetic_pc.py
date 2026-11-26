@@ -2,6 +2,7 @@
 its zero velocity block, and ``auto`` keeps the 2-D Pc."""
 
 import pytest
+from builders import approx
 from screening_data import fixture_by_number
 
 from keepout.conjunction import Conjunction
@@ -38,12 +39,10 @@ def test_a_fast_approach_takes_every_method() -> None:
     auto = compute_pc(conjunction)
     assert auto.method == "foster"
     assert auto.diagnostics == ()
-    assert auto.value == pytest.approx(1.5057e-8, rel=1e-4)
-    assert compute_pc(conjunction, "elrod").value == pytest.approx(auto.value, rel=1e-9)
+    assert auto.value == approx(1.5057e-8, rel=1e-4)
+    assert compute_pc(conjunction, "elrod").value == approx(auto.value, rel=1e-9)
     # A short encounter: the 3-D Pc agrees with the 2-D one.
-    assert compute_pc(conjunction, "hall3d").value == pytest.approx(
-        auto.value, rel=5e-3
-    )
+    assert compute_pc(conjunction, "hall3d").value == approx(auto.value, rel=5e-3)
     sampled = compute_pc(conjunction, "montecarlo", samples=1_000, seed=1)
     # Pc ~ 1.5e-8 gives no hit in 1000 trials; the interval still holds it.
     assert sampled.value == 0.0
@@ -67,4 +66,4 @@ def test_a_slow_approach_keeps_the_2d_pc_with_both_notes() -> None:
         "only in position (zero velocity block): the 3-D methods need the "
         "velocity uncertainty, so the 2-D Pc is used"
     )
-    assert compute_pc(conjunction, "elrod").value == pytest.approx(auto.value, rel=1e-9)
+    assert compute_pc(conjunction, "elrod").value == approx(auto.value, rel=1e-9)

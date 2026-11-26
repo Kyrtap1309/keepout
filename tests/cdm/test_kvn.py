@@ -116,7 +116,7 @@ def test_a_cdm_after_the_leap_second_table_is_read_and_written() -> None:
     assert kvn.dumps(kvn.loads(kvn.dumps(cdm))) == kvn.dumps(cdm)
 
 
-@settings(max_examples=50, deadline=None)
+@settings(max_examples=50)
 @given(cdms())
 def test_round_trip_property(cdm: Cdm) -> None:
     assert_equivalent(kvn.loads(kvn.dumps(cdm)), cdm)

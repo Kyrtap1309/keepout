@@ -91,7 +91,9 @@ def approx(expected: object, rel: float) -> object:
 
     ``pytest.approx(x, rel=r)`` also accepts anything within its default
     ``abs=1e-12``, which makes every comparison with a tiny ``x`` vacuous; this
-    keeps an absolute slack of :data:`TINY` only.
+    keeps an absolute slack of :data:`TINY` only. Use it for every expected
+    value below about 1e-6 (a Pc, a rate in rad/s, an acceleration);
+    ``pytest.approx`` stays for larger values or with an explicit ``abs``.
     """
     return pytest.approx(expected, rel=rel, abs=TINY)
 

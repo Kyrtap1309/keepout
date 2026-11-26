@@ -12,7 +12,8 @@ calls it,
 the rate of a batch of times (``CollisionRate._rates``), the Clenshaw-Curtis
 orders of the time integral, the Monte Carlo batch size, the methods
 :func:`keepout.pc.compute_pc` falls back between and the run of one method
-behind every :class:`~keepout.pc.PcComputation` (``api._compute``).
+behind every :class:`~keepout.pc.PcComputation` (``api._compute``) and the
+encounter scan (``Encounters.locate``).
 
 It sits at the top of ``tests`` so that the tests of the Pc's callers (the
 maneuver planner) import it too.
@@ -37,6 +38,7 @@ from keepout.pc import _overlap as overlap_module
 from keepout.pc import _quadrature as quadrature_module
 from keepout.pc import _rate as rate_module
 from keepout.pc import api as api_module
+from keepout.pc._encounters import Encounters
 from keepout.pc._orbit import OrbitUncertainty
 from keepout.pc._overlap import Gaussians
 from keepout.pc._quadrature import RateIntegral
@@ -387,3 +389,17 @@ def hall3d_failing(monkeypatch: pytest.MonkeyPatch, skip: int = 0) -> HallFails:
     fails = HallFails(skip=skip)
     monkeypatch.setattr(api_module, "_compute", fails)
     return fails
+
+
+def recorded_scans(monkeypatch: pytest.MonkeyPatch) -> list[Encounters]:
+    """Every encounter scan made from now on (``Encounters.locate``), the scans
+    unchanged."""
+    scans: list[Encounters] = []
+    real = Encounters.locate
+
+    def spy(conjunction: Conjunction, window: tuple[float, float] | None) -> Encounters:
+        scans.append(real(conjunction, window))
+        return scans[-1]
+
+    monkeypatch.setattr(Encounters, "locate", spy)
+    return scans

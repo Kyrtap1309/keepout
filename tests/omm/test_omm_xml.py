@@ -5,7 +5,7 @@ from xml.etree import ElementTree
 import pytest
 import xmlschema
 from astropy.time import Time
-from hypothesis import given, settings
+from hypothesis import given
 from hypothesis import strategies as st
 from omm_builders import CCSDS_XML, GOES_9, ISS, SAMPLE_CSV, csv_text, records
 
@@ -222,7 +222,6 @@ def test_a_file_is_read(tmp_path: Path) -> None:
     assert xml.load(path) == (ISS_OMM,)
 
 
-@settings(deadline=None)
 @given(st.lists(records(), max_size=4))
 def test_written_elements_are_valid_and_read_back_equal(
     values: list[dict[str, str]],

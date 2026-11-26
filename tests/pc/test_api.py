@@ -4,7 +4,7 @@ import math
 import pickle
 import re
 import typing
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 
 import numpy as np
 import pytest
@@ -26,7 +26,9 @@ from faults import (
     auto_hall_integration,
     auto_monte_carlo,
     auto_monte_carlo_budget,
+    hall3d_failing,
     overlap_failing_while_integrating,
+    recorded_scans,
 )
 from pc_builders import side_by_side
 
@@ -533,19 +535,6 @@ def test_a_long_encounter_is_described_once(method: MethodChoice) -> None:
     ) in diagnostics
 
 
-def _scan_spy(monkeypatch: pytest.MonkeyPatch) -> list[Encounters]:
-    """Record every encounter scan made through :mod:`keepout.pc.api`."""
-    scans: list[Encounters] = []
-    real = Encounters.locate
-
-    def spy(conjunction: Conjunction, window: tuple[float, float] | None) -> Encounters:
-        scans.append(real(conjunction, window))
-        return scans[-1]
-
-    monkeypatch.setattr(Encounters, "locate", spy)
-    return scans
-
-
 def test_auto_falls_back_to_monte_carlo_on_hall_s_scan(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -560,7 +549,7 @@ def test_auto_falls_back_to_monte_carlo_on_hall_s_scan(
         calls.append((encounters, options))
         return PcResult(0.25, "montecarlo", (), {})
 
-    scans = _scan_spy(monkeypatch)
+    scans = recorded_scans(monkeypatch)
     auto_hall_integration(monkeypatch, fail)
     auto_monte_carlo(monkeypatch, run)
     result = compute_pc(SLOW_ALONG_TRACK)
@@ -600,16 +589,7 @@ def test_auto_resolves_hall3d_with_its_monte_carlo_fallback() -> None:
 def test_a_fallback_stands_in_where_the_method_does_not_converge(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    real = api._compute
-
-    def hall_fails(
-        conjunction: Conjunction, method: str, options: Mapping[str, object]
-    ) -> PcResult:
-        if method == "hall3d":
-            raise PcConvergenceError("Nc is not finite")
-        return real(conjunction, method, options)  # type: ignore[arg-type]
-
-    monkeypatch.setattr(api, "_compute", hall_fails)
+    fails = hall3d_failing(monkeypatch)
     run = PcComputation("hall3d", fallback=computation("foster"))
     result = run(TYPICAL_HEAD_ON)
     assert result.method == "foster"
@@ -617,6 +597,7 @@ def test_a_fallback_stands_in_where_the_method_does_not_converge(
         result.diagnostics[-1]
         == "hall3d failed (Nc is not finite); foster used instead"
     )
+    fails.armed = True
     with pytest.raises(PcConvergenceError, match="Nc is not finite"):
         computation("hall3d")(TYPICAL_HEAD_ON)
 

@@ -7,11 +7,16 @@ from keepout.units import DAY, HOUR
 
 
 @pytest.mark.parametrize(
-    ("count", "nouns", "text"),
-    [(1, None, "1 run"), (2, None, "2 runs"), (0, "minima", "0 minima")],
+    ("count", "noun", "nouns", "text"),
+    [
+        (1, "run", None, "1 run"),
+        (2, "run", None, "2 runs"),
+        (0, "minimum", "minima", "0 minima"),
+    ],
 )
-def test_plural_names_one_or_many(count: int, nouns: str | None, text: str) -> None:
-    noun = "minimum" if nouns else "run"
+def test_plural_names_one_or_many(
+    count: int, noun: str, nouns: str | None, text: str
+) -> None:
     assert plural(count, noun, nouns) == text
 
 

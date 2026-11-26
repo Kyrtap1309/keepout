@@ -147,13 +147,13 @@ def test_mid_block_comments_move_to_the_start_of_their_element() -> None:
     assert xml.loads(text).relative.comments == ("late note",)
 
 
-@settings(max_examples=50, deadline=None)
+@settings(max_examples=50)
 @given(cdms())
 def test_round_trip_property(cdm: Cdm) -> None:
     assert_equivalent(xml.loads(xml.dumps(cdm)), cdm)
 
 
-@settings(max_examples=25, deadline=None)
+@settings(max_examples=25)
 @given(cdms())
 def test_kvn_to_xml_property(cdm: Cdm) -> None:
     assert_equivalent(xml.loads(xml.dumps(kvn.loads(kvn.dumps(cdm)))), cdm)

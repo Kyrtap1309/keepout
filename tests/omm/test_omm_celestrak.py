@@ -217,7 +217,7 @@ def test_an_invalid_epoch_is_refused_with_its_place_among_valid_ones() -> None:
         loads_csv(csv_text(rows))
 
 
-@settings(deadline=None, max_examples=50)
+@settings(max_examples=50)
 @given(st.lists(records(), min_size=1, max_size=30))
 def test_epochs_read_from_a_catalog_are_those_parsed_one_by_one(
     values: list[dict[str, str]],
@@ -245,7 +245,6 @@ def test_writers_give_back_the_sample() -> None:
     assert json.loads(dumps_json(omms)) == json.loads(SAMPLE_JSON.read_text())
 
 
-@settings(deadline=None)
 @given(st.lists(records(), max_size=4))
 def test_csv_and_json_of_the_same_values_give_equal_elements(
     values: list[dict[str, str]],
@@ -253,7 +252,6 @@ def test_csv_and_json_of_the_same_values_give_equal_elements(
     assert loads_csv(csv_text(values)) == loads_json(json_text(values))
 
 
-@settings(deadline=None)
 @given(records())
 def test_satrec_is_bit_identical_to_sgp4s_own_initialisation(
     values: dict[str, str],
@@ -264,7 +262,6 @@ def test_satrec_is_bit_identical_to_sgp4s_own_initialisation(
     assert_same_satrec(satrec_of(from_json), sgp4_record(values))
 
 
-@settings(deadline=None)
 @given(st.lists(records(), max_size=4))
 def test_written_elements_read_back_equal(values: list[dict[str, str]]) -> None:
     omms: tuple[Omm, ...] = loads_csv(csv_text(values))

@@ -584,7 +584,7 @@ def test_a_failure_loses_the_minimum_of_its_own_interval_only() -> None:
     assert dict(whole.catalog_failures) == {5: ObjectFailure(2901.0, 6)}
 
 
-@settings(deadline=None, max_examples=30)
+@settings(max_examples=30)
 @given(max_states=st.integers(min_value=1, max_value=40))
 def test_chunks_do_not_change_the_result(max_states: int) -> None:
     # 7 objects: chunks of 2 to 5 of the 61 samples, or all of them.
@@ -862,7 +862,7 @@ volumes = st.one_of(
 
 
 @pytest.mark.slow
-@settings(deadline=None, max_examples=20)
+@settings(max_examples=20)
 @given(
     chosen=st.lists(st.sampled_from(CLOSE), min_size=1, max_size=3, unique=True),
     start=st.floats(min_value=-2 * DAY, max_value=5 * DAY),

@@ -10,6 +10,7 @@ import astropy.units as u
 import numpy as np
 import pytest
 from astropy.time import Time
+from builders import approx
 from screening_data import FIXTURE_START, fixture_by_number, load_fixture
 
 from keepout.ccsds.message import UNKNOWN
@@ -152,7 +153,7 @@ def test_each_event_is_assessed_from_its_cdm() -> None:
     assert crossing.cdm.message_for == "FLEET ONE"
     assert crossing.cdm.object1.section.get("MANEUVERABLE") == "YES"
     assert crossing.observation.source == "keepout (foster)"
-    assert crossing.observation.pc == pytest.approx(4.3671e-8, rel=1e-4)
+    assert crossing.observation.pc == approx(4.3671e-8, rel=1e-4)
     assert crossing.observation.diagnostics == ()
     assert crossing.assessment.level is RiskLevel.GREEN
     assert crossing.action is Action.IGNORE
@@ -193,7 +194,7 @@ def test_fleet_satellites_that_meet_get_an_event_each() -> None:
     assert other.hard_body_radius == 3.0
     assert other.section.get("MANEUVERABLE") == "NO"
     assert other.section.get("OBJECT_TYPE") == "PAYLOAD"
-    assert first.observation.pc == pytest.approx(mirrored.observation.pc, rel=1e-6)
+    assert first.observation.pc == approx(mirrored.observation.pc, rel=1e-6)
 
 
 def test_the_options_reach_the_cdms_and_the_assessment() -> None:
@@ -222,7 +223,7 @@ def test_the_options_reach_the_cdms_and_the_assessment() -> None:
     assert "safety factor f 1" in cdm.object1.section.comments[3]
     # Half the default sigmas: a far smaller Pc.
     assert event.observation.source == "keepout (elrod)"
-    assert event.observation.pc == pytest.approx(1.5437e-14, rel=1e-4)
+    assert event.observation.pc == approx(1.5437e-14, rel=1e-4)
     assert event.observation.time_to_tca == pytest.approx(1.817 * DAY, rel=1e-3)
     assert event.assessment.thresholds.red_from == 1e-14
     # Red within the decision point.

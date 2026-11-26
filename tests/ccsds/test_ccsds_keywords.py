@@ -230,7 +230,7 @@ def _fields_text(fields: tuple[int, ...], digits: int) -> str:
     return text + (f".{fraction:0{digits}d}" if digits else "")
 
 
-@settings(deadline=None, max_examples=300)
+@settings(max_examples=300)
 @given(
     st.floats(min_value=2441317.5, max_value=5373484.0),
     st.integers(min_value=0, max_value=9),
@@ -355,7 +355,7 @@ def _epoch_texts(draw: st.DrawFn) -> str:
     return draw(st.sampled_from(["", " "])) + text
 
 
-@settings(deadline=None, max_examples=300)
+@settings(max_examples=300)
 @given(st.lists(_epoch_texts(), max_size=40))
 def test_epochs_parsed_together_are_those_parsed_one_by_one(texts: list[str]) -> None:
     expected = [_epoch_outcome(text) for text in texts]

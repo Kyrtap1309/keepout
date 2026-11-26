@@ -544,7 +544,7 @@ metadata = st.builds(
 )
 
 
-@settings(max_examples=50, deadline=None)
+@settings(max_examples=50)
 @given(conjunctions(), metadata, metadata)
 def test_any_conjunction_round_trips_through_the_message(
     item: Conjunction, primary: ObjectMetadata, secondary: ObjectMetadata
