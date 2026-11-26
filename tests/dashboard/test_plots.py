@@ -62,8 +62,9 @@ def test_trend_colours_points_by_level_hollow_below_floor() -> None:
     assert [trace["text"] for trace in points] == [["A"], ["B"], ["C"]]
     lines = {shape["y0"] for shape in figure["layout"]["shapes"]}
     assert lines == {1e-4, 1e-7}
-    notes = {note["text"] for note in figure["layout"]["annotations"]}
-    assert notes == {"red from 1e-04", "green below 1e-07"}
+    notes = {note["text"]: note["y"] for note in figure["layout"]["annotations"]}
+    # On its line: a log axis places annotations at log10 of the value.
+    assert notes == {"red from 1e-04": -4.0, "green below 1e-07": -7.0}
     assert figure["layout"]["yaxis"]["type"] == "log"
     assert figure["layout"]["xaxis"]["autorange"] == "reversed"
 

@@ -33,9 +33,12 @@ services:
       # its 127.0.0.1 only (ports, below).
       - --host
       - 0.0.0.0
-      # The demo's fixed time; remove these two items for your own data.
-      - --as-of
-      - "2026-10-07T18:00:00Z"
+    environment:
+      # The demo's fixed time; KEEPOUT_AS_OF= (empty) reads the clock, for
+      # your own data.
+      KEEPOUT_AS_OF: ${KEEPOUT_AS_OF-2026-10-07T18:00:00Z}
+      # The port the dashboard names in its log: the host's.
+      STREAMLIT_BROWSER_SERVER_PORT: ${KEEPOUT_PORT:-8501}
     ports:
       # The host's 127.0.0.1 only; KEEPOUT_PORT picks another port there.
       - "127.0.0.1:${KEEPOUT_PORT:-8501}:8501"
@@ -65,9 +68,9 @@ services:
       init:
         condition: service_completed_successfully
     restart: unless-stopped
-    # keepout worker puts its job back in the queue on SIGTERM.
-    stop_signal: SIGTERM
+    # keepout worker puts its job back in the queue on SIGTERM (Docker's
+    # stop signal); give it time to.
     stop_grace_period: 30s
 
 volumes:
-  data: {}
+  data:

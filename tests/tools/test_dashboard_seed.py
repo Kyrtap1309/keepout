@@ -303,16 +303,21 @@ def test_demo_update_joins_event_and_is_red(tmp_path: Path) -> None:
 
 
 def test_demo_update_file_is_current() -> None:
-    [path] = sorted(seed.DEMO_DIR.glob("*.kvn"))
+    path = seed.demo_file()
     name, text = seed.demo_update()
     assert path.name == name
     assert path.read_text(encoding="utf-8") == text
 
 
+@pytest.fixture(scope="module")
+def demo_store(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """The demo's store, built once (a manoeuvre plan takes about 10 s)."""
+    return seed.demo_store(tmp_path_factory.mktemp("demo") / "demo.db")
+
+
 @pytest.mark.slow
-def test_demo_store_has_plan(tmp_path: Path) -> None:
-    path = seed.demo_store(tmp_path / "demo.db")
-    with open_store(path, create=False) as store:
+def test_demo_store_has_plan(demo_store: Path) -> None:
+    with open_store(demo_store, create=False) as store:
         outcome = store.maneuver(seed.DEMO_EVENT, load_settings(seed.SETTINGS))
     assert outcome is not None
     assert outcome.catalog_label is not None
@@ -320,9 +325,8 @@ def test_demo_store_has_plan(tmp_path: Path) -> None:
 
 
 @pytest.mark.slow
-def test_demo_store_has_no_wal(tmp_path: Path) -> None:
-    seed.demo_store(tmp_path / "demo.db")
-    assert sorted(p.name for p in tmp_path.iterdir()) == [
+def test_demo_store_has_no_wal(demo_store: Path) -> None:
+    assert sorted(p.name for p in demo_store.parent.iterdir()) == [
         "demo.db",
         "demo.db.catalogs",
     ]

@@ -530,9 +530,7 @@ keepout dashboard --store keepout.db --as-of 2026-10-06
 ```
 
 It listens on 127.0.0.1 unless `--host` gives another address, and has no
-authentication: see [the warning](dashboard.md). In a container,
-[Docker Compose](deployment.md) runs it with `--host 0.0.0.0` and
-publishes its port on the host's 127.0.0.1 only. It computes no Pc or plan itself but queues
+authentication: see [the warning](dashboard.md). It computes no Pc or plan itself but queues
 them for a [worker](#worker). [The dashboard](dashboard.md) describes its
 options, pages and demo.
 

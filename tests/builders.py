@@ -14,11 +14,13 @@ import astropy.units as u
 import numpy as np
 import numpy.typing as npt
 import pytest
+from alembic import command
 from astropy.time import Time
 from hypothesis import assume
 from hypothesis import strategies as st
 from hypothesis.extra.numpy import arrays
 from scipy.spatial.transform import Rotation
+from sqlalchemy import create_engine
 
 import keepout.cdm
 from keepout._types import FloatArray, override
@@ -34,6 +36,7 @@ from keepout.propagation import ManeuveredPropagator
 from keepout.propagation.forces import EARTH_RADIUS
 from keepout.risk import PcKind, PcObservation
 from keepout.state import StateVector
+from keepout.store import db as store_db
 from keepout.units import DAY, HOUR, KM
 from keepout.validation.cases import Suite, ValidationCase
 from keepout.validation.criteria import TWO_D, BoundCriterion
@@ -467,3 +470,14 @@ def loaded_after(code: str, modules: Iterable[str]) -> Imports:
     loaded = ast.literal_eval(last)
     assert isinstance(loaded, list)
     return Imports(printed, [str(name) for name in loaded])
+
+
+def store_at(path: Path, revision: str) -> None:
+    """Make ``path`` a store at ``revision`` of the schema, as an older
+    keepout made it."""
+    engine = create_engine(f"sqlite:///{path}")
+    try:
+        with engine.begin() as connection:
+            command.upgrade(store_db._config(connection), revision)
+    finally:
+        engine.dispose()

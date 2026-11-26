@@ -9,6 +9,6 @@ from playwright.sync_api import Page
 pytestmark = pytest.mark.e2e
 
 
-def test_dashboard_scenario(page: Page, base_url: str) -> None:
-    [upload] = sorted(seed.DEMO_DIR.glob("*.kvn"))
-    run_scenario(page, base_url, upload=upload)
+def test_dashboard_scenario(dashboard_url: str, page: Page) -> None:
+    # dashboard_url first: it skips before a browser is launched.
+    run_scenario(page, dashboard_url, upload=seed.demo_file())

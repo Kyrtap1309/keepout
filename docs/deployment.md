@@ -28,12 +28,11 @@ from `Dockerfile`:
 
 - **`init`** gives the `data` volume the demo store if it has no store
   (`/data/keepout.db`), then exits. A volume that has a store, from a
-  previous `up` or your own, is left as it is.
+  previous `up` or your own, is left as it is, once init has checked that
+  this keepout can open it ([Updating](#updating)).
 - **`dashboard`** is `keepout dashboard` on that store. Inside the container
   it listens on every address (`--host 0.0.0.0`, which prints a warning in
-  its log); the host publishes it on 127.0.0.1:8501 only. It names
-  itself `http://localhost:8501` in its log, so Streamlit does not look the
-  machine's public IP up over the network. Its healthcheck
+  its log); the host publishes it on 127.0.0.1:8501 only. Its healthcheck
   asks Streamlit's `/_stcore/health`, and `up --wait` waits for it.
 - **`worker`** is `keepout worker` on the same store: it computes the Pc of
   uploaded CDMs and the manoeuvre plans queued from the dashboard.
@@ -55,12 +54,13 @@ The image holds a store built from `examples/dashboard/` when it is built
 `3befe6f1305d`, so the planner shows its heatmap at once.
 
 `compose.yaml` fixes the time the data are seen at to 2026-10-07 18:00 UTC
-(`--as-of`): 6 events are ahead. To see the event's Pc rise, upload
+(`KEEPOUT_AS_OF`, the dashboard's `--as-of`): 6 events are ahead. To see the event's Pc rise, upload
 `examples/dashboard/demo/*.kvn` on the Events page (**Upload CDMs**). It is
 a fifth CDM of event `3befe6f1305d`, issued at 18:00 with a smaller miss
 and covariance. The worker computes its Pc within seconds, and the event
-turns red with a rising trend. The [README's GIF](https://github.com/Kyrtap1309/keepout#readme)
-shows exactly that.
+turns red with a rising trend:
+
+![The demo: the events list, the planner, the upload, and the event turning red](img/dashboard/dashboard.gif)
 
 The planner names the catalog its re-screen used as
 `stored copy of /src/tests/screening/data/celestrak-public.csv.gz`: the
@@ -68,8 +68,9 @@ path it had when the image was built, kept by the store as a label.
 
 ## Your own data
 
-- **Your own time.** Remove the two `--as-of` items from the `dashboard`
-  command in `compose.yaml`: the dashboard then reads the clock.
+- **Your own time.** `KEEPOUT_AS_OF= docker compose up --wait` (an empty
+  value) makes the dashboard read the clock; put `KEEPOUT_AS_OF=` in a
+  `.env` file next to `compose.yaml` to keep it.
 - **CDM files.** Upload them on the Events page, or add them from the
   command line:
 
@@ -79,10 +80,11 @@ path it had when the image was built, kept by the store as a label.
         'keepout store add /tmp/cdms/*.kvn --store /data/keepout.db --settings /opt/keepout/settings.toml'
     ```
 
-- **Your settings.** The services read `/opt/keepout/settings.toml`, a
-  copy of `examples/dashboard/settings.toml`. Mount your own over it, in
-  both services, in a `compose.override.yaml` next to `compose.yaml`, which
-  Compose reads too:
+- **Your settings.** The dashboard reads `/opt/keepout/settings.toml`, a
+  copy of `examples/dashboard/settings.toml`, and queues each job with
+  them: the worker reads no settings file. Mount your own over it in a
+  `compose.override.yaml` next to `compose.yaml`, which Compose reads too,
+  in the worker as well if you run `keepout store add` there:
 
     ```yaml
     services:
@@ -119,12 +121,13 @@ docker compose start
 
 After `git pull`, rebuild and restart: `docker compose up --build --wait`.
 The volume keeps its store. If the new keepout changed the store's schema,
-the dashboard and the worker stop at start, saying so in their logs
-(`docker compose logs`), and restart over and over; `up --wait` reports the
-dashboard unhealthy. Migrate the store in a container of its own, then
-start again ([Upgrading](store.md#upgrading)):
+`init` fails, `up` says so, and its log (`docker compose logs init`) gives
+the command. Stop the services, so that nothing holds the store, migrate it
+in a container of its own, then start again
+([Upgrading](store.md#upgrading)):
 
 ```bash
+docker compose stop dashboard worker
 docker compose run --rm --no-deps worker keepout store upgrade --store /data/keepout.db
 docker compose up --wait
 ```
@@ -134,10 +137,3 @@ The base images (`python:3.13-slim` and `uv`) are pinned by digest in
 take their security updates, look up the current digests
 (`docker buildx imagetools inspect python:3.13-slim`), replace them in
 `Dockerfile` and rebuild.
-
-## Checked in CI
-
-CI's `e2e` job builds the image, runs `docker compose up --wait`, requests
-the health check and the first page, runs a browser scenario through the
-three pages with an upload (Playwright, `tests/e2e`), restarts the
-services and checks that the upload is still stored.

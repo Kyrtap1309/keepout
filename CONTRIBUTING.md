@@ -17,7 +17,8 @@ uv run pytest -n auto         # offline test suite, without the slow tests
 uv run pytest -n auto -m slow # the slow tests CI also runs (tens of seconds each)
 uv run pytest -m validation   # reference checks; downloads CARA and Kelvins data
 docker compose down -v && docker compose up --wait   # then the browser scenario:
-KEEPOUT_E2E_URL=http://127.0.0.1:8501 uv run pytest -m e2e   # needs uv run playwright install chromium
+uv run pytest -m e2e --base-url http://127.0.0.1:8501   # needs uv run playwright install chromium
+# (CI's e2e job also restarts the services and checks the upload is kept)
 uv run pytest -n0 --inline-snapshot=fix   # update the CLI snapshots (not under -n)
 ```
 

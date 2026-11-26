@@ -406,6 +406,22 @@ def write_demo(*, check: bool) -> int:
     return write_seed([demo_update()], DEMO_DIR, check=check)
 
 
+def demo_file() -> Path:
+    """The demo's update CDM in :data:`DEMO_DIR` (:func:`write_demo`).
+
+    Raises
+    ------
+    ValueError
+        If :data:`DEMO_DIR` does not hold exactly one ``.kvn`` file.
+    """
+    files = sorted(DEMO_DIR.glob("*.kvn"))
+    if len(files) != 1:
+        raise ValueError(
+            f"expected one .kvn file in {DEMO_DIR}, found {len(files)}; run {TOOL}"
+        )
+    return files[0]
+
+
 def demo_store(path: Path) -> Path:
     """The demo's store: :func:`seed_store` and the manoeuvre plan of
     :data:`DEMO_EVENT`, computed by a worker and cached, with

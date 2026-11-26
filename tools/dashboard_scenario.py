@@ -15,9 +15,13 @@ import re
 import time
 from typing import TYPE_CHECKING, Final
 
-from dashboard_seed import DEMO_EVENT, ISSUES
+from dashboard_seed import DEMO_AS_OF, DEMO_EVENT, ISSUES
 from playwright.sync_api import Error as PlaywrightError
-from playwright.sync_api import expect
+from playwright.sync_api import ViewportSize, expect
+
+from keepout._text import utc
+from keepout.figures.palette import RISK_LABELS
+from keepout.risk import RiskLevel
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -25,11 +29,14 @@ if TYPE_CHECKING:
 
     from playwright.sync_api import Locator, Page
 
-AS_OF_TEXT: Final = "Data as of 2026-10-07T18:00:00 UTC (fixed)"
+AS_OF_TEXT: Final = f"Data as of {utc(DEMO_AS_OF)} UTC (fixed)"
 """How every page of the demo gives the time its data are seen at."""
 
-RED: Final = re.compile(r"^red · ")
+RED: Final = re.compile(f"^{re.escape(RISK_LABELS[RiskLevel.RED])} · ")
 """A red risk chip: its level, then its action."""
+
+VIEWPORT: Final = ViewportSize(width=1280, height=800)
+"""The browser's size [px] for the scenario (and the GIF's video)."""
 
 UPLOADED_SIZE: Final = re.compile(r"^\d+(\.\d+)?\s?[KM]?B$")
 """The size Streamlit lists under a file once it has it."""
@@ -146,7 +153,6 @@ def run_scenario(
 
     def uploaded() -> None:
         page.goto(base_url)
-        page.get_by_text("Upload CDMs").click()
         page.locator("input[type=file]").set_input_files(upload)
         # Streamlit sends the file in the background: Ingest before it is
         # listed with its size would submit no file. (The name is shortened.)

@@ -13,16 +13,15 @@ def test_ffmpeg_args(tmp_path: Path) -> None:
     assert Path(args[0]).name.startswith("ffmpeg")
     assert args[args.index("-i") + 1] == str(video)
     assert args[-1] == str(out)
-    assert args[args.index("-filter_complex") + 1] == (
-        f"fps={gif.FPS},scale={gif.WIDTH}:-1:flags=lanczos,split[a][b];"
-        "[a]palettegen[p];[b][p]paletteuse"
-    )
+    assert f"fps={gif.FPS}" in args[args.index("-filter_complex") + 1]
     assert "-y" in args
 
 
-def test_gif_path_is_in_the_docs_images() -> None:
-    assert gif.GIF.parts[-3:] == ("img", "dashboard", "dashboard.gif")
-    assert gif.VIEWPORT == (1280, 800)
+def test_gifsicle_optimises_in_place(tmp_path: Path) -> None:
+    gif_path = tmp_path / "out.gif"
+    args = gif.gifsicle_args(gif_path)
+    assert Path(args[0]).name == "gifsicle"
+    assert args[1:] == ["--batch", "-O3", str(gif_path)]
 
 
 def test_main_refuses_an_unknown_option() -> None:

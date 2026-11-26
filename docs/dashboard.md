@@ -84,12 +84,8 @@ with the past ones. Every covariance is assumed (badge
 so each event's Pc trend is flat: only the time to TCA, and so the
 decision, changes from one CDM to the next.
 
-`docker compose up` serves the same events, with their Pc computed and the
-manoeuvre of event `3befe6f1305d` planned when the image is built, seen at
-2026-10-07 18:00 UTC: 6 events are ahead. `examples/dashboard/demo/` holds
-one more CDM of that event, issued at 18:00 with a smaller miss and
-covariance: upload it on the Events page and, once the worker has computed
-it, the event turns red and its trend rises
+`docker compose up` serves the same events with their Pc and a manoeuvre
+plan precomputed, and an update CDM to upload that turns one event red
 ([Deployment](deployment.md#the-demo)).
 
 NASA CARA's Metop-B test CDM can be added too:
@@ -102,7 +98,8 @@ TCA is in 2020, so it is listed with the past events.
 
 Every page shows, at its top, the time it sees the data at:
 `Data as of 2026-10-07T12:00:00 UTC (fixed)`. By default it is the
-clock, read again on every page. `--as-of TIME` fixes it, so that frozen
+clock, read again on every page. `--as-of TIME` (or `KEEPOUT_AS_OF`; empty
+means the clock) fixes it, so that frozen
 data such as the demo's look as they did then, and the page says
 `(fixed)`. The time decides which events are past, how far each TCA is
 (`in 30 h`, `2.5 d ago`) and nothing else: the risk of an event comes from
@@ -110,10 +107,10 @@ its CDMs, whatever the time.
 
 ## The pages
 
-The sidebar has three pages. The Event page and the planner show the
-event named in the address, e.g.
-`http://127.0.0.1:8501/event?event=3befe6f1305d`; each row of the Events
-list links to both.
+The dashboard opens on the Events list. The Event page and the planner
+show the event named in the address, e.g.
+`http://127.0.0.1:8501/event?event=3befe6f1305d`: each row of the Events
+list links to both, and they are not in the navigation.
 
 ### Events list
 
