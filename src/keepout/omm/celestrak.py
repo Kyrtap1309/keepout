@@ -29,7 +29,7 @@ from keepout.ccsds.epochs import preparse_epochs
 from keepout.ccsds.files import strip_bom
 from keepout.errors import OmmParseError
 from keepout.omm._io import OMM, parse_record
-from keepout.omm.keywords import KEYWORDS
+from keepout.omm.keywords import FIXED_METADATA, KEYWORDS
 from keepout.omm.model import SGP4_EPOCH_DIGITS, Omm
 
 if TYPE_CHECKING:
@@ -160,8 +160,27 @@ def loads_json(text: str) -> tuple[Omm, ...]:
     for record, (item, epoch) in enumerate(zip(data, epochs, strict=True), start=1):
         if not isinstance(item, dict):
             raise OmmParseError("not a JSON object", record=record)
-        omms.append(parse_record(item, record=record, epoch=epoch))
+        omms.append(parse_record(_json_texts(item, record), record=record, epoch=epoch))
     return tuple(omms)
+
+
+def _json_texts(item: dict[str, JsonValue], record: int) -> dict[str, str]:
+    """The text values of a JSON element; others are ignored unless read.
+
+    Raises
+    ------
+    OmmParseError
+        If a value keepout reads is not text.
+    """
+    texts: dict[str, str] = {}
+    for keyword, value in item.items():
+        if isinstance(value, str):
+            texts[keyword] = value
+        elif keyword in KEYWORDS or keyword in FIXED_METADATA:
+            raise OmmParseError(
+                f"must be text, got {value!r}", record=record, keyword=keyword
+            )
+    return texts
 
 
 def _epoch_text(item: object) -> str:

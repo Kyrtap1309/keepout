@@ -59,6 +59,22 @@ def test_the_header_is_checked(text: str) -> None:
         read_socrates(text)
 
 
+def test_blank_lines_are_ignored() -> None:
+    blanks = SOCRATES_HEADER + DOCKED + "\r\n" + FAST + " \r\n"
+    assert read_socrates(blanks) == read_socrates(REPORT)
+
+
+def test_a_line_with_only_commas_is_not_blank() -> None:
+    with pytest.raises(SourceFormatError, match="line 3: 3 values, not 11"):
+        read_socrates(SOCRATES_HEADER + DOCKED + ",,\r\n")
+
+
+def test_a_quoted_value_running_over_a_line_end_is_refused() -> None:
+    broken = DOCKED.replace("ISS (ZARYA)", '"ISS\r\n(ZARYA)"')
+    with pytest.raises(SourceFormatError, match="line 2: a quoted value"):
+        read_socrates(SOCRATES_HEADER + broken)
+
+
 def test_every_row_has_eleven_values() -> None:
     with pytest.raises(SourceFormatError, match="line 3: 10 values, not 11"):
         read_socrates(SOCRATES_HEADER + DOCKED + DOCKED.replace(",0.010", ""))

@@ -60,7 +60,6 @@ __all__ = [
     "MC_TARGET_HITS",
     "TWO_D_METHODS",
     "CaseOptions",
-    "MonteCarloSizing",
     "Suite",
     "ValidationCase",
     "alfano_3d_cases",
@@ -127,13 +126,6 @@ MC_SUITE_ALPHA: Final = 0.01
 interval is at confidence ``1 - MC_SUITE_ALPHA / n`` (Bonferroni)."""
 
 
-class MonteCarloSizing(TypedDict):
-    """Samples and seed of a Monte Carlo case (:func:`monte_carlo_options`)."""
-
-    samples: int
-    seed: int
-
-
 class CaseOptions(TypedDict, total=False):
     """Options a case passes to :func:`~keepout.pc.compute_pc`.
 
@@ -197,9 +189,7 @@ class ValidationCase:
         object.__setattr__(self, "options", self.options.copy())
 
 
-def monte_carlo_options(
-    suite: Suite, case_id: str, reference: float
-) -> MonteCarloSizing:
+def monte_carlo_options(suite: Suite, case_id: str, reference: float) -> CaseOptions:
     """Samples and seed of a Monte Carlo case: about :data:`MC_TARGET_HITS`
     expected collisions within :data:`MC_SAMPLES`, and a seed fixed by the
     case's name so the report is reproducible.
@@ -215,12 +205,12 @@ def monte_carlo_options(
 
     Returns
     -------
-    MonteCarloSizing
+    CaseOptions
         The number of samples and the seed.
     """
     wanted = MC_TARGET_HITS / reference if reference > 0.0 else MC_SAMPLES[1]
     samples = int(min(max(math.ceil(wanted), MC_SAMPLES[0]), MC_SAMPLES[1]))
-    return {"samples": samples, "seed": zlib.crc32(f"{suite}/{case_id}".encode())}
+    return CaseOptions(samples=samples, seed=zlib.crc32(f"{suite}/{case_id}".encode()))
 
 
 def _window(windows: Mapping[int, float], number: int) -> tuple[float, float]:
@@ -241,8 +231,7 @@ def _monte_carlo_case(
 
     ``window`` is the Monte Carlo window; ``None`` sizes it automatically.
     """
-    sizing = monte_carlo_options(suite, case_id, reference)
-    options = CaseOptions(samples=sizing["samples"], seed=sizing["seed"])
+    options = monte_carlo_options(suite, case_id, reference)
     if window is not None:
         options["window"] = window
     return ValidationCase(
@@ -332,14 +321,7 @@ def alfano_monte_carlo_cases(
 ) -> list[ValidationCase]:
     """Alfano (2009) cases 1-12 with CARA's two-body Monte Carlo reference.
 
-    Parameters
-    ----------
-    alfano
-        The Alfano (2009) cases, from
-        :func:`~keepout.validation.cara_inputs.load_alfano_inputs`.
-    windows
-        Half-width [s] of each case's window, by case number, from
-        :func:`~keepout.validation.cara_inputs.load_alfano_windows`.
+    Parameters as for :func:`alfano_3d_cases`.
 
     Returns
     -------
@@ -397,11 +379,7 @@ def pc_method_3d_cases(pc_method: Sequence[PcMethodInput]) -> list[ValidationCas
     CARA's Coppola 3-D Pc is shown for information only: it is another
     method, and CARA's own table flags where it underestimates.
 
-    Parameters
-    ----------
-    pc_method
-        The conjunctions of CARA's Pc method test set, from
-        :func:`~keepout.validation.cara_inputs.load_pc_method_inputs`.
+    Parameters as for :func:`pc_method_cases`.
 
     Returns
     -------
@@ -427,11 +405,7 @@ def pc_method_monte_carlo_cases(
 ) -> list[ValidationCase]:
     """Test-set conjunctions whose CARA Monte Carlo Pc is at least ``MC_MIN_PC``.
 
-    Parameters
-    ----------
-    pc_method
-        The conjunctions of CARA's Pc method test set, from
-        :func:`~keepout.validation.cara_inputs.load_pc_method_inputs`.
+    Parameters as for :func:`pc_method_cases`.
 
     Returns
     -------
@@ -457,12 +431,7 @@ def load_non_pd_case(cache: Path | None = None) -> ValidationCase:
     Reference and tolerance as in CARA's ``Pc2D_Foster_UnitTest.m``
     (``testNonPositiveDefinite``, HBR 20 m).
 
-    Parameters
-    ----------
-    cache
-        The cache directory of the CARA files (see
-        :func:`keepout.sources.cara.commit_dir`); ``None`` for ``$KEEPOUT_CACHE_DIR``,
-        else the user cache directory. Missing files are downloaded.
+    Parameters as for :func:`load_all`.
 
     Returns
     -------
@@ -536,12 +505,7 @@ def load_hall_2d3d_cases(cache: Path | None = None) -> list[ValidationCase]:
     Pc3D_Hall_UnitTest.m`` lines 107-122 (values on lines 108-111) at the
     pinned commit.
 
-    Parameters
-    ----------
-    cache
-        The cache directory of the CARA files (see
-        :func:`keepout.sources.cara.commit_dir`); ``None`` for ``$KEEPOUT_CACHE_DIR``,
-        else the user cache directory. Missing files are downloaded.
+    Parameters as for :func:`load_all`.
 
     Returns
     -------
@@ -575,12 +539,7 @@ def load_max_pc_cases(cache: Path | None = None) -> list[ValidationCase]:
     they do not conform to CCSDS. Frisbee's secondary covariance is unknown,
     as CARA's test passes zeros for it.
 
-    Parameters
-    ----------
-    cache
-        The cache directory of the CARA files (see
-        :func:`keepout.sources.cara.commit_dir`); ``None`` for ``$KEEPOUT_CACHE_DIR``,
-        else the user cache directory. Missing files are downloaded.
+    Parameters as for :func:`load_all`.
 
     Returns
     -------
@@ -619,12 +578,8 @@ def load_max_pc_cases(cache: Path | None = None) -> list[ValidationCase]:
 def load_all(cache: Path | None = None) -> list[ValidationCase]:
     """Every validation case except Monte Carlo, downloading CARA files as needed.
 
-    Parameters
-    ----------
-    cache
-        The cache directory of the CARA files (see
-        :func:`keepout.sources.cara.commit_dir`); ``None`` for ``$KEEPOUT_CACHE_DIR``,
-        else the user cache directory. Missing files are downloaded.
+    Parameters as for
+    :func:`~keepout.validation.cara_inputs.load_alfano_inputs`.
 
     Returns
     -------
@@ -652,12 +607,7 @@ def load_monte_carlo_cases(cache: Path | None = None) -> list[ValidationCase]:
     """The Monte Carlo validation cases (minutes to hours of computing), with
     the interval confidence of :data:`MC_SUITE_ALPHA`.
 
-    Parameters
-    ----------
-    cache
-        The cache directory of the CARA files (see
-        :func:`keepout.sources.cara.commit_dir`); ``None`` for ``$KEEPOUT_CACHE_DIR``,
-        else the user cache directory. Missing files are downloaded.
+    Parameters as for :func:`load_all`.
 
     Returns
     -------

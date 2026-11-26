@@ -9,7 +9,6 @@ their raw text and unit.
 from __future__ import annotations
 
 import enum
-import re
 from dataclasses import dataclass
 from functools import cached_property
 from typing import TYPE_CHECKING, Final, assert_never
@@ -19,6 +18,7 @@ from astropy.time import Time
 
 from keepout._types import FloatArray, read_only
 from keepout.ccsds.keywords import FieldValue, ValueKind, format_value, parse_value
+from keepout.ccsds.kvn import KEYWORD
 from keepout.ccsds.message import COMMENT, USER_DEFINED_PREFIX
 from keepout.cdm.keywords import (
     KEYWORDS,
@@ -41,22 +41,19 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 __all__ = [
-    "KEYWORD_PATTERN",
     "USER_DEFINED_PREFIX",
     "Cdm",
     "CdmObject",
     "CovarianceMethod",
     "DuplicateKeyword",
     "Field",
+    "Maneuverable",
     "Section",
     "covariance_dimension",
     "format_field",
     "parse_field",
 ]
 
-
-KEYWORD_PATTERN: Final = re.compile(r"[A-Z][A-Z0-9_]*")
-"""What a keyword may look like: valid in KVN and as an XML element name."""
 
 _COVARIANCE_NAMES: Final[Mapping[int, frozenset[str]]] = {
     size: frozenset(covariance_names(size)) for size in range(6, 10)
@@ -70,6 +67,17 @@ class CovarianceMethod(enum.StrEnum):
     """Computed in the orbit determination."""
     DEFAULT = "DEFAULT"
     """Assumed (a default or a model), not from an orbit determination."""
+
+
+class Maneuverable(enum.StrEnum):
+    """``MANEUVERABLE`` values of CCSDS 508.0-B-1."""
+
+    YES = "YES"
+    """The object can manoeuvre."""
+    NO = "NO"
+    """The object cannot manoeuvre."""
+    NOT_APPLICABLE = "N/A"
+    """Not applicable or not known (e.g. a catalog object)."""
 
 
 class DuplicateKeyword(ValueError):
@@ -172,6 +180,14 @@ def _matches(value: object, kind: ValueKind) -> bool:
             assert_never(kind)
 
 
+def _valid_keyword(keyword: str) -> bool:
+    """Whether a section may hold ``keyword``: an NDM/XML user-defined
+    parameter may be named by any text."""
+    if keyword.startswith(USER_DEFINED_PREFIX):
+        return keyword != USER_DEFINED_PREFIX
+    return KEYWORD.fullmatch(keyword) is not None
+
+
 @dataclass(frozen=True)
 class Section:
     """An ordered group of fields: header, relative metadata or one object.
@@ -201,10 +217,11 @@ class Section:
         table = KEYWORDS[self.kind]
         seen: set[str] = set()
         for field in self.fields:
-            if not KEYWORD_PATTERN.fullmatch(field.keyword):
+            if not _valid_keyword(field.keyword):
                 raise ValueError(
                     f"keyword {field.keyword!r} must be upper-case letters, digits "
-                    "and underscores, starting with a letter"
+                    "and underscores, starting with a letter, or "
+                    f"{USER_DEFINED_PREFIX} and a parameter name"
                 )
             if field.keyword != COMMENT:
                 if field.keyword in seen:
@@ -367,9 +384,22 @@ class CdmObject:
         return _optional_number(self.section, "HBR")
 
     @property
-    def maneuverable(self) -> str:
-        """``MANEUVERABLE``, as written."""
-        return _text(self.section, "MANEUVERABLE")
+    def maneuverable(self) -> Maneuverable:
+        """``MANEUVERABLE``.
+
+        Raises
+        ------
+        CdmParseError
+            If it is not ``YES``, ``NO`` or ``N/A``.
+        """
+        value = _text(self.section, "MANEUVERABLE")
+        try:
+            return Maneuverable(value)
+        except ValueError:
+            raise CdmParseError(
+                f"MANEUVERABLE must be YES, NO or N/A, got {value!r}",
+                keyword="MANEUVERABLE",
+            ) from None
 
     @property
     def cd_area_over_mass(self) -> float | None:

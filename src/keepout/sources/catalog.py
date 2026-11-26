@@ -24,7 +24,6 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import hashlib
-import importlib
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
@@ -32,6 +31,7 @@ from typing import TYPE_CHECKING, Final, Literal, TypeAlias
 
 from keepout._defaults import CELESTRAK_TTL, GP_INTERVAL
 from keepout.errors import ChecksumMismatch, SourceUnavailable
+from keepout.sources._store import sha256_of
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Iterable, Mapping
@@ -154,8 +154,8 @@ def _sha256(path: Path) -> str:
     SourceUnavailable
         If it cannot be read (e.g. it is gone).
     """
-    with _reading(path), path.open("rb") as file:
-        return hashlib.file_digest(file, "sha256").hexdigest()
+    with _reading(path):
+        return sha256_of(path)
 
 
 def _verified(file: CatalogFileRef) -> bytes:
@@ -424,9 +424,11 @@ class CatalogSource:
         title: a CelesTrak group, a Space-Track query.
     summary
         What it is and needs, for the ``--source`` help.
-    module
-        The module whose ``fetch_catalog(*, cache)`` gets its catalog,
-        imported on the first :meth:`fetch`.
+    fetch
+        The catalog, given the cache directory (``None`` for
+        ``$KEEPOUT_CACHE_DIR``, else the user cache directory): its cached
+        copy while that is younger than :attr:`reuse`, else a download. It
+        raises what the source's ``fetch_catalog`` raises.
     reuse
         Seconds a downloaded catalog is reused without asking the source
         again [s]: :data:`keepout.sources.celestrak.TTL`, Space-Track's
@@ -437,33 +439,23 @@ class CatalogSource:
     title: str
     part_title: str
     summary: str
-    module: str
+    fetch: Callable[[Path | None], Catalog]
     reuse: float
 
-    def fetch(self, cache: Path | None = None) -> Catalog:
-        """The catalog: its cached copy while that is younger than
-        :attr:`reuse`, else a download.
 
-        Parameters
-        ----------
-        cache
-            The cache directory; ``None`` for ``$KEEPOUT_CACHE_DIR``, else the user
-            cache directory.
+# The source modules import this one: they are imported on the first fetch.
+def _celestrak_catalog(cache: Path | None) -> Catalog:
+    """:func:`keepout.sources.celestrak.fetch_catalog`."""
+    from keepout.sources import celestrak
 
-        Returns
-        -------
-        Catalog
-            One element set per object, and the downloads it came from.
+    return celestrak.fetch_catalog(cache=cache)
 
-        Raises
-        ------
-        KeepoutError
-            As the module's ``fetch_catalog``.
-        """
-        fetch: Callable[..., Catalog] = importlib.import_module(
-            self.module
-        ).fetch_catalog
-        return fetch(cache=cache)
+
+def _spacetrack_catalog(cache: Path | None) -> Catalog:
+    """:func:`keepout.sources.spacetrack.fetch_catalog`."""
+    from keepout.sources import spacetrack
+
+    return spacetrack.fetch_catalog(cache=cache)
 
 
 CATALOG_SOURCES: Final[Mapping[CatalogSourceName, CatalogSource]] = MappingProxyType(
@@ -473,7 +465,7 @@ CATALOG_SOURCES: Final[Mapping[CatalogSourceName, CatalogSource]] = MappingProxy
             "CelesTrak public GP groups",
             "Group",
             "public groups, no account",
-            "keepout.sources.celestrak",
+            _celestrak_catalog,
             CELESTRAK_TTL,
         ),
         "spacetrack": CatalogSource(
@@ -481,7 +473,7 @@ CATALOG_SOURCES: Final[Mapping[CatalogSourceName, CatalogSource]] = MappingProxy
             "Space-Track full GP catalog",
             "Query",
             "the full catalog, needs SPACETRACK_IDENTITY and SPACETRACK_PASSWORD",
-            "keepout.sources.spacetrack",
+            _spacetrack_catalog,
             GP_INTERVAL,
         ),
     }

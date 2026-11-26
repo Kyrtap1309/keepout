@@ -78,8 +78,7 @@ def test_a_catalog_source_fetches_with_its_module(
         asked.append(cache)
         return fetched
 
-    monkeypatch.setattr(
-        importlib.import_module(source.module), "fetch_catalog", fetch_catalog
-    )
+    module = importlib.import_module(f"keepout.sources.{name}")
+    monkeypatch.setattr(module, "fetch_catalog", fetch_catalog)
     assert source.fetch(tmp_path) is fetched
     assert asked == [tmp_path]

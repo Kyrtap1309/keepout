@@ -181,6 +181,7 @@ class CcsdsParseError(KeepoutError):
         if keyword is not None:
             context.append(f"keyword {keyword}")
         super().__init__(f"{message} ({', '.join(context)})" if context else message)
+        self.message = message
         self.record = record
         self.line = line
         self.keyword = keyword

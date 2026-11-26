@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 __all__ = [
     "XSI",
     "add_leaf",
+    "check_text",
     "keyword",
     "leaves",
     "local",
@@ -287,16 +288,39 @@ def add_leaf(
     Raises
     ------
     KeepoutError
-        The family's write error if ``text`` contains a character XML 1.0
-        cannot hold.
+        The family's write error if ``text`` or an attribute contains a
+        character XML 1.0 cannot hold.
     """
-    if _NOT_XML.search(text):
-        raise family.write_error(f"{keyword or tag}: XML 1.0 cannot hold {text!r}")
-    element = ElementTree.SubElement(parent, tag, attributes or {})
+    attributes = attributes or {}
+    for held in (text, *attributes.values()):
+        check_text(held, family, keyword or tag)
+    element = ElementTree.SubElement(parent, tag, attributes)
     element.text = text
     if unit is not None:
         element.set("units", unit)
     return element
+
+
+def check_text(text: str, family: Family, keyword: str) -> None:
+    """A check that XML 1.0 can hold ``text``.
+
+    Parameters
+    ----------
+    text
+        Text of an element or attribute.
+    family
+        The message family.
+    keyword
+        Keyword the text belongs to, for the error.
+
+    Raises
+    ------
+    KeepoutError
+        The family's write error if ``text`` contains a character XML 1.0
+        cannot hold.
+    """
+    if _NOT_XML.search(text):
+        raise family.write_error(f"{keyword}: XML 1.0 cannot hold {text!r}")
 
 
 def tostring(root: ElementTree.Element) -> str:

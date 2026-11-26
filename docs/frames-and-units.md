@@ -13,7 +13,9 @@ data used to determine the orbit) in days. The readers convert on input and
 the writers convert back on output.
 
 - **Times** are astropy `Time` objects. CDM and OMM epochs are UTC, the time
-  system these messages use, and keepout reads and writes them in UTC.
+  system these messages use, and keepout reads and writes them in UTC, from
+  1972-01-01 on (earlier UTC stepped by fractions of a second, and no CDM or
+  OMM carries such an epoch).
   Durations, such as the time to TCA, are in seconds;
   [`elapsed_seconds`](reference/units.md#keepout.units.elapsed_seconds)
   counts leap seconds.

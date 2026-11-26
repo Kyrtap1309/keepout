@@ -17,7 +17,7 @@ from typing import Final
 import pytest
 from astropy.time import Time
 
-from keepout.cdm import Cdm, Maneuverable, ObjectMetadata, kvn, load, make_cdm
+from keepout.cdm import Cdm, ObjectMetadata, kvn, load, make_cdm
 from keepout.conjunction import Conjunction
 from keepout.covariance import make_covariance
 from keepout.objects import ObjectState
@@ -52,7 +52,7 @@ def sample_event() -> list[Cdm]:
         ObjectMetadata(
             item.name,
             item.international_designator,
-            maneuverable=Maneuverable(item.maneuverable),
+            maneuverable=item.maneuverable,
         )
         for item in (source.object1, source.object2)
     ]

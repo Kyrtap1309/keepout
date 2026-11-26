@@ -302,7 +302,7 @@ def run(
 
 
 def _metadata(
-    omm: Omm, context: _RunContext, tca: Time
+    omm: Omm, context: _RunContext, comments: tuple[str, ...]
 ) -> tuple[ObjectMetadata, float]:
     """What the CDM says about an object, and its hard-body radius."""
     satellite = context.fleet.find(omm.catalog_number)
@@ -322,7 +322,7 @@ def _metadata(
         object_type=object_type,
         maneuverable=maneuverable,
         covariance_method=CovarianceMethod.DEFAULT,
-        covariance_comments=context.model.comments(omm, tca),
+        covariance_comments=comments,
     )
     return metadata, radius
 
@@ -332,12 +332,18 @@ def _event(approach: CloseApproach, context: _RunContext) -> OperatorEvent:
     tca = approach.tca
     primary = context.newest_by_number[approach.primary_number]
     secondary = context.newest_by_number[approach.secondary_number]
-    primary_metadata, primary_radius = _metadata(primary, context, tca)
-    secondary_metadata, secondary_radius = _metadata(secondary, context, tca)
     model = context.model
+    primary_covariance, primary_comments = model.described_covariance(primary, tca)
+    secondary_covariance, secondary_comments = model.described_covariance(
+        secondary, tca
+    )
+    primary_metadata, primary_radius = _metadata(primary, context, primary_comments)
+    secondary_metadata, secondary_radius = _metadata(
+        secondary, context, secondary_comments
+    )
     conjunction = approach.to_conjunction(
-        primary_covariance=model.covariance(primary, tca),
-        secondary_covariance=model.covariance(secondary, tca),
+        primary_covariance=primary_covariance,
+        secondary_covariance=secondary_covariance,
         primary_radius=primary_radius,
         secondary_radius=secondary_radius,
     )

@@ -4,9 +4,10 @@ The reader flattens grouping elements, so it accepts CCSDS 508.0-B-1 messages
 with or without the ``ndm:`` namespace (Technical Corrigendum 2) and CDM 2.0
 groups such as ``physicalParameters`` and ``userDefinedParameters``.
 ``<USER_DEFINED parameter="NAME">`` becomes the keyword ``USER_DEFINED_NAME``,
-as in KVN. DOCTYPE declarations are rejected: CDMs never need them, and
-refusing them rules out entity-expansion attacks. No XSD validation is
-performed.
+as in KVN; the schema lets ``NAME`` be any text, which is kept as written
+(KVN holds only upper-case names). DOCTYPE declarations are rejected: CDMs
+never need them, and refusing them rules out entity-expansion attacks. No XSD
+validation is performed.
 """
 
 from __future__ import annotations
@@ -16,7 +17,16 @@ from typing import TYPE_CHECKING, Final
 from xml.etree import ElementTree
 
 from keepout.ccsds.message import COMMENT, USER_DEFINED, USER_DEFINED_PREFIX, Located
-from keepout.ccsds.xml import XSI, add_leaf, local, parse, single, tostring, values
+from keepout.ccsds.xml import (
+    XSI,
+    add_leaf,
+    check_text,
+    local,
+    parse,
+    single,
+    tostring,
+    values,
+)
 from keepout.cdm._io import CDM, SectionBuilder, build_cdm
 from keepout.cdm.keywords import (
     ADDITIONAL_PARAMETERS,
@@ -156,8 +166,9 @@ def _insert_comment(element: ElementTree.Element, text: str) -> None:
     position = next(
         (i for i, child in enumerate(element) if child.tag != COMMENT), len(element)
     )
-    comment = add_leaf(element, COMMENT, text, None, CDM)
-    element.remove(comment)
+    check_text(text, CDM, COMMENT)
+    comment = ElementTree.Element(COMMENT)
+    comment.text = text
     element.insert(position, comment)
 
 
@@ -222,7 +233,8 @@ def dumps(cdm: Cdm) -> str:
     Raises
     ------
     CdmWriteError
-        If a value or comment contains a character XML 1.0 cannot hold.
+        If a value, comment or user-defined parameter name contains a
+        character XML 1.0 cannot hold.
     """
     root = ElementTree.Element("cdm", {"id": VERSION_KEYWORD, "version": cdm.version})
     if cdm.version == VERSION_1_0:

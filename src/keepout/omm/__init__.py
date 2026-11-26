@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from keepout.ccsds.files import decode_file, strip_bom
+from keepout.ccsds.files import decode_file, is_xml, strip_bom
 from keepout.errors import OmmParseError
 from keepout.omm import celestrak, kvn, tle, xml
 from keepout.omm._io import OMM
@@ -78,7 +78,7 @@ def loads(text: str) -> tuple[Omm, ...]:
     body = strip_bom(text)
     start = body.lstrip()
     first, *second = start.splitlines()[:2] or [""]
-    if start.startswith("<"):
+    if is_xml(start):
         return xml.loads(start)
     if start.startswith(("[", "{")):
         return celestrak.loads_json(body)

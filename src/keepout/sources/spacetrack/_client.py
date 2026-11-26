@@ -15,11 +15,12 @@ from keepout._types import JsonValue, override
 from keepout.errors import (
     AuthError,
     HttpStatusError,
+    OmmParseError,
     RateLimited,
     SourceUnavailable,
 )
 from keepout.omm.celestrak import loads_json
-from keepout.sources._format import omm_reader
+from keepout.sources._format import refuse_format
 from keepout.sources._store import cache_dir
 from keepout.sources.cache import cached_fetch
 from keepout.sources.catalog import Catalog, CatalogPart, Retrieval
@@ -415,9 +416,6 @@ def _allowance(query: Query) -> str:
     )
 
 
-_read_gp: Final = omm_reader(loads_json, "Space-Track", "OMM JSON")
-
-
 def read_catalog(data: bytes) -> tuple[Omm, ...]:
     """The element sets of a Space-Track ``gp`` answer in JSON.
 
@@ -437,7 +435,10 @@ def read_catalog(data: bytes) -> tuple[Omm, ...]:
         If ``data`` is not UTF-8 OMM JSON (e.g. an error object instead of
         an array).
     """
-    return _read_gp(data)
+    try:
+        return loads_json(data.decode("utf-8"))
+    except (UnicodeDecodeError, OmmParseError) as exc:
+        refuse_format("Space-Track", "OMM JSON", data, exc)
 
 
 def fetch_public_cdms(
@@ -448,38 +449,10 @@ def fetch_public_cdms(
     transport: Transport | None = None,
     now: Callable[[], float] = time.time,
 ) -> PublicCdms:
-    """The public CDM summaries of the approaches still to come
-    (:data:`PUBLIC_CDMS`), from Space-Track or its cache.
+    """As :meth:`SpaceTrackClient.fetch_public_cdms`, in a session closed after.
 
-    Opens a :class:`SpaceTrackClient`, calls its
-    :meth:`~SpaceTrackClient.fetch_public_cdms` and closes it (logging out).
-    The rows may not be redistributed without Space-Track's approval.
-
-    Parameters
-    ----------
-    cache
-        Cache root; if ``None``, ``$KEEPOUT_CACHE_DIR`` or else the
-        platform's user cache directory for keepout.
-    max_age
-        Seconds a cached copy is used; the ``cdm_public`` interval of
-        :data:`~keepout.sources.spacetrack.CLASS_INTERVALS` (8 h) if
-        ``None``, and not less.
-    credentials
-        The account; from the environment if ``None`` and needed.
-    transport
-        Sends the requests; a new :class:`UrllibTransport` if ``None``.
-    now
-        Gives the current Unix time [s].
-
-    Returns
-    -------
-    PublicCdms
-        The summaries and their download.
-
-    Raises
-    ------
-    ValueError, RateLimited, AuthError, SourceUnavailable, SourceFormatError
-        As :meth:`SpaceTrackClient.fetch`.
+    The session is a new :class:`SpaceTrackClient` of ``credentials``,
+    ``cache``, ``transport`` and ``now``; closing it logs out.
     """
     return _in_session(
         lambda client: client.fetch_public_cdms(max_age=max_age),
@@ -498,36 +471,10 @@ def fetch_catalog(
     transport: Transport | None = None,
     now: Callable[[], float] = time.time,
 ) -> Catalog:
-    """The full GP catalog from Space-Track (:data:`CATALOG`), or its cache.
+    """As :meth:`SpaceTrackClient.fetch_catalog`, in a session closed after.
 
-    Opens a :class:`SpaceTrackClient`, calls its
-    :meth:`~SpaceTrackClient.fetch_catalog` and closes it (logging out).
-
-    Parameters
-    ----------
-    cache
-        Cache root; if ``None``, ``$KEEPOUT_CACHE_DIR`` or else the
-        platform's user cache directory for keepout.
-    max_age
-        Seconds a cached copy is used; the ``gp`` interval of
-        :data:`~keepout.sources.spacetrack.CLASS_INTERVALS` (1 h) if
-        ``None``, and not less.
-    credentials
-        The account; from the environment if ``None`` and needed.
-    transport
-        Sends the requests; a new :class:`UrllibTransport` if ``None``.
-    now
-        Gives the current Unix time [s].
-
-    Returns
-    -------
-    Catalog
-        One element set per object, and the download it came from.
-
-    Raises
-    ------
-    ValueError, RateLimited, AuthError, SourceUnavailable, SourceFormatError
-        As :meth:`SpaceTrackClient.fetch`.
+    The session is a new :class:`SpaceTrackClient` of ``credentials``,
+    ``cache``, ``transport`` and ``now``; closing it logs out.
     """
     return _in_session(
         lambda client: client.fetch_catalog(max_age=max_age),

@@ -20,6 +20,7 @@ from keepout.cdm.model import (
     CovarianceMethod,
     DuplicateKeyword,
     Field,
+    Maneuverable,
     Section,
 )
 from keepout.conjunction import Conjunction
@@ -76,10 +77,25 @@ def test_an_unknown_covariance_method_is_a_parse_error() -> None:
         _ = cdm.assumed_covariance
 
 
-@pytest.mark.parametrize("value", ["YES", "NO", "N/A"])
-def test_maneuverable_is_given_as_written(value: str) -> None:
+@pytest.mark.parametrize(
+    ("value", "maneuverable"),
+    [
+        ("YES", Maneuverable.YES),
+        ("NO", Maneuverable.NO),
+        ("N/A", Maneuverable.NOT_APPLICABLE),
+    ],
+)
+def test_maneuverable_is_read_as_its_value(
+    value: str, maneuverable: Maneuverable
+) -> None:
     cdm = minimal_cdm(replace(segment_fields(1), "MANEUVERABLE", value))
-    assert cdm.object1.maneuverable == value
+    assert cdm.object1.maneuverable is maneuverable
+
+
+def test_an_unknown_maneuverable_is_a_parse_error() -> None:
+    cdm = minimal_cdm(replace(segment_fields(1), "MANEUVERABLE", "MAYBE"))
+    with pytest.raises(CdmParseError, match="must be YES, NO or N/A, got 'MAYBE'"):
+        _ = cdm.object1.maneuverable
 
 
 def test_cd_area_over_mass_is_optional() -> None:

@@ -12,9 +12,7 @@ from typing import TYPE_CHECKING, Final
 import numpy as np
 
 from keepout.conjunction import Conjunction
-from keepout.objects import ObjectState
-from keepout.state import StateVector
-from keepout.validation.cara_inputs import NOMINAL_EPOCH
+from keepout.validation.cara_inputs import gcrf_object
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -146,7 +144,8 @@ not in the repository), transcribed from
 def similar_conjunction(
     covariance: Callable[[FloatArray], Covariance],
 ) -> Conjunction:
-    """The ``testSimilarTo*`` states at :data:`NOMINAL_EPOCH` with
+    """The ``testSimilarTo*`` states at
+    :data:`~keepout.validation.cara_inputs.NOMINAL_EPOCH` with
     ``covariance`` of each 6x6 matrix, HBR :data:`UNIT_TEST_HBR`.
 
     Parameters
@@ -161,7 +160,7 @@ def similar_conjunction(
         The conjunction.
     """
     primary, secondary = (
-        ObjectState(name, StateVector(NOMINAL_EPOCH, r, v, "GCRF"), covariance(matrix))
+        gcrf_object(name, r, v, covariance(matrix))
         for name, (r, v), matrix in zip(
             ("PRIMARY", "SECONDARY"),
             SIMILAR_STATES,

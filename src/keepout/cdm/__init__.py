@@ -8,7 +8,7 @@ and :mod:`keepout.cdm.xml` read and write a specific one.
 from pathlib import Path
 from typing import Literal, TypeAlias
 
-from keepout.ccsds.files import decode_file, read_file, strip_bom
+from keepout.ccsds.files import decode_file, is_xml, read_file, strip_bom
 from keepout.cdm import kvn, xml
 from keepout.cdm._io import CDM
 from keepout.cdm.builder import (
@@ -62,7 +62,7 @@ def format_of(text: str) -> CdmFormat:
     {"kvn", "xml"}
         The format of ``text``.
     """
-    return "xml" if strip_bom(text).lstrip().startswith("<") else "kvn"
+    return "xml" if is_xml(strip_bom(text)) else "kvn"
 
 
 def loads(text: str) -> Cdm:
@@ -101,7 +101,7 @@ def loads(text: str) -> Cdm:
     ```
     """
     body = strip_bom(text)
-    return xml.loads(body.lstrip()) if format_of(body) == "xml" else kvn.loads(body)
+    return xml.loads(body.lstrip()) if is_xml(body) else kvn.loads(body)
 
 
 def load(path: str | Path) -> Cdm:
@@ -145,34 +145,24 @@ def read_text(path: str | Path) -> str:
     """The text of a CDM file, as :func:`load` reads it: decompressed if it
     is gzip data, without a byte-order mark.
 
-    Parameters
-    ----------
-    path
-        File to read (UTF-8, gzip-compressed or not).
+    Parameters, and errors but for an invalid CDM, as for :func:`load`.
 
     Returns
     -------
     str
         The file's text.
-
-    Raises
-    ------
-    CdmParseError
-        If the file is broken gzip data or not UTF-8 text.
-    OSError
-        If it cannot be read.
     """
     return read_file(path, CDM)
 
 
 def decode_text(data: bytes, name: str, *, max_bytes: int | None = None) -> str:
-    """The text of a CDM file's bytes, as :func:`read_text` reads the file:
-    decompressed if it is gzip data, without a byte-order mark.
+    """The text of a CDM file's bytes (e.g. as uploaded), as
+    :func:`read_text` reads the file.
 
     Parameters
     ----------
     data
-        The file's bytes (UTF-8, gzip-compressed or not), e.g. as uploaded.
+        The file's bytes (UTF-8, gzip-compressed or not).
     name
         The file's name, which an error message starts with.
     max_bytes

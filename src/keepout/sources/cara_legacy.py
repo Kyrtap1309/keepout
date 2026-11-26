@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Final
 
 from astropy.time import Time
 
+from keepout.ccsds.kvn import KEYWORD
 from keepout.ccsds.message import COMMENT
 from keepout.cdm.keywords import STATE_KEYWORDS, covariance_matrix
 from keepout.errors import CaraFormatError, UnsupportedFrame
@@ -29,7 +30,7 @@ if TYPE_CHECKING:
 
 __all__ = ["load_legacy_objects"]
 
-_LINE: Final = re.compile(r"^\s*([A-Z][A-Z0-9_]*)\s*=\s*(\S+)")
+_LINE: Final = re.compile(rf"^\s*({KEYWORD.pattern})\s*=\s*(\S+)")
 _OBJECT: Final = re.compile(r"^\s*OBJECT\s*=")
 _UNKNOWN_DESIGNATOR: Final = "?"
 """Object ID of a section without ``OBJECT_DESIGNATOR``."""

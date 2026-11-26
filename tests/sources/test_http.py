@@ -1,5 +1,4 @@
 import email.message
-import gzip
 import http.client
 import io
 import urllib.error
@@ -144,15 +143,6 @@ def test_network_errors_become_source_unavailable(error: Exception) -> None:
 def test_other_errors_pass_through_network_errors() -> None:
     with pytest.raises(KeyError), _http.network_errors("cannot reach x"):
         raise KeyError("bug")
-
-
-def test_gunzip_decompresses_gzip_data() -> None:
-    assert _http.gunzip(gzip.compress(b"rows")) == b"rows"
-
-
-@pytest.mark.parametrize("data", [b"not gzip", b"\x1f\x8b\x08truncated"])
-def test_gunzip_of_something_else_is_none(data: bytes) -> None:
-    assert _http.gunzip(data) is None
 
 
 def test_a_dropped_download_is_tried_again(monkeypatch: pytest.MonkeyPatch) -> None:

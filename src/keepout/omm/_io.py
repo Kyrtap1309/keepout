@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import functools
 from typing import TYPE_CHECKING, Any, Final, NamedTuple
 
 from astropy.time import Time
@@ -36,30 +36,30 @@ OMM: Final = Family(
 """The OMM message family; keywords it does not keep are read as text."""
 
 
-@dataclass(frozen=True, slots=True)
-class _Errors:
-    """The maker of one object's parse errors, placed at the keyword's value."""
-
-    values: Mapping[str, object]
-    record: int | None
-    line: int | None
-    path: str | None
-
-    def __call__(self, message: str, keyword: str) -> OmmParseError:
-        place = self.values.get(keyword)
-        if not isinstance(place, Located):
-            place = Located("")
-        return OmmParseError(
-            message,
-            record=self.record,
-            line=self.line if place.line is None else place.line,
-            path=self.path if place.path is None else place.path,
-            keyword=keyword,
-        )
+def _placed_error(
+    values: Mapping[str, Located | str],
+    message: str,
+    keyword: str,
+    *,
+    record: int | None,
+    line: int | None,
+    path: str | None,
+) -> OmmParseError:
+    """The error of ``keyword``'s value, at the value's place if it has one."""
+    place = values.get(keyword)
+    if not isinstance(place, Located):
+        place = Located("")
+    return OmmParseError(
+        message,
+        record=record,
+        line=line if place.line is None else place.line,
+        path=path if place.path is None else place.path,
+        keyword=keyword,
+    )
 
 
 def parse_record(
-    values: Mapping[str, object],
+    values: Mapping[str, Located | str],
     *,
     record: int | None = None,
     line: int | None = None,
@@ -96,16 +96,15 @@ def parse_record(
         If a keyword is missing or has an invalid value or unit, the metadata
         are not those of SGP4 elements, or the elements are invalid.
     """
-    make_error = _Errors(values, record, line, path)
+    make_error = functools.partial(
+        _placed_error, values, record=record, line=line, path=path
+    )
 
     def text_of(keyword: str) -> Located:
-        match values[keyword]:
-            case Located() as value:
-                return value._replace(text=value.text.strip())
-            case str() as value:
-                return Located(value.strip())
-            case value:
-                raise make_error(f"must be text, got {value!r}", keyword)
+        value = values[keyword]
+        if isinstance(value, str):
+            return Located(value.strip())
+        return value._replace(text=value.text.strip())
 
     for keyword, accepted in FIXED_METADATA.items():
         if keyword in values and (stated := text_of(keyword).text) not in accepted:

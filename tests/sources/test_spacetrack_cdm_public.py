@@ -114,6 +114,10 @@ def test_an_approach_not_emergency_reportable_reads_false() -> None:
         (space_track_cdm_public(public_cdm(TCA="")), "TCA is empty"),
         (space_track_cdm_public(public_cdm(TCA="soon")), "TCA is not an ISO 8601"),
         (
+            space_track_cdm_public(ROW, public_cdm(TCA="soon"), ROW),
+            "row 2: TCA is not an ISO 8601",
+        ),
+        (
             space_track_cdm_public(public_cdm(CREATED="2026-13-01 00:00:00")),
             "CREATED is not an ISO 8601",
         ),

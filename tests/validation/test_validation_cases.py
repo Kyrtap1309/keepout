@@ -261,8 +261,12 @@ def test_alfano_monte_carlo_cases_carry_the_cara_interval(
 
 
 def test_monte_carlo_options_are_bounded_and_reproducible() -> None:
-    assert monte_carlo_options(Suite.UNIT_TESTS, "1", 0.5)["samples"] == MC_SAMPLES[0]
-    assert monte_carlo_options(Suite.UNIT_TESTS, "1", 1e-5)["samples"] == MC_SAMPLES[1]
+    assert (
+        monte_carlo_options(Suite.UNIT_TESTS, "1", 0.5).get("samples") == MC_SAMPLES[0]
+    )
+    assert (
+        monte_carlo_options(Suite.UNIT_TESTS, "1", 1e-5).get("samples") == MC_SAMPLES[1]
+    )
     assert monte_carlo_options(Suite.UNIT_TESTS, "1", 1e-3) == monte_carlo_options(
         Suite.UNIT_TESTS, "1", 1e-3
     )

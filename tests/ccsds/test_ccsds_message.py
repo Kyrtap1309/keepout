@@ -94,6 +94,24 @@ def test_decode_file_caps_the_size(family: Family) -> None:
         files.decode_file(text.encode(), "f", family, max_bytes=size - 1)
 
 
+def test_gunzip_decompresses_gzip_data() -> None:
+    assert files.gunzip(gzip.compress(b"rows")) == b"rows"
+
+
+@pytest.mark.parametrize(
+    "data", [b"not gzip", b"\x1f\x8b\x08truncated"], ids=["other", "truncated"]
+)
+def test_gunzip_of_something_else_is_a_gzip_error(data: bytes) -> None:
+    with pytest.raises(files.GzipError, match="invalid gzip data"):
+        files.gunzip(data)
+
+
+def test_gunzip_inflates_no_further_than_its_limit() -> None:
+    bomb = gzip.compress(b" " * 50_000_000)
+    with pytest.raises(files.GzipError, match="larger than 1000 bytes"):
+        files.gunzip(bomb, max_bytes=1000)
+
+
 @pytest.mark.parametrize("family", FAMILIES)
 def test_decode_file_caps_gzip_data_once_decompressed(family: Family) -> None:
     text = "A = 1\n" * 1000

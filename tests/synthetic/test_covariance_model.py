@@ -324,6 +324,14 @@ def test_comments_describe_the_model_parameters_and_age() -> None:
     assert earlier[4] == f"Element set epoch {epoch} UTC, age -0.500 days"
 
 
+def test_the_described_covariance_is_the_covariance_and_its_comments() -> None:
+    omm = BY_NUMBER[900]
+    time = at(omm, 1.25 * 86400.0)
+    covariance, comments = MODEL.described_covariance(omm, time)
+    assert comments == MODEL.comments(omm, time)
+    np.testing.assert_array_equal(covariance.matrix, MODEL.covariance(omm, time).matrix)
+
+
 @given(elements, ages)
 def test_comments_are_short_ascii_lines(omm: Omm, age: float) -> None:
     for line in MODEL.comments(omm, at(omm, age)):

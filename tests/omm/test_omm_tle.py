@@ -140,11 +140,6 @@ def test_blank_text_holds_no_element_sets() -> None:
     assert tle.loads("") == tle.loads("\n \n") == ()
 
 
-def test_the_checksum_is_sgp4s() -> None:
-    for line in (GOES_LINE_1, GOES_LINE_2):
-        assert tle.checksum(line) == compute_checksum(line[:68]) == int(line[68])
-
-
 def test_a_file_is_read(tmp_path: Path) -> None:
     path = tmp_path / "goes.tle"
     path.write_text(GOES_9_TLE, encoding="utf-8")
@@ -232,19 +227,5 @@ def test_satrec_is_sgp4s_initialisation_of_the_tle_values(
 ) -> None:
     text, values = element_set
     (omm,) = tle.loads(text)
-    assert omm == omm_from(values)
-    assert_same_satrec(satrec_of(omm), sgp4_record(values))
-
-
-def test_an_epoch_on_a_day_that_ends_in_a_utc_step_is_read_exactly() -> None:
-    # Day 366.00000501 of 1964 is 00:00:00.432864, on a day that ended in a
-    # UTC step of 0.1 s.
-    line_1 = with_checksum(GOES_LINE_1[:18] + "64366.00000501" + GOES_LINE_1[32:68])
-    (omm,) = tle.loads(f"{line_1}\n{GOES_LINE_2}\n")
-    values = {
-        **GOES_9_TLE_VALUES,
-        "OBJECT_NAME": "UNKNOWN",
-        "EPOCH": "1964-12-31T00:00:00.432864",
-    }
     assert omm == omm_from(values)
     assert_same_satrec(satrec_of(omm), sgp4_record(values))

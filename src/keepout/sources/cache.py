@@ -15,15 +15,14 @@ import dataclasses
 import enum
 import functools
 import gzip
-import hashlib
 import json
 import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, NamedTuple, TypeVar
 
+from keepout.ccsds.files import GzipError, gunzip
 from keepout.errors import SourceFormatError, SourceUnavailable
-from keepout.sources._http import gunzip
-from keepout.sources._store import store_bytes, store_json
+from keepout.sources._store import has_digest, store_bytes, store_json
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -120,7 +119,6 @@ def read_copy(target: Path, url: str) -> CachedCopy | None:
     """
     try:
         record: JsonValue = json.loads(meta_path(target).read_bytes())
-        data = target.read_bytes()
     except (OSError, ValueError):
         return None
     if not isinstance(record, dict) or record.get("format") != _META_FORMAT:
@@ -132,8 +130,14 @@ def read_copy(target: Path, url: str) -> CachedCopy | None:
         or not isinstance(digest, str)
         or not _is_time(retrieved)
         or not _is_time(checked)
-        or hashlib.sha256(data).hexdigest() != digest
     ):
+        return None
+    # A copy this process has checked is not hashed again (has_digest).
+    try:
+        if not has_digest(target, digest):
+            return None
+        data = target.read_bytes()
+    except OSError:
         return None
     meta = CopyMeta(url=url, sha256=digest, retrieved=retrieved, checked=checked)
     return CachedCopy(data, meta)
@@ -324,12 +328,9 @@ def _read_cached(
     read: Callable[[bytes], _T], cached: CachedCopy, *, compressed: bool
 ) -> _T | _Unreadable:
     """``read(body)`` of a cached copy; :data:`_UNREADABLE` if it cannot."""
-    data = gunzip(cached.data) if compressed else cached.data
-    if data is None:
-        return _UNREADABLE
     try:
-        return read(data)
-    except SourceFormatError:
+        return read(gunzip(cached.data) if compressed else cached.data)
+    except (GzipError, SourceFormatError):
         return _UNREADABLE
 
 

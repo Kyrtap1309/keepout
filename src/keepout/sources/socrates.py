@@ -96,7 +96,8 @@ def read_socrates(text: str) -> tuple[SocratesApproach, ...]:
     ----------
     text
         The report as CelesTrak sends it: a header of :data:`COLUMNS`, which
-        may start with a byte-order mark, and one line per approach.
+        may start with a byte-order mark, and one line per approach. Blank
+        lines are ignored.
 
     Returns
     -------
@@ -107,18 +108,33 @@ def read_socrates(text: str) -> tuple[SocratesApproach, ...]:
     ------
     SourceFormatError
         If the header is not the report's, a row has another number of
-        values, or a value cannot be read.
+        values, a quoted value runs over a line end, or a value cannot be
+        read.
     """
-    header, *lines = text.splitlines(keepends=True) or [""]
-    columns = next(csv.reader([strip_bom(header)]), [])
-    if tuple(columns) != COLUMNS:
+    lines = [
+        (number, line)
+        for number, line in enumerate(
+            strip_bom(text).splitlines(keepends=True), start=1
+        )
+        if line.strip()
+    ]
+    header = lines[0][1] if lines else ""
+    reader = csv.reader(line for _, line in lines)
+    if tuple(next(reader, [])) != COLUMNS or reader.line_num > 1:
         raise SourceFormatError(f"not a SOCRATES report header: {header.strip()!r}")
-    rows = [next(csv.reader([line])) for line in lines]
-    for number, row in enumerate(rows, start=2):
+    rows: list[list[str]] = []
+    for row in reader:
+        number = lines[len(rows) + 1][0]
+        if reader.line_num != len(rows) + 2:
+            raise SourceFormatError(
+                f"line {number}: a quoted value runs over a line end"
+            )
         if len(row) != len(COLUMNS):
             raise SourceFormatError(
                 f"line {number}: {len(row)} values, not {len(COLUMNS)}"
             )
+        rows.append(row)
+    lines = lines[1:]
     records: list[dict[str, str]] = [
         dict(zip(COLUMNS, row, strict=True)) for row in rows
     ]
@@ -126,7 +142,9 @@ def read_socrates(text: str) -> tuple[SocratesApproach, ...]:
         tcas = Time([record["TCA"] for record in records], format="iso", scale="utc")
         return tuple(
             _approach(record, tcas[index], line)
-            for index, (record, line) in enumerate(zip(records, lines, strict=True))
+            for index, (record, (_, line)) in enumerate(
+                zip(records, lines, strict=True)
+            )
         )
     except ValueError as exc:
         raise SourceFormatError(f"cannot read a SOCRATES report: {exc}") from exc

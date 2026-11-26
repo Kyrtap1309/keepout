@@ -120,7 +120,8 @@ def dumps(cdm: Cdm) -> str:
     ------
     CdmWriteError
         If a value other than a comment contains a line break (KVN has no
-        escaping).
+        escaping), or a keyword is not one KVN can hold (a user-defined
+        parameter read from XML may be named by any text).
     """
     lines: list[str] = []
     for section in (cdm.header, cdm.relative, *cdm.object_sections):

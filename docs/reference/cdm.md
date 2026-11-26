@@ -28,7 +28,6 @@ Reading, writing and building Conjunction Data Messages. See [Reading a CDM](../
     options:
       heading_level: 3
       members:
-        - KEYWORD_PATTERN
         - USER_DEFINED_PREFIX
         - DuplicateKeyword
         - covariance_dimension

@@ -10,14 +10,12 @@ transient failure (:func:`retrying`).
 from __future__ import annotations
 
 import contextlib
-import gzip
 import http.client
 import io
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
-import zlib
 from collections.abc import Callable, Collection, Generator, Mapping, Sequence
 from http import HTTPStatus
 from importlib.metadata import version
@@ -34,7 +32,6 @@ __all__ = [
     "USER_AGENT",
     "Downloader",
     "Sink",
-    "gunzip",
     "http_download",
     "http_request",
     "http_stream",
@@ -267,11 +264,3 @@ def http_download(url: str, *, retry_delays: Sequence[float] = RETRY_DELAYS) -> 
         return buffer.getvalue()
 
     return retrying(attempt, delays=retry_delays)
-
-
-def gunzip(data: bytes) -> bytes | None:
-    """``data`` decompressed, or ``None`` if it is not intact gzip data."""
-    try:
-        return gzip.decompress(data)
-    except (OSError, EOFError, zlib.error):
-        return None

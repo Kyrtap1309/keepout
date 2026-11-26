@@ -138,9 +138,9 @@ _NAME = st.text(st.sampled_from('ABCXYZ0189 -()/,"'), min_size=1, max_size=24).f
     lambda name: name.strip() == name
 )
 
-# UTC epochs from 1957 to 2149 on CelesTrak's microsecond grid, on both sides
-# of ERFA's leap-second table (1960 to a few years past its last leap second).
-_EPOCH_START = datetime.datetime(1957, 1, 1, tzinfo=datetime.UTC)
+# UTC epochs from 1972 (the first read) to 2149 on CelesTrak's microsecond
+# grid, within and past ERFA's leap-second table.
+_EPOCH_START = datetime.datetime(1972, 1, 1, tzinfo=datetime.UTC)
 _EPOCH_END = datetime.datetime(2150, 1, 1, tzinfo=datetime.UTC)
 _EPOCH = st.integers(
     0, (_EPOCH_END - _EPOCH_START) // datetime.timedelta(microseconds=1) - 1
@@ -259,7 +259,8 @@ def element_sets(draw: st.DrawFn) -> tuple[str, dict[str, str]]:
     number = draw(st.integers(0, MAX_SATREC_NUMBER))
     satnum = to_alpha5(number)
     classification = draw(st.sampled_from("UCS "))
-    year = draw(st.integers(0, 99))
+    # Two-digit years from 1972 on: UTC epochs before are not read.
+    year = draw(st.one_of(st.integers(72, 99), st.integers(0, 56)))
     full_year = year + (1900 if year >= 57 else 2000)
     leap = full_year % 4 == 0 and (full_year % 100 != 0 or full_year % 400 == 0)
     day = draw(st.integers(1, 366 if leap else 365))

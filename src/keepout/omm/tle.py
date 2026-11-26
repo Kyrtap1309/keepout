@@ -11,12 +11,14 @@ have no TLE form, which is why OMM replaces it.
 Each field becomes its OMM keyword's text, read like any other OMM, so
 :func:`~keepout.propagation.satrec_of` gives the record
 :meth:`sgp4.api.Satrec.twoline2rv` makes from the lines. Two-digit years
-57-99 are 1957-1999 and 00-56 are 2000-2056. The epoch's day fraction has
-eight digits, a grid of 864 microseconds, so it becomes whole microseconds
-exactly. A TLE without a name line gets the ``OBJECT_NAME`` ``UNKNOWN``, and
-a blank international designator the ``OBJECT_ID`` ``UNKNOWN``, as CCSDS
-502.0-B-3 (table 4-2) asks; a blank classification or ephemeris type takes
-the CCSDS default (:data:`~keepout.omm.keywords.DEFAULTS`).
+57-99 are 1957-1999 and 00-56 are 2000-2056; an epoch before 1972 is
+refused, as in every OMM (:func:`~keepout.ccsds.epochs.parse_epoch`). The
+epoch's day fraction has eight digits, a grid of 864 microseconds, so it
+becomes whole microseconds exactly. A TLE without a name line gets the
+``OBJECT_NAME`` ``UNKNOWN``, and a blank international designator the
+``OBJECT_ID`` ``UNKNOWN``, as CCSDS 502.0-B-3 (table 4-2) asks; a blank
+classification or ephemeris type takes the CCSDS default
+(:data:`~keepout.omm.keywords.DEFAULTS`).
 """
 
 from __future__ import annotations
@@ -39,7 +41,7 @@ if TYPE_CHECKING:
 
     from keepout.omm.model import Omm
 
-__all__ = ["checksum", "load", "loads"]
+__all__ = ["load", "loads"]
 
 _LINES: Final = {
     "1": re.compile(
@@ -81,22 +83,6 @@ _EXPONENTIAL: Final = re.compile(
 )
 _DECIMAL: Final = re.compile(r" *[0-9]+\.[0-9]+")
 _DIGITS: Final = re.compile(r"[0-9]{7}")
-
-
-def checksum(line: str) -> int:
-    """The TLE checksum of a line: its digits summed, each minus sign as 1, mod 10.
-
-    Parameters
-    ----------
-    line
-        The line; only its first 68 columns count.
-
-    Returns
-    -------
-    int
-        The checksum, 0 to 9.
-    """
-    return compute_checksum(line)
 
 
 def _match(pattern: re.Pattern[str], text: str) -> re.Match[str]:
@@ -281,10 +267,10 @@ def _fields(
             record=record,
             line=line_number,
         )
-    if match["sum"] != str(checksum(line)):
+    if match["sum"] != str(compute_checksum(line)):
         raise OmmParseError(
             f"TLE line {line_kind} checksum is {match['sum']!r}, "
-            f"its columns give {checksum(line)}",
+            f"its columns give {compute_checksum(line)}",
             record=record,
             line=line_number,
         )

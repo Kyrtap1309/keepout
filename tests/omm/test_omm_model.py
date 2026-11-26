@@ -58,41 +58,11 @@ def test_satrec_is_the_record_sgp4_makes_from_the_message() -> None:
     assert_same_satrec(satrec_of(ISS_OMM), sgp4_record(ISS))
 
 
-@pytest.mark.parametrize(
-    "epoch", ["1958-03-17T12:00:00.000000", "2100-02-28T23:59:59.999999"]
-)
-def test_epochs_outside_the_leap_second_table_are_read_and_used(epoch: str) -> None:
-    values = {**ISS, "EPOCH": epoch}
+def test_an_epoch_past_the_leap_second_table_is_read_and_used() -> None:
+    values = {**ISS, "EPOCH": "2100-02-28T23:59:59.999999"}
     omm = omm_from(values)
-    assert omm.keyword_texts() == {**ISS_OMM.keyword_texts(), "EPOCH": epoch}
+    assert omm.keyword_texts() == {**ISS_OMM.keyword_texts(), "EPOCH": values["EPOCH"]}
     assert_same_satrec(satrec_of(omm), sgp4_record(values))
-
-
-@pytest.mark.parametrize(
-    "epoch", ["1964-12-31T00:00:00.432864", "1968-01-31T23:59:59.899999"]
-)
-def test_epochs_on_a_day_that_ends_in_a_utc_step_are_read_and_used(
-    epoch: str,
-) -> None:
-    values = {**ISS, "EPOCH": epoch}
-    omm = omm_from(values)
-    assert omm.keyword_texts() == {**ISS_OMM.keyword_texts(), "EPOCH": epoch}
-    assert_same_satrec(satrec_of(omm), sgp4_record(values))
-
-
-@pytest.mark.parametrize(
-    ("epoch", "sgp4_epoch"),
-    [
-        ("1964-12-31T23:59:60.0999999", "1965-01-01T00:00:00.000000"),
-        ("1968-01-31T23:59:59.8999996", "1968-02-01T00:00:00.000000"),
-    ],
-)
-def test_an_epoch_rounded_past_the_end_of_a_step_day_starts_the_next(
-    epoch: str, sgp4_epoch: str
-) -> None:
-    omm = omm_from({**ISS, "EPOCH": epoch})
-    assert omm.keyword_texts()["EPOCH"] == epoch
-    assert_same_satrec(satrec_of(omm), sgp4_record({**ISS, "EPOCH": sgp4_epoch}))
 
 
 def test_satrec_holds_a_six_digit_catalog_number() -> None:

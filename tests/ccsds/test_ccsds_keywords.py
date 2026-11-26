@@ -1,10 +1,8 @@
 """CCSDS keyword values: units, numbers and UTC epochs (on CDM keywords)."""
 
-import datetime
 import math
 import sys
 import warnings
-from decimal import Decimal
 
 import pytest
 from astropy.time import Time
@@ -14,7 +12,6 @@ from hypothesis import strategies as st
 from keepout.ccsds.epochs import (
     format_epoch,
     parse_epoch,
-    parse_epochs,
     preparse_epochs,
     utc_fields,
 )
@@ -101,6 +98,33 @@ def test_ordinal_epoch_and_trailing_z() -> None:
 
 
 @pytest.mark.parametrize(
+    ("text", "isot"),
+    [
+        ("2020-03-04T10:34:41.9999999996", "2020-03-04T10:34:42.000000000"),
+        ("1999-365T23:59:59.9999999999", "2000-01-01T00:00:00.000000000"),
+    ],
+)
+def test_a_fraction_of_over_nine_digits_may_round_up_to_the_next_second(
+    text: str, isot: str
+) -> None:
+    # CCSDS sets no limit on the digits; astropy keeps nine.
+    assert format_epoch(parse_epoch(text)) == isot
+
+
+@pytest.mark.parametrize(
+    "text", ["1971-12-31T23:59:59.999", "1964-366T12:00:00", "1957-10-04T19:28:34"]
+)
+def test_a_utc_epoch_before_1972_is_refused(text: str) -> None:
+    with pytest.raises(ValueError, match="UTC epochs before 1972-01-01 are not read"):
+        parse_epoch(text)
+
+
+def test_a_utc_epoch_before_1972_is_not_written() -> None:
+    with pytest.raises(ValueError, match="UTC epochs before 1972-01-01 are not"):
+        format_epoch(Time("1971-12-31T23:59:59", scale="utc"))
+
+
+@pytest.mark.parametrize(
     "text",
     [
         "2010-13-40T00:00:00",
@@ -115,13 +139,6 @@ def test_ordinal_epoch_and_trailing_z() -> None:
         "2020-01-01T12:60:00",
         # Outside ERFA's leap-second table a second 60 is still refused.
         "2035-06-30T23:59:60",
-        "1955-181T23:59:60",
-        # Past the 0.1 s UTC step at the end of 1964-12-31, and in the 0.1 s
-        # that 1968-01-31 lacked.
-        "1964-12-31T23:59:60.1",
-        "1968-01-31T23:59:59.95",
-        # astropy writes years before 1000 with fewer digits.
-        "0999-365T12:00:00",
     ],
 )
 def test_invalid_epochs(text: str) -> None:
@@ -144,7 +161,6 @@ def test_leap_seconds_and_leap_days_are_accepted(text: str, isot: str) -> None:
 @pytest.mark.parametrize(
     ("text", "isot"),
     [
-        ("1957-10-04T19:28:34", "1957-10-04T19:28:34"),
         ("2035-06-30T12:00:00.25", "2035-06-30T12:00:00.25"),
         ("2150-001T00:00:00.000001", "2150-01-01T00:00:00.000001"),
     ],
@@ -152,143 +168,9 @@ def test_leap_seconds_and_leap_days_are_accepted(text: str, isot: str) -> None:
 def test_epochs_outside_the_leap_second_table_are_accepted(
     text: str, isot: str
 ) -> None:
-    # ERFA calls UTC before 1960 or a few years past its last leap second
-    # "dubious": the leap seconds there are unknown, not the time invalid.
+    # ERFA calls UTC a few years past its last leap second "dubious": the
+    # leap seconds there are unknown, not the time invalid.
     assert format_epoch(parse_epoch(text)) == isot
-
-
-UTC_STEP_DAYS = (
-    "1960-12-31",
-    "1961-07-31",
-    "1963-10-31",
-    "1964-03-31",
-    "1964-08-31",
-    "1964-12-31",
-    "1965-02-28",
-    "1965-06-30",
-    "1965-08-31",
-    "1968-01-31",
-    "1971-12-31",
-)
-"""The days before 1972 at whose end UTC stepped by a fraction of a second
-(-0.1 s to +0.108 s; leap seconds came in 1972)."""
-
-
-@pytest.mark.parametrize("day", UTC_STEP_DAYS)
-@pytest.mark.parametrize("clock", ["00:00:00.432864", "12:00:00", "23:59:59.899999"])
-def test_epochs_on_a_day_that_ends_in_a_utc_step_are_read_as_written(
-    day: str, clock: str
-) -> None:
-    # ERFA's Julian dates stretch such a day by its step; astropy's text
-    # (ERFA's d2dtf) undoes that only for steps over 0.5 s, so it was 1 us
-    # off at 00:00:00.432864 (a TLE epoch of day .00000501), 0.05 s at noon.
-    text = f"{day}T{clock}"
-    assert format_epoch(parse_epoch(text)) == text
-
-
-@pytest.mark.parametrize(
-    ("text", "isot"),
-    [
-        ("1964-12-31T23:59:60.05", "1964-12-31T23:59:60.05"),
-        ("1964-366T12:00:00.000001", "1964-12-31T12:00:00.000001"),
-    ],
-)
-def test_the_utc_step_ends_its_day(text: str, isot: str) -> None:
-    # Like a leap second, the 0.1 s step is written as 23:59:60.0 to 60.1.
-    assert format_epoch(parse_epoch(text)) == isot
-
-
-@pytest.mark.parametrize(
-    ("text", "precision", "isot"),
-    [
-        ("1964-12-31T23:59:60.0999999", 6, "1965-01-01T00:00:00.000000"),
-        ("1968-01-31T23:59:59.8999996", 6, "1968-02-01T00:00:00.000000"),
-        ("1968-01-31T23:59:59.6", 0, "1968-02-01T00:00:00"),
-        ("1964-12-31T23:59:60.06", 1, "1965-01-01T00:00:00.0"),
-        ("1964-12-31T23:59:60.04", 1, "1964-12-31T23:59:60.0"),
-        ("1964-366T23:59:60.0999999", 6, "1965-01-01T00:00:00.000000"),
-    ],
-)
-def test_a_time_rounded_past_the_end_of_a_step_day_is_the_next_day(
-    text: str, precision: int, isot: str
-) -> None:
-    # The date and the clock round together: the clock never reaches the
-    # day's length on the old date.
-    assert format_epoch(Time(parse_epoch(text), precision=precision)) == isot
-
-
-_STEPS = "0.005 -0.05 0.1 0.1 0.1 0.1 0.1 0.1 0.1 -0.1 0.107758"
-UTC_STEPS: dict[str, Decimal] = dict(
-    zip(UTC_STEP_DAYS, map(Decimal, _STEPS.split()), strict=True)
-)
-"""Each step [s], from the TAI-UTC table (USNO tai-utc.dat), as ERFA has it."""
-
-
-def _step_day_reference(day: str, nanoseconds: Decimal, digits: int) -> str:
-    """Text of the time ``nanoseconds`` into a UTC step day, rounded to ``digits``.
-
-    A clock rounded to the day's length or past it does not exist on that
-    day: the time is the next day's 00:00:00.
-    """
-    length = 86_400 + UTC_STEPS[day]
-    clock = nanoseconds.scaleb(-9).quantize(Decimal(1).scaleb(-digits))
-    if clock >= length:
-        following = datetime.date.fromisoformat(day) + datetime.timedelta(days=1)
-        zeros = "." + "0" * digits if digits else ""
-        return f"{following.isoformat()}T00:00:00{zeros}"
-    # From 23:59 on, the seconds run on past 59 into a positive step.
-    minutes = min(int(clock), 86_340) // 60
-    hour, minute = divmod(minutes, 60)
-    seconds = clock - 3600 * hour - 60 * minute
-    width = 3 + digits if digits else 2
-    return f"{day}T{hour:02d}:{minute:02d}:{seconds:0{width}.{digits}f}"
-
-
-@settings(deadline=None)
-@given(
-    day=st.sampled_from(UTC_STEP_DAYS),
-    before_end=st.one_of(st.integers(0, 2_000_000), st.integers(0, 86_399_999_999_999)),
-    digits=st.integers(0, 9),
-)
-def test_times_on_a_step_day_round_to_the_nearest_written_time(
-    day: str, before_end: int, digits: int
-) -> None:
-    # Times in the last 2 ms of the day or anywhere in it, at every precision,
-    # against exact decimal arithmetic on the day's length. A quarter of a
-    # nanosecond off the grid keeps the rounding clear of ties.
-    length_ns = (86_400 + UTC_STEPS[day]).scaleb(9)
-    nanoseconds = length_ns - 1 - before_end + Decimal("0.25")
-    assume(nanoseconds >= 0)
-    start = Time(f"{day}T00:00:00", scale="utc")
-    fraction = float(nanoseconds / length_ns)
-    epoch = Time(start.jd1, start.jd2 + fraction, format="jd", scale="utc")
-    expected = _step_day_reference(day, nanoseconds, digits)
-    assert format_epoch(Time(epoch, precision=digits)) == expected
-    # The text reads back to itself, also with the day of year.
-    if expected.startswith(day):
-        doy = datetime.date.fromisoformat(day).timetuple().tm_yday
-        yday = f"{day[:4]}-{doy:03d}{expected[10:]}"
-        assert format_epoch(parse_epoch(expected)) == expected
-        assert format_epoch(parse_epoch(yday)) == expected
-
-
-def test_an_epoch_on_a_day_that_ends_in_a_utc_step_keeps_its_time() -> None:
-    # TAI-UTC on 1964-12-31: 3.44013 s less 0.001296 s a day before 1965.
-    tai = parse_epoch("1964-12-31T12:00:00.000000").tai
-    assert tai.isot == "1964-12-31T12:00:03.439482"
-
-
-@pytest.mark.parametrize(
-    "text",
-    [
-        "1964-12-30T12:00:00",
-        "1965-01-01T00:00:00.000001",
-        # ERFA's drift arithmetic gives this day a step of -4e-16 s.
-        "1961-12-31T23:59:59.999999",
-    ],
-)
-def test_the_other_days_before_1972_are_read_as_written(text: str) -> None:
-    assert format_epoch(parse_epoch(text)) == text
 
 
 @pytest.mark.parametrize(
@@ -350,7 +232,7 @@ def _fields_text(fields: tuple[int, ...], digits: int) -> str:
 
 @settings(deadline=None, max_examples=300)
 @given(
-    st.floats(min_value=2086308.0, max_value=5373484.0),
+    st.floats(min_value=2441317.5, max_value=5373484.0),
     st.integers(min_value=0, max_value=9),
 )
 def test_utc_fields_are_those_format_epoch_writes(jd: float, digits: int) -> None:
@@ -370,7 +252,6 @@ def test_utc_fields_are_those_format_epoch_writes(jd: float, digits: int) -> Non
         ("2016-12-31T23:59:59.9999996", 6, "2016-12-31T23:59:60.000000"),
         ("2026-12-31T23:59:59.9999996", 6, "2027-01-01T00:00:00.000000"),
         ("2100-02-28T23:59:59.5", 0, "2100-03-01T00:00:00"),
-        ("1958-03-17T12:00:00.25", 3, "1958-03-17T12:00:00.250"),
     ],
 )
 def test_utc_fields_round_as_format_epoch(text: str, digits: int, isot: str) -> None:
@@ -379,19 +260,14 @@ def test_utc_fields_round_as_format_epoch(text: str, digits: int, isot: str) -> 
     assert _fields_text(fields, digits) == isot
 
 
-@pytest.mark.parametrize("text", ["1965-06-01T00:00:00", "1972-12-31T23:59:59.9999999"])
-def test_utc_fields_are_none_for_unusual_years(text: str) -> None:
-    assert utc_fields(parse_epoch(text), 6) is None
-
-
 def test_utc_fields_are_none_for_unusual_epochs() -> None:
     date_only = Time("2026-10-06T00:20:47", scale="utc", out_subfmt="date")
     assert utc_fields(date_only, 6) is None
     assert utc_fields(Time(["2026-10-06T00:20:47"], scale="utc"), 6) is None
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")  # dubious year
-        year_999 = Time(2086300.0, format="jd", scale="utc")
-    assert utc_fields(year_999, 6) is None
+        before_1972 = Time(2441317.0, format="jd", scale="utc")
+    assert utc_fields(before_1972, 6) is None
 
 
 def test_format_value() -> None:
@@ -488,13 +364,6 @@ def test_epochs_parsed_together_are_those_parsed_one_by_one(texts: list[str]) ->
     ):
         if epoch is not None:
             assert _time_state(epoch) == outcome, text
-    errors = [outcome for outcome in expected if outcome[0] == "error"]
-    if errors:
-        with pytest.raises(ValueError, match="invalid CCSDS epoch") as caught:
-            parse_epochs(texts)
-        assert ("error", str(caught.value)) == errors[0]
-    else:
-        assert [_time_state(epoch) for epoch in parse_epochs(texts)] == expected
 
 
 @pytest.mark.parametrize(
@@ -520,10 +389,10 @@ def test_epochs_parsed_together_are_those_parsed_one_by_one(texts: list[str]) ->
             ],
             [False, False, True],
         ),
-        # Years outside ERFA's leap-second table, and before 1972.
+        # A year past ERFA's leap-second table, and years before 1972.
         (
-            ["1955-01-01T00:00:00.5", "2035-06-30T12:00:00", "1964-12-31T23:59:60.05"],
-            [True, True, False],
+            ["1955-01-01T00:00:00.5", "2035-06-30T12:00:00", "1971-12-31T12:00:00"],
+            [False, True, False],
         ),
     ],
 )
@@ -553,8 +422,3 @@ def test_epochs_parsed_together_are_independent_times() -> None:
     assert second is not None
     first.precision = 3
     assert second.precision == 1
-
-
-def test_parse_epochs_raises_the_first_invalid_epochs_error() -> None:
-    with pytest.raises(ValueError, match="'2026-02-30T00:00:00'"):
-        parse_epochs(["2026-01-01T00:00:00", "2026-02-30T00:00:00", "never"])

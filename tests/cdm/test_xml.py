@@ -104,19 +104,27 @@ def test_user_defined_without_parameter_is_rejected() -> None:
     assert info.value.path.endswith("userDefinedParameters/USER_DEFINED")
 
 
-def test_an_invalid_user_defined_keyword_is_a_parse_error() -> None:
-    # The parameter makes the keyword USER_DEFINED_run id, which no section
-    # may hold: reported at the section, not as a duplicate.
+def test_a_user_defined_parameter_of_any_text_is_read_and_written_back() -> None:
+    # The NDM/XML schema types the parameter attribute as any string.
     text = mutate(
         xml.dumps(kvn.load(TRACSS)), ' parameter="RUN_ID"', ' parameter="run id"'
     )
-    with pytest.raises(
-        CdmParseError, match="keyword 'USER_DEFINED_run id' must be"
-    ) as info:
-        xml.loads(text)
-    assert isinstance(info.value.__cause__, ValueError)
-    assert info.value.path == "cdm/body/segment[1]"
-    assert info.value.keyword is None
+    cdm = xml.loads(text)
+    assert cdm.object1.user_defined["USER_DEFINED_run id"] == (
+        "8e815679-b659-48df-957e-9c5b4921af52"
+    )
+    root = ElementTree.fromstring(xml.dumps(cdm))
+    group = root.find("body/segment/data/userDefinedParameters")
+    assert group is not None
+    assert group[0].get("parameter") == "run id"
+
+
+def test_a_user_defined_parameter_kvn_cannot_hold_cannot_be_written_as_kvn() -> None:
+    text = mutate(
+        xml.dumps(kvn.load(TRACSS)), ' parameter="RUN_ID"', ' parameter="run id"'
+    )
+    with pytest.raises(CdmWriteError, match="KVN cannot hold the keyword"):
+        kvn.dumps(xml.loads(text))
 
 
 def test_empty_group_is_structure_not_a_keyword() -> None:

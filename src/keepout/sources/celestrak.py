@@ -39,6 +39,7 @@ such when you republish it.
 
 from __future__ import annotations
 
+import functools
 import re
 import time
 from dataclasses import dataclass
@@ -46,7 +47,6 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING, Final, TypeVar
 
 from keepout._defaults import CELESTRAK_TTL
-from keepout.ccsds.files import strip_bom
 from keepout.errors import HttpStatusError, SourceFormatError
 from keepout.omm.celestrak import loads_csv
 from keepout.sources._format import omm_reader, refuse_format
@@ -54,7 +54,7 @@ from keepout.sources._http import Downloader, http_download
 from keepout.sources._store import cache_dir
 from keepout.sources.cache import Unchanged, cached_fetch
 from keepout.sources.catalog import Catalog, CatalogPart, Retrieval
-from keepout.sources.socrates import COLUMNS, SocratesApproach, read_socrates
+from keepout.sources.socrates import SocratesApproach, read_socrates
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -105,9 +105,6 @@ _TTL_REASON: Final = "CelesTrak updates GP data every two hours"
 _GROUP_NAME: Final = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 """A CelesTrak group name, lower case: ``active``, ``last-30-days``."""
 
-_SOCRATES_COLUMN: Final = COLUMNS[0]
-"""A column of the SOCRATES CSV header, to recognise the report."""
-
 _T = TypeVar("_T")
 
 
@@ -151,7 +148,7 @@ class SocratesReport:
     retrieval: Retrieval
 
     def approaches(self) -> tuple[SocratesApproach, ...]:
-        """The approaches of the report, in its order (read anew each call).
+        """The approaches of the report, in its order (the last report's kept).
 
         Returns
         -------
@@ -164,7 +161,7 @@ class SocratesReport:
             If the text is not a SOCRATES report keepout can read (see
             :func:`~keepout.sources.socrates.read_socrates`).
         """
-        return read_socrates(self.text)
+        return _approaches(self.text)
 
 
 def group_url(name: str) -> str:
@@ -254,16 +251,8 @@ def fetch_catalog(
     ----------
     groups
         Group names; a name given twice is fetched once.
-    cache
-        Cache root; if ``None``, ``$KEEPOUT_CACHE_DIR`` or else the
-        platform's user cache directory for keepout.
-    max_age
-        Seconds a cached copy is used without asking CelesTrak; at least
-        :data:`TTL`.
-    download
-        Downloads a URL; :func:`download_once` (no retries) by default.
-    now
-        Gives the current Unix time [s], by which cached copies age.
+    cache, max_age, download, now
+        As for :func:`fetch_group`.
 
     Returns
     -------
@@ -299,21 +288,13 @@ def fetch_socrates(
     """The latest SOCRATES Plus report (:data:`SOCRATES_URL`).
 
     Cached and fetched like a GP group (see :func:`fetch_group`). The text
-    is given as CelesTrak sends it; it is only checked to be UTF-8 CSV with
-    the report's ``NORAD_CAT_ID_1`` column.
+    is given as CelesTrak sends it, once checked to be a report
+    :func:`~keepout.sources.socrates.read_socrates` reads.
 
     Parameters
     ----------
-    cache
-        Cache root; if ``None``, ``$KEEPOUT_CACHE_DIR`` or else the
-        platform's user cache directory for keepout.
-    max_age
-        Seconds a cached copy is used without asking CelesTrak; at least
-        :data:`TTL`.
-    download
-        Downloads a URL; :func:`download_once` (no retries) by default.
-    now
-        Gives the current Unix time [s], by which cached copies age.
+    cache, max_age, download, now
+        As for :func:`fetch_group`.
 
     Returns
     -------
@@ -373,18 +354,27 @@ def _root(cache: Path | None) -> Path:
 
 
 def _read_socrates(data: bytes) -> str:
+    """The text of a downloaded SOCRATES report, read through once.
+
+    Raises
+    ------
+    SourceFormatError
+        If it is not UTF-8 text or not a SOCRATES report keepout can read.
+    """
     try:
         text = data.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise SourceFormatError(f"{SOCRATES_URL} did not send UTF-8 text") from exc
-    header = strip_bom(text).partition("\n")[0]
-    if _SOCRATES_COLUMN not in header.split(","):
-        refuse_format(
-            SOCRATES_URL,
-            f"a SOCRATES report (no {_SOCRATES_COLUMN} column)",
-            data,
-        )
+    try:
+        _approaches(text)
+    except SourceFormatError as exc:
+        refuse_format(SOCRATES_URL, "a SOCRATES report", data, exc)
     return text
+
+
+_approaches = functools.lru_cache(maxsize=1)(read_socrates)
+""":func:`read_socrates`, the last report kept: a report is read once when
+downloaded and again by :meth:`SocratesReport.approaches`."""
 
 
 def _fetch(

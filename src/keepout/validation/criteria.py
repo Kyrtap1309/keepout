@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import abc
 from dataclasses import dataclass
-from typing import Final, NamedTuple, Protocol
+from typing import Final, NamedTuple
 
 from keepout._types import override
 from keepout._validation import require_non_negative
@@ -39,12 +40,13 @@ Runs on different CPUs differ by up to ~1/20 of it (BLAS kernels, adaptive
 quadrature paths, Monte Carlo hits at the sphere boundary)."""
 
 
-class Criterion(Protocol):
+class Criterion(abc.ABC):
     """How a method's value is compared with a case's reference:
     :class:`BoundCriterion` or :class:`IntervalCriterion`."""
 
     __slots__ = ()
 
+    @abc.abstractmethod
     def judge(
         self,
         value: float,
@@ -70,8 +72,8 @@ class Criterion(Protocol):
         Verdict
             The error, whether it is relative, and whether it passed.
         """
-        ...
 
+    @abc.abstractmethod
     def margin(
         self, reference: float, result_interval: tuple[float, float] | None = None
     ) -> float:
@@ -89,8 +91,8 @@ class Criterion(Protocol):
         float
             The allowed absolute difference.
         """
-        ...
 
+    @abc.abstractmethod
     def describe(self) -> str:
         """The criterion in words, for the report.
 
@@ -99,7 +101,6 @@ class Criterion(Protocol):
         str
             The description.
         """
-        ...
 
     def reproduces(
         self,
@@ -177,27 +178,8 @@ class BoundCriterion(Criterion):
         reference: float,
         result_interval: tuple[float, float] | None = None,
     ) -> Verdict:
-        """The verdict on ``value`` against ``reference`` (``result_interval``
-        is not used).
-
-        The relative bound falls back to the absolute bound (0 if none)
-        where the reference is below ``small`` or is 0.
-
-        Parameters
-        ----------
-        value
-            The method's Pc.
-        reference
-            The case's reference Pc.
-        result_interval
-            The result's confidence interval ``(low, high)``, if it has one (Monte
-            Carlo).
-
-        Returns
-        -------
-        Verdict
-            The error, whether it is relative, and whether it passed.
-        """
+        """The relative bound, or the absolute one (0 if none) where the
+        reference is below ``small`` or is 0; ``result_interval`` is not used."""
         del result_interval  # a bound does not depend on it
         difference = abs(value - reference)
         relative = self._relative_at(reference)
@@ -212,20 +194,7 @@ class BoundCriterion(Criterion):
     def margin(
         self, reference: float, result_interval: tuple[float, float] | None = None
     ) -> float:
-        """The bound that applies at ``reference``, as an absolute difference.
-
-        Parameters
-        ----------
-        reference
-            The case's reference Pc.
-        result_interval
-            The result's confidence interval, if it has one.
-
-        Returns
-        -------
-        float
-            The allowed absolute difference.
-        """
+        """The bound that applies at ``reference``, as an absolute difference."""
         del result_interval  # a bound does not depend on it
         relative = self._relative_at(reference)
         if relative is not None:
@@ -240,13 +209,7 @@ class BoundCriterion(Criterion):
 
     @override
     def describe(self) -> str:
-        """The criterion in words, for the report.
-
-        Returns
-        -------
-        str
-            The description.
-        """
+        """The criterion in words, for the report."""
         if self.relative is None:
             return f"absolute error at most {self.absolute:g}"
         text = f"relative error at most {self.relative:g}"
@@ -273,25 +236,8 @@ class IntervalCriterion(Criterion):
         reference: float,
         result_interval: tuple[float, float] | None = None,
     ) -> Verdict:
-        """The verdict on ``value`` against ``reference``: passed if
-        ``reference`` lies in ``result_interval``; the error is relative unless
-        the reference is 0.
-
-        Parameters
-        ----------
-        value
-            The method's Pc.
-        reference
-            The case's reference Pc.
-        result_interval
-            The result's confidence interval ``(low, high)``, if it has one (Monte
-            Carlo).
-
-        Returns
-        -------
-        Verdict
-            The error, whether it is relative, and whether it passed.
-        """
+        """Passed if ``reference`` lies in ``result_interval``; the error is
+        relative unless the reference is 0."""
         difference = abs(value - reference)
         low, high = _required(result_interval)
         error = difference / reference if reference > 0.0 else difference
@@ -301,33 +247,14 @@ class IntervalCriterion(Criterion):
     def margin(
         self, reference: float, result_interval: tuple[float, float] | None = None
     ) -> float:
-        """The half-width of the result's ``result_interval``.
-
-        Parameters
-        ----------
-        reference
-            The case's reference Pc.
-        result_interval
-            The result's confidence interval, if it has one.
-
-        Returns
-        -------
-        float
-            The half-width.
-        """
+        """The half-width of the result's ``result_interval``."""
         del reference  # the interval does not depend on it
         low, high = _required(result_interval)
         return 0.5 * (high - low)
 
     @override
     def describe(self) -> str:
-        """The criterion in words, for the report.
-
-        Returns
-        -------
-        str
-            The description.
-        """
+        """The criterion in words, for the report."""
         return "CARA's value within keepout's confidence interval"
 
 

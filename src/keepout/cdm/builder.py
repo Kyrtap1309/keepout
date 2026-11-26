@@ -35,7 +35,7 @@ from keepout.cdm.keywords import (
     VERSION_KEYWORD,
     covariance_entries,
 )
-from keepout.cdm.model import Cdm, CovarianceMethod, Field, Section
+from keepout.cdm.model import Cdm, CovarianceMethod, Field, Maneuverable, Section
 from keepout.frames import rtn_rotation
 
 if TYPE_CHECKING:
@@ -89,17 +89,6 @@ class ObjectType(enum.StrEnum):
     """Type not known."""
     OTHER = "OTHER"
     """None of the above."""
-
-
-class Maneuverable(enum.StrEnum):
-    """``MANEUVERABLE`` values of CCSDS 508.0-B-1."""
-
-    YES = "YES"
-    """The object can manoeuvre."""
-    NO = "NO"
-    """The object cannot manoeuvre."""
-    NOT_APPLICABLE = "N/A"
-    """Not applicable or not known (e.g. a catalog object)."""
 
 
 def _check_comments(comments: Sequence[str], what: str) -> tuple[str, ...]:

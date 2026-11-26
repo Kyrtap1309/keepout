@@ -344,28 +344,12 @@ class SyntheticCovarianceModel:
         ValueError
             If ``time`` is not a single time.
         """
-        require_single_time(time, "time")
-        return self._sigmas(self.parameters(orbit_regime(omm)), omm, time)
-
-    def _sigmas(self, parameters: RegimeParameters, omm: Omm, time: Time) -> RtnSigmas:
-        age = abs(julian_seconds_between(omm.epoch, time.utc))
-        transverse = parameters.transverse + parameters.transverse_rate * age
-        factor = self.safety_factor
-        return RtnSigmas(
-            factor * parameters.radial,
-            factor * transverse,
-            factor * parameters.normal,
-        )
+        return self._evaluated(omm, time).sigmas
 
     def covariance(self, omm: Omm, time: Time) -> Covariance:
         """The model's covariance of an element set at a time.
 
-        Parameters
-        ----------
-        omm
-            Element set of the object.
-        time
-            When the covariance is wanted (e.g. a TCA); one time.
+        Parameters as for :meth:`sigmas`.
 
         Returns
         -------
@@ -381,22 +365,14 @@ class SyntheticCovarianceModel:
         ValueError
             If ``time`` is not a single time.
         """
-        sigmas = np.array(self.sigmas(omm, time))
-        return Covariance.from_position(np.diag(sigmas * sigmas), "RTN", time)
+        return _covariance(self._evaluated(omm, time).sigmas, time)
 
     def comments(self, omm: Omm, time: Time) -> tuple[str, ...]:
         """Lines describing the model's covariance of an element set at a time.
 
         For a CDM's ``COMMENT`` lines: the model, the regime's parameters,
         the element set's epoch and age, and the resulting sigmas (ASCII,
-        under 80 characters each).
-
-        Parameters
-        ----------
-        omm
-            Element set of the object.
-        time
-            When the covariance is wanted (e.g. a TCA); one time.
+        under 80 characters each). Parameters as for :meth:`sigmas`.
 
         Returns
         -------
@@ -410,10 +386,47 @@ class SyntheticCovarianceModel:
         ValueError
             If ``time`` is not a single time.
         """
+        return self._comments(self._evaluated(omm, time), omm, time)
+
+    def described_covariance(
+        self, omm: Omm, time: Time
+    ) -> tuple[Covariance, tuple[str, ...]]:
+        """:meth:`covariance` and :meth:`comments` together, the regime and
+        sigmas derived once. Parameters as for :meth:`sigmas`.
+
+        Returns
+        -------
+        tuple[Covariance, tuple[str, ...]]
+            The covariance and the lines describing it.
+
+        Raises
+        ------
+        UnsupportedElements
+            If SGP4 cannot be initialised from ``omm`` (:func:`orbit_regime`).
+        ValueError
+            If ``time`` is not a single time.
+        """
+        evaluated = self._evaluated(omm, time)
+        return _covariance(evaluated.sigmas, time), self._comments(evaluated, omm, time)
+
+    def _evaluated(self, omm: Omm, time: Time) -> _Evaluated:
+        """The regime, its parameters and the sigmas of ``omm`` at ``time``."""
         require_single_time(time, "time")
         regime = orbit_regime(omm)
         parameters = self.parameters(regime)
-        sigmas = self._sigmas(parameters, omm, time)
+        age = abs(julian_seconds_between(omm.epoch, time.utc))
+        transverse = parameters.transverse + parameters.transverse_rate * age
+        factor = self.safety_factor
+        sigmas = RtnSigmas(
+            factor * parameters.radial,
+            factor * transverse,
+            factor * parameters.normal,
+        )
+        return _Evaluated(regime, parameters, sigmas)
+
+    def _comments(self, evaluated: _Evaluated, omm: Omm, time: Time) -> tuple[str, ...]:
+        """The :meth:`comments` lines of an evaluation."""
+        regime, parameters, sigmas = evaluated
         age = julian_seconds_between(omm.epoch, time.utc) / DAY
         epoch = omm.epoch.utc.isot
         return (
@@ -434,3 +447,17 @@ class SyntheticCovarianceModel:
                 f"T {sigmas.transverse / KM:.3f} km, N {sigmas.normal / KM:.3f} km"
             ),
         )
+
+
+class _Evaluated(NamedTuple):
+    """The model at one element set and time."""
+
+    regime: OrbitRegime
+    parameters: RegimeParameters
+    sigmas: RtnSigmas
+
+
+def _covariance(sigmas: RtnSigmas, time: Time) -> Covariance:
+    """The diagonal RTN position covariance of ``sigmas`` at ``time``."""
+    variances = np.array(sigmas)
+    return Covariance.from_position(np.diag(variances * variances), "RTN", time)

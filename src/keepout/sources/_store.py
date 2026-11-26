@@ -96,6 +96,18 @@ def forget_verified() -> None:
         _verified.clear()
 
 
+def sha256_of(path: Path) -> str:
+    """The SHA-256 (hex) of the file at ``path``.
+
+    Raises
+    ------
+    OSError
+        If the file cannot be read.
+    """
+    with path.open("rb") as file:
+        return hashlib.file_digest(file, "sha256").hexdigest()
+
+
 def has_digest(path: Path, sha256: str) -> bool:
     """Whether the file at ``path`` exists and has SHA-256 digest ``sha256``.
 
@@ -109,9 +121,8 @@ def has_digest(path: Path, sha256: str) -> bool:
     with _verified_lock:
         if _verified.get(path) == (sha256, signature):
             return True
-    with path.open("rb") as cached:
-        if hashlib.file_digest(cached, "sha256").hexdigest() != sha256:
-            return False
+    if sha256_of(path) != sha256:
+        return False
     _remember(path, sha256, signature)
     return True
 

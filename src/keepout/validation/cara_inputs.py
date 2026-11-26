@@ -32,6 +32,7 @@ __all__ = [
     "alfano_objects",
     "column_number",
     "column_value",
+    "gcrf_object",
     "load_alfano_inputs",
     "load_alfano_windows",
     "load_pc_method_inputs",
@@ -122,12 +123,7 @@ def load_alfano_windows(cache: Path | None = None) -> dict[int, float]:
     """Half-width [s] of each Alfano case's window, by case number:
     ``A09_FinalTime_s`` of CARA's supplementary table.
 
-    Parameters
-    ----------
-    cache
-        The cache directory of the CARA files (see
-        :func:`keepout.sources.cara.commit_dir`); ``None`` for ``$KEEPOUT_CACHE_DIR``,
-        else the user cache directory. Missing files are downloaded.
+    Parameters as for :func:`load_alfano_inputs`.
 
     Returns
     -------
@@ -143,12 +139,7 @@ def load_alfano_windows(cache: Path | None = None) -> dict[int, float]:
 def load_pc_method_inputs(cache: Path | None = None) -> list[PcMethodInput]:
     """Every conjunction of the CARA Pc method test set: table row and CDM.
 
-    Parameters
-    ----------
-    cache
-        The cache directory of the CARA files (see
-        :func:`keepout.sources.cara.commit_dir`); ``None`` for ``$KEEPOUT_CACHE_DIR``,
-        else the user cache directory. Missing files are downloaded.
+    Parameters as for :func:`load_alfano_inputs`.
 
     Returns
     -------
@@ -204,7 +195,7 @@ def alfano_objects(rows: Sequence[Sequence[Cell]]) -> tuple[ObjectState, ObjectS
     except (IndexError, ValueError) as exc:
         raise CaraFormatError(f"unexpected Alfano sheet layout: {exc}") from exc
     primary, secondary = (
-        _gcrf_object(name, r, v, make_covariance(matrix, "GCRF", NOMINAL_EPOCH))
+        gcrf_object(name, r, v, make_covariance(matrix, "GCRF", NOMINAL_EPOCH))
         for name, (r, v, matrix) in zip(("PRIMARY", "SECONDARY"), pieces, strict=True)
     )
     return primary, secondary
@@ -221,10 +212,17 @@ def _matrix(rows: Sequence[Sequence[Cell]], first_row: int) -> FloatArray:
     )
 
 
-def _gcrf_object(
+def gcrf_object(
     name: str, r: npt.ArrayLike, v: npt.ArrayLike, covariance: Covariance
 ) -> ObjectState:
-    """An object at :data:`NOMINAL_EPOCH`."""
+    """An object ``name`` at :data:`NOMINAL_EPOCH`: GCRF position ``r`` [m],
+    velocity ``v`` [m/s] and ``covariance``.
+
+    Returns
+    -------
+    ObjectState
+        The object.
+    """
     return ObjectState(name, StateVector(NOMINAL_EPOCH, r, v, "GCRF"), covariance)
 
 

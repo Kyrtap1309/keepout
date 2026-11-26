@@ -718,10 +718,12 @@ def _prepare(
     ManeuverError
         As :func:`prepare_maneuver`, or if the CDM comes after the window of
         ``grid`` has closed.
+    CdmParseError
+        If the primary's ``MANEUVERABLE`` is not ``YES``, ``NO`` or ``N/A``.
     """
     require_open_probability(target_pc, "target_pc")
     cdm = event.latest
-    if cdm.object1.maneuverable == Maneuverable.NO:
+    if cdm.object1.maneuverable is Maneuverable.NO:
         raise ManeuverError(
             f"event {event.event_id}: the primary {cdm.object1.object_id} cannot "
             "maneuver (MANEUVERABLE = NO)"

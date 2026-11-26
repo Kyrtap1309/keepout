@@ -175,17 +175,35 @@ def read_public_cdms(data: bytes) -> tuple[PublicCdm, ...]:
         refuse_format("Space-Track", "JSON", data, exc)
     if not isinstance(records, list):
         refuse_format("Space-Track", "an array of cdm_public rows", data)
+    created, tca = _times(records, "CREATED"), _times(records, "TCA")
     cdms: list[PublicCdm] = []
     for number, record in enumerate(records, start=1):
         try:
-            cdms.append(_public_cdm(record))
+            cdms.append(_public_cdm(record, created[number - 1], tca[number - 1]))
         except ValueError as exc:
             raise SourceFormatError(f"cdm_public row {number}: {exc}") from exc
     return tuple(cdms)
 
 
-def _public_cdm(record: object) -> PublicCdm:
-    """A ``cdm_public`` row; ``ValueError`` if it cannot be read.
+def _times(records: list[JsonValue], column: str) -> list[Time | None]:
+    """The times of a column, parsed together; all None if one of them cannot
+    be, for each row to report its own."""
+    texts: list[str] = []
+    for record in records:
+        value = record.get(column) if isinstance(record, dict) else None
+        if not (isinstance(value, str) and value.strip()):
+            return [None] * len(records)
+        texts.append(_isot(value.strip()))
+    try:
+        times = Time(texts, format="isot", scale="utc")
+    except ValueError:
+        return [None] * len(records)
+    return [times[index] for index in range(len(texts))]
+
+
+def _public_cdm(record: object, created: Time | None, tca: Time | None) -> PublicCdm:
+    """A ``cdm_public`` row, at its ``created`` and ``tca`` if they are parsed
+    already.
 
     Raises
     ------
@@ -226,6 +244,9 @@ def _public_cdm(record: object) -> PublicCdm:
             exclusion_volume=values[f"SAT_{n}_EXCL_VOL"],
         )
 
+    def time(column: str, parsed: Time | None) -> Time:
+        return _time(required(column), column) if parsed is None else parsed
+
     reportable = required("EMERGENCY_REPORTABLE")
     if reportable not in _YES_NO:
         raise ValueError(f"EMERGENCY_REPORTABLE must be Y or N, got {reportable!r}")
@@ -234,9 +255,9 @@ def _public_cdm(record: object) -> PublicCdm:
         require_probability(probability, "PC")
     return PublicCdm(
         cdm_id=catalog_number("CDM_ID"),
-        created=_time(required("CREATED"), "CREATED"),
+        created=time("CREATED", created),
         emergency_reportable=_YES_NO[reportable],
-        tca=_time(required("TCA"), "TCA"),
+        tca=time("TCA", tca),
         range_at_tca=number("MIN_RNG"),
         pc=probability,
         object1=public_object(1),
@@ -260,6 +281,10 @@ def _cell(value: object, column: str) -> str | None:
     return text or None
 
 
+def _isot(text: str) -> str:
+    return text.replace(" ", "T", 1)
+
+
 def _time(text: str, column: str) -> Time:
     """A UTC time in ISO 8601 (``T`` or a space between date and time).
 
@@ -269,6 +294,6 @@ def _time(text: str, column: str) -> Time:
         If ``text`` is not an ISO 8601 time.
     """
     try:
-        return Time(text.replace(" ", "T", 1), format="isot", scale="utc")
+        return Time(_isot(text), format="isot", scale="utc")
     except ValueError as exc:
         raise ValueError(f"{column} is not an ISO 8601 time: {text!r}") from exc

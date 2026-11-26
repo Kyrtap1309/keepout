@@ -8,16 +8,21 @@ import http.cookiejar
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal, Protocol
+from typing import TYPE_CHECKING, Final, Literal, Protocol
 
+from keepout.ccsds.files import GzipError, gunzip
 from keepout.errors import SourceUnavailable
-from keepout.sources._http import DOWNLOAD_TIMEOUT, gunzip, http_request, network_errors
+from keepout.sources._http import DOWNLOAD_TIMEOUT, http_request, network_errors
 
 if TYPE_CHECKING:
     import email.message
     from collections.abc import Iterable
 
 __all__ = ["Request", "Response", "Transport", "UrllibTransport"]
+
+_MAX_ANSWER_BYTES: Final = 1024 * 1024 * 1024
+"""Most bytes a gzipped answer may inflate to: about 30 times the full
+catalog's 36 MB of JSON."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -161,14 +166,17 @@ def _decoded(url: str, body: bytes, headers: email.message.Message) -> bytes:
     Raises
     ------
     SourceUnavailable
-        If a gzipped body does not decompress (cut off on the way).
+        If a gzipped body does not decompress (cut off on the way) or
+        inflates past :data:`_MAX_ANSWER_BYTES`.
     """
     if headers.get("Content-Encoding", "").strip().lower() != "gzip":
         return body
-    data = gunzip(body)
-    if data is None:
-        raise SourceUnavailable(f"{url}: the gzipped answer does not decompress")
-    return data
+    try:
+        return gunzip(body, _MAX_ANSWER_BYTES)
+    except GzipError as exc:
+        raise SourceUnavailable(
+            f"{url}: the gzipped answer does not decompress ({exc})"
+        ) from exc
 
 
 def _error_body(error: urllib.error.HTTPError) -> bytes:

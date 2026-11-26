@@ -25,8 +25,8 @@ from typing import (
 from astropy.time import Time
 from generated import read_json, write_or_check
 
+from keepout.ccsds.files import GzipError, gunzip
 from keepout.omm.celestrak import dumps_csv, loads_csv
-from keepout.sources._http import gunzip
 from keepout.sources._store import store_json
 
 if TYPE_CHECKING:
@@ -223,6 +223,14 @@ def file_digests(files: Mapping[str, bytes]) -> dict[str, FileDigest]:
     }
 
 
+def _gunzipped(stored: bytes) -> bytes | None:
+    """``stored`` decompressed; None if it is not intact gzip data."""
+    try:
+        return gunzip(stored)
+    except GzipError:
+        return None
+
+
 def stored_files(
     data: Path,
     contents: Mapping[str, bytes],
@@ -242,7 +250,7 @@ def stored_files(
         stored = path.read_bytes() if name in gzipped and path.exists() else None
         if name not in gzipped:
             files[name] = content
-        elif stored is not None and gunzip(stored) == content:
+        elif stored is not None and _gunzipped(stored) == content:
             files[name] = stored
         else:
             files[name] = gzip.compress(content, compresslevel=9, mtime=0)

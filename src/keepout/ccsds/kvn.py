@@ -14,12 +14,13 @@ from typing import TYPE_CHECKING, Final, NamedTuple
 from keepout.ccsds.message import Located
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Iterator
 
     from keepout.ccsds.keywords import Keyword
     from keepout.ccsds.message import Family
 
 __all__ = [
+    "KEYWORD",
     "KvnLine",
     "assignment",
     "comment",
@@ -30,9 +31,16 @@ __all__ = [
     "split_unit",
 ]
 
-_ASSIGNMENT: Final = re.compile(r"^(?P<keyword>[A-Z][A-Z0-9_]*)\s*=\s*(?P<value>.*)$")
+KEYWORD: Final = re.compile(r"[A-Z][A-Z0-9_]*")
+"""What a KVN keyword looks like (also a valid XML element name)."""
+
+_ASSIGNMENT: Final = re.compile(
+    rf"^(?P<keyword>{KEYWORD.pattern})\s*=\s*(?P<value>.*)$"
+)
 _UNIT: Final = re.compile(r"^(?P<value>.*?)\s*\[(?P<unit>[^\[\]]*)\]$")
 _COMMENT: Final = re.compile(r"^COMMENT(?:\s+(?P<text>.*))?$")
+_LINE_BREAK: Final = re.compile("[\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029]")
+"""A character :meth:`str.splitlines` breaks a line at."""
 
 
 def assignment(line: str) -> tuple[str, str] | None:
@@ -106,13 +114,7 @@ class KvnLine(NamedTuple):
     """The value of an assignment (with its unit, if any), or the comment text."""
 
 
-def _no_record() -> int | None:
-    return None
-
-
-def read_lines(
-    text: str, family: Family, *, record: Callable[[], int | None] = _no_record
-) -> Iterator[KvnLine]:
+def read_lines(text: str, family: Family) -> Iterator[KvnLine]:
     """The comments and assignments of KVN ``text``, in order; blank lines
     are skipped.
 
@@ -122,9 +124,6 @@ def read_lines(
         The message text.
     family
         The message family, whose parse error a malformed line raises.
-    record
-        The 1-based message being read when a line is malformed, for the
-        error, in a text of several messages.
 
     Yields
     ------
@@ -148,9 +147,7 @@ def read_lines(
         assigned = assignment(line)
         if assigned is None:
             raise family.parse_error(
-                f"expected 'KEYWORD = value', got {line!r}",
-                record=record(),
-                line=number,
+                f"expected 'KEYWORD = value', got {line!r}", line=number
             )
         yield KvnLine(number, *assigned)
 
@@ -240,11 +237,13 @@ def format_line(keyword: str, value: str, unit: str | None, family: Family) -> s
     Raises
     ------
     KeepoutError
-        The family's write error if the value contains a line break (KVN
-        has no escaping).
+        The family's write error if the keyword is not one KVN can hold
+        (:data:`KEYWORD`), or the value contains a line break (KVN has no
+        escaping).
     """
-    # The brackets make a leading or trailing line break count as well.
-    if len(f"<{value}>".splitlines()) > 1:
+    if not KEYWORD.fullmatch(keyword):
+        raise family.write_error(f"KVN cannot hold the keyword {keyword!r}")
+    if _LINE_BREAK.search(value):
         raise family.write_error(
             f"{keyword}: KVN cannot hold a line break in {value!r}"
         )

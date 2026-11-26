@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 
 from keepout.ccsds.kvn import format_line, located_value, read_lines, require_started
 from keepout.ccsds.message import UNKNOWN, KeywordValues
+from keepout.errors import OmmParseError
 from keepout.omm._io import (
     OMM,
     ccsds_values,
@@ -63,20 +64,27 @@ def loads(text: str) -> tuple[Omm, ...]:
     """
     # Each message's first line and values, keyed by keyword.
     messages: list[tuple[int, KeywordValues]] = []
-    # The message being read, 1-based, for the error of a malformed line.
-    for line in read_lines(text, OMM, record=lambda: len(messages) or None):
-        if line.keyword == VERSION_KEYWORD:
-            record = len(messages) + 1
-            check_version(line.text, record=record, line=line.number)
-            messages.append((line.number, KeywordValues(OMM, record=record)))
-            continue
-        require_started(line, OMM, VERSION_KEYWORD, started=bool(messages))
-        if line.keyword is None:
-            continue
-        spec = KEYWORDS.get(line.keyword)
-        messages[-1][1].add(
-            line.keyword, located_value(spec, line.text, line.number, OMM)
-        )
+    try:
+        for line in read_lines(text, OMM):
+            if line.keyword == VERSION_KEYWORD:
+                record = len(messages) + 1
+                check_version(line.text, record=record, line=line.number)
+                messages.append((line.number, KeywordValues(OMM, record=record)))
+                continue
+            require_started(line, OMM, VERSION_KEYWORD, started=bool(messages))
+            if line.keyword is None:
+                continue
+            spec = KEYWORDS.get(line.keyword)
+            messages[-1][1].add(
+                line.keyword, located_value(spec, line.text, line.number, OMM)
+            )
+    except OmmParseError as exc:
+        if exc.record is not None or not messages:
+            raise
+        # A malformed line: name the message it is in.
+        raise OmmParseError(
+            exc.message, record=len(messages), line=exc.line, keyword=exc.keyword
+        ) from None
     return tuple(
         parse_record({**DEFAULTS, **found.values}, record=record, line=start)
         for record, (start, found) in enumerate(messages, start=1)
