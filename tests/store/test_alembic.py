@@ -30,7 +30,7 @@ def alembic_config() -> Config:
 def alembic_engine(tmp_path: Path) -> Iterator[Engine]:
     """An engine on a new file, as keepout migrates one: foreign keys off,
     no write-ahead logging."""
-    engine = db._engine(tmp_path / "keepout.db", wal=False, foreign_keys=False)
+    engine = db._engine(tmp_path / "keepout.db", foreign_keys=False)
     yield engine
     engine.dispose()
 

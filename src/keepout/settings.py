@@ -35,12 +35,19 @@ import tomllib
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Final, NotRequired, TypedDict, TypeVar, cast
+from typing import (
+    TYPE_CHECKING,
+    Final,
+    NotRequired,
+    TypedDict,
+    TypeVar,
+    cast,
+)
 
 from keepout._defaults import TARGET_PC
+from keepout._json import number
 from keepout._methods import METHOD_CHOICES, MethodChoice
 from keepout._validation import (
-    is_number,
     positive_float,
     require_choice,
     require_open_probability,
@@ -66,15 +73,6 @@ __all__ = [
     "settings_from_data",
     "settings_to_data",
 ]
-
-SETTINGS_KEYS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
-    {
-        "pc": frozenset({"method", "policy", "hbr_m"}),
-        "risk": frozenset({"green_below", "red_from"}),
-        "maneuver": frozenset({"target_pc"}),
-    }
-)
-"""The tables of a settings file and the keys of each; all optional."""
 
 _C = TypeVar("_C")
 
@@ -169,6 +167,27 @@ class SettingsData(TypedDict):
     """The manoeuvre target."""
 
 
+SETTINGS_KEYS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
+    {
+        "pc": PcTable.__required_keys__ | PcTable.__optional_keys__,
+        "risk": RiskTable.__required_keys__ | RiskTable.__optional_keys__,
+        "maneuver": ManeuverTable.__required_keys__ | ManeuverTable.__optional_keys__,
+    }
+)
+"""The tables of a settings file (those of :class:`SettingsData`) and the
+keys of each (those of its table's class); all optional."""
+
+
+class _Fields(TypedDict, total=False):
+    """The fields of :class:`Settings` a settings file gives."""
+
+    compute: PcComputation
+    policy: Policy
+    combined_hard_body_radius: float
+    thresholds: Thresholds
+    target_pc: float
+
+
 class PlanArguments(TypedDict):
     """The keyword arguments of :func:`~keepout.maneuver.plan_event` that
     settings hold; pass them as ``plan_event(event, **plan_arguments(settings))``."""
@@ -232,17 +251,8 @@ def _table(data: Mapping[str, object], name: str) -> Mapping[str, object]:
 
 
 def _number(table: Mapping[str, object], name: str, key: str) -> float:
-    """``table[key]``, a number.
-
-    Raises
-    ------
-    SettingsError
-        If it is not one (a bool is not a number).
-    """
-    value = table[key]
-    if not is_number(value):
-        raise SettingsError(f"{name}.{key} must be a number, got {value!r}")
-    return float(value)
+    """``table[key]``, a number (``SettingsError`` if not; a bool is not)."""
+    return number(table[key], f"{name}.{key}", error=SettingsError)
 
 
 def _choice(
@@ -352,35 +362,35 @@ def settings_from_data(data: Mapping[str, object]) -> Settings:
             f"{', '.join(f'[{name}]' for name in SETTINGS_KEYS)}"
         )
     pc, risk, maneuver = (_table(data, name) for name in SETTINGS_KEYS)
-    settings = Settings()
+    fields = _Fields()
     if "method" in pc:
-        compute = PcComputation(_choice(pc, "pc", "method", METHOD_CHOICES))
-        settings = replace(settings, compute=compute)
+        fields["compute"] = PcComputation(_choice(pc, "pc", "method", METHOD_CHOICES))
     if "policy" in pc:
-        settings = replace(settings, policy=_choice(pc, "pc", "policy", POLICIES))
+        fields["policy"] = _choice(pc, "pc", "policy", POLICIES)
     if "hbr_m" in pc:
         radius = _number(pc, "pc", "hbr_m")
-        settings = _checked(
-            "pc.hbr_m", lambda: replace(settings, combined_hard_body_radius=radius)
+        fields["combined_hard_body_radius"] = _checked(
+            "pc.hbr_m", lambda: positive_float(radius, "combined_hard_body_radius")
         )
     if risk:
         green = _number(risk, "risk", "green_below") if "green_below" in risk else None
         red = _number(risk, "risk", "red_from") if "red_from" in risk else None
-        thresholds = _checked(
+        fields["thresholds"] = _checked(
             "risk",
             lambda: replace(
-                settings.thresholds,
-                green_below=settings.thresholds.green_below if green is None else green,
-                red_from=settings.thresholds.red_from if red is None else red,
+                DEFAULT_THRESHOLDS,
+                green_below=DEFAULT_THRESHOLDS.green_below if green is None else green,
+                red_from=DEFAULT_THRESHOLDS.red_from if red is None else red,
             ),
         )
-        settings = replace(settings, thresholds=thresholds)
     if "target_pc" in maneuver:
         target_pc = _number(maneuver, "maneuver", "target_pc")
-        settings = _checked(
-            "maneuver.target_pc", lambda: replace(settings, target_pc=target_pc)
+        _checked(
+            "maneuver.target_pc",
+            lambda: require_open_probability(target_pc, "target_pc"),
         )
-    return settings
+        fields["target_pc"] = target_pc
+    return Settings(**fields)
 
 
 def load_settings(path: Path) -> Settings:

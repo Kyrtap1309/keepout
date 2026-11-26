@@ -122,20 +122,7 @@ class UtcTime(TypeDecorator[Time]):
         value: Time | None,
         dialect: Dialect,  # noqa: ARG002 (SQLite only)
     ) -> str | None:
-        """The text of a time, rounded to the nanosecond.
-
-        Parameters
-        ----------
-        value
-            The time to store, or None.
-        dialect
-            The database dialect (not used).
-
-        Returns
-        -------
-        str or None
-            The time as UTC ISO text, or None for None.
-        """
+        """The UTC ISO text of a time, rounded to the nanosecond; None for None."""
         if value is None:
             return None
         # A scalar time's isot is a str (astropy types it array-or-scalar).
@@ -147,38 +134,14 @@ class UtcTime(TypeDecorator[Time]):
         value: str | None,
         dialect: Dialect,  # noqa: ARG002 (SQLite only)
     ) -> Time | None:
-        """The time of a text.
-
-        Parameters
-        ----------
-        value
-            The stored text, or None.
-        dialect
-            The database dialect (not used).
-
-        Returns
-        -------
-        astropy.time.Time or None
-            The time, in the UTC scale, or None for None.
-        """
+        """The time (UTC scale) of a stored text; None for None."""
         if value is None:
             return None
         return Time(value, format="isot", scale="utc")
 
     @override
     def compare_values(self, x: Time | None, y: Time | None) -> bool:
-        """Whether two times are the same instant (a changed one is written).
-
-        Parameters
-        ----------
-        x, y
-            The times to compare, or None.
-
-        Returns
-        -------
-        bool
-            ``True`` if the times are equal.
-        """
+        """Whether two times are the same instant (a changed one is written)."""
         if x is None or y is None:
             return x is y
         return elapsed_seconds(x, y) == 0.0
@@ -206,20 +169,7 @@ class StrEnumText(TypeDecorator[_E]):
         value: _E | None,
         dialect: Dialect,  # noqa: ARG002 (SQLite only)
     ) -> str | None:
-        """The text of a member.
-
-        Parameters
-        ----------
-        value
-            The member to store, or None.
-        dialect
-            The database dialect (not used).
-
-        Returns
-        -------
-        str or None
-            The member's text, or None for None.
-        """
+        """The text of a member; None for None."""
         return None if value is None else self.enum_type(value).value
 
     @override
@@ -228,19 +178,7 @@ class StrEnumText(TypeDecorator[_E]):
         value: str | None,
         dialect: Dialect,  # noqa: ARG002 (SQLite only)
     ) -> _E | None:
-        """The member of a text.
-
-        Parameters
-        ----------
-        value
-            The stored text, or None.
-        dialect
-            The database dialect (not used).
-
-        Returns
-        -------
-        enum.StrEnum or None
-            The member, or None for None.
+        """The member of a stored text; None for None.
 
         Raises
         ------
@@ -321,9 +259,6 @@ class Cdm(Base):
 
     event: Mapped[Event] = relationship(back_populates="cdms", lazy="raise")
     catalog: Mapped[Catalog | None] = relationship(lazy="raise")
-    results: Mapped[list[Result]] = relationship(
-        back_populates="cdm", lazy="raise", passive_deletes=True
-    )
 
 
 class Catalog(Base):
@@ -370,8 +305,6 @@ class Result(Base):
     payload: Mapped[dict[str, JsonValue]] = mapped_column(JSON)
     created_at: Mapped[Time] = mapped_column(UtcTime)
 
-    cdm: Mapped[Cdm] = relationship(back_populates="results", lazy="raise")
-
 
 class Job(Base):
     """A computation queued on an event's CDM, and how far it got."""
@@ -392,8 +325,11 @@ class Job(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    """Never reused (SQLite ``AUTOINCREMENT``): a worker's stale write to a
-    deleted job cannot reach a new one."""
+    """Not reused (SQLite ``AUTOINCREMENT``): a worker's stale write to a
+    deleted job cannot reach a new one. One caveat: migration 0003 rebuilt
+    the table, which reset its counter, so the ids of jobs purged before a
+    store's upgrade from 0002 may be given once more after it (a worker of
+    the older keepout is stopped for the upgrade)."""
     event_id: Mapped[EventId] = mapped_column(
         String(12), ForeignKey("events.id", ondelete="CASCADE")
     )

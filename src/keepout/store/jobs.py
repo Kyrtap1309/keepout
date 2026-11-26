@@ -13,9 +13,10 @@ A job is pinned to its event's latest CDM at submission, so a CDM ingested
 later does not change what it computes. A plan is cached on that CDM, under
 :func:`~keepout.store.codec.maneuver_key`. A refresh computes the Pc of the
 CDMs up to it that lack one, each cached on its CDM under
-:func:`~keepout.store.codec.result_key`. Submission is idempotent. A cached
-result means no job. A queued or running plan of the same CDM and key is
-returned instead of a second one. A refresh is one per event and key: a
+:func:`~keepout.store.codec.result_key`, as it goes
+(:meth:`JobQueue.save_partial`) and at its end. Submission is idempotent. A
+cached result means no job. A queued or running plan of the same CDM and key
+is returned instead of a second one. A refresh is one per event and key: a
 queued one is pinned again to the event's latest CDM, and a running one is
 followed by one queued at most (:meth:`JobQueue.submit_refresh`).
 
@@ -35,21 +36,29 @@ from typing import TYPE_CHECKING, Final, TypedDict, assert_never
 
 import astropy.units as u
 from astropy.time import Time
-from sqlalchemy import ColumnElement, Select, exists, select, update
+from sqlalchemy import ColumnElement, exists, select, update
 
 from keepout.errors import SettingsError, StoreError
-from keepout.settings import Settings, settings_from_data, settings_to_data
+from keepout.settings import Settings, settings_to_data
 from keepout.store import models
-from keepout.store.codec import observation_from_json, result_key
+from keepout.store.codec import result_key
 from keepout.store.models import ACTIVE_STATUSES, JobKind, JobStatus, MessageId
-from keepout.store.repo import (
+from keepout.store.queries import (
+    NEWEST_FIRST,
+    active,
+    active_job_in,
+    cached,
+    cdms_of,
     insert_results_in,
-    latest_in,
+    is_cached_in,
     maneuver_slot_in,
     message_ids_in,
-    missing_in,
+    no_event,
+    plan_jobs_in,
+    require_latest_in,
     save_maneuver_in,
 )
+from keepout.store.summaries import Job, PlanJobs
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Collection, Mapping
@@ -58,8 +67,6 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
     from keepout._types import JsonValue
-    from keepout.events import ConjunctionEvent
-    from keepout.maneuver import ManeuverOutcome
     from keepout.settings import SettingsData
     from keepout.store.repo import Store
 
@@ -70,8 +77,6 @@ __all__ = [
     "JobKind",
     "JobQueue",
     "JobStatus",
-    "PlanDetail",
-    "PlanJobs",
     "Submission",
     "SubmissionOutcome",
 ]
@@ -91,81 +96,6 @@ def _times(count: int) -> str:
 
 _STOPPED: Final = f"the worker stopped {_times(MAX_ATTEMPTS)} without an answer"
 """The error of a job failed after :data:`MAX_ATTEMPTS`."""
-
-
-@dataclass(frozen=True, slots=True, eq=False)
-class Job:
-    """A job of the queue, as it was when read.
-
-    Two jobs compare by identity (:class:`~keepout.settings.Settings` do):
-    compare :attr:`id` and :attr:`claims`.
-    """
-
-    id: int
-    """The job's number, unique in the store's queue."""
-    kind: JobKind
-    """What it computes: a manoeuvre plan, or the missing Pc."""
-    event_id: str
-    """The store's id of the event."""
-    message_id: str
-    """The CDM the computation is pinned to: the event's latest when
-    queued."""
-    key: str
-    """The key its result is cached under."""
-    settings: Settings
-    """The operator's settings the job computes with."""
-    status: JobStatus
-    """Where the job is: queued, running, succeeded, failed or cancelled."""
-    attempt: int
-    """How many attempts it cost: a claim adds one, a release on a stop
-    takes it back."""
-    claims: int
-    """How many times it was claimed, never lowered: a worker's writes name
-    the claim they belong to."""
-    worker: str | None
-    """The worker that holds it, or held it when it succeeded, failed or was
-    cancelled. Cleared when it goes back to the queue or its lease lapses."""
-    created_at: Time
-    """When it was queued, in UTC."""
-    started_at: Time | None
-    """When a worker last claimed it, in UTC; ``None`` while it waits in the
-    queue (also after going back to it)."""
-    finished_at: Time | None
-    """When it succeeded, failed or was cancelled, in UTC; ``None`` while it
-    is active."""
-    error: str | None
-    """Why it failed."""
-
-    @classmethod
-    def of(cls, row: models.Job) -> Job:
-        """The job of a row.
-
-        Parameters
-        ----------
-        row
-            The job's row in the store.
-
-        Returns
-        -------
-        Job
-            The job.
-        """
-        return cls(
-            id=row.id,
-            kind=row.kind,
-            event_id=row.event_id,
-            message_id=row.message_id,
-            key=row.key,
-            settings=settings_from_data(row.params),
-            status=row.status,
-            attempt=row.attempt,
-            claims=row.claims,
-            worker=row.worker,
-            created_at=row.created_at,
-            started_at=row.started_at,
-            finished_at=row.finished_at,
-            error=row.error,
-        )
 
 
 class SubmissionOutcome(StrEnum):
@@ -194,37 +124,6 @@ class Submission:
     the result is cached."""
 
 
-@dataclass(frozen=True, slots=True)
-class PlanJobs:
-    """An event's manoeuvre jobs: the active ones, and the one of a set of
-    settings (:meth:`JobQueue.plan_jobs`)."""
-
-    active: tuple[Job, ...]
-    """Every manoeuvre job of the event still queued or running, whatever
-    its settings, newest first."""
-    current: Job | None
-    """The job of the settings on the event's latest CDM: the queued or
-    running one, else the newest (ended); ``None`` if there is none."""
-
-
-@dataclass(frozen=True, slots=True)
-class PlanDetail:
-    """A stored event as its manoeuvre planner shows it, read in one
-    transaction (:meth:`~keepout.store.Store.plan_detail`)."""
-
-    event: ConjunctionEvent
-    """The event and its CDMs."""
-    message_id: MessageId
-    """The CDM a plan of the event is cached on: its latest."""
-    key: str
-    """The plan's :func:`~keepout.store.codec.maneuver_key`: the settings
-    and the catalog of that CDM."""
-    outcome: ManeuverOutcome | None
-    """The plan cached there, of :attr:`event`; ``None`` if none is."""
-    jobs: PlanJobs
-    """The event's manoeuvre jobs, and the one of the settings."""
-
-
 class _Columns(TypedDict, total=False):
     """The columns of a job that its transitions write."""
 
@@ -244,11 +143,8 @@ def _ended(
     error: str | None = None,
     forget_worker: bool = False,
 ) -> _Columns:
-    """The columns of a job that ends now with ``status``.
-
-    ``error`` is written only if given. The worker is kept, unless
-    ``forget_worker``.
-    """
+    """The columns of a job that ends now with ``status``: ``error`` only if
+    given, the worker kept unless ``forget_worker``."""
     values = _Columns(status=status, finished_at=now, lease_until=None)
     if error is not None:
         values["error"] = error
@@ -258,10 +154,8 @@ def _ended(
 
 
 def _requeued(*, give_back_attempt: bool = False) -> _Columns:
-    """The columns of a job back in the queue: no worker, lease or start.
-
-    Its attempt stays counted, unless ``give_back_attempt``.
-    """
+    """The columns of a job back in the queue (no worker, lease or start),
+    its attempt counted unless ``give_back_attempt``."""
     values = _Columns(
         status=JobStatus.QUEUED, worker=None, lease_until=None, started_at=None
     )
@@ -282,11 +176,8 @@ def _held(job: Job) -> ColumnElement[bool]:
 
 def _lapse(session: Session, which: ColumnElement[bool], now: Time) -> int:
     """Give back the running jobs of ``which`` whose worker stopped without
-    an answer; how many it gave back.
-
-    The attempt stays counted. A job is queued again, or failed at
-    :data:`MAX_ATTEMPTS`. Its worker is cleared either way.
-    """
+    an answer, the attempt counted: queued again, or failed at
+    :data:`MAX_ATTEMPTS`; how many it gave back."""
     running = which & (models.Job.status == JobStatus.RUNNING)
     connection = session.connection()
     failed = connection.execute(
@@ -357,101 +248,30 @@ def _fail_unreadable(
     )
 
 
-def _is_cached(session: Session, message_id: str, key: str) -> bool:
-    """Whether a result is cached on ``message_id`` under ``key``."""
-    return bool(
-        session.scalar(
-            select(
-                exists().where(
-                    models.Result.message_id == message_id,
-                    models.Result.key == key,
-                )
-            )
-        )
-    )
-
-
-def _observations_in(
-    session: Session, job: Job, payload: Mapping[str, JsonValue]
-) -> list[tuple[str, dict[str, JsonValue]]]:
-    """The observations of a refresh job's result, each a CDM's
-    ``MESSAGE_ID`` and its observation's JSON, checked against the CDMs of
-    its event up to its own in the caller's transaction.
+def _observations(
+    payload: Mapping[str, JsonValue],
+) -> list[tuple[str, Mapping[str, JsonValue]]]:
+    """The observations of a refresh's result (all or part): each CDM's
+    ``MESSAGE_ID`` and its observation's JSON, checked for their shape only.
 
     Raises
     ------
     StoreError
-        If the result does not map CDMs of the event up to the job's to the
-        JSON of their own observations (a bug of its computation).
+        If the result is not ``{"observations": {MESSAGE_ID: object}}``.
     """
     observations = payload.get("observations")
     if not isinstance(observations, dict):
         raise StoreError(
             f"a refresh job's result must hold its observations, got {sorted(payload)}"
         )
-    cdms = set(message_ids_in(session, job.event_id, until=job.message_id))
-    found: list[tuple[str, dict[str, JsonValue]]] = []
+    found: list[tuple[str, Mapping[str, JsonValue]]] = []
     for message_id, data in observations.items():
-        if message_id not in cdms:
-            raise StoreError(
-                f"a refresh job's result holds {message_id}, not a CDM of its "
-                "event up to its own"
-            )
         if not isinstance(data, dict):
             raise StoreError(
                 f"a refresh job's observation of {message_id} must be an object"
             )
-        try:
-            observation = observation_from_json(data)
-        except StoreError as exc:
-            raise StoreError(
-                f"a refresh job's observation of {message_id}: {exc}"
-            ) from exc
-        if observation.message_id != message_id:
-            raise StoreError(
-                f"a refresh job's observation of {message_id} is of "
-                f"{observation.message_id}"
-            )
         found.append((message_id, data))
     return found
-
-
-def _jobs_of(kind: JobKind, message_id: str, key: str) -> Select[models.Job]:
-    """The jobs of ``kind``, ``message_id`` and ``key``."""
-    return select(models.Job).where(
-        models.Job.kind == kind,
-        models.Job.message_id == message_id,
-        models.Job.key == key,
-    )
-
-
-def _active_job(
-    session: Session, kind: JobKind, message_id: str, key: str
-) -> Job | None:
-    """The oldest queued or running job of ``kind``, ``message_id`` and
-    ``key``."""
-    row = session.scalars(
-        _jobs_of(kind, message_id, key)
-        .where(models.Job.status.in_(ACTIVE_STATUSES))
-        .order_by(models.Job.id)
-        .limit(1)
-    ).one_or_none()
-    return None if row is None else Job.of(row)
-
-
-_NEWEST_FIRST: Final = (models.Job.created_at.desc(), models.Job.id.desc())
-"""The order of jobs listed newest first."""
-
-
-def _newest_job(
-    session: Session, kind: JobKind, message_id: str, key: str
-) -> Job | None:
-    """The newest job of ``kind``, ``message_id`` and ``key``, whatever its
-    status."""
-    row = session.scalars(
-        _jobs_of(kind, message_id, key).order_by(*_NEWEST_FIRST).limit(1)
-    ).one_or_none()
-    return None if row is None else Job.of(row)
 
 
 def _queue_new(
@@ -472,14 +292,27 @@ def _queue_new(
         key=key,
         params=params,
         status=JobStatus.QUEUED,
-        attempt=0,
-        claims=0,
         created_at=now,
     )
     session.add(row)
     session.flush()
-    session.refresh(row)  # the times as stored, as job() reads them
+    session.refresh(row)  # the times and defaults as stored, as jobs() reads them
     return Submission(SubmissionOutcome.QUEUED, Job.of(row))
+
+
+def _covers(session: Session, row: models.Job) -> bool:
+    """Whether a running refresh computes every Pc its event lacks up to its
+    CDM: none of those CDMs was ingested after its claim (its child reads
+    them after it; a time equal to the claim's is of an ingest that held the
+    write lock before the claim took it)."""
+    if row.started_at is None:
+        return False
+    late = exists().where(
+        cdms_of(row.event_id, until=row.message_id),
+        ~cached(row.key),
+        models.Cdm.ingested_at > row.started_at,
+    )
+    return not session.scalar(select(late))
 
 
 def _refresh_queued(
@@ -493,16 +326,11 @@ def _refresh_queued(
 ) -> Submission:
     """The submission of a refresh of an event pinned to its latest CDM
     ``message_id``: the queued one of the event and key, pinned again to
-    ``message_id``; else the running one if pinned to it; else a refresh
-    queued now."""
+    ``message_id``; else the running one pinned to it, if it computes every
+    Pc missing (:func:`_covers`); else a refresh queued now."""
     rows = session.scalars(
         select(models.Job)
-        .where(
-            models.Job.kind == JobKind.REFRESH,
-            models.Job.event_id == event_id,
-            models.Job.key == key,
-            models.Job.status.in_(ACTIVE_STATUSES),
-        )
+        .where(active(JobKind.REFRESH, event_ids=[event_id], key=key))
         .order_by(models.Job.id)
     ).all()
     for row in rows:
@@ -512,7 +340,7 @@ def _refresh_queued(
             session.flush()
             return Submission(SubmissionOutcome.EXISTING, Job.of(row))
     for row in rows:
-        if row.message_id == message_id:
+        if row.message_id == message_id and _covers(session, row):
             return Submission(SubmissionOutcome.EXISTING, Job.of(row))
     return _queue_new(
         session,
@@ -523,47 +351,6 @@ def _refresh_queued(
         params=params,
         now=now,
     )
-
-
-def plan_jobs_in(
-    session: Session, event_id: str, message_id: str, key: str
-) -> PlanJobs:
-    """An event's manoeuvre jobs, in the caller's transaction: those still
-    queued or running, and the one of ``message_id`` and ``key``.
-
-    Internal to :mod:`keepout.store`: the queue and the store's planner
-    read (:meth:`~keepout.store.Store.plan_detail`) read the same jobs.
-
-    Parameters
-    ----------
-    session
-        A session of the store.
-    event_id
-        The store's id of the event.
-    message_id
-        The event's latest CDM, where its plan is cached.
-    key
-        The plan's :func:`~keepout.store.codec.maneuver_key`.
-
-    Returns
-    -------
-    PlanJobs
-        The jobs.
-    """
-    maneuver = JobKind.MANEUVER
-    current = _active_job(session, maneuver, message_id, key)
-    if current is None:
-        current = _newest_job(session, maneuver, message_id, key)
-    rows = session.scalars(
-        select(models.Job)
-        .where(
-            models.Job.event_id == event_id,
-            models.Job.status.in_(ACTIVE_STATUSES),
-            models.Job.kind == maneuver,
-        )
-        .order_by(*_NEWEST_FIRST)
-    )
-    return PlanJobs(tuple(Job.of(row) for row in rows), current)
 
 
 class JobQueue:
@@ -611,12 +398,13 @@ class JobQueue:
         params = settings_to_data(settings)
         now = self._now()
         with self.store.write() as session:
-            message_id, key = maneuver_slot_in(
-                session, self.store.path.parent, event_id, settings
-            )
-            if _is_cached(session, message_id, key):
+            slot = maneuver_slot_in(session, self.store.path.parent, event_id, settings)
+            if slot is None:
+                raise StoreError(no_event(event_id))
+            message_id, key = slot
+            if is_cached_in(session, message_id, key):
                 return Submission(SubmissionOutcome.CACHED, None)
-            found = _active_job(session, JobKind.MANEUVER, message_id, key)
+            found = active_job_in(session, JobKind.MANEUVER, message_id, key)
             if found is not None:
                 return Submission(SubmissionOutcome.EXISTING, found)
             return _queue_new(
@@ -632,16 +420,20 @@ class JobQueue:
     def submit_refresh(self, event_id: str, settings: Settings) -> Submission:
         """Queue the computation of the Pc a stored event lacks for
         ``settings``, unless none lacks or a refresh of the event and
-        settings is queued, or running on the event's latest CDM.
+        settings that will compute them is queued or running.
 
         The job is pinned to the event's latest CDM: it computes the Pc of
         that CDM and the older ones that lack one when a worker runs it, not
         of those ingested later. A refresh is one per event and key, as long
         as one is queued: a CDM ingested meanwhile pins the queued one again
-        to the new latest CDM (it is ``existing``), so two workers never
-        take two refreshes that compute the same Pc. A running refresh keeps
-        its CDM; a CDM ingested meanwhile queues one refresh after it, the
-        only queued one. One write transaction, as :meth:`submit`.
+        to the new latest CDM (it is ``existing``). A running refresh keeps
+        its CDM, and the CDMs it read when it started: one ingested after
+        its claim, newer or older than its CDM, queues one refresh after it,
+        the only queued one. One write transaction, as :meth:`submit`.
+
+        Two workers may still compute the same Pc (one runs the refresh
+        queued after the other's): the first one written is kept, the other
+        dropped.
 
         Parameters
         ----------
@@ -657,7 +449,8 @@ class JobQueue:
             What became of the submission, and its job if there is one:
             ``cached`` when every CDM up to the latest has its Pc;
             ``existing`` with the queued refresh, pinned to the latest CDM,
-            or the running one already pinned to it.
+            or the running one already pinned to it that computes every Pc
+            missing.
 
         Raises
         ------
@@ -671,8 +464,8 @@ class JobQueue:
         key = result_key(settings)
         now = self._now()
         with self.store.write() as session:
-            message_id = latest_in(session, event_id)
-            if not missing_in(session, event_id, key, until=message_id):
+            message_id = require_latest_in(session, event_id)
+            if not message_ids_in(session, event_id, lacking=key):
                 return Submission(SubmissionOutcome.CACHED, None)
             return _refresh_queued(
                 session,
@@ -765,26 +558,17 @@ class JobQueue:
         """
         return self._update_if_held(job, lease_until=self._now() + lease * u.s)
 
-    def finish(self, job: Job, payload: Mapping[str, JsonValue]) -> bool:
-        """End a job a worker holds as succeeded and cache its result, in one
-        write transaction.
-
-        A plan is cached on the job's CDM; a refresh caches each observation
-        on its CDM. A result already cached under its key (e.g. by a
-        synchronous run meanwhile) is kept.
-
-        The result of a refresh is decoded in the same transaction: it must
-        map CDMs of the event up to the job's to their own observations.
+    def save_partial(self, job: Job, payload: Mapping[str, JsonValue]) -> bool:
+        """Cache part of the result of a refresh a worker holds, in one
+        write transaction, so that the Pc computed so far outlive the job:
+        a refresh after a failed or abandoned one computes only the rest.
 
         Parameters
         ----------
         job
-            The job, as claimed.
+            The job, as claimed: a refresh.
         payload
-            Its result: of a plan, the outcome's
-            :func:`~keepout.store.maneuver_codec.outcome_to_json`; of a
-            refresh, ``{"observations": {MESSAGE_ID: observation}}``, each
-            observation's :func:`~keepout.store.codec.observation_to_json`.
+            Some of its observations, as :meth:`finish` takes them.
 
         Returns
         -------
@@ -795,9 +579,53 @@ class JobQueue:
         Raises
         ------
         StoreError
-            If the result of a refresh cannot be cached (nothing is written:
-            fail the job, :meth:`fail`), or if the database cannot be used.
+            If the job is not a refresh or the result is not shaped as one
+            (nothing is written), or if the database cannot be used.
         """
+        if job.kind is not JobKind.REFRESH:
+            raise StoreError(f"a {job.kind} job caches no part of its result")
+        observations = _observations(payload)
+        with self.store.write() as session:
+            if not session.scalar(select(exists().where(_held(job)))):
+                return False
+            insert_results_in(session, job.key, observations)
+            return True
+
+    def finish(self, job: Job, payload: Mapping[str, JsonValue]) -> bool:
+        """End a job a worker holds as succeeded and cache its result, in one
+        write transaction.
+
+        A plan is cached on the job's CDM; a refresh caches each observation
+        on its CDM. A result already cached under its key (e.g. by a
+        synchronous run meanwhile), or of a CDM no longer stored, is not
+        written. A refresh's result is checked for its shape only: it is
+        keepout's own.
+
+        Parameters
+        ----------
+        job
+            The job, as claimed.
+        payload
+            Its result: of a plan, the outcome's
+            :func:`~keepout.store.maneuver_codec.outcome_to_json`; of a
+            refresh, ``{"observations": {MESSAGE_ID: observation}}``, each
+            observation's :func:`~keepout.store.codec.observation_to_json`
+            (those not cached by :meth:`save_partial` already).
+
+        Returns
+        -------
+        bool
+            Whether the job was still the worker's (as :meth:`heartbeat`);
+            if not, nothing is written.
+
+        Raises
+        ------
+        StoreError
+            If the result of a refresh is not shaped as one (nothing is
+            written: fail the job, :meth:`fail`), or if the database cannot
+            be used.
+        """
+        observations = _observations(payload) if job.kind is JobKind.REFRESH else None
         now = self._now()
         with self.store.write() as session:
             if not self._update_if_held_in(
@@ -806,8 +634,7 @@ class JobQueue:
                 return False
             match job.kind:
                 case JobKind.REFRESH:
-                    observations = _observations_in(session, job, payload)
-                    insert_results_in(session, job.key, observations)
+                    insert_results_in(session, job.key, observations or [])
                 case JobKind.MANEUVER:
                     save_maneuver_in(session, job.message_id, job.key, payload)
                 case _:
@@ -928,13 +755,20 @@ class JobQueue:
             raise StoreError(f"no job {job_id} in the store")
         raise StoreError(f"job {job_id} has already ended: {status}")
 
-    def jobs(self, *, status: Collection[JobStatus] | None = None) -> list[Job]:
+    def jobs(
+        self,
+        *,
+        status: Collection[JobStatus] | None = None,
+        limit: int | None = None,
+    ) -> list[Job]:
         """The jobs, newest first.
 
         Parameters
         ----------
         status
             Only the jobs of these statuses; ``None``: every job.
+        limit
+            Only the newest ``limit`` of them; ``None``: all.
 
         Returns
         -------
@@ -946,7 +780,7 @@ class JobQueue:
         StoreError
             If the database cannot be used.
         """
-        query = select(models.Job).order_by(*_NEWEST_FIRST)
+        query = select(models.Job).order_by(*NEWEST_FIRST).limit(limit)
         if status is not None:
             query = query.where(models.Job.status.in_(list(status)))
         with self.store.read() as session:
@@ -979,36 +813,10 @@ class JobQueue:
             :func:`~keepout.store.codec.maneuver_key`.
         """
         with self.store.read() as session:
-            if session.get(models.Event, event_id) is None:
+            slot = maneuver_slot_in(session, self.store.path.parent, event_id, settings)
+            if slot is None:
                 return None
-            message_id, key = maneuver_slot_in(
-                session, self.store.path.parent, event_id, settings
-            )
-            return plan_jobs_in(session, event_id, message_id, key)
-
-    def job(self, job_id: int) -> Job:
-        """A job, by id.
-
-        Parameters
-        ----------
-        job_id
-            The job's id.
-
-        Returns
-        -------
-        Job
-            The job, as it is now.
-
-        Raises
-        ------
-        StoreError
-            If there is no such job, or if the database cannot be used.
-        """
-        with self.store.read() as session:
-            row = session.get(models.Job, job_id)
-            if row is None:
-                raise StoreError(f"no job {job_id} in the store")
-            return Job.of(row)
+            return plan_jobs_in(session, event_id, *slot)
 
     def jobs_by_id(
         self, job_ids: Collection[int], *, missing_ok: bool = False

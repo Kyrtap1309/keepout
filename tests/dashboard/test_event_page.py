@@ -14,7 +14,7 @@ import numpy as np
 import numpy.typing as npt
 import pytest
 from astropy.time import Time
-from builders import EPOCH, LEO_R, LEO_V
+from builders import EPOCH, LEO_R, LEO_V, cached_pc
 from dashboard_builders import OpenApp, shown, use_store, walk
 from sqlalchemy import delete
 from streamlit.testing.v1 import AppTest
@@ -270,7 +270,7 @@ def test_missing_pc_offers_compute(
     settings = load_settings(seed.SETTINGS)
     with open_store(seed_copy, create=False) as store:
         cdms = [cdm.message_id for cdm in store.event(event_id).cdms]
-        cached = store.observations(event_id, settings)
+        cached = cached_pc(store, event_id, settings)
     first = cdms[0]
     _forget_pc(seed_copy, first)
     monkeypatch.setenv("KEEPOUT_STORE", str(seed_copy))

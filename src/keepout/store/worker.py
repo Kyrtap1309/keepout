@@ -9,13 +9,18 @@ child process, the only way to stop a computation at once.
 While the child computes, the supervisor renews the job's lease. It kills
 the child at the time limit, on a stop, or once the job is no longer its own
 (:mod:`keepout.store.jobs` says when). The child only reads the store. The
-supervisor alone writes the job's end and its result.
+supervisor alone writes the job's end and its result. A computation that
+yields its result in parts (a refresh, :func:`~keepout.store.planning.run_refresh_job`)
+has each part written as it comes
+(:meth:`~keepout.store.jobs.JobQueue.save_partial`), so a job stopped
+halfway keeps them.
 
 How a job ends:
 
 - an answer: the job succeeds, with its result cached on the job's CDM;
 - an answer the store cannot cache (a :class:`~keepout.errors.StoreError`
-  of :meth:`~keepout.store.jobs.JobQueue.finish`): it fails with the
+  of :meth:`~keepout.store.jobs.JobQueue.finish` or
+  :meth:`~keepout.store.jobs.JobQueue.save_partial`): it fails with the
   reason;
 - an error of keepout (:class:`~keepout.errors.KeepoutError`): it fails
   with the error's message, and any other error with ``internal error``,
@@ -27,7 +32,9 @@ How a job ends:
 - a stop request (``stop``, or ``KeyboardInterrupt``): the child is killed
   and the job is released, the attempt not counted.
 
-The worker logs on the :data:`LOGGER_NAME` logger.
+The worker logs on the :data:`LOGGER_NAME` logger. Given a heartbeat file,
+it touches it each time it looks at the queue and renews a lease: a
+container's healthcheck tells a live worker by its age.
 """
 
 from __future__ import annotations
@@ -42,7 +49,7 @@ import socket
 import threading
 import time
 import traceback
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, Protocol, TypeAlias, cast
 
@@ -96,8 +103,12 @@ _INTERNAL: Final = "internal error"
 """The error of a job whose computation raised anything but a keepout
 error."""
 
-Compute: TypeAlias = Callable[[str, Job, "int | None"], "dict[str, JsonValue]"]
-"""The computation of a job: ``(store path, job, workers) -> result``. A
+Compute: TypeAlias = Callable[
+    [str, Job, "int | None"],
+    "dict[str, JsonValue] | Iterator[dict[str, JsonValue]]",
+]
+"""The computation of a job: ``(store path, job, workers) -> result``, or an
+iterator of the parts of a refresh's result, each written as it comes. A
 module-level function, which a spawned child process unpickles."""
 
 logger = logging.getLogger(LOGGER_NAME)
@@ -121,7 +132,14 @@ class _Sender(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class _Answer:
-    """The child's message of a result."""
+    """The child's message of a result (of its last part, if in parts)."""
+
+    payload: dict[str, JsonValue]
+
+
+@dataclass(frozen=True, slots=True)
+class _Part:
+    """The child's message of a part of its result, more to come."""
 
     payload: dict[str, JsonValue]
 
@@ -168,6 +186,7 @@ def run_worker(
     heartbeat: float = HEARTBEAT_SECONDS,
     time_limit: float = TIME_LIMIT_SECONDS,
     poll: float = POLL_SECONDS,
+    heartbeat_file: Path | None = None,
 ) -> int:
     """A worker of a store's queue: its jobs run one at a time, each in a
     child process, until it is asked to stop.
@@ -193,6 +212,11 @@ def run_worker(
         How long a job may compute before it is failed, in seconds.
     poll
         How long to wait for a job when the queue is empty, in seconds.
+    heartbeat_file
+        A file whose modification time the worker sets each time it looks
+        at the queue (every ``poll`` seconds when idle) and renews a lease
+        (every ``heartbeat`` seconds while a job computes): made if missing,
+        its directory must exist. ``None``: none.
 
     Returns
     -------
@@ -205,6 +229,8 @@ def run_worker(
         If ``heartbeat`` is not less than ``lease``.
     StoreError
         If the store cannot be opened, or the database cannot be used.
+    OSError
+        If ``heartbeat_file`` cannot be touched.
     KeyboardInterrupt
         On an interrupt; its job goes back to the queue first, as on a stop.
     """
@@ -222,6 +248,7 @@ def run_worker(
         lease=lease,
         heartbeat=heartbeat,
         time_limit=time_limit,
+        heartbeat_file=heartbeat_file,
     )
     ran = 0
     # ONE_THREAD unless set already, while the worker runs: a child spawned
@@ -233,6 +260,7 @@ def run_worker(
     ):
         queue = JobQueue(store)
         while not stop.is_set():
+            supervisor.beat()
             job = queue.claim(name, lease=lease)
             if job is None:
                 if until_idle:
@@ -284,6 +312,12 @@ class _Supervisor:
     lease: float
     heartbeat: float
     time_limit: float
+    heartbeat_file: Path | None
+
+    def beat(self) -> None:
+        """Touch the heartbeat file, if there is one."""
+        if self.heartbeat_file is not None:
+            self.heartbeat_file.touch()
 
     def run(self, queue: JobQueue, job: Job) -> _Run:
         """How a job the worker claimed ended, run in a child process.
@@ -316,10 +350,14 @@ class _Supervisor:
             sender.close()
 
     def _watch(
-        self, queue: JobQueue, job: Job, child: SpawnProcess, receiver: _Receiver
+        self,
+        queue: JobQueue,
+        job: Job,
+        child: SpawnProcess,
+        receiver: _Receiver,
     ) -> _Run:
         """How the job ended: by the child's answer, the time limit, a stop
-        or the loss of its lease.
+        or the loss of its lease; the parts of its result written meanwhile.
 
         Raises
         ------
@@ -331,8 +369,12 @@ class _Supervisor:
         while True:
             if receiver.poll(tick):
                 answer = _answer(receiver)
+                if isinstance(answer, _Part):
+                    if not _record_part(queue, job, answer.payload):
+                        _kill(child)
+                        return _Run.RAN
                 # A child gone without an answer on a stop was stopped too.
-                if answer is not None or not self.stop.is_set():
+                elif answer is not None or not self.stop.is_set():
                     _record_answer(queue, job, answer)
                     return _Run.RAN
             now = time.monotonic()
@@ -348,6 +390,7 @@ class _Supervisor:
                     continue
                 case _Step.RENEW:
                     beat = now
+                    self.beat()
                     if queue.heartbeat(job, lease=self.lease):
                         continue
                     _kill(child)
@@ -397,6 +440,27 @@ def _answer(receiver: _Receiver) -> object:
         return receiver.recv()
     except EOFError:
         return None
+
+
+def _record_part(queue: JobQueue, job: Job, payload: dict[str, JsonValue]) -> bool:
+    """Write a part of a job's result; whether its child computes on: not if
+    the job is no longer the worker's, or failed for a part it cannot cache.
+
+    Raises
+    ------
+    StoreError
+        If the database cannot be used.
+    """
+    try:
+        if queue.save_partial(job, payload):
+            return True
+    except StoreError as exc:
+        # As a result finish cannot cache (_record_answer).
+        if queue.fail(job, str(exc)):
+            logger.error("job %d failed: %s", job.id, exc)
+            return False
+    _lost(job)
+    return False
 
 
 def _record_answer(queue: JobQueue, job: Job, answer: object) -> None:
@@ -508,43 +572,73 @@ def _send(
     workers: int | None,
     connection: _Sender,
 ) -> None:
-    """The child's one message: ``compute``'s answer, or its error; a
-    result that cannot be sent is an error too."""
+    """The child's messages: the parts of ``compute``'s answer, if any, then
+    its answer, or its error; a message that cannot be sent is an error
+    too, and the last."""
     try:
-        try:
-            connection.send(_compute_answer(compute, path, job, workers))
-        except Exception as exc:  # noqa: BLE001 - not picklable: a bug
-            connection.send(
-                _Failure(
-                    message=str(exc),
-                    from_keepout=False,
-                    traceback=traceback.format_exc(),
+        for message in _messages(compute, path, job, workers):
+            try:
+                connection.send(message)
+            except Exception as exc:  # noqa: BLE001 - not picklable: a bug
+                connection.send(
+                    _Failure(
+                        message=str(exc),
+                        from_keepout=False,
+                        traceback=traceback.format_exc(),
+                    )
                 )
-            )
+                return
     finally:
         connection.close()
 
 
-def _compute_answer(
-    compute: Compute, path: str, job: Job, workers: int | None
-) -> _Answer | _Failure:
-    """The message of ``compute``'s answer, or of its error.
+def _failure(exc: Exception) -> _Failure:
+    """The message of ``compute``'s error, with its traceback."""
+    return _Failure(
+        message=str(exc),
+        from_keepout=isinstance(exc, KeepoutError),
+        traceback=traceback.format_exc(),
+    )
 
-    A result that is not a dict, which its type rules out, is an error too.
+
+def _not_a_dict(result: object) -> _Failure | None:
+    """The error of a result (or part) that is not a dict, which its type
+    rules out; ``None`` if it is one."""
+    if isinstance(result, dict):
+        return None
+    kind = type(result).__name__
+    message = f"a job's result must be a dict, got {kind}"
+    return _Failure(message=message, from_keepout=False, traceback="")
+
+
+def _messages(
+    compute: Compute, path: str, job: Job, workers: int | None
+) -> Iterator[_Part | _Answer | _Failure]:
+    """The messages of ``compute``'s answer, or of its error.
+
+    An answer in parts is sent one part behind: its last part is the
+    answer, which the supervisor writes with the job's end.
     """
     try:
         # Seen as an object: a job's code may break its declared type.
-        payload = cast("object", compute(path, job, workers))
-    except KeepoutError as exc:
-        return _Failure(
-            message=str(exc), from_keepout=True, traceback=traceback.format_exc()
-        )
+        result = cast("object", compute(path, job, workers))
+        if isinstance(result, Iterator):
+            parts = cast("Iterator[object]", result)
+            result = next(parts, None)
+            if result is None:
+                yield _Failure(
+                    message="a job's result in parts must have a part",
+                    from_keepout=False,
+                    traceback="",
+                )
+                return
+            for part in parts:
+                if (wrong := _not_a_dict(result)) is not None:
+                    yield wrong
+                    return
+                yield _Part(cast("dict[str, JsonValue]", result))
+                result = part
     except Exception as exc:  # noqa: BLE001 - any bug is the job's failure
-        return _Failure(
-            message=str(exc), from_keepout=False, traceback=traceback.format_exc()
-        )
-    if isinstance(payload, dict):
-        return _Answer(cast("dict[str, JsonValue]", payload))
-    kind = type(payload).__name__
-    message = f"a job's result must be a dict, got {kind}"
-    return _Failure(message=message, from_keepout=False, traceback="")
+        yield _failure(exc)
+        return
+    yield _not_a_dict(result) or _Answer(cast("dict[str, JsonValue]", result))

@@ -17,11 +17,12 @@ say where.
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING, Final, TypeVar, cast, get_args
+from typing import TYPE_CHECKING, Final, cast, get_args
 
 import numpy as np
 from astropy.time import Time
 
+from keepout._json import boolean, integer, items, number, obj, text, texts
 from keepout._methods import Method
 from keepout._validation import require_choice
 from keepout.errors import KeepoutError, StoreError
@@ -54,8 +55,6 @@ _UNREADABLE: Final = (
     KeepoutError,
 )
 """What reading JSON that keepout did not write may raise."""
-
-_T = TypeVar("_T")
 
 
 # --- To JSON ---------------------------------------------------------------
@@ -174,40 +173,39 @@ def outcome_to_json(outcome: ManeuverOutcome) -> dict[str, JsonValue]:
 # Each reader raises one of _UNREADABLE on JSON it cannot read.
 
 
-def _of(value: object, kind: type[_T]) -> _T:
-    """``value``, of type ``kind``; a bool is of no type but bool.
-
-    Raises
-    ------
-    TypeError
-        If it is not.
-    """
-    if not isinstance(value, kind) or (isinstance(value, bool) and kind is not bool):
-        raise TypeError(f"expected a {kind.__name__}, got {value!r}")
-    return value
+_VALUE: Final = "a value"
+"""How a reader's message names its value: this JSON's messages do not say
+where."""
 
 
 def _object(value: object) -> Mapping[str, object]:
     """``value``, a JSON object."""
-    # A JSON object's keys are strings.
-    return cast("Mapping[str, object]", _of(value, dict))
+    return obj(value, _VALUE)
 
 
 def _list(value: object) -> list[object]:
     """``value``, a JSON array."""
-    return cast("list[object]", _of(value, list))
+    return items(value, _VALUE)
 
 
 def _float(value: object) -> float:
     """``value``, a number, or NaN for ``null``."""
-    if value is None:
-        return math.nan
-    return float(_of(value, float if isinstance(value, float) else int))
+    return math.nan if value is None else number(value, _VALUE)
+
+
+def _int(value: object) -> int:
+    """``value``, an integer."""
+    return integer(value, _VALUE)
+
+
+def _bool(value: object) -> bool:
+    """``value``, ``true`` or ``false``."""
+    return boolean(value, _VALUE)
 
 
 def _texts(value: object) -> tuple[str, ...]:
     """``value``, a list of strings."""
-    return tuple(_of(item, str) for item in _list(value))
+    return texts(value, _VALUE)
 
 
 def _array(value: object, ndim: int) -> FloatArray:
@@ -241,8 +239,8 @@ def _new(value: object) -> NewApproach:
     level = require_choice(data["level"], tuple(_LEVELS), "risk level")
     return NewApproach(
         approach=CloseApproach(
-            _of(approach["primary_number"], int),
-            _of(approach["secondary_number"], int),
+            _int(approach["primary_number"]),
+            _int(approach["secondary_number"]),
             _state(approach["primary_state"]),
             _state(approach["secondary_state"]),
         ),
@@ -259,7 +257,7 @@ def _option(value: object) -> ManeuverOption:
         pc=_float(data["pc"]),
         range_at_tca=_float(data["range_at_tca"]),
         method=require_choice(data["method"], _METHODS, "method"),
-        meets_target=_of(data["meets_target"], bool),
+        meets_target=_bool(data["meets_target"]),
         notes=_texts(data["notes"]),
     )
 
@@ -277,9 +275,9 @@ def _rescreen(value: object, option: ManeuverOption) -> RescreenResult:
         event_returns=tuple(_new(item) for item in _list(data["event_returns"])),
         event_range=None if event_range is None else _float(event_range),
         window=(start, end),
-        catalog_objects=_of(data["catalog_objects"], int),
-        secondary_screened=_of(data["secondary_screened"], bool),
-        skipped_objects=_of(data["skipped_objects"], int),
+        catalog_objects=_int(data["catalog_objects"]),
+        secondary_screened=_bool(data["secondary_screened"]),
+        skipped_objects=_int(data["skipped_objects"]),
     )
 
 
@@ -310,7 +308,7 @@ def _outcome(value: object, event: ConjunctionEvent) -> ManeuverOutcome:
         notes=_texts(data["notes"]),
         burns=tuple(_burn(item) for item in _list(data["burns"])),
         grid=None if grid is None else _grid(grid),
-        catalog_label=None if label is None else _of(label, str),
+        catalog_label=None if label is None else text(label, _VALUE),
     )
 
 

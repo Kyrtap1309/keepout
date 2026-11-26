@@ -22,7 +22,7 @@ import keepout.cdm as keepout_cdm
 from keepout.cli.output import ExitCode
 from keepout.cli.store import STORE_HINT, open_cli_store, store_upgrade
 from keepout.store import open_store
-from keepout.store.db import HEAD
+from keepout.store.db import head
 
 EVENT_ID = re.compile(r"[0-9a-f]{12}")
 
@@ -261,11 +261,11 @@ def test_store_on_an_old_database_says_upgrade(tmp_path: Path) -> None:
     assert "run keepout store upgrade" in assess.stderr
     upgraded = keepout("store", "upgrade", "--store", str(db))
     assert upgraded.exit_code == ExitCode.OK
-    assert upgraded.stdout == f"Upgraded {db}: base -> {HEAD}.\n"
+    assert upgraded.stdout == f"Upgraded {db}: base -> {head()}.\n"
     again = keepout("store", "upgrade", "--store", str(db), "--json")
-    assert json.loads(again.stdout) == {"path": str(db), "from": HEAD, "to": HEAD}
+    assert json.loads(again.stdout) == {"path": str(db), "from": head(), "to": head()}
     same = keepout("store", "upgrade", "--store", str(db))
-    assert same.stdout == f"{db} is up to date (revision {HEAD}).\n"
+    assert same.stdout == f"{db} is up to date (revision {head()}).\n"
     assert keepout("store", "add", *files, "--store", str(db)).exit_code == 0
 
 

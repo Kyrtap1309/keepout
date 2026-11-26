@@ -276,7 +276,7 @@ layers = [
     "keepout.frames",
     "keepout.state",
     "keepout._workers",
-    "keepout._linalg",
+    "keepout._linalg | keepout._json",
     "keepout._types | keepout._validation | keepout._methods | keepout._defaults | keepout._text | keepout._environment | keepout.errors",
     "keepout.units | keepout._typing",
 ]

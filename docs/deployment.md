@@ -37,7 +37,11 @@ from `Dockerfile`:
 - **`worker`** is `keepout worker` on the same store: it computes the Pc of
   uploaded CDMs and the manoeuvre plans queued from the dashboard.
   `docker compose stop` sends it SIGTERM; it puts its running job back in
-  the queue and exits.
+  the queue and exits. Its healthcheck asks for a heartbeat file under a
+  minute old: compose sets `KEEPOUT_HEARTBEAT_FILE=/tmp/keepout-worker.alive`
+  (`keepout worker --heartbeat-file`), which the worker touches each time it
+  looks at the queue (every 2 s when idle) or renews its job's lease (every
+  20 s while a job computes). A worker run without it touches no file.
 
 Both run under an init process (`init: true`), which reaps the child
 processes Streamlit and the jobs run in. Both run as the user `keepout`

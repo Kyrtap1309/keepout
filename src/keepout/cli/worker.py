@@ -13,10 +13,12 @@ import sys
 import threading
 from collections.abc import Generator
 from contextlib import contextmanager
+from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Final, TypeAlias
 
 import typer
 
+from keepout._environment import HEARTBEAT_FILE_VARIABLE
 from keepout._text import plural
 from keepout.cli.options import Workers
 from keepout.cli.store import StorePath, importing_store
@@ -38,6 +40,23 @@ UntilIdle: TypeAlias = Annotated[
     typer.Option("--until-idle", help="Stop once the queue is empty."),
 ]
 """``--until-idle``: return when no job is queued instead of waiting."""
+
+HeartbeatFile: TypeAlias = Annotated[
+    Path | None,
+    typer.Option(
+        "--heartbeat-file",
+        envvar=HEARTBEAT_FILE_VARIABLE,
+        dir_okay=False,
+        metavar="FILE",
+        help=(
+            "Touch FILE each time the worker looks at the queue (every 2 s "
+            "when idle) or renews its job's lease (every 20 s), for a "
+            "healthcheck."
+        ),
+    ),
+]
+"""``--heartbeat-file``: the file the worker touches while it runs, also
+read from ``$KEEPOUT_HEARTBEAT_FILE``; ``None``: none."""
 
 
 @contextmanager
@@ -77,6 +96,7 @@ def worker_command(
     store: StorePath,
     until_idle: UntilIdle = False,
     workers: Workers = None,
+    heartbeat_file: HeartbeatFile = None,
 ) -> None:
     """Compute the store's queued jobs, one at a time, until stopped.
 
@@ -101,5 +121,6 @@ def worker_command(
             workers=workers,
             until_idle=until_idle,
             stop=stop,
+            heartbeat_file=heartbeat_file,
         )
     typer.echo(f"Ran {plural(ran, 'job')}.")

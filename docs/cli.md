@@ -29,7 +29,7 @@ clone, with `uv run keepout ...` or in the activated environment.
 | `keepout store add CDM... --store FILE` | Keep CDMs in a [conjunction store](store.md), each in its event, and assess the events |
 | `keepout store upgrade\|rebuild\|purge --store FILE` | Upgrade a store's schema, compute its missing Pc, delete its old events |
 | `keepout jobs list\|cancel --store FILE` | List a store's [background jobs](store.md#background-jobs), cancel one |
-| `keepout worker --store FILE [--until-idle] [--workers N]` | Compute the jobs queued: manoeuvre plans (`maneuver --event ID --queue`) and the dashboard's Pc refreshes |
+| `keepout worker --store FILE [--until-idle] [--workers N] [--heartbeat-file FILE]` | Compute the jobs queued: manoeuvre plans (`maneuver --event ID --queue`) and the dashboard's Pc refreshes |
 | `keepout dashboard --store FILE [--host ADDRESS] [--port N] [--as-of TIME]` | Show a store in the browser, on this machine only by default ([dashboard](dashboard.md)) |
 
 `keepout COMMAND --help` lists every option of a command.
@@ -501,7 +501,10 @@ the time limit and what happens to the job of a worker that dies.
 caches each result in the store: a manoeuvre plan, or the Pc of a refresh
 job the [dashboard](dashboard.md#jobs) queued. It runs until stopped
 (SIGTERM or Ctrl+C): its job then goes back to the queue. With `--until-idle` it stops once the
-queue is empty, and says how many jobs it ran. Its log goes to standard
+queue is empty, and says how many jobs it ran. `--heartbeat-file FILE` (or
+`$KEEPOUT_HEARTBEAT_FILE`) has it touch FILE each time it looks at the queue
+or renews its job's lease, for a healthcheck
+([Deployment](deployment.md#what-runs)). Its log goes to standard
 error:
 
 ```bash

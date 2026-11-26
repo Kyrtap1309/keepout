@@ -10,7 +10,7 @@ import shutil
 import signal
 import threading
 import time
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
 from multiprocessing.process import BaseProcess
@@ -19,15 +19,16 @@ from typing import Any, Final, TypedDict
 
 import pytest
 from astropy.time import Time
-from builders import SMALL_GRID
+from builders import SMALL_GRID, cached_pc, job_of
 from celestrak_builders import CELESTRAK_SAMPLE_CSV
 from cli_builders import operator_kvn
 from sqlalchemy import select
-from store_builders import FOSTER, count_rows, message
+from store_builders import FOSTER, count_rows, message, missing_pc
 from worker_jobs import (
     crash,
     crash_once,
     exit_when_told,
+    pc_one_by_one_then_sleep,
     pids_then_sleep,
     quick,
     raise_bug,
@@ -56,7 +57,7 @@ from keepout.store import CdmInput, JobKind, Store, models, open_store, planning
 from keepout.store.codec import observation_to_json
 from keepout.store.jobs import Job, JobQueue, JobStatus, SubmissionOutcome
 from keepout.store.maneuver_codec import outcome_from_json, outcome_to_json
-from keepout.store.planning import run_job, run_maneuver_job, run_refresh_job
+from keepout.store.planning import run_job, run_maneuver_job
 from keepout.store.worker import (
     TIME_LIMIT_SECONDS,
     Compute,
@@ -104,7 +105,7 @@ def _until(condition: Callable[[], bool], timeout: float = 5.0) -> None:
 
 
 def _running(store: Store, job: Job) -> Callable[[], bool]:
-    return lambda: JobQueue(store).job(job.id).status is JobStatus.RUNNING
+    return lambda: job_of(store, job.id).status is JobStatus.RUNNING
 
 
 @contextmanager
@@ -125,7 +126,7 @@ def test_runs_a_job_and_caches_its_result(
 ) -> None:
     caplog.set_level(logging.INFO, logger="keepout.worker")
     assert run_worker(path, compute=quick, until_idle=True, **FAST) == 1
-    done = JobQueue(store).job(job.id)
+    done = job_of(store, job.id)
     assert done.status is JobStatus.SUCCEEDED
     assert done.attempt == 1
     assert done.worker is not None
@@ -155,7 +156,7 @@ def test_a_cdm_stored_after_the_job_misses_its_result(
     store.ingest([message("B", tca=1.0, created=-60.0)])
     assert store.event(job.event_id).latest.message_id == "B"
     assert run_worker(path, compute=quick, until_idle=True, **FAST) == 1
-    assert JobQueue(store).job(job.id).status is JobStatus.SUCCEEDED
+    assert job_of(store, job.id).status is JobStatus.SUCCEEDED
     with store.read() as session:
         cached = session.execute(
             select(models.Result.message_id, models.Result.key)
@@ -174,7 +175,7 @@ def test_an_empty_queue(path: str) -> None:
 
 def test_keepout_error_is_the_message(store: Store, path: str, job: Job) -> None:
     assert run_worker(path, compute=raise_keepout, until_idle=True, **FAST) == 1
-    failed = JobQueue(store).job(job.id)
+    failed = job_of(store, job.id)
     assert failed.status is JobStatus.FAILED
     assert failed.error == "no burn"
     assert failed.attempt == 1
@@ -185,7 +186,7 @@ def test_bug_is_internal_error_with_traceback_logged(
     store: Store, path: str, job: Job, caplog: pytest.LogCaptureFixture
 ) -> None:
     assert run_worker(path, compute=raise_bug, until_idle=True, **FAST) == 1
-    failed = JobQueue(store).job(job.id)
+    failed = job_of(store, job.id)
     assert failed.status is JobStatus.FAILED
     assert failed.error == "internal error"
     assert failed.attempt == 1
@@ -204,7 +205,7 @@ def test_a_job_past_the_time_limit_is_stopped_and_failed(
     # The job sleeps forever: 15 s is a loaded runner's margin over the 1 s
     # limit, well below a worker that never stopped it.
     assert time.monotonic() - started < 15.0
-    failed = JobQueue(store).job(job.id)
+    failed = job_of(store, job.id)
     assert failed.status is JobStatus.FAILED
     assert failed.error == "stopped at the time limit of 1 s"
     assert failed.attempt == 1
@@ -258,7 +259,7 @@ def test_cancel_while_running(
         JobQueue(store).cancel(job.id)
         assert ran.result(timeout=5.0) == 1
     assert multiprocessing.active_children() == []
-    cancelled = JobQueue(store).job(job.id)
+    cancelled = job_of(store, job.id)
     assert cancelled.status is JobStatus.CANCELLED
     assert count_rows(store, models.Result) == 0
     assert f"lost job {job.id}" in caplog.text
@@ -267,7 +268,7 @@ def test_cancel_while_running(
 def test_crash_is_retried_once(store: Store, path: str, job: Job) -> None:
     ran = run_worker(path, compute=crash_once, until_idle=True, lease=1.0, **FAST)
     assert ran == 2
-    done = JobQueue(store).job(job.id)
+    done = job_of(store, job.id)
     assert done.status is JobStatus.SUCCEEDED
     assert done.attempt == 2
     assert count_rows(store, models.Result) == 1
@@ -276,7 +277,7 @@ def test_crash_is_retried_once(store: Store, path: str, job: Job) -> None:
 def test_crash_twice_fails(store: Store, path: str, job: Job) -> None:
     ran = run_worker(path, compute=crash, until_idle=True, lease=1.0, **FAST)
     assert ran == 2
-    failed = JobQueue(store).job(job.id)
+    failed = job_of(store, job.id)
     assert failed.status is JobStatus.FAILED
     assert failed.error == "the worker stopped twice without an answer"
     assert failed.attempt == 2
@@ -290,19 +291,38 @@ def test_stop_releases_the_job(store: Store, path: str, job: Job) -> None:
         stop.set()
         assert ran.result(timeout=5.0) == 0
     assert multiprocessing.active_children() == []
-    released = JobQueue(store).job(job.id)
+    released = job_of(store, job.id)
     assert released.status is JobStatus.QUEUED
     assert released.attempt == 0
     assert released.worker is None
 
 
-def test_stop_while_idle(path: str) -> None:
+def _touched_again(alive: Path) -> None:
+    """Wait for ``alive`` to be touched, then touched again."""
+    _until(alive.exists)
+    first = alive.stat().st_mtime_ns
+    _until(lambda: alive.stat().st_mtime_ns > first)
+
+
+def test_stop_while_idle(path: str, tmp_path: Path) -> None:
     stop = threading.Event()
-    with _in_thread(path, compute=quick, stop=stop, **FAST) as ran:
-        time.sleep(0.3)
+    alive = tmp_path / "alive"
+    options = {"stop": stop, "heartbeat_file": alive, **FAST}
+    with _in_thread(path, compute=quick, **options) as ran:
+        _touched_again(alive)  # it looked at the queue twice: waiting
         assert not ran.done()
         stop.set()
         assert ran.result(timeout=5.0) == 0
+
+
+def test_the_heartbeat_file_is_touched_while_a_job_computes(
+    store: Store, path: str, job: Job, tmp_path: Path
+) -> None:
+    alive = tmp_path / "alive"
+    options = {"until_idle": True, "heartbeat_file": alive, **FAST}
+    with _in_thread(path, compute=sleep_forever, **options):
+        _until(_running(store, job))
+        _touched_again(alive)
 
 
 def test_interrupt_releases_the_job(
@@ -315,7 +335,7 @@ def test_interrupt_releases_the_job(
     with pytest.raises(KeyboardInterrupt):
         run_worker(path, compute=sleep_forever, until_idle=True, **FAST)
     assert multiprocessing.active_children() == []
-    released = JobQueue(store).job(job.id)
+    released = job_of(store, job.id)
     assert released.status is JobStatus.QUEUED
     assert released.attempt == 0
 
@@ -355,7 +375,7 @@ def test_missing_catalog_copy_fails_the_job(
     (copy,) = (file.path for file in stored.files)
     copy.unlink()
     assert run_worker(path, until_idle=True, **FAST) == 1
-    failed = JobQueue(store).job(submitted.id)
+    failed = job_of(store, submitted.id)
     assert failed.status is JobStatus.FAILED
     assert failed.error is not None
     assert copy.name in failed.error
@@ -463,7 +483,7 @@ def test_an_unpicklable_result_is_internal_error(
     store: Store, path: str, job: Job
 ) -> None:
     assert run_worker(path, compute=unpicklable, until_idle=True, **FAST) == 1
-    failed = JobQueue(store).job(job.id)
+    failed = job_of(store, job.id)
     assert failed.status is JobStatus.FAILED
     assert failed.error == "internal error"
     assert failed.attempt == 1
@@ -490,7 +510,7 @@ def test_heartbeats_renew_the_lease(store: Store, path: str, job: Job) -> None:
         claimed = _lease_until(store, job)
         _until(lambda: _lease_until(store, job) > claimed)
         assert ran.result(timeout=5.0) == 1
-    done = JobQueue(store).job(job.id)
+    done = job_of(store, job.id)
     assert done.status is JobStatus.SUCCEEDED
     assert done.attempt == 1
 
@@ -532,10 +552,10 @@ def test_the_child_ignores_terminations(store: Store, path: str, job: Job) -> No
         os.kill(child.pid, signal.SIGTERM)
         time.sleep(0.5)
         assert child.is_alive()
-        assert JobQueue(store).job(job.id).status is JobStatus.RUNNING
+        assert job_of(store, job.id).status is JobStatus.RUNNING
         stop.set()
         assert ran.result(timeout=5.0) == 0
-    released = JobQueue(store).job(job.id)
+    released = job_of(store, job.id)
     assert released.status is JobStatus.QUEUED
     assert released.attempt == 0
 
@@ -553,7 +573,7 @@ def test_a_child_gone_on_a_stop_is_given_back(
         stop.set()
         Path(path).with_name("exit").touch()
         assert ran.result(timeout=5.0) == 0
-    released = JobQueue(store).job(job.id)
+    released = job_of(store, job.id)
     assert released.status is JobStatus.QUEUED
     assert released.attempt == 0
 
@@ -572,7 +592,7 @@ def test_killed_worker_job_finishes_once(store: Store, path: str, job: Job) -> N
         assert worker.pid is not None
         os.kill(worker.pid, signal.SIGKILL)
         worker.join()
-    time.sleep(1.5)
+    _until(lambda: _lease_until(store, job) < Time.now())
     ran = run_worker(
         path, compute=sleep_then_quick, until_idle=True, lease=1.0, heartbeat=0.2
     )
@@ -580,7 +600,7 @@ def test_killed_worker_job_finishes_once(store: Store, path: str, job: Job) -> N
     # Taken over once the killed worker's lease ran out, and finished by the
     # second attempt. (One result is cached; the cache keeps one per CDM and
     # key anyway, so that alone would not show a second finish.)
-    done = JobQueue(store).job(job.id)
+    done = job_of(store, job.id)
     assert done.status is JobStatus.SUCCEEDED
     assert done.attempt == 2
     assert count_rows(store, models.Result) == 1
@@ -625,7 +645,7 @@ def test_real_maneuver_job(store: Store, path: str) -> None:
     submitted = JobQueue(store).submit(event_id, settings).job
     assert submitted is not None
     assert run_worker(path, compute=small_grid_maneuver, until_idle=True) == 1
-    assert JobQueue(store).job(submitted.id).status is JobStatus.SUCCEEDED
+    assert job_of(store, submitted.id).status is JobStatus.SUCCEEDED
     with store.read() as session:
         payload = session.scalars(select(models.Result.payload)).one()
     event = store.event(event_id)
@@ -643,15 +663,33 @@ def test_refresh_job_writes_observations(
     assert submitted is not None
     # The default computation runs a job of either kind.
     assert run_worker(path, until_idle=True, **FAST) == 1
-    assert JobQueue(store).job(submitted.id).status is JobStatus.SUCCEEDED
+    assert job_of(store, submitted.id).status is JobStatus.SUCCEEDED
     with open_store(tmp_path / "sync.db") as synchronous:
         synchronous.ingest(messages)
         assert synchronous.refresh(FOSTER).computed == 2
-        expected = synchronous.observations(event_id, FOSTER)
-    observations = store.observations(event_id, FOSTER)
+        expected = cached_pc(synchronous, event_id, FOSTER)
+    observations = cached_pc(store, event_id, FOSTER)
     assert [observation_to_json(o) for o in observations] == [
         observation_to_json(o) for o in expected
     ]
+
+
+def test_a_refresh_keeps_the_pc_it_sent_before_its_time_limit(
+    store: Store, path: str
+) -> None:
+    (event_id,) = store.ingest(
+        [message("A"), message("B", tca=1.0, created=-60.0)]
+    ).events
+    submitted = JobQueue(store).submit_refresh(event_id, FOSTER).job
+    assert submitted is not None
+    ran = run_worker(
+        path, compute=pc_one_by_one_then_sleep, until_idle=True, time_limit=1.0, **FAST
+    )
+    assert ran == 1
+    assert job_of(store, submitted.id).status is JobStatus.FAILED
+    # A's Pc was written as B's came (a part is sent once the next one is
+    # there, the last being the answer): a refresh after this computes B's.
+    assert missing_pc(store, event_id, FOSTER) == ("B",)
 
 
 def test_refresh_job_without_hbr_fails(store: Store, path: str) -> None:
@@ -660,7 +698,7 @@ def test_refresh_job_without_hbr_fails(store: Store, path: str) -> None:
     submitted = JobQueue(store).submit_refresh(event_id, settings).job
     assert submitted is not None
     assert run_worker(path, until_idle=True, **FAST) == 1
-    failed = JobQueue(store).job(submitted.id)
+    failed = job_of(store, submitted.id)
     assert failed.status is JobStatus.FAILED
     with pytest.raises(HardBodyRadiusError) as raised:
         store.refresh(settings, event_ids=[event_id])
@@ -689,14 +727,15 @@ def no_observations(path: str, job: Job, workers: int | None) -> dict[str, JsonV
     return {"ok": True}
 
 
-def mislabelled(path: str, job: Job, workers: int | None) -> dict[str, JsonValue]:
-    """A refresh's result with A's observation given as B's."""
-    observations = run_refresh_job(path, job, workers)["observations"]
-    assert isinstance(observations, dict)
-    return {"observations": {"B": observations["A"]}}
+def a_part_without_observations(
+    path: str, job: Job, workers: int | None
+) -> Iterator[dict[str, JsonValue]]:
+    """A refresh's result whose first part has no observations."""
+    yield {"ok": True}
+    yield {"observations": {}}
 
 
-@pytest.mark.parametrize("compute", [no_observations, mislabelled])
+@pytest.mark.parametrize("compute", [no_observations, a_part_without_observations])
 def test_a_malformed_refresh_result_fails_the_job(
     store: Store,
     path: str,
@@ -710,7 +749,7 @@ def test_a_malformed_refresh_result_fails_the_job(
     assert submitted is not None
     # The worker goes on: until_idle returns once the queue is empty.
     assert run_worker(path, compute=compute, until_idle=True, **FAST) == 1
-    failed = JobQueue(store).job(submitted.id)
+    failed = job_of(store, submitted.id)
     assert failed.status is JobStatus.FAILED
     assert failed.error is not None
     assert failed.error.startswith("a refresh job's")

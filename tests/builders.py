@@ -37,7 +37,9 @@ from keepout.pc.result import PcResult
 from keepout.propagation import ManeuveredPropagator
 from keepout.propagation.forces import EARTH_RADIUS
 from keepout.risk import PcKind, PcObservation
+from keepout.settings import Settings
 from keepout.state import StateVector
+from keepout.store import Job, JobQueue, Store
 from keepout.store import db as store_db
 from keepout.units import DAY, HOUR, KM
 from keepout.validation.cases import Suite, ValidationCase
@@ -499,3 +501,20 @@ def store_at(path: Path, revision: str) -> None:
             command.upgrade(store_db._config(connection), revision)
     finally:
         engine.dispose()
+
+
+def cached_pc(
+    store: Store, event_id: str, settings: Settings
+) -> tuple[PcObservation, ...]:
+    """Every Pc observation of a stored event cached for ``settings``, oldest
+    CDM first; the test fails unless each one is cached."""
+    detail = store.detail(event_id, settings)
+    assert detail is not None, f"no event {event_id}"
+    assert detail.complete is not None, f"no Pc of {detail.missing}"
+    return detail.complete
+
+
+def job_of(store: Store, job_id: int) -> Job:
+    """The job ``job_id`` of ``store``'s queue, as it is now."""
+    (job,) = JobQueue(store).jobs_by_id([job_id])
+    return job

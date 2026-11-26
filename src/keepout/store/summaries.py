@@ -1,54 +1,54 @@
-"""The events list of the dashboard: one page of stored events, each summed up.
+"""What the store reads out: the events list of the dashboard (a page of
+stored events, each summed up), an event's detail, and the jobs of the
+queue and of the manoeuvre planner.
 
 :meth:`keepout.store.Store.summaries` reads a page of events
-(:class:`SummaryPage`) in a fixed number of queries, whatever its length:
-the count, the page's events, their CDMs with the Pc cached for the
-settings, the latest CDM of each, and their active jobs. An event's latest
-CDM is parsed only when its Pc rests on an assumed covariance, whose
-provenance its header comments tell (:func:`keepout.risk.provenance`).
-Each event's risk is :func:`~keepout.risk.assess` of the Pc observations
-cached for it: none is computed here.
+(:class:`SummaryPage`) in a fixed number of queries, whatever its length
+(:func:`keepout.store.queries.read_page`): the count, the page's events,
+their CDMs with the Pc cached for the settings, the latest CDM of each, and
+their active jobs. An event's latest CDM is parsed only when its Pc rests on
+an assumed covariance, whose provenance its header comments tell
+(:func:`keepout.risk.provenance`). Each event's risk is
+:func:`~keepout.risk.assess` of the Pc observations cached for it: none is
+computed here.
 """
 
 from __future__ import annotations
 
-from collections import defaultdict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
-from sqlalchemy import and_, func, select
-
 import keepout.cdm
 from keepout.risk import assess, provenance
-from keepout.store import models
+from keepout.settings import settings_from_data
 from keepout.store.codec import observation_from_json
-from keepout.store.models import ACTIVE_STATUSES, JobKind
 
 if TYPE_CHECKING:
-    from collections.abc import Collection, Iterable, Mapping, Sequence
+    from collections.abc import Iterable, Mapping, Sequence
 
     from astropy.time import Time
-    from sqlalchemy import ColumnElement
-    from sqlalchemy.orm import Session
 
     from keepout.events import ConjunctionEvent
+    from keepout.maneuver import ManeuverOutcome
     from keepout.risk import Assessment, PcObservation, Provenance, Thresholds
-    from keepout.store.models import EventId, MessageId
+    from keepout.settings import Settings
+    from keepout.store import models
+    from keepout.store.models import EventId, JobKind, JobStatus, MessageId
 
 __all__ = [
     "MAX_LIMIT",
     "EventDetail",
     "EventRows",
     "EventSummary",
+    "Job",
+    "LatestCdm",
+    "PlanDetail",
+    "PlanJobs",
     "SummaryPage",
-    "active_refresh_in",
     "assessed",
     "check_page",
     "complete_of",
     "decoded",
-    "payloads_in",
-    "read_page",
-    "result_under",
     "summarize",
 ]
 
@@ -171,22 +171,9 @@ def complete_of(
 def assessed(
     observations: Sequence[PcObservation | None], thresholds: Thresholds
 ) -> Assessment | None:
-    """The risk of an event from the observations of its CDMs, oldest
-    first, with ``thresholds``: assessed only when every one is computed
-    (:func:`complete_of`), the events list and an event's page alike.
-
-    Parameters
-    ----------
-    observations
-        Each CDM's observation; ``None`` where it is not computed.
-    thresholds
-        The thresholds of the risk levels.
-
-    Returns
-    -------
-    Assessment or None
-        The risk; ``None`` if any observation is not computed.
-    """
+    """The risk of an event from its CDMs' observations (oldest first) with
+    ``thresholds``; ``None`` unless every one is computed
+    (:func:`complete_of`), the events list and an event's page alike."""
     complete = complete_of(observations)
     return None if complete is None else assess(complete, thresholds=thresholds)
 
@@ -214,7 +201,7 @@ class SummaryPage:
 
 
 @dataclass(frozen=True, slots=True)
-class _Latest:
+class LatestCdm:
     """The latest CDM of an event, as stored."""
 
     tca: Time
@@ -224,8 +211,8 @@ class _Latest:
 
 @dataclass(frozen=True, slots=True)
 class EventRows:
-    """What the store holds of a listed event, as :func:`read_page` reads
-    it for :func:`summarize`.
+    """What the store holds of a listed event, as
+    :func:`~keepout.store.queries.read_page` reads it for :func:`summarize`.
 
     Internal to :mod:`keepout.store`.
     """
@@ -236,7 +223,7 @@ class EventRows:
     payloads: Sequence[Mapping[str, object] | None]
     """The Pc cached on each of its CDMs, oldest first; ``None`` where there
     is none."""
-    latest: _Latest
+    latest: LatestCdm
     active_job: JobKind | None
 
 
@@ -277,41 +264,22 @@ def _summary(rows: EventRows, thresholds: Thresholds) -> EventSummary:
 def summarize(
     events: Iterable[EventRows], thresholds: Thresholds
 ) -> tuple[EventSummary, ...]:
-    """The summaries of listed events (:func:`read_page`), each assessed from
-    its cached observations.
-
-    Parameters
-    ----------
-    events
-        The events' rows.
-    thresholds
-        The thresholds of the risk levels.
-
-    Returns
-    -------
-    tuple of EventSummary
-        Their summaries, in the same order.
+    """The summaries of listed events, each assessed from its cached
+    observations, in the same order.
 
     Raises
     ------
     StoreError
         If a cached observation cannot be read.
     CdmParseError
-        If a latest CDM, parsed for an assumed covariance, no longer parses
-        (a store edited by hand).
+        If a latest CDM, parsed for an assumed covariance, no longer parses.
     """
     return tuple(_summary(rows, thresholds) for rows in events)
 
 
 def check_page(offset: int, limit: int) -> None:
-    """Check the bounds of a page.
-
-    Parameters
-    ----------
-    offset
-        How many events come before the page: not negative.
-    limit
-        Most events the page holds: 1 to :data:`MAX_LIMIT`.
+    """Check a page's bounds: ``offset`` not negative, ``limit`` from 1 to
+    :data:`MAX_LIMIT`.
 
     Raises
     ------
@@ -324,180 +292,108 @@ def check_page(offset: int, limit: int) -> None:
         raise ValueError(f"offset must not be negative, got {offset}")
 
 
-def read_page(
-    session: Session,
-    key: str,
-    *,
-    as_of: Time | None,
-    offset: int,
-    limit: int,
-) -> tuple[tuple[EventRows, ...], int]:
-    """A page of the events list, read in the caller's transaction.
+@dataclass(frozen=True, slots=True, eq=False)
+class Job:
+    """A job of the queue (:class:`~keepout.store.JobQueue`), as it was when
+    read.
 
-    Internal to :mod:`keepout.store`: :meth:`~keepout.store.Store.summaries`
-    reads it, then parses and assesses it outside the transaction
-    (:func:`summarize`).
-
-    Parameters
-    ----------
-    session
-        A session of the store.
-    key
-        The :func:`~keepout.store.codec.result_key` of the observations.
-    as_of
-        Only the events whose latest TCA is not before it; ``None``: all.
-    offset
-        How many events come before the page.
-    limit
-        Most events the page holds.
-
-    Returns
-    -------
-    tuple
-        The rows of the page's events, and how many events the list has.
+    Two jobs compare by identity (:class:`~keepout.settings.Settings` do):
+    compare :attr:`id` and :attr:`claims`.
     """
-    listed: list[ColumnElement[bool]] = []
-    if as_of is not None:
-        listed.append(models.Event.tca_max >= as_of)
-    total = session.scalar(
-        select(func.count()).select_from(models.Event).where(*listed)
-    )
-    events = session.execute(
-        select(models.Event.id, models.Event.object1, models.Event.object2)
-        .where(*listed)
-        .order_by(models.Event.tca_max, models.Event.id)
-        .offset(offset)
-        .limit(limit)
-    ).all()
-    ids = [event_id for event_id, _, _ in events]
-    payloads = payloads_in(session, ids, key)
-    latest = _latest(session, [cdms[-1][0] for cdms in payloads.values()])
-    jobs = _active_jobs(session, ids)
-    rows = tuple(
-        EventRows(
-            event_id=event_id,
-            object1=object1,
-            object2=object2,
-            payloads=[payload for _, payload in payloads[event_id]],
-            latest=latest[payloads[event_id][-1][0]],
-            active_job=jobs.get(event_id),
+
+    id: int
+    """The job's number, unique in the store's queue."""
+    kind: JobKind
+    """What it computes: a manoeuvre plan, or the missing Pc."""
+    event_id: str
+    """The store's id of the event."""
+    message_id: str
+    """The CDM the computation is pinned to: the event's latest when
+    queued."""
+    key: str
+    """The key its result is cached under."""
+    settings: Settings
+    """The operator's settings the job computes with."""
+    status: JobStatus
+    """Where the job is: queued, running, succeeded, failed or cancelled."""
+    attempt: int
+    """How many attempts it cost: a claim adds one, a release on a stop
+    takes it back."""
+    claims: int
+    """How many times it was claimed, never lowered: a worker's writes name
+    the claim they belong to."""
+    worker: str | None
+    """The worker that holds it, or held it when it succeeded, failed or was
+    cancelled. Cleared when it goes back to the queue or its lease lapses."""
+    created_at: Time
+    """When it was queued, in UTC."""
+    started_at: Time | None
+    """When a worker last claimed it, in UTC; ``None`` while it waits in the
+    queue (also after going back to it)."""
+    finished_at: Time | None
+    """When it succeeded, failed or was cancelled, in UTC; ``None`` while it
+    is active."""
+    error: str | None
+    """Why it failed."""
+
+    @classmethod
+    def of(cls, row: models.Job) -> Job:
+        """The job of a row.
+
+        Parameters
+        ----------
+        row
+            The job's row in the store.
+
+        Returns
+        -------
+        Job
+            The job.
+        """
+        return cls(
+            id=row.id,
+            kind=row.kind,
+            event_id=row.event_id,
+            message_id=row.message_id,
+            key=row.key,
+            settings=settings_from_data(row.params),
+            status=row.status,
+            attempt=row.attempt,
+            claims=row.claims,
+            worker=row.worker,
+            created_at=row.created_at,
+            started_at=row.started_at,
+            finished_at=row.finished_at,
+            error=row.error,
         )
-        for event_id, object1, object2 in events
-    )
-    return rows, total or 0
 
 
-def result_under(key: str) -> ColumnElement[bool]:
-    """A CDM's result cached under ``key``: the condition that joins
-    :class:`~keepout.store.models.Result` to
-    :class:`~keepout.store.models.Cdm`.
+@dataclass(frozen=True, slots=True)
+class PlanJobs:
+    """An event's manoeuvre jobs: the active ones, and the one of a set of
+    settings (:meth:`~keepout.store.JobQueue.plan_jobs`)."""
 
-    Parameters
-    ----------
-    key
-        The key of the result, e.g. a :func:`~keepout.store.codec.result_key`.
-
-    Returns
-    -------
-    ColumnElement
-        The condition.
-    """
-    return and_(
-        models.Result.message_id == models.Cdm.message_id,
-        models.Result.key == key,
-    )
+    active: tuple[Job, ...]
+    """Every manoeuvre job of the event still queued or running, whatever
+    its settings, newest first."""
+    current: Job | None
+    """The job of the settings on the event's latest CDM: the queued or
+    running one, else the newest (ended); ``None`` if there is none."""
 
 
-def payloads_in(
-    session: Session, event_ids: Collection[str], key: str
-) -> dict[EventId, list[tuple[MessageId, Mapping[str, object] | None]]]:
-    """The CDMs of each event, oldest first, by ``MESSAGE_ID``, with the
-    payload cached on each under ``key``, in the caller's transaction.
+@dataclass(frozen=True, slots=True)
+class PlanDetail:
+    """A stored event as its manoeuvre planner shows it, read in one
+    transaction (:meth:`~keepout.store.Store.plan_detail`)."""
 
-    Internal to :mod:`keepout.store`: the events list and an event's
-    detail read the same cache.
-
-    Parameters
-    ----------
-    session
-        A session of the store.
-    event_ids
-        The store's ids of the events; one not stored is left out.
-    key
-        The key of the payloads, e.g. a
-        :func:`~keepout.store.codec.result_key`.
-
-    Returns
-    -------
-    dict
-        Each event's CDMs, by ``CREATION_DATE`` then ``MESSAGE_ID``, with
-        their payload: ``None`` where there is none (the outer join's
-        ``NULL``, which the column's type does not say).
-    """
-    rows: Sequence[tuple[EventId, MessageId, Mapping[str, object] | None]] = (
-        session.execute(
-            select(models.Cdm.event_id, models.Cdm.message_id, models.Result.payload)
-            .outerjoin(models.Result, result_under(key))
-            .where(models.Cdm.event_id.in_(event_ids))
-            .order_by(
-                models.Cdm.event_id, models.Cdm.creation_date, models.Cdm.message_id
-            )
-        ).all()
-    )
-    by_event: defaultdict[
-        EventId, list[tuple[MessageId, Mapping[str, object] | None]]
-    ] = defaultdict(list)
-    for event_id, message_id, payload in rows:
-        by_event[event_id].append((message_id, payload))
-    return dict(by_event)
-
-
-def _latest(
-    session: Session, message_ids: Sequence[MessageId]
-) -> dict[MessageId, _Latest]:
-    """The TCA, creation and text of each CDM of ``message_ids``."""
-    rows = session.execute(
-        select(
-            models.Cdm.message_id,
-            models.Cdm.tca,
-            models.Cdm.creation_date,
-            models.Cdm.content,
-        ).where(models.Cdm.message_id.in_(message_ids))
-    ).all()
-    return {
-        message_id: _Latest(tca, creation_date, content)
-        for message_id, tca, creation_date, content in rows
-    }
-
-
-def active_refresh_in(session: Session, event_id: str, key: str) -> tuple[int, ...]:
-    """The ids of an event's queued or running ``refresh`` jobs whose result
-    is cached under ``key``, oldest first, in the caller's transaction."""
-    return tuple(
-        session.scalars(
-            select(models.Job.id)
-            .where(
-                models.Job.event_id == event_id,
-                models.Job.kind == JobKind.REFRESH,
-                models.Job.key == key,
-                models.Job.status.in_(ACTIVE_STATUSES),
-            )
-            .order_by(models.Job.id)
-        )
-    )
-
-
-def _active_jobs(
-    session: Session, event_ids: Sequence[EventId]
-) -> dict[EventId, JobKind]:
-    """The kind of the oldest queued or running job of each event that has
-    one."""
-    rows = session.execute(
-        select(models.Job.event_id, models.Job.kind)
-        .where(
-            models.Job.event_id.in_(event_ids), models.Job.status.in_(ACTIVE_STATUSES)
-        )
-        .order_by(models.Job.id.desc())
-    ).all()
-    # Newest first: the oldest is written last.
-    return dict(rows)
+    event: ConjunctionEvent
+    """The event and its CDMs."""
+    message_id: MessageId
+    """The CDM a plan of the event is cached on: its latest."""
+    key: str
+    """The plan's :func:`~keepout.store.codec.maneuver_key`: the settings
+    and the catalog of that CDM."""
+    outcome: ManeuverOutcome | None
+    """The plan cached there, of :attr:`event`; ``None`` if none is."""
+    jobs: PlanJobs
+    """The event's manoeuvre jobs, and the one of the settings."""

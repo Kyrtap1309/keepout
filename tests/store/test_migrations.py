@@ -21,7 +21,7 @@ from sqlalchemy.exc import IntegrityError
 
 from keepout.errors import StoreError
 from keepout.store import JobQueue, Store, db, models, open_store, upgrade
-from keepout.store.db import HEAD
+from keepout.store.db import head
 from keepout.store.models import Base, JobKind
 
 EVENT = text(
@@ -149,8 +149,8 @@ def test_upgrade_reports_the_revisions(tmp_path: Path) -> None:
     base_revision_store(path)
     with pytest.raises(StoreError, match="keepout store upgrade"):
         open_store(path)
-    assert upgrade(path) == (None, HEAD)
-    assert upgrade(str(path)) == (HEAD, HEAD)
+    assert upgrade(path) == (None, head())
+    assert upgrade(str(path)) == (head(), head())
     with open_store(path, create=False):
         pass
 
@@ -158,7 +158,7 @@ def test_upgrade_reports_the_revisions(tmp_path: Path) -> None:
 def test_upgrade_builds_an_empty_file(tmp_path: Path) -> None:
     path = tmp_path / "keepout.db"
     path.touch()
-    assert upgrade(path) == (None, HEAD)
+    assert upgrade(path) == (None, head())
 
 
 def test_upgrade_needs_a_store(tmp_path: Path) -> None:
@@ -401,7 +401,7 @@ def test_upgrade_0002_to_0003_keeps_jobs(tmp_path: Path) -> None:
             )
     finally:
         engine.dispose()
-    assert upgrade(path) == ("0002", HEAD)
+    assert upgrade(path) == ("0002", head())
     with open_store(path, create=False) as store:
         with store.read() as session:
             kind = session.scalar(text("SELECT kind FROM jobs"))

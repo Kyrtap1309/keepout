@@ -2,7 +2,7 @@
 
 import astropy.units as u
 import pytest
-from builders import counting_parses
+from builders import cached_pc, counting_parses
 from store_builders import (
     FOSTER,
     TCA,
@@ -14,7 +14,6 @@ from store_builders import (
 
 import keepout.cdm
 from keepout.cdm import Cdm
-from keepout.errors import StoreError
 from keepout.risk import Provenance
 from keepout.risk.provenance import HEADER_COMMENTS
 from keepout.settings import Settings
@@ -136,23 +135,22 @@ def test_summaries_of_an_empty_store(store: Store) -> None:
     assert (page.items, page.total, page.offset, page.limit) == ((), 0, 0, 10)
 
 
-def test_cached_observations_with_one_missing(store: Store) -> None:
+def test_the_detail_pairs_each_cdm_with_its_cached_pc(store: Store) -> None:
     (event_id,) = store.ingest(
         [message("A"), message("B", tca=1.0, created=-60.0)]
     ).events
     store.refresh(FOSTER)
-    complete = store.observations(event_id, FOSTER)
+    complete = cached_pc(store, event_id, FOSTER)
     drop_result(store, "A", FOSTER)
-    pairs = store.cached_observations(event_id, FOSTER)
+    detail = store.detail(event_id, FOSTER)
+    assert detail is not None
+    pairs = detail.observations
     assert [message_id for message_id, _ in pairs] == ["A", "B"]
     assert pairs[0][1] is None
     latest = pairs[1][1]
     assert latest is not None
     assert latest.pc == complete[1].pc
-    with pytest.raises(StoreError, match="no Pc of A in event"):
-        store.observations(event_id, FOSTER)
-    with pytest.raises(StoreError, match="no event nothing"):
-        store.cached_observations("nothing", FOSTER)
+    assert detail.complete is None
 
 
 def test_detail_of_an_unknown_event(store: Store) -> None:
@@ -170,7 +168,7 @@ def test_detail_reads_event_pc_and_refresh_jobs(store: Store) -> None:
     assert detail.missing == ()
     assert detail.complete is not None
     assert [o.pc for o in detail.complete] == [
-        o.pc for o in store.observations(event_id, FOSTER)
+        o.pc for o in cached_pc(store, event_id, FOSTER)
     ]
     assert detail.refresh_jobs == ()
 
@@ -197,7 +195,7 @@ def test_detail_reads_event_pc_and_refresh_jobs(store: Store) -> None:
 def test_complete_of_needs_every_observation(store: Store) -> None:
     (event_id,) = store.ingest([message("A")]).events
     store.refresh(FOSTER)
-    (observation,) = store.observations(event_id, FOSTER)
+    (observation,) = cached_pc(store, event_id, FOSTER)
     assert complete_of([observation, observation]) == (observation, observation)
     assert complete_of([observation, None]) is None
     assert complete_of([]) == ()

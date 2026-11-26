@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 from alembic import command
+from builders import job_of
 from cli_builders import (
     keepout,
     operator_run,
@@ -267,7 +268,7 @@ def test_worker_gives_its_workers_to_the_computation(
     result = keepout("worker", "--store", str(db), "--until-idle", "--workers", "3")
     assert (result.exit_code, result.stdout) == (ExitCode.OK, "Ran 1 job.\n")
     with open_store(db, create=False) as store:
-        key = JobQueue(store).job(job).key
+        key = job_of(store, job).key
         with store.read() as session:
             cached = session.scalars(
                 select(models.Result.payload).where(models.Result.key == key)
@@ -325,9 +326,20 @@ def test_a_signal_stops_the_worker_and_releases_its_job(
     ]
 
 
+def test_worker_touches_its_heartbeat_file_from_the_environment(
+    stored: tuple[Path, str], tmp_path: Path
+) -> None:
+    db, _ = stored
+    alive = tmp_path / "alive"
+    env = {"KEEPOUT_HEARTBEAT_FILE": str(alive)}
+    result = keepout("worker", "--store", str(db), "--until-idle", env=env)
+    assert (result.exit_code, result.stdout) == (ExitCode.OK, "Ran 0 jobs.\n")
+    assert alive.exists()
+
+
 def test_worker_help_names_its_options() -> None:
     result = keepout("worker", "--help", env={"COLUMNS": "200"})
     assert result.exit_code == ExitCode.OK
     words = " ".join(result.stdout.split())
-    for expected in ("--store FILE", "--until-idle", "--workers"):
+    for expected in ("--store FILE", "--until-idle", "--workers", "--heartbeat-file"):
         assert expected in words

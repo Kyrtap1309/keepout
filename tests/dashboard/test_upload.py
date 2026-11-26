@@ -8,7 +8,7 @@ from pathlib import Path
 
 import dashboard_seed as seed
 import pytest
-from builders import leo_crossing
+from builders import job_of, leo_crossing
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
@@ -141,7 +141,7 @@ def test_upload_ingests_and_queues_refresh(store: Store) -> None:
     assert len(result.report.added) == 1
     assert _cdm_count(store) == before + 1
     (job_id,) = result.jobs
-    job = JobQueue(store).job(job_id)
+    job = job_of(store, job_id)
     assert job.kind is JobKind.REFRESH
     assert job.event_id == result.report.events[0]
     assert _active_jobs(store) == [job_id]

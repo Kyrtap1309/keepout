@@ -13,7 +13,9 @@ from keepout.errors import SettingsError
 from keepout.pc import AUTO, PcComputation
 from keepout.risk import DEFAULT_THRESHOLDS, Thresholds
 from keepout.settings import (
+    SETTINGS_KEYS,
     Settings,
+    SettingsData,
     load_settings,
     settings_from_data,
     settings_to_data,
@@ -24,6 +26,17 @@ def _write(tmp_path: Path, text: str) -> Path:
     path = tmp_path / "keepout.toml"
     path.write_text(text, encoding="utf-8")
     return path
+
+
+def test_the_settings_keys_are_those_of_a_full_settings_file() -> None:
+    # Every table and key settings_to_data gives (hbr_m once a radius is set).
+    full = settings_to_data(Settings(combined_hard_body_radius=20.0))
+    assert list(SETTINGS_KEYS) == list(SettingsData.__annotations__)
+    assert {
+        "pc": set(full["pc"]),
+        "risk": set(full["risk"]),
+        "maneuver": set(full["maneuver"]),
+    } == {name: set(keys) for name, keys in SETTINGS_KEYS.items()}
 
 
 def test_settings_default_to_the_librarys() -> None:

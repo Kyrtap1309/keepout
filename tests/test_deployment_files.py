@@ -45,15 +45,26 @@ def test_compose_publishes_on_loopback_at_the_demo_time() -> None:
     assert "ports" not in services["init"]
 
 
+def test_the_worker_s_healthcheck_reads_its_heartbeat_file() -> None:
+    worker = _compose()["services"]["worker"]
+    alive = worker["environment"]["KEEPOUT_HEARTBEAT_FILE"]
+    assert f"os.stat('{alive}')" in worker["healthcheck"]["test"][-1]
+
+
 def test_dockerfile_pins_and_user() -> None:
     text = (REPO / "Dockerfile").read_text(encoding="utf-8")
     lines = text.splitlines()
-    # Every image pulled (FROM python..., COPY --from=ghcr.io/...), not
-    # the stages named in the file.
-    images = re.findall(r"^(?:FROM |COPY --from=)(\S+)", text, re.MULTILINE)
+    # Every image pulled (ARG PYTHON_IMAGE=python..., COPY
+    # --from=ghcr.io/...), not the stages named in the file.
+    images = re.findall(
+        r"^(?:FROM |COPY --from=|ARG \w+_IMAGE=)(\S+)", text, re.MULTILINE
+    )
     external = [image for image in images if ":" in image]
-    assert len(external) >= 3
+    assert len(external) >= 2
     assert all(re.search(r"@sha256:[0-9a-f]{64}$", image) for image in external)
+    # The build and the runtime run on one Python image.
+    stages = re.findall(r"^FROM (\S+)", text, re.MULTILINE)
+    assert stages.count("${PYTHON_IMAGE}") == 2
     last = max(i for i, line in enumerate(lines) if line.startswith("FROM "))
     stage = lines[last:]
     user = [i for i, line in enumerate(stage) if line.startswith("USER ")]
@@ -122,6 +133,18 @@ def test_init_fails_on_an_older_store(seed_dir: Path, data_dir: Path) -> None:
     assert result.returncode == 1
     assert "keepout store upgrade" in result.stderr
     assert store.read_bytes() == before
+
+
+def test_init_fails_on_a_file_that_is_no_store_without_the_upgrade_hint(
+    seed_dir: Path, data_dir: Path
+) -> None:
+    store = data_dir / "keepout.db"
+    store.write_bytes(b"not a database, nor a store")
+    result = _init(seed_dir, data_dir)
+    assert result.returncode == 1
+    assert f"{store} is not a keepout store" in result.stderr
+    assert "upgrade" not in result.stderr
+    assert store.read_bytes() == b"not a database, nor a store"
 
 
 def test_init_keeps_catalogs_without_their_store(

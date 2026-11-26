@@ -64,9 +64,24 @@ services:
     # worker kills (docs/store.md, Deployment).
     init: true
     command: ["keepout", "worker", "--store", "/data/keepout.db"]
+    environment:
+      # Touched each time the worker looks at the queue or renews a lease.
+      KEEPOUT_HEARTBEAT_FILE: /tmp/keepout-worker.alive
     depends_on:
       init:
         condition: service_completed_successfully
+    # Healthy while the heartbeat file is under a minute old (the worker
+    # touches it every 2 s when idle, every 20 s while a job computes).
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import os, sys, time; sys.exit(time.time() - os.stat('/tmp/keepout-worker.alive').st_mtime > 60)"
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
     # keepout worker puts its job back in the queue on SIGTERM (Docker's
     # stop signal); give it time to.

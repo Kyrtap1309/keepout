@@ -5,6 +5,7 @@ import multiprocessing
 import os
 import threading
 import time
+from collections.abc import Iterator
 from pathlib import Path
 
 from builders import SMALL_GRID
@@ -12,7 +13,7 @@ from builders import SMALL_GRID
 from keepout._types import JsonValue
 from keepout.errors import ManeuverError
 from keepout.store.jobs import Job
-from keepout.store.planning import run_maneuver_job
+from keepout.store.planning import run_maneuver_job, run_refresh_job
 
 
 def quick(path: str, job: Job, workers: int | None) -> dict[str, JsonValue]:
@@ -128,3 +129,16 @@ def pids_then_sleep(path: str, job: Job, workers: int | None) -> dict[str, JsonV
     written.write_text(f"{os.getpid()} {grandchild.pid}")
     written.replace(_beside(path, "pids"))
     return sleep_forever(path, job, workers)
+
+
+def pc_one_by_one_then_sleep(
+    path: str, job: Job, workers: int | None
+) -> Iterator[dict[str, JsonValue]]:
+    """A refresh's Pc, each sent as a part of its own, then no answer: sleeps
+    until killed."""
+    for batch in run_refresh_job(path, job, workers):
+        observations = batch["observations"]
+        assert isinstance(observations, dict)
+        for message_id, observation in observations.items():
+            yield {"observations": {message_id: observation}}
+    sleep_forever(path, job, workers)

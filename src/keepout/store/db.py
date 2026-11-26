@@ -9,13 +9,14 @@ write-ahead logging.
 
 :func:`open_store` opens a store (re-exported as
 :func:`keepout.store.open_store`), checking its revision against
-:data:`HEAD`. :func:`engine_for` makes the SQLAlchemy engine a
+:func:`head`. :func:`engine_for` makes the SQLAlchemy engine a
 :class:`~keepout.store.Store` runs on: write-ahead logging, foreign keys, and
 a wait of :data:`BUSY_TIMEOUT_MS` for another process's lock.
 """
 
 from __future__ import annotations
 
+import functools
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -41,8 +42,8 @@ if TYPE_CHECKING:
 
 __all__ = [
     "BUSY_TIMEOUT_MS",
-    "HEAD",
     "engine_for",
+    "head",
     "open_store",
     "upgrade",
 ]
@@ -65,27 +66,38 @@ def _config(connection: Connection | None = None) -> Config:
     return config
 
 
-_SCRIPTS: Final = ScriptDirectory.from_config(_config())
-
-# The package ships at least one migration, so there is a head.
-HEAD: Final = _SCRIPTS.get_current_head() or ""
-"""The schema revision this keepout reads and writes: the Alembic head of its
-migrations. :func:`open_store` opens only a store at this revision;
-:func:`upgrade` brings an older one to it."""
-
-_KNOWN: Final = frozenset(script.revision for script in _SCRIPTS.walk_revisions())
-"""Every revision of this keepout's migrations."""
+@functools.cache
+def _scripts() -> ScriptDirectory:
+    """The migrations of this keepout, parsed on first use: a job's child
+    process that never checks a revision does not pay for it."""
+    return ScriptDirectory.from_config(_config())
 
 
-def _engine(path: Path, *, wal: bool, foreign_keys: bool) -> Engine:
-    """An engine on a SQLite file whose transactions keepout begins itself.
+def head() -> str:
+    """The schema revision this keepout reads and writes: the Alembic head of
+    its migrations.
 
-    Every connection waits up to :data:`BUSY_TIMEOUT_MS` for a lock, and
-    enforces foreign keys or not; with ``wal``, it also switches the file to
-    write-ahead logging (a lasting change to the file). Transactions start
-    with ``BEGIN``, or ``BEGIN IMMEDIATE`` with the
-    :data:`~keepout.store.repo.WRITE` execution option.
+    :func:`open_store` opens only a store at this revision; :func:`upgrade`
+    brings an older one to it.
+
+    Returns
+    -------
+    str
+        The revision.
     """
+    # The package ships at least one migration, so there is a head.
+    return _scripts().get_current_head() or ""
+
+
+@functools.cache
+def _known() -> frozenset[str]:
+    """Every revision of this keepout's migrations."""
+    return frozenset(script.revision for script in _scripts().walk_revisions())
+
+
+def _engine(path: Path, *, foreign_keys: bool) -> Engine:
+    """An engine on a SQLite file whose transactions keepout begins itself
+    (:func:`engine_for`), foreign keys on or off."""
     engine = create_engine(URL.create("sqlite", database=str(path)))
 
     @event.listens_for(engine, "connect")
@@ -97,8 +109,6 @@ def _engine(path: Path, *, wal: bool, foreign_keys: bool) -> Engine:
         cursor = connection.cursor()
         cursor.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
         cursor.execute(f"PRAGMA foreign_keys={'ON' if foreign_keys else 'OFF'}")
-        if wal:
-            cursor.execute("PRAGMA journal_mode=WAL")
         cursor.close()
 
     @event.listens_for(engine, "begin")
@@ -113,15 +123,13 @@ def _engine(path: Path, *, wal: bool, foreign_keys: bool) -> Engine:
 def engine_for(path: Path) -> Engine:
     """A SQLAlchemy engine on a SQLite file, set up for the store.
 
-    Every connection uses write-ahead logging (readers and a writer do not
-    block each other), waits up to :data:`BUSY_TIMEOUT_MS` for a lock and
+    Every connection waits up to :data:`BUSY_TIMEOUT_MS` for a lock and
     enforces foreign keys. Transactions start with ``BEGIN``, or with
     ``BEGIN IMMEDIATE`` on a connection with the
     :data:`~keepout.store.repo.WRITE` execution option, so two writers queue
-    instead of one failing to upgrade its read lock.
-
-    Switching to write-ahead logging changes the file: :func:`open_store`
-    makes this engine only once it has checked the file's revision.
+    instead of one failing to upgrade its read lock. The file is in
+    write-ahead logging (readers and a writer do not block each other):
+    :func:`open_store` switches it, once it has checked its revision.
 
     Parameters
     ----------
@@ -134,7 +142,7 @@ def engine_for(path: Path) -> Engine:
         The engine; :meth:`~sqlalchemy.engine.Engine.dispose` closes its
         connections.
     """
-    return _engine(path, wal=True, foreign_keys=True)
+    return _engine(path, foreign_keys=True)
 
 
 @dataclass(frozen=True)
@@ -161,9 +169,7 @@ def _connected(engine: Engine, *, write: bool) -> Generator[Connection]:
     Raises
     ------
     StoreError
-        On a database error: the file cannot be opened (a directory, an
-        unwritable place), is not a SQLite database, or stayed locked past
-        the busy timeout.
+        On a database error, naming the file.
     """
     if write:
         engine = engine.execution_options(**{WRITE: True})
@@ -180,8 +186,7 @@ def _schema(connection: Connection, path: str | Path | None) -> _Schema:
     Raises
     ------
     StoreError
-        If it has tables but no Alembic revision table: another
-        application's database.
+        If it has tables but no Alembic revision: another application's.
     """
     tables = set(inspect(connection).get_table_names())
     if not tables:
@@ -200,7 +205,7 @@ def _require_known(path: str | Path | None, schema: _Schema) -> None:
     StoreError
         If it does not: a newer keepout made the database.
     """
-    if schema.revision is not None and schema.revision not in _KNOWN:
+    if schema.revision is not None and schema.revision not in _known():
         raise StoreError(
             f"{path} was made by a newer keepout (revision {schema.revision}): "
             "upgrade keepout to open it"
@@ -208,15 +213,14 @@ def _require_known(path: str | Path | None, schema: _Schema) -> None:
 
 
 def _require_head(path: str | Path | None, schema: _Schema) -> None:
-    """Check that the database is at :data:`HEAD`, the revision this keepout
-    opens.
+    """Check that the database is at :func:`head`.
 
     Raises
     ------
     StoreError
         If it is at a newer or an older revision.
     """
-    if schema.revision == HEAD:
+    if schema.revision == head():
         return
     _require_known(path, schema)
     raise StoreError(f"{path} was made by an older keepout: run keepout store upgrade")
@@ -226,7 +230,7 @@ def _require_head(path: str | Path | None, schema: _Schema) -> None:
 def _inspected(path: Path) -> Generator[Engine]:
     """An engine that changes nothing on connection (no write-ahead logging),
     disposed of on exit."""
-    engine = _engine(path, wal=False, foreign_keys=True)
+    engine = _engine(path, foreign_keys=True)
     try:
         yield engine
     finally:
@@ -239,8 +243,7 @@ def _read_schema(path: Path) -> _Schema:
     Raises
     ------
     StoreError
-        If the file cannot be read, is not a SQLite database or is another
-        application's database.
+        If it cannot be read, or is no keepout store.
     """
     with _inspected(path) as engine, _connected(engine, write=False) as connection:
         return _schema(connection, path)
@@ -248,20 +251,17 @@ def _read_schema(path: Path) -> _Schema:
 
 @contextmanager
 def _migrating(path: Path) -> Generator[Connection]:
-    """A connection to migrate a store on, in a write transaction.
-
-    Foreign keys are off, set before the transaction begins: SQLite alters
-    a table by copying it and dropping the old one, and with foreign keys
-    on the drop would delete, by ``ON DELETE CASCADE``, the rows of other
-    tables that refer to it. They are checked before the commit instead.
+    """A connection to migrate a store on, in a write transaction, foreign
+    keys off (SQLite alters a table by dropping a copy, which would cascade)
+    and checked before the commit instead.
 
     Raises
     ------
     StoreError
-        If the migrations leave a row whose foreign key refers to nothing
-        (the transaction is rolled back), or on a database error.
+        If a foreign key refers to nothing (rolled back), or on a database
+        error.
     """
-    engine = _engine(path, wal=False, foreign_keys=False)
+    engine = _engine(path, foreign_keys=False)
     try:
         with _connected(engine, write=True) as connection:
             yield connection
@@ -277,7 +277,7 @@ def _migrating(path: Path) -> Generator[Connection]:
 
 
 def _to_head(connection: Connection) -> None:
-    """Run the migrations from the connection's revision to :data:`HEAD`."""
+    """Run the migrations from the connection's revision to :func:`head`."""
     command.upgrade(_config(connection), "head")
 
 
@@ -287,9 +287,8 @@ def _create(path: Path) -> None:
     Raises
     ------
     StoreError
-        If the directory cannot be made, the file cannot be written, or
-        another process made the file meanwhile at a revision this keepout
-        cannot open.
+        If it cannot be made, or another process made it meanwhile at a
+        revision this keepout cannot open.
     """
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -332,12 +331,12 @@ _SQLITE: Final = (3, 35)
 
 
 def _require_sqlite() -> None:
-    """A check that Python's SQLite is :data:`_SQLITE` or newer.
+    """Check that Python's SQLite is :data:`_SQLITE` or newer.
 
     Raises
     ------
     StoreError
-        If it is older; the message names its version.
+        If it is older, naming its version.
     """
     if sqlite3.sqlite_version_info < _SQLITE:
         oldest = ".".join(map(str, _SQLITE))
@@ -402,7 +401,33 @@ def open_store(path: str | Path, *, create: bool = True) -> Store:
         _create(path)
     else:
         _require_head(path, schema)
+    _use_wal(path)
     return Store(path, engine_for(path))
+
+
+def _use_wal(path: Path) -> None:
+    """Switch a store to write-ahead logging unless it is in it already.
+
+    The mode lasts in the file. Switching takes an exclusive lock and fails
+    at once, without a busy wait, while another process uses the file: so it
+    is done here, once, not by each process's first connection.
+
+    Raises
+    ------
+    StoreError
+        If the file cannot be switched.
+    """
+    try:
+        connection = sqlite3.connect(
+            path, timeout=BUSY_TIMEOUT_MS / 1000, isolation_level=None
+        )
+        try:
+            if connection.execute("PRAGMA journal_mode").fetchone() != ("wal",):
+                connection.execute("PRAGMA journal_mode=WAL")
+        finally:
+            connection.close()
+    except sqlite3.Error as error:
+        raise StoreError(f"cannot use the store {path}: {error}") from error
 
 
 def upgrade(path: str | Path) -> tuple[str | None, str]:
@@ -417,7 +442,7 @@ def upgrade(path: str | Path) -> tuple[str | None, str]:
     -------
     tuple[str | None, str]
         The revision before (``None`` for a file without a schema) and after
-        (:data:`HEAD`); the same when there was nothing to do.
+        (:func:`head`); the same when there was nothing to do.
 
     Raises
     ------
@@ -433,11 +458,11 @@ def upgrade(path: str | Path) -> tuple[str | None, str]:
         raise StoreError(_no_store(path))
     schema = _read_schema(path)
     _require_known(path, schema)
-    if schema.revision == HEAD:
-        return HEAD, HEAD
+    if schema.revision == head():
+        return head(), head()
     with _migrating(path) as connection:
         # Again under the write lock: another process may have upgraded it.
         schema = _schema(connection, path)
         _require_known(path, schema)
         _to_head(connection)
-    return schema.revision, HEAD
+    return schema.revision, head()

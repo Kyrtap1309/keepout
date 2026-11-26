@@ -6,6 +6,7 @@ import dashboard_seed as seed
 import pytest
 import synthetic_operator_report as report
 from astropy.time import Time
+from builders import cached_pc
 from sqlalchemy import select
 
 from keepout.cdm import load
@@ -290,7 +291,7 @@ def test_demo_update_joins_event_and_is_red(tmp_path: Path) -> None:
     with open_store(path, create=False) as store:
         report = store.ingest([update])
         store.refresh(settings)
-        observations = store.observations(seed.DEMO_EVENT, settings)
+        observations = cached_pc(store, seed.DEMO_EVENT, settings)
     assert report.events == (seed.DEMO_EVENT,)
     assert len(observations) == seed.ISSUES + 1
     latest = observations[-1]

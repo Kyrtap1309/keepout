@@ -15,11 +15,17 @@ data="${2:-/data}"
 store="$data/keepout.db"
 
 if [ -e "$store" ]; then
-    # Opens the store read-only; fails on another schema.
-    if ! keepout jobs list --store "$store" >/dev/null; then
-        echo "upgrade it: docker compose stop dashboard worker &&" \
-            "docker compose run --rm --no-deps worker keepout store upgrade" \
-            "--store $store" >&2
+    # Opens the store read-only; fails on another schema, or on a file that
+    # is no store. Only a store of an older keepout gets the upgrade hint.
+    if ! error="$(keepout jobs list --store "$store" 2>&1 >/dev/null)"; then
+        echo "$error" >&2
+        case "$error" in
+        *"made by an older keepout"*)
+            echo "upgrade it: docker compose stop dashboard worker &&" \
+                "docker compose run --rm --no-deps worker keepout store upgrade" \
+                "--store $store" >&2
+            ;;
+        esac
         exit 1
     fi
     echo "store kept: $store"

@@ -15,56 +15,72 @@ the settings it was computed with
 (:meth:`Store.maneuver`) is cached on its latest CDM under the key of the
 operator's settings and the catalog
 (:func:`~keepout.store.codec.maneuver_key`).
+
+What it is given and reports is in :mod:`keepout.store.inputs`; its reads
+in a session, shared with the job queue, in :mod:`keepout.store.queries`.
 """
 
 from __future__ import annotations
 
-import functools
 import hashlib
 import re
-import time
 from contextlib import contextmanager
-from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Final, Self, TypeVarTuple
+from typing import TYPE_CHECKING, Final, Self
 
 import astropy.units as u
 from astropy.time import Time
-from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy import delete as delete_rows
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy import exists, func, select
 from sqlalchemy.exc import DatabaseError, IntegrityError
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session
 
 import keepout.cdm
-from keepout.errors import HardBodyRadiusError, StoreError
+from keepout.errors import StoreError
 from keepout.events import (
     DEFAULT_TCA_TOLERANCE,
     AssessedEvent,
     ConjunctionEvent,
     EventBounds,
-    missing_hard_body_radius,
     stable_event_id,
-    without_hard_body_radius,
 )
 from keepout.risk import assess
-from keepout.sources.catalog import CatalogFileRef, CatalogReference
-from keepout.store import models
-from keepout.store.codec import (
-    maneuver_key,
-    observation_to_json,
-    result_key,
+from keepout.store import computing, models
+from keepout.store.codec import maneuver_key, observation_to_json, result_key
+from keepout.store.computing import (
+    batches,
+    lacking_hard_body_radius,
+    observation_of,
+    parsed_cdm,
+    parsed_event,
+    refuse_lacking_hard_body_radius,
 )
+from keepout.store.inputs import IngestReport, RefreshReport
 from keepout.store.models import EventId, MessageId
+from keepout.store.queries import (
+    active_refresh_in,
+    cached,
+    cached_payload_in,
+    catalog_in,
+    cdms_of,
+    insert_results_in,
+    maneuver_slot_in,
+    no_event,
+    payloads_in,
+    plan_jobs_in,
+    read_page,
+    require_events,
+    require_latest_in,
+    save_maneuver_in,
+    texts_in,
+)
 from keepout.store.summaries import (
     EventDetail,
+    PlanDetail,
     SummaryPage,
-    active_refresh_in,
     check_page,
+    complete_of,
     decoded,
-    payloads_in,
-    read_page,
-    result_under,
     summarize,
 )
 from keepout.units import elapsed_seconds
@@ -80,16 +96,16 @@ if TYPE_CHECKING:
     )
     from types import TracebackType
 
-    from sqlalchemy import ColumnElement, Engine, Select
+    from sqlalchemy import ColumnElement, Engine
 
-    from keepout._types import JsonValue
-    from keepout.cdm import Cdm, CdmFormat
+    from keepout.cdm import Cdm
     from keepout.maneuver import ManeuverOutcome
     from keepout.risk import PcObservation
     from keepout.settings import Settings
-    from keepout.store.jobs import PlanDetail
+    from keepout.sources.catalog import CatalogReference
+    from keepout.store.inputs import CdmInput
 
-__all__ = ["WRITE", "CdmInput", "IngestReport", "RefreshReport", "Store"]
+__all__ = ["WRITE", "Store"]
 
 WRITE: Final = "keepout_write"
 """Execution option of a write transaction: it starts with ``BEGIN IMMEDIATE``
@@ -98,31 +114,9 @@ WRITE: Final = "keepout_write"
 _COPY_NAME: Final = re.compile(r"([0-9a-f]{64})(?:\.|$)")
 """The name of a catalog copy: its SHA-256, then the original's suffixes."""
 
-_BATCH_SIZE: Final = 100
-"""Most observations :meth:`Store.refresh` writes in one transaction, and
-most CDM texts it reads in one."""
-
-_BATCH_SECONDS: Final = 1.0
-"""Longest :meth:`Store.refresh` computes before writing what it computed."""
-
-_GIVE_HARD_BODY_RADIUS: Final = "give the combined hard-body radius in the settings"
-"""The hint of a Pc that lacks a hard-body radius."""
-
 _WINDOW: Final = (DEFAULT_TCA_TOLERANCE + 1.0) * u.s
 """How far from a TCA the database searches for the events it may join: the
 tolerance and a second of slack; the exact test follows."""
-
-_PARSED_CDMS: Final = 1024
-"""How many stored CDMs the process keeps parsed (:func:`_parsed_cdm`): the
-CDMs of some 50 events of 20 CDMs, about 25 MB with their texts."""
-
-
-_Ts = TypeVarTuple("_Ts")
-
-
-def _now() -> Time:
-    """The current time, for the rows' ``created_at`` and ``ingested_at``."""
-    return Time.now()
 
 
 def _digest(cdm: Cdm) -> str:
@@ -130,135 +124,7 @@ def _digest(cdm: Cdm) -> str:
     return hashlib.sha256(keepout.cdm.kvn.dumps(cdm).encode("utf-8")).hexdigest()
 
 
-@dataclass(frozen=True, slots=True)
-class CdmInput:
-    """A CDM to ingest, with its text as read and where it came from.
-
-    Parameters
-    ----------
-    cdm
-        The message.
-    text
-        Its text, KVN or XML: what the store keeps.
-    format
-        The text's format.
-    origin
-        Where it came from: the file it was read from, or ``"screen"``.
-    """
-
-    cdm: Cdm
-    text: str
-    format: CdmFormat
-    origin: str
-
-    @classmethod
-    def read(cls, path: Path) -> CdmInput:
-        """The CDM of a KVN or XML file (UTF-8, gzip-compressed or not),
-        its origin the path.
-
-        Parameters
-        ----------
-        path
-            The CDM file, KVN or XML; its path is the origin.
-
-        Returns
-        -------
-        CdmInput
-            The parsed CDM, its text, format and origin.
-
-        Raises
-        ------
-        CdmParseError
-            If the file is broken gzip data, not UTF-8 text or not a CDM.
-        OSError
-            If it cannot be read.
-        """
-        return cls.parse(keepout.cdm.read_text(path), str(path))
-
-    @classmethod
-    def parse(cls, text: str, origin: str) -> CdmInput:
-        """The CDM of a text, KVN or XML.
-
-        Parameters
-        ----------
-        text
-            The message's text, as read (decoded, without a byte-order mark).
-        origin
-            Where it came from, e.g. the file it was read from.
-
-        Returns
-        -------
-        CdmInput
-            The parsed CDM, its text, format and origin.
-
-        Raises
-        ------
-        CdmParseError
-            If the text is not a CDM.
-        """
-        return cls(keepout.cdm.loads(text), text, keepout.cdm.format_of(text), origin)
-
-    @classmethod
-    def of(cls, cdm: Cdm, origin: str) -> CdmInput:
-        """A CDM made in memory, e.g. by a screening, kept as its KVN.
-
-        Parameters
-        ----------
-        cdm
-            The message, e.g. from :func:`~keepout.cdm.make_cdm`.
-        origin
-            Where it came from, e.g. ``"screen"``.
-
-        Returns
-        -------
-        CdmInput
-            The CDM, its KVN text and its origin.
-        """
-        return cls(cdm, keepout.cdm.kvn.dumps(cdm), "kvn", origin)
-
-
-@dataclass(frozen=True, slots=True)
-class IngestReport:
-    """What an ingest did, in the order the messages were given.
-
-    Parameters
-    ----------
-    added
-        The ``MESSAGE_ID`` of each message stored.
-    already_stored
-        The ``MESSAGE_ID`` of each message given that was stored before
-        (or earlier in the same ingest), with the same content.
-    events
-        The id of each event the messages given belong to.
-    new_events
-        The id of each of those events that the ingest created.
-    """
-
-    added: tuple[MessageId, ...]
-    already_stored: tuple[MessageId, ...]
-    events: tuple[EventId, ...]
-    new_events: tuple[EventId, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class RefreshReport:
-    """What a refresh did.
-
-    Parameters
-    ----------
-    computed
-        How many Pc observations it computed and cached.
-    skipped
-        The ``MESSAGE_ID`` of each CDM left without a Pc because it lacks
-        ``HBR`` and the settings give no hard-body radius (only when every
-        event is refreshed), oldest event first.
-    """
-
-    computed: int
-    skipped: tuple[MessageId, ...] = ()
-
-
-def _unique(items: Sequence[EventId]) -> tuple[EventId, ...]:
+def _unique(items: Iterable[EventId]) -> tuple[EventId, ...]:
     """``items`` without repeats, in the order they first come."""
     return tuple(dict.fromkeys(items))
 
@@ -286,9 +152,8 @@ def _new_event_id(session: Session, message_id: str) -> EventId:
 
 
 def _event_of(session: Session, cdm: Cdm) -> tuple[models.Event, bool]:
-    """The event that ``cdm`` joins, by the rule of
-    :class:`~keepout.events.EventBounds`, updated for it, and whether it is
-    new.
+    """The event that ``cdm`` joins (:class:`~keepout.events.EventBounds`),
+    updated for it, and whether it is new.
 
     Raises
     ------
@@ -322,7 +187,7 @@ def _event_of(session: Session, cdm: Cdm) -> tuple[models.Event, bool]:
         conjunction_id=cdm.conjunction_id,
         tca_min=cdm.tca,
         tca_max=cdm.tca,
-        created_at=_now(),
+        created_at=Time.now(),
     )
     session.add(event)
     return event, True
@@ -346,563 +211,47 @@ def _catalog_row(reference: CatalogReference, base: Path) -> models.Catalog:
     )
 
 
-def insert_results_in(
-    session: Session,
-    key: str,
-    payloads: Sequence[tuple[str, Mapping[str, JsonValue]]],
-) -> int:
-    """Write results under ``key`` in the caller's write transaction, each a
-    CDM's ``MESSAGE_ID`` and its payload, but those of CDMs not stored (e.g.
-    purged meanwhile) and those already cached.
-
-    Internal to :mod:`keepout.store`: a refresh job writes its observations
-    and its own end in one transaction.
-
-    Parameters
-    ----------
-    session
-        A session of :meth:`Store.write`.
-    key
-        The key of the results.
-    payloads
-        Each result: its CDM's ``MESSAGE_ID`` and its JSON.
-
-    Returns
-    -------
-    int
-        How many it wrote.
-    """
-    given = {message_id for message_id, _ in payloads}
-    stored = set(
-        session.scalars(
-            select(models.Cdm.message_id).where(models.Cdm.message_id.in_(given))
+def _texts_by_event(
+    session: Session, event_ids: Collection[str] | None
+) -> tuple[Sequence[EventId], dict[EventId, list[str]]]:
+    """The ids of the stored events of ``event_ids`` (all if ``None``), by
+    first TCA then id, and the texts of each one's CDMs."""
+    listed = select(models.Event.id)
+    if event_ids is not None:
+        listed = listed.where(models.Event.id.in_(event_ids))
+    ids = session.scalars(listed.order_by(models.Event.tca_min, models.Event.id)).all()
+    rows = session.execute(
+        select(models.Cdm.event_id, models.Cdm.content).where(
+            models.Cdm.event_id.in_(listed.scalar_subquery())
         )
-    )
-    rows: list[dict[str, object]] = [
-        {
-            "message_id": message_id,
-            "key": key,
-            "payload": dict(payload),
-            "created_at": _now(),
-        }
-        for message_id, payload in payloads
-        if message_id in stored
-    ]
-    if not rows:
-        return 0
-    insert = sqlite_insert(models.Result).on_conflict_do_nothing(
-        index_elements=[models.Result.message_id, models.Result.key]
-    )
-    return session.connection().execute(insert, rows).rowcount
-
-
-def _write_results(
-    session: Session, key: str, observations: Sequence[PcObservation]
-) -> int:
-    """Write observations under ``key``, but those of CDMs not stored (e.g.
-    purged meanwhile) and those already cached; how many it wrote."""
-    return insert_results_in(
-        session,
-        key,
-        [
-            (observation.message_id, observation_to_json(observation))
-            for observation in observations
-            if observation.message_id is not None
-        ],
-    )
-
-
-def save_maneuver_in(
-    session: Session, message_id: str, key: str, payload: Mapping[str, JsonValue]
-) -> bool:
-    """Cache a manoeuvre outcome's JSON on a CDM, in the caller's write
-    transaction (:meth:`Store.save_maneuver` makes one of its own).
-
-    Internal to :mod:`keepout.store`: a job that plans a manoeuvre writes
-    its result and its own end in one transaction.
-
-    Parameters
-    ----------
-    session
-        A session of :meth:`Store.write`.
-    message_id
-        The ``MESSAGE_ID`` of the CDM the outcome was planned on.
-    key
-        The outcome's :func:`~keepout.store.codec.maneuver_key`: the settings and
-        catalog it was planned with.
-    payload
-        The outcome's JSON, from :func:`~keepout.store.maneuver_codec.outcome_to_json`.
-
-    Returns
-    -------
-    bool
-        Whether it was written: not if the CDM is not stored (e.g. purged
-        meanwhile) or an outcome is already cached on it under ``key``.
-    """
-    return insert_results_in(session, key, [(message_id, payload)]) == 1
-
-
-def _maneuver_key_in(
-    session: Session, base: Path, message_id: str, settings: Settings
-) -> str:
-    """The key of a plan with ``settings`` on a stored CDM: its
-    :func:`~keepout.store.codec.maneuver_key` with the CDM's catalog.
-
-    Raises
-    ------
-    ValueError
-        If a settings file cannot hold ``settings``.
-    """
-    return maneuver_key(settings, catalog_in(session, base, message_id))
-
-
-def maneuver_slot_in(
-    session: Session, base: Path, event_id: str, settings: Settings
-) -> tuple[MessageId, str]:
-    """Where a plan of a stored event with ``settings`` is cached, in the
-    caller's transaction: the event's latest CDM and the plan's key.
-
-    Internal to :mod:`keepout.store`: the cache and the job queue look up
-    the same slot.
-
-    Parameters
-    ----------
-    session
-        A session of the store.
-    base
-        The directory of the store file.
-    event_id
-        The store's id of the event.
-    settings
-        The operator's settings of the plan.
-
-    Raises
-    ------
-    StoreError
-        If there is no such event.
-    ValueError
-        If a settings file cannot hold ``settings``, as
-        :func:`~keepout.store.codec.maneuver_key`.
-    """
-    message_id = latest_in(session, event_id)
-    return message_id, _maneuver_key_in(session, base, message_id, settings)
-
-
-def pinned_in(
-    session: Session, base: Path, event_id: str, message_id: str | None
-) -> tuple[ConjunctionEvent, CatalogReference | None]:
-    """A stored event as it was at one of its CDMs, and that CDM's catalog,
-    in the caller's transaction.
-
-    Internal to :mod:`keepout.store`: a plan reads both in one transaction.
-
-    Parameters
-    ----------
-    session
-        A session of the store.
-    base
-        The directory of the store file.
-    event_id
-        The store's id of the event.
-    message_id
-        The ``MESSAGE_ID`` of one of its CDMs: the event without the CDMs
-        after it in (``CREATION_DATE``, ``MESSAGE_ID``) order. ``None``: its
-        latest CDM.
-
-    Raises
-    ------
-    StoreError
-        If there is no such event, or ``message_id`` is not a CDM of it.
-    CdmParseError
-        If a stored CDM no longer parses (a store edited by hand).
-    EventError
-        If the stored CDMs no longer make an event (likewise).
-    """
-    cdms = _cdms_of(session, event_id, message_id)
-    latest = _latest_message_id(session, cdms)
-    event = _parsed_event(event_id, _texts(session, cdms))
-    return event, catalog_in(session, base, latest)
-
-
-def _paired(
-    rows: Sequence[tuple[str, Mapping[str, object] | None]],
-) -> tuple[tuple[MessageId, PcObservation | None], ...]:
-    """Each CDM's ``MESSAGE_ID`` with its observation decoded from its
-    cached payload (:func:`~keepout.store.summaries.decoded`).
-
-    Raises
-    ------
-    StoreError
-        If a payload is not an observation.
-    """
-    observations = decoded(payload for _, payload in rows)
-    return tuple(
-        (MessageId(message_id), observation)
-        for (message_id, _), observation in zip(rows, observations, strict=True)
-    )
+    ).all()
+    texts: dict[EventId, list[str]] = {}
+    for event_id, content in rows:
+        texts.setdefault(event_id, []).append(content)
+    return ids, texts
 
 
 def _all_observations(
-    event_id: str, pairs: Sequence[tuple[MessageId, PcObservation | None]]
+    event_id: str, rows: Sequence[tuple[MessageId, Mapping[str, object] | None]]
 ) -> tuple[PcObservation, ...]:
-    """The observations of an event's CDMs (:func:`_paired`), all or none.
+    """The observations of an event's CDMs and their cached payloads, all or
+    none.
 
     Raises
     ------
     StoreError
-        If a CDM's observation is not cached.
+        If a CDM's observation is not cached, or cannot be read.
     """
-    missing = [message_id for message_id, item in pairs if item is None]
-    if missing:
+    observations = complete_of(decoded(payload for _, payload in rows))
+    if observations is None:
+        missing = ", ".join(
+            message_id for message_id, payload in rows if payload is None
+        )
         raise StoreError(
-            f"no Pc of {', '.join(missing)} in event {event_id} for these "
-            "settings: refresh the store first"
+            f"no Pc of {missing} in event {event_id} for these settings: "
+            "refresh the store first"
         )
-    return tuple(item for _, item in pairs if item is not None)
-
-
-def _cached(key: str) -> ColumnElement[bool]:
-    """The CDMs whose result is cached under ``key``."""
-    return exists().where(result_under(key))
-
-
-def _oldest_first(
-    query: Select[*_Ts],
-    cdms: ColumnElement[bool],
-    *,
-    lacking: str | None = None,
-) -> Select[*_Ts]:
-    """``query`` of ``cdms``, by ``CREATION_DATE`` then ``MESSAGE_ID``; only
-    those without a result under ``lacking`` if given."""
-    if lacking is not None:
-        query = query.where(~_cached(lacking))
-    return query.where(cdms).order_by(models.Cdm.creation_date, models.Cdm.message_id)
-
-
-def _lacking_hard_body_radius(settings: Settings, cdms: Iterable[Cdm]) -> list[Cdm]:
-    """The CDMs of ``cdms`` without ``HBR`` for an object, if the settings
-    give no hard-body radius (``cdms`` is not read if they do)."""
-    if settings.combined_hard_body_radius is not None:
-        return []
-    return [cdm for cdm in cdms if without_hard_body_radius((cdm,))]
-
-
-def _refuse_lacking_hard_body_radius(lacking: Sequence[Cdm]) -> None:
-    """Refuse the Pc of CDMs that lack ``HBR`` (:func:`_lacking_hard_body_radius`).
-
-    Raises
-    ------
-    HardBodyRadiusError
-        If there is one.
-    """
-    if lacking:
-        raise HardBodyRadiusError(
-            missing_hard_body_radius(lacking), _GIVE_HARD_BODY_RADIUS
-        )
-
-
-def _observation(event_id: str, cdm: Cdm, settings: Settings) -> PcObservation:
-    """The Pc observation of a CDM of an event, computed with ``settings``."""
-    (observation,) = ConjunctionEvent(event_id, (cdm,)).observations(
-        compute=settings.compute,
-        policy=settings.policy,
-        combined_hard_body_radius=settings.combined_hard_body_radius,
-    )
-    return observation
-
-
-def _require_events(session: Session, event_ids: Collection[str]) -> None:
-    """Check that the events are stored.
-
-    Raises
-    ------
-    StoreError
-        If one is not, naming the first by id.
-    """
-    known = set(
-        session.scalars(select(models.Event.id).where(models.Event.id.in_(event_ids)))
-    )
-    unknown = sorted(set(event_ids) - known)
-    if unknown:
-        raise StoreError(f"no event {unknown[0]} in the store")
-
-
-def _cdms_of(session: Session, event_id: str, until: str | None) -> ColumnElement[bool]:
-    """The CDMs of a stored event, up to ``until`` (its ``MESSAGE_ID``) in
-    (``CREATION_DATE``, ``MESSAGE_ID``) order if given.
-
-    Raises
-    ------
-    StoreError
-        If there is no such event, or ``until`` is not a CDM of it.
-    """
-    _require_events(session, [event_id])
-    of_event = models.Cdm.event_id == event_id
-    if until is None:
-        return of_event
-    pinned = session.execute(
-        select(models.Cdm.creation_date, models.Cdm.message_id).where(
-            of_event, models.Cdm.message_id == until
-        )
-    ).one_or_none()
-    if pinned is None:
-        raise StoreError(f"no CDM {until} in event {event_id}")
-    created, message_id = pinned
-    return and_(
-        of_event,
-        or_(
-            models.Cdm.creation_date < created,
-            and_(
-                models.Cdm.creation_date == created,
-                models.Cdm.message_id <= message_id,
-            ),
-        ),
-    )
-
-
-def _latest_message_id(session: Session, cdms: ColumnElement[bool]) -> MessageId:
-    """The ``MESSAGE_ID`` of the latest of ``cdms``, by ``CREATION_DATE``
-    (then by ``MESSAGE_ID``); every stored event has a CDM."""
-    return session.execute(
-        select(models.Cdm.message_id)
-        .where(cdms)
-        .order_by(models.Cdm.creation_date.desc(), models.Cdm.message_id.desc())
-        .limit(1)
-    ).scalar_one()
-
-
-def missing_in(
-    session: Session, event_id: str, key: str, *, until: str | None = None
-) -> tuple[MessageId, ...]:
-    """The CDMs of a stored event without a result under ``key``, oldest
-    first, in the caller's transaction.
-
-    Internal to :mod:`keepout.store`: the store and the job queue look for
-    the same missing Pc.
-
-    Parameters
-    ----------
-    session
-        A session of the store.
-    event_id
-        The store's id of the event.
-    key
-        The key of the results, e.g. a
-        :func:`~keepout.store.codec.result_key`.
-    until
-        Only the CDMs up to this one (its ``MESSAGE_ID``), in
-        (``CREATION_DATE``, ``MESSAGE_ID``) order; ``None``: all of them.
-
-    Returns
-    -------
-    tuple of MessageId
-        Their ``MESSAGE_ID``, by ``CREATION_DATE`` then ``MESSAGE_ID``.
-
-    Raises
-    ------
-    StoreError
-        If there is no such event, or ``until`` is not a CDM of it.
-    """
-    cdms = _cdms_of(session, event_id, until)
-    query = _oldest_first(select(models.Cdm.message_id), cdms, lacking=key)
-    return tuple(session.scalars(query))
-
-
-def message_ids_in(
-    session: Session, event_id: str, *, until: str | None = None
-) -> tuple[MessageId, ...]:
-    """The CDMs of a stored event, oldest first, in the caller's transaction.
-
-    Internal to :mod:`keepout.store`: the job queue checks a refresh's
-    result against them.
-
-    Parameters
-    ----------
-    session
-        A session of the store.
-    event_id
-        The store's id of the event.
-    until
-        Only the CDMs up to this one (its ``MESSAGE_ID``), as
-        :func:`missing_in`; ``None``: all of them.
-
-    Returns
-    -------
-    tuple of MessageId
-        Their ``MESSAGE_ID``, by ``CREATION_DATE`` then ``MESSAGE_ID``.
-
-    Raises
-    ------
-    StoreError
-        If there is no such event, or ``until`` is not a CDM of it.
-    """
-    cdms = _cdms_of(session, event_id, until)
-    return tuple(session.scalars(_oldest_first(select(models.Cdm.message_id), cdms)))
-
-
-def compute_missing(
-    store: Store, event_id: str, settings: Settings, *, key: str, until: str
-) -> dict[MessageId, PcObservation]:
-    """The Pc observations a stored event lacks under ``key``, computed with
-    ``settings`` but not written.
-
-    Internal to :mod:`keepout.store`: the computation of a refresh job
-    (:func:`~keepout.store.planning.run_refresh_job`), whose worker writes
-    them. The CDMs are read in one read transaction, then parsed and
-    computed outside it.
-
-    Parameters
-    ----------
-    store
-        The open store.
-    event_id
-        The store's id of the event.
-    settings
-        How Pc is computed.
-    key
-        The key the observations are cached under: the
-        :func:`~keepout.store.codec.result_key` of ``settings``.
-    until
-        Only the CDMs up to this one (its ``MESSAGE_ID``), as
-        :func:`missing_in`.
-
-    Returns
-    -------
-    dict
-        The observation of each CDM without one, by ``MESSAGE_ID``, oldest
-        first.
-
-    Raises
-    ------
-    StoreError
-        If there is no such event, ``until`` is not a CDM of it, or the
-        database cannot be used.
-    HardBodyRadiusError
-        If the settings give no hard-body radius and a CDM lacks ``HBR``
-        for an object (as :meth:`Store.refresh` of given events; checked
-        before any Pc is computed).
-    CdmParseError
-        If a stored CDM no longer parses (a store edited by hand).
-    """
-    with store.read() as session:
-        cdms_of = _cdms_of(session, event_id, until)
-        query = _oldest_first(select(models.Cdm.content), cdms_of, lacking=key)
-        texts = session.scalars(query).all()
-    cdms = [_parsed_cdm(text) for text in texts]
-    _refuse_lacking_hard_body_radius(_lacking_hard_body_radius(settings, cdms))
-    return {
-        MessageId(cdm.message_id): _observation(event_id, cdm, settings) for cdm in cdms
-    }
-
-
-def latest_in(session: Session, event_id: str) -> MessageId:
-    """The ``MESSAGE_ID`` of an event's latest CDM, by ``CREATION_DATE``
-    (then by ``MESSAGE_ID``), in the caller's transaction.
-
-    Parameters
-    ----------
-    session
-        A session of the store, in the caller's transaction.
-    event_id
-        The store's id of the event.
-
-    Raises
-    ------
-    StoreError
-        If there is no such event.
-    """
-    return _latest_message_id(session, _cdms_of(session, event_id, None))
-
-
-def catalog_in(
-    session: Session, base: Path, message_id: str
-) -> CatalogReference | None:
-    """The catalog a stored CDM was made from (as :meth:`Store.catalog`), in
-    the caller's transaction.
-
-    Internal to :mod:`keepout.store`: a job's key is that of the catalog of
-    its CDM, read in the transaction that queues the job.
-
-    Parameters
-    ----------
-    session
-        A session of the store.
-    base
-        The directory of the store file: the catalog's paths are relative
-        to it.
-    message_id
-        The ``MESSAGE_ID`` of the CDM.
-    """
-    catalog_id = session.scalar(
-        select(models.Cdm.catalog_id).where(models.Cdm.message_id == message_id)
-    )
-    if catalog_id is None:
-        return None
-    catalog = session.get_one(
-        models.Catalog, catalog_id, options=[selectinload(models.Catalog.files)]
-    )
-    return CatalogReference(
-        catalog.label,
-        tuple(
-            CatalogFileRef(
-                file.name,
-                base / file.path,
-                file.sha256,
-                url=file.url,
-                retrieved=file.retrieved,
-            )
-            for file in catalog.files
-        ),
-    )
-
-
-def _texts(session: Session, cdms: ColumnElement[bool]) -> Sequence[str]:
-    """The stored texts of ``cdms``."""
-    return session.scalars(select(models.Cdm.content).where(cdms)).all()
-
-
-@functools.lru_cache(maxsize=_PARSED_CDMS)
-def _parsed_cdm(text: str) -> Cdm:
-    """A stored CDM's text, parsed; the last :data:`_PARSED_CDMS` texts
-    parsed are kept, and shared.
-
-    A stored CDM's text never changes (a ``MESSAGE_ID`` is stored once),
-    and a :class:`~keepout.cdm.Cdm` cannot be changed (frozen, its
-    covariance read-only): a page shown again reads its event's CDMs
-    without parsing them again.
-
-    Raises
-    ------
-    CdmParseError
-        If the text does not parse (a store edited by hand); not kept.
-    """
-    return keepout.cdm.loads(text)
-
-
-def _parsed_event(event_id: str, texts: Iterable[str]) -> ConjunctionEvent:
-    """The event of stored CDM texts, each parsed once in the process
-    (:func:`_parsed_cdm`).
-
-    Raises
-    ------
-    CdmParseError
-        If a text no longer parses (a store edited by hand).
-    EventError
-        If the CDMs no longer make an event (likewise).
-    """
-    return ConjunctionEvent(event_id, tuple(_parsed_cdm(text) for text in texts))
-
-
-def _cached_payload(
-    session: Session, message_id: str, key: str
-) -> dict[str, JsonValue] | None:
-    """The result cached on ``message_id`` under ``key``, ``None`` if none
-    is."""
-    return session.scalar(
-        select(models.Result.payload).where(
-            models.Result.message_id == message_id, models.Result.key == key
-        )
-    )
+    return observations
 
 
 def _before(before: Time) -> ColumnElement[bool]:
@@ -966,11 +315,8 @@ class Store:
 
     @contextmanager
     def _errors(self) -> Generator[None]:
-        """Database errors as :class:`~keepout.errors.StoreError`, naming the
-        file: a lock held past the busy timeout, a file that cannot be read or
-        written or is no longer a database. A broken constraint stays an
-        :class:`~sqlalchemy.exc.IntegrityError`: it is a bug, not the store's
-        state.
+        """Database errors as :class:`~keepout.errors.StoreError` naming the
+        file, but a broken constraint (a bug, not the store's state).
 
         Raises
         ------
@@ -1044,15 +390,14 @@ class Store:
 
         The messages are taken in ``CREATION_DATE`` order (then by
         ``MESSAGE_ID``), as :func:`~keepout.events.group_events` takes them,
-        in one write transaction. A
-        message whose ``MESSAGE_ID`` is stored with the same content (the
-        same KVN, whatever the format read) is reported as already stored.
-        Any other joins the stored event (or one made earlier in the ingest)
-        of the same ``OBJECT1`` and ``OBJECT2`` whose TCAs, with its own,
-        spread over no more than
+        in one write transaction. A message whose ``MESSAGE_ID`` is stored
+        with the same content (the same KVN, whatever the format read) is
+        reported as already stored. Any other joins the stored event (or one
+        made earlier in the ingest) of the same ``OBJECT1`` and ``OBJECT2``
+        whose TCAs, with its own, spread over no more than
         :data:`~keepout.events.DEFAULT_TCA_TOLERANCE`, and whose
-        ``CONJUNCTION_ID``, if both give one, is its own; if there is none, it
-        starts a new event.
+        ``CONJUNCTION_ID``, if both give one, is its own; if there is none,
+        it starts a new event.
 
         Parameters
         ----------
@@ -1093,8 +438,8 @@ class Store:
                 messages[i].cdm.message_id,
             ),
         )
-        added: dict[int, bool] = {}
-        events: dict[int, EventId] = {}
+        # Each message's event, and whether the ingest stored it.
+        outcomes: dict[int, tuple[EventId, bool]] = {}
         created: set[EventId] = set()
         with self.write() as session:
             catalog_row: models.Catalog | None = None
@@ -1109,7 +454,7 @@ class Store:
                             f"MESSAGE_ID {message_id} is stored with other content",
                             message_id=message_id,
                         )
-                    added[i], events[i] = False, stored.event_id
+                    outcomes[i] = (stored.event_id, False)
                     continue
                 event, new = _event_of(session, given.cdm)
                 if new:
@@ -1129,18 +474,22 @@ class Store:
                         format=given.format,
                         origin=given.origin,
                         catalog=catalog_row,
-                        ingested_at=_now(),
+                        ingested_at=Time.now(),
                     )
                 )
-                added[i], events[i] = True, event.id
-        given_order = range(len(messages))
-        touched = _unique([events[i] for i in given_order])
-        ids = [MessageId(given.cdm.message_id) for given in messages]
+                outcomes[i] = (event.id, True)
+        given_order = [
+            (MessageId(given.cdm.message_id), *outcomes[i])
+            for i, given in enumerate(messages)
+        ]
+        touched = _unique(event_id for _, event_id, _ in given_order)
         return IngestReport(
-            added=tuple(ids[i] for i in given_order if added[i]),
-            already_stored=tuple(ids[i] for i in given_order if not added[i]),
+            added=tuple(message_id for message_id, _, new in given_order if new),
+            already_stored=tuple(
+                message_id for message_id, _, new in given_order if not new
+            ),
             events=touched,
-            new_events=tuple(event for event in touched if event in created),
+            new_events=tuple(event_id for event_id in touched if event_id in created),
         )
 
     def _snapshot(self, catalog: CatalogReference) -> CatalogReference:
@@ -1150,10 +499,6 @@ class Store:
         ------
         StoreError
             If a copy cannot be written.
-        SourceUnavailable
-            If a file is gone or cannot be read.
-        ChecksumMismatch
-            If a file changed since the reference was made.
         """
         try:
             return catalog.snapshot(self.catalog_dir)
@@ -1168,14 +513,16 @@ class Store:
         """Compute and cache the Pc observations missing for ``settings``.
 
         Settings with the same :func:`~keepout.store.codec.result_key` share
-        their observations. Each CDM is parsed just before its Pc is computed,
-        outside any transaction (in ``"auto"`` mode it can take up to a
-        minute). The observations are written in short transactions of 100
-        observations or 1 s of computing, whichever comes first, so that an
-        interrupted refresh keeps most of what it computed and other
-        processes are not held up.
-        One that another process cached meanwhile, or of a CDM purged
-        meanwhile, is not written.
+        their observations. The CDMs' texts are read 100 at a time, in short
+        read transactions, and each CDM is parsed just before its Pc is
+        computed, outside any transaction (in ``"auto"`` mode it can take up
+        to a minute): a refresh of the whole store holds some 100 texts at a
+        time, not every one. The observations are written in short
+        transactions of 100 observations or 1 s of computing, whichever
+        comes first, so that an interrupted refresh keeps most of what it
+        computed and other processes are not held up. One that another
+        process cached meanwhile, or of a CDM purged meanwhile, is not
+        written.
 
         If the settings give no hard-body radius, a CDM without ``HBR`` for
         an object has no Pc: refreshing every event skips it (and reports
@@ -1208,53 +555,44 @@ class Store:
         key = result_key(settings)
         query = (
             select(models.Cdm.event_id, models.Cdm.message_id)
-            .where(~_cached(key))
+            .where(~cached(key))
             .order_by(
                 models.Cdm.event_id, models.Cdm.creation_date, models.Cdm.message_id
             )
         )
         with self.read() as session:
             if event_ids is not None:
-                _require_events(session, event_ids)
+                require_events(session, event_ids)
                 query = query.where(models.Cdm.event_id.in_(event_ids))
-            missing = [(event_id, m) for event_id, m in session.execute(query)]
+            missing = session.execute(query).all()
         parsed = (cdm for _, cdm in self._parsed(missing))
-        lacking = _lacking_hard_body_radius(settings, parsed)
+        lacking = lacking_hard_body_radius(settings, parsed)
         if event_ids is not None:
-            _refuse_lacking_hard_body_radius(lacking)
+            refuse_lacking_hard_body_radius(lacking)
         skipped = tuple(MessageId(cdm.message_id) for cdm in lacking)
-        unknown = set(skipped)
-        todo = [(event_id, m) for event_id, m in missing if m not in unknown]
-        written = 0
-        pending: list[PcObservation] = []
-        since = time.monotonic()
-        for event_id, cdm in self._parsed(todo):
-            pending.append(_observation(event_id, cdm, settings))
-            if (
-                len(pending) >= _BATCH_SIZE
-                or time.monotonic() - since >= _BATCH_SECONDS
-            ):
-                written += self._write(key, pending)
-                pending, since = [], time.monotonic()
-        written += self._write(key, pending)
+        without_hbr = set(skipped)
+        todo = [(event_id, m) for event_id, m in missing if m not in without_hbr]
+        computed = (
+            observation_of(event_id, cdm, settings)
+            for event_id, cdm in self._parsed(todo)
+        )
+        written = sum(self._write(key, batch) for batch in batches(computed))
         return RefreshReport(written, skipped)
 
     def _parsed(
         self, rows: Sequence[tuple[EventId, MessageId]]
     ) -> Iterator[tuple[EventId, Cdm]]:
-        """The stored CDMs of ``rows``, each parsed only when asked for: their
-        texts are read :data:`_BATCH_SIZE` at a time, in short read
-        transactions. A CDM purged meanwhile is left out.
+        """The stored CDMs of ``rows`` but those purged meanwhile, each parsed
+        when asked for, read a batch at a time.
 
         Raises
         ------
         StoreError
             If the database cannot be used.
-        CdmParseError
-            If a stored CDM no longer parses (a store edited by hand).
         """
-        for start in range(0, len(rows), _BATCH_SIZE):
-            chunk = rows[start : start + _BATCH_SIZE]
+        size = computing.BATCH_SIZE
+        for start in range(0, len(rows), size):
+            chunk = rows[start : start + size]
             with self.read() as session:
                 found = session.execute(
                     select(models.Cdm.message_id, models.Cdm.content).where(
@@ -1264,15 +602,21 @@ class Store:
                 texts = dict(found.all())
             for event_id, message_id in chunk:
                 if message_id in texts:
-                    yield event_id, _parsed_cdm(texts.pop(message_id))
+                    yield event_id, parsed_cdm(texts.pop(message_id))
 
     def _write(self, key: str, observations: Sequence[PcObservation]) -> int:
         """Write observations under ``key`` in one write transaction (none if
-        there are none); how many it wrote (see :func:`_write_results`)."""
-        if not observations:
+        there are none), but those of CDMs not stored and those cached; how
+        many it wrote."""
+        payloads = [
+            (observation.message_id, observation_to_json(observation))
+            for observation in observations
+            if observation.message_id is not None
+        ]
+        if not payloads:
             return 0
         with self.write() as session:
-            return _write_results(session, key, observations)
+            return insert_results_in(session, key, payloads)
 
     def cache(self, settings: Settings, observations: Iterable[PcObservation]) -> int:
         """Cache Pc observations computed with ``settings`` elsewhere, e.g. by
@@ -1327,27 +671,28 @@ class Store:
         Raises
         ------
         StoreError
-            As :meth:`refresh` and :meth:`events`.
+            As :meth:`refresh`; or if a Pc is not cached after it (a CDM
+            ingested meanwhile) or cannot be read.
         HardBodyRadiusError
             If the settings give no hard-body radius and a CDM lacks ``HBR``.
+        CdmParseError
+            If a stored CDM no longer parses (a store edited by hand).
+        EventError
+            If the stored CDMs of an event no longer make one (likewise).
         """
         self.refresh(settings, event_ids=event_ids)
-        events = self.events(event_ids=event_ids)
         with self.read() as session:
-            ids = [event.event_id for event in events]
-            _require_events(session, ids)
+            ids, texts = _texts_by_event(session, event_ids)
             payloads = payloads_in(session, ids, result_key(settings))
         return [
             AssessedEvent(
-                event,
+                parsed_event(event_id, texts[event_id]),
                 assess(
-                    _all_observations(
-                        event.event_id, _paired(payloads[EventId(event.event_id)])
-                    ),
+                    _all_observations(event_id, payloads[event_id]),
                     thresholds=settings.thresholds,
                 ),
             )
-            for event in events
+            for event_id in ids
         ]
 
     def summaries(
@@ -1437,8 +782,10 @@ class Store:
             If the stored CDMs no longer make an event (likewise).
         """
         with self.read() as session:
-            texts = _texts(session, _cdms_of(session, event_id, None))
-        return _parsed_event(event_id, texts)
+            texts = texts_in(session, cdms_of(event_id))
+        if not texts:  # every stored event has a CDM
+            raise StoreError(no_event(event_id))
+        return parsed_event(event_id, texts)
 
     def events(
         self, *, event_ids: Collection[str] | None = None
@@ -1467,84 +814,11 @@ class Store:
             If the stored CDMs of a listed event no longer make one
             (likewise).
         """
-        listed = select(models.Event.id)
-        if event_ids is not None:
-            listed = listed.where(models.Event.id.in_(event_ids))
         with self.read() as session:
             if event_ids is not None:
-                _require_events(session, event_ids)
-            ids = session.scalars(
-                listed.order_by(models.Event.tca_min, models.Event.id)
-            ).all()
-            rows = session.execute(
-                select(models.Cdm.event_id, models.Cdm.content).where(
-                    models.Cdm.event_id.in_(listed.scalar_subquery())
-                )
-            ).all()
-        cdms: dict[str, list[Cdm]] = {}
-        for event_id, content in rows:
-            cdms.setdefault(event_id, []).append(_parsed_cdm(content))
-        return [ConjunctionEvent(event_id, tuple(cdms[event_id])) for event_id in ids]
-
-    def cached_observations(
-        self, event_id: str, settings: Settings
-    ) -> tuple[tuple[MessageId, PcObservation | None], ...]:
-        """Each CDM of an event with its Pc observation cached for
-        ``settings``, oldest CDM first.
-
-        Parameters
-        ----------
-        event_id
-            The store's id of the event.
-        settings
-            The settings they were computed with (by their
-            :func:`~keepout.store.codec.result_key`).
-
-        Returns
-        -------
-        tuple of (MessageId, PcObservation or None)
-            Each CDM's ``MESSAGE_ID`` and its observation; ``None`` where
-            it is not cached (:meth:`refresh` caches it).
-
-        Raises
-        ------
-        StoreError
-            If there is no such event, a cached observation cannot be read,
-            or the database cannot be used.
-        """
-        with self.read() as session:
-            _require_events(session, [event_id])
-            key = result_key(settings)
-            rows = payloads_in(session, [event_id], key)[EventId(event_id)]
-        return _paired(rows)
-
-    def observations(
-        self, event_id: str, settings: Settings
-    ) -> tuple[PcObservation, ...]:
-        """The cached Pc observations of an event's CDMs, oldest CDM first,
-        all or none (:meth:`cached_observations` gives those there are).
-
-        Parameters
-        ----------
-        event_id
-            The store's id of the event.
-        settings
-            The settings they were computed with (by their
-            :func:`~keepout.store.codec.result_key`).
-
-        Returns
-        -------
-        tuple of PcObservation
-            One observation per CDM, oldest CDM first.
-
-        Raises
-        ------
-        StoreError
-            If there is no such event; if a CDM's observation is not cached
-            for these settings (:meth:`refresh` caches them) or cannot be
-            read; or if the database cannot be used.
-        """
-        return _all_observations(event_id, self.cached_observations(event_id, settings))
+                require_events(session, event_ids)
+            ids, texts = _texts_by_event(session, event_ids)
+        return [parsed_event(event_id, texts[event_id]) for event_id in ids]
 
     def detail(self, event_id: str, settings: Settings) -> EventDetail | None:
         """A stored event, read in one transaction: its CDMs, their cached
@@ -1575,12 +849,14 @@ class Store:
         """
         key = result_key(settings)
         with self.read() as session:
-            if session.get(models.Event, event_id) is None:
+            texts = texts_in(session, cdms_of(event_id))
+            if not texts:  # every stored event has a CDM
                 return None
-            texts = _texts(session, models.Cdm.event_id == event_id)
             rows = payloads_in(session, [event_id], key)[EventId(event_id)]
             jobs = active_refresh_in(session, event_id, key)
-        return EventDetail(_parsed_event(event_id, texts), _paired(rows), jobs)
+        observations = decoded(payload for _, payload in rows)
+        paired = tuple(zip((m for m, _ in rows), observations, strict=True))
+        return EventDetail(parsed_event(event_id, texts), paired, jobs)
 
     def plan_detail(self, event_id: str, settings: Settings) -> PlanDetail | None:
         """A stored event as its manoeuvre planner shows it, read in one
@@ -1616,19 +892,19 @@ class Store:
         EventError
             If the stored CDMs no longer make an event (likewise).
         """
-        from keepout.store.jobs import PlanDetail, plan_jobs_in
+        # Imported here: keepout.store loads no manoeuvre code until a plan
+        # is read or written.
         from keepout.store.maneuver_codec import outcome_from_json
 
         with self.read() as session:
-            if session.get(models.Event, event_id) is None:
+            slot = maneuver_slot_in(session, self.path.parent, event_id, settings)
+            if slot is None:
                 return None
-            latest, key = maneuver_slot_in(
-                session, self.path.parent, event_id, settings
-            )
-            payload = _cached_payload(session, latest, key)
-            texts = _texts(session, models.Cdm.event_id == event_id)
+            latest, key = slot
+            payload = cached_payload_in(session, latest, key)
+            texts = texts_in(session, cdms_of(event_id))
             jobs = plan_jobs_in(session, event_id, latest, key)
-        event = _parsed_event(event_id, texts)
+        event = parsed_event(event_id, texts)
         outcome = None if payload is None else outcome_from_json(payload, event)
         return PlanDetail(event, latest, key, outcome, jobs)
 
@@ -1654,7 +930,8 @@ class Store:
             If there is no such event, or if the database cannot be used.
         """
         with self.read() as session:
-            return catalog_in(session, self.path.parent, latest_in(session, event_id))
+            latest = require_latest_in(session, event_id)
+            return catalog_in(session, self.path.parent, latest)
 
     def maneuver(self, event_id: str, settings: Settings) -> ManeuverOutcome | None:
         """The cached manoeuvre outcome of an event: the one planned on its
@@ -1690,17 +967,17 @@ class Store:
         EventError
             If the stored CDMs no longer make an event (likewise).
         """
-        with self.read() as session:
-            latest, key = maneuver_slot_in(
-                session, self.path.parent, event_id, settings
-            )
-            payload = _cached_payload(session, latest, key)
-            if payload is None:
-                return None
-            texts = _texts(session, _cdms_of(session, event_id, None))
         from keepout.store.maneuver_codec import outcome_from_json
 
-        return outcome_from_json(payload, _parsed_event(event_id, texts))
+        with self.read() as session:
+            slot = maneuver_slot_in(session, self.path.parent, event_id, settings)
+            if slot is None:
+                raise StoreError(no_event(event_id))
+            payload = cached_payload_in(session, *slot)
+            if payload is None:
+                return None
+            texts = texts_in(session, cdms_of(event_id))
+        return outcome_from_json(payload, parsed_event(event_id, texts))
 
     def save_maneuver(
         self, message_id: str, settings: Settings, outcome: ManeuverOutcome
@@ -1736,7 +1013,8 @@ class Store:
 
         payload = outcome_to_json(outcome)
         with self.write() as session:
-            key = _maneuver_key_in(session, self.path.parent, message_id, settings)
+            catalog = catalog_in(session, self.path.parent, message_id)
+            key = maneuver_key(settings, catalog)
             return save_maneuver_in(session, message_id, key, payload)
 
     def count_before(self, before: Time) -> int:
@@ -1793,14 +1071,11 @@ class Store:
         return count
 
     def _delete_copies(self) -> None:
-        """Delete the copies in :attr:`catalog_dir` whose digest no catalog
-        refers to: those of deleted catalogs, and those a failed ingest left.
+        """Delete the copies in :attr:`catalog_dir` (named ``<sha256>…``)
+        whose digest no catalog refers to.
 
-        This runs in a write transaction of its own: an ingest writes or
-        reuses its copies under the same write lock, so it either comes
-        first, and its row keeps the copy, or after, and writes the copy
-        again. Only files named as the store names its copies
-        (``<sha256>…``) are deleted.
+        It runs under the write lock: an ingest writes or reuses its copies
+        under it too, so its row keeps the copy, or it writes it again.
 
         Raises
         ------

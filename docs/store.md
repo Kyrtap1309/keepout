@@ -129,8 +129,11 @@ A job is of one of two kinds, which `keepout jobs list` shows:
   queued: a CDM stored later is left for another refresh. An event has
   one refresh queued at most for the settings: asked again after a new
   CDM, the queued one moves to it, and a running one is followed by one
-  queued refresh. A Pc cached meanwhile, by `store add` say, is kept, not
-  written twice.
+  queued refresh (also for a CDM older than its own, stored after it
+  started). The worker writes the Pc as they come, in batches of 100 or
+  of a second of computing: a refresh stopped halfway, at the time limit
+  say, keeps them, and the next one computes the rest. A Pc cached
+  meanwhile, by `store add` say, is kept, not written twice.
 
 ```bash
 keepout maneuver --event 3befe6f1305d --store keepout.db --queue   # Job 1 queued

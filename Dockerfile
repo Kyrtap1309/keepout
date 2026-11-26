@@ -3,7 +3,10 @@
 # demo's store. Base images are pinned by digest; refresh them by hand
 # (docker buildx imagetools inspect python:3.13-slim) and rebuild.
 
-FROM python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90 AS base
+# The Python image of the build and of the runtime, one pin for both.
+ARG PYTHON_IMAGE=python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90
+
+FROM ${PYTHON_IMAGE} AS base
 COPY --from=ghcr.io/astral-sh/uv:0.11.26@sha256:3d868e555f8f1dbc324afa005066cd11e1053fc4743b9808ca8025283e65efa5 /uv /usr/local/bin/uv
 ENV UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
 WORKDIR /src
@@ -39,7 +42,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-editable \
     --extra cli --extra store --extra dashboard
 
-FROM python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90 AS runtime
+FROM ${PYTHON_IMAGE} AS runtime
 RUN groupadd --gid 10001 keepout \
     && useradd --uid 10001 --gid 10001 --create-home --shell /usr/sbin/nologin keepout \
     && mkdir /data && chown keepout:keepout /data

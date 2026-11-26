@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 __all__ = [
     "AS_OF_VARIABLE",
     "CACHE_DIR_VARIABLE",
+    "HEARTBEAT_FILE_VARIABLE",
     "MAX_UPLOAD_MB",
     "SETTINGS_VARIABLE",
     "STORE_VARIABLE",
@@ -43,6 +44,10 @@ defaults."""
 AS_OF_VARIABLE: Final = "KEEPOUT_AS_OF"
 """The time the dashboard sees its data at, ISO 8601 UTC; unset: the
 clock."""
+
+HEARTBEAT_FILE_VARIABLE: Final = "KEEPOUT_HEARTBEAT_FILE"
+"""The file ``keepout worker`` touches while it runs (``--heartbeat-file``),
+for a container's healthcheck; unset: none."""
 
 MAX_UPLOAD_MB: Final = 1
 """The largest file [MB] the dashboard takes (a CDM is a few kB): Streamlit's

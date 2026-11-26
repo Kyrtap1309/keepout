@@ -8,11 +8,13 @@ from builders import B1_TEXT, EPOCH, set_keyword
 from sqlalchemy import delete, func, select
 
 import keepout.cdm
+from keepout._types import JsonValue
 from keepout.cdm import Cdm
 from keepout.pc import computation
 from keepout.settings import Settings
-from keepout.store import CdmInput, Store, models
+from keepout.store import CdmInput, Job, Store, models
 from keepout.store.codec import result_key
+from keepout.store.planning import run_refresh_job
 
 TCA = EPOCH
 """The example's TCA."""
@@ -109,5 +111,17 @@ def drop_result(store: Store, message_id: str, settings: Settings) -> None:
 def missing_pc(store: Store, event_id: str, settings: Settings) -> tuple[str, ...]:
     """The CDMs of a stored event whose Pc is not cached for ``settings``,
     oldest first."""
-    pairs = store.cached_observations(event_id, settings)
-    return tuple(message_id for message_id, item in pairs if item is None)
+    detail = store.detail(event_id, settings)
+    assert detail is not None
+    return detail.missing
+
+
+def refreshed(path: str, job: Job) -> dict[str, JsonValue]:
+    """The observations of a refresh job (:func:`run_refresh_job`), its
+    batches as one result."""
+    observations: dict[str, JsonValue] = {}
+    for batch in run_refresh_job(path, job, None):
+        found = batch["observations"]
+        assert isinstance(found, dict)
+        observations.update(found)
+    return {"observations": observations}

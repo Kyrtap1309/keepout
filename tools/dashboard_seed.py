@@ -458,7 +458,7 @@ def demo_store(path: Path) -> Path:
         return path
     run_worker(path, until_idle=True)
     with open_store(path) as store:
-        done = JobQueue(store).job(job.id)
+        (done,) = JobQueue(store).jobs_by_id([job.id])
     if done.status is not JobStatus.SUCCEEDED:
         raise RuntimeError(
             f"the plan of {DEMO_EVENT} did not succeed: {done.status}, {done.error}"

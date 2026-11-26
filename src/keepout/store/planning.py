@@ -4,7 +4,8 @@
 burns are re-screened against the store's copy of that CDM's catalog, if
 the CDM was made from one. :func:`run_maneuver_job` is the same plan as the
 computation of a queued job (:mod:`keepout.store.worker`), and
-:func:`run_refresh_job` the computation of the Pc a stored event lacks.
+:func:`run_refresh_job` the computation of the Pc a stored event lacks
+(:func:`compute_missing`), in batches its worker writes as they come.
 :func:`run_job` runs either, by the job's kind.
 
 The numerical libraries are imported when a plan is made, not with this
@@ -15,20 +16,39 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, assert_never
 
+from sqlalchemy import select
+
 from keepout.settings import plan_arguments
+from keepout.store import models
 from keepout.store.codec import observation_to_json
+from keepout.store.computing import (
+    batches,
+    lacking_hard_body_radius,
+    observation_of,
+    parsed_cdm,
+    refuse_lacking_hard_body_radius,
+)
 from keepout.store.db import open_store
 from keepout.store.models import JobKind
-from keepout.store.repo import compute_missing, pinned_in
+from keepout.store.queries import cdms_of, oldest_first, pinned_in, require_events
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from keepout._types import JsonValue
     from keepout.maneuver import BurnGrid, ManeuverOutcome
+    from keepout.risk import PcObservation
     from keepout.settings import Settings
     from keepout.store.jobs import Job
     from keepout.store.repo import Store
 
-__all__ = ["plan_stored", "run_job", "run_maneuver_job", "run_refresh_job"]
+__all__ = [
+    "compute_missing",
+    "plan_stored",
+    "run_job",
+    "run_maneuver_job",
+    "run_refresh_job",
+]
 
 
 def plan_stored(
@@ -153,17 +173,71 @@ def run_maneuver_job(
     return outcome_to_json(planned)
 
 
+def compute_missing(
+    store: Store, event_id: str, settings: Settings, *, key: str, until: str
+) -> Iterator[list[PcObservation]]:
+    """The Pc observations a stored event lacks under ``key``, computed with
+    ``settings`` as they are iterated, in batches
+    (:func:`~keepout.store.computing.batches`); none is written.
+
+    The texts of the CDMs up to ``until`` (its ``MESSAGE_ID``) without a
+    result under ``key`` are read in one read transaction, and checked for
+    ``HBR`` before any Pc is computed, outside it.
+
+    Parameters
+    ----------
+    store
+        The open store.
+    event_id
+        The store's id of the event.
+    settings
+        How Pc is computed.
+    key
+        The key the observations are cached under: the
+        :func:`~keepout.store.codec.result_key` of ``settings``.
+    until
+        The ``MESSAGE_ID`` of the last CDM, in (``CREATION_DATE``,
+        ``MESSAGE_ID``) order.
+
+    Yields
+    ------
+    list of PcObservation
+        The observations of the CDMs without one, oldest first.
+
+    Raises
+    ------
+    StoreError
+        If there is no such event, or the database cannot be used.
+    HardBodyRadiusError
+        If the settings give no hard-body radius and a CDM lacks ``HBR``
+        for an object (as :meth:`~keepout.store.Store.refresh` of given
+        events).
+    CdmParseError
+        If a stored CDM no longer parses (a store edited by hand).
+    """
+    with store.read() as session:
+        require_events(session, [event_id])
+        query = oldest_first(
+            select(models.Cdm.content), cdms_of(event_id, until=until), lacking=key
+        )
+        texts = session.scalars(query).all()
+    cdms = [parsed_cdm(text) for text in texts]
+    refuse_lacking_hard_body_radius(lacking_hard_body_radius(settings, cdms))
+    yield from batches(observation_of(event_id, cdm, settings) for cdm in cdms)
+
+
 def run_refresh_job(
     path: str,
     job: Job,
     workers: int | None,  # noqa: ARG001 (one process computes a Pc)
-) -> dict[str, JsonValue]:
-    """The Pc observations a job's event lacks, as JSON: those of its CDMs up
-    to the job's, computed with the job's settings, not written.
+) -> Iterator[dict[str, JsonValue]]:
+    """The Pc observations a job's event lacks, as JSON, in batches: those of
+    its CDMs up to the job's, computed with the job's settings
+    (:func:`compute_missing`), not written.
 
-    The worker that runs it writes them
-    (:meth:`~keepout.store.jobs.JobQueue.finish`), but those cached
-    meanwhile.
+    The worker that runs it writes each batch as it comes
+    (:meth:`~keepout.store.jobs.JobQueue.save_partial`), but the Pc cached
+    meanwhile: a refresh stopped halfway keeps what it computed.
 
     Parameters
     ----------
@@ -174,17 +248,17 @@ def run_refresh_job(
     workers
         Not used: the Pc of a CDM is computed in one process.
 
-    Returns
-    -------
+    Yields
+    ------
     dict
         ``{"observations": {MESSAGE_ID: observation}}``, each observation's
-        :func:`~keepout.store.codec.observation_to_json`, oldest CDM first.
+        :func:`~keepout.store.codec.observation_to_json`, oldest CDM first;
+        one batch at least, empty if no Pc was missing.
 
     Raises
     ------
     StoreError
-        If the store cannot be opened or no longer holds the job's event or
-        CDM.
+        If the store cannot be opened or no longer holds the job's event.
     HardBodyRadiusError
         If the settings give no hard-body radius and a CDM lacks ``HBR``
         (as :meth:`~keepout.store.Store.refresh` of given events).
@@ -195,16 +269,25 @@ def run_refresh_job(
         computed = compute_missing(
             store, job.event_id, job.settings, key=job.key, until=job.message_id
         )
-    observations: dict[str, JsonValue] = {
-        message_id: observation_to_json(observation)
-        for message_id, observation in computed.items()
-    }
-    return {"observations": observations}
+        empty = True
+        for batch in computed:
+            observations: dict[str, JsonValue] = {
+                observation.message_id: observation_to_json(observation)
+                for observation in batch
+                if observation.message_id is not None
+            }
+            empty = False
+            yield {"observations": observations}
+        if empty:  # nothing was missing: a result all the same
+            yield {"observations": {}}
 
 
-def run_job(path: str, job: Job, workers: int | None) -> dict[str, JsonValue]:
+def run_job(
+    path: str, job: Job, workers: int | None
+) -> dict[str, JsonValue] | Iterator[dict[str, JsonValue]]:
     """The computation of a job of either kind, as JSON: a plan
-    (:func:`run_maneuver_job`) or the missing Pc (:func:`run_refresh_job`).
+    (:func:`run_maneuver_job`) or the missing Pc, in batches
+    (:func:`run_refresh_job`).
 
     Parameters
     ----------
@@ -217,8 +300,8 @@ def run_job(path: str, job: Job, workers: int | None) -> dict[str, JsonValue]:
 
     Returns
     -------
-    dict
-        The result of the job's computation.
+    dict or iterator of dict
+        The result of the job's computation, or its batches.
 
     Raises
     ------

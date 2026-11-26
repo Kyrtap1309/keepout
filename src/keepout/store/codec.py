@@ -18,11 +18,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import TYPE_CHECKING, Final, TypeVar, cast, get_args
+from typing import TYPE_CHECKING, Final, TypeVar, get_args
 
 import keepout
+from keepout._json import boolean, number, text, texts
 from keepout._methods import Method
-from keepout._validation import is_number, require_choice
+from keepout._validation import require_choice
 from keepout.errors import StoreError
 from keepout.risk.observation import PC_KINDS, PcObservation
 from keepout.settings import settings_to_data
@@ -99,46 +100,21 @@ def observation_to_json(observation: PcObservation) -> dict[str, JsonValue]:
     }
 
 
+def _where(key: str) -> str:
+    """The name of ``key`` in a message about a cached observation."""
+    return f"{_WHERE}{key}"
+
+
 def _number(data: Mapping[str, object], key: str) -> float | None:
-    """``data[key]``, a number or ``None``.
-
-    Raises
-    ------
-    StoreError
-        If it is neither (a bool is not a number).
-    """
+    """``data[key]``, a number or ``None`` (``StoreError`` if neither)."""
     value = data[key]
-    if value is None:
-        return None
-    if not is_number(value):
-        raise StoreError(f"{_WHERE}{key} must be a number, got {value!r}")
-    return float(value)
-
-
-def _method(text: str | None) -> Method | None:
-    """A stored method name as a :data:`~keepout.pc.Method` (``ValueError``
-    if it is none).
-
-    Raises
-    ------
-    ValueError
-        If ``text`` names no method.
-    """
-    return None if text is None else require_choice(text, _METHODS, "method")
+    return None if value is None else number(value, _where(key), error=StoreError)
 
 
 def _text(data: Mapping[str, object], key: str) -> str | None:
-    """``data[key]``, a string or ``None``.
-
-    Raises
-    ------
-    StoreError
-        If it is neither.
-    """
+    """``data[key]``, a string or ``None`` (``StoreError`` if neither)."""
     value = data[key]
-    if value is not None and not isinstance(value, str):
-        raise StoreError(f"{_WHERE}{key} must be a string, got {value!r}")
-    return value
+    return None if value is None else text(value, _where(key), error=StoreError)
 
 
 def _required(value: _T | None, key: str) -> _T:
@@ -152,6 +128,12 @@ def _required(value: _T | None, key: str) -> _T:
     if value is None:
         raise StoreError(f"{_WHERE}{key} must not be null")
     return value
+
+
+def _method(name: str | None) -> Method | None:
+    """A stored method name as a :data:`~keepout.pc.Method` (``ValueError``
+    if it names none)."""
+    return None if name is None else require_choice(name, _METHODS, "method")
 
 
 def observation_from_json(data: Mapping[str, object]) -> PcObservation:
@@ -180,18 +162,10 @@ def observation_from_json(data: Mapping[str, object]) -> PcObservation:
     missing = sorted(OBSERVATION_KEYS - set(data))
     if missing:
         raise StoreError(f"{_WHERE}missing key(s) {', '.join(missing)}")
-    listed = data["diagnostics"]
-    items = cast("list[object]", listed) if isinstance(listed, list) else None
-    diagnostics = [item for item in items or () if isinstance(item, str)]
-    if items is None or len(diagnostics) != len(items):
-        raise StoreError(
-            f"{_WHERE}diagnostics must be a list of strings, got {listed!r}"
-        )
-    assumed = data["assumed_covariance"]
-    if not isinstance(assumed, bool):
-        raise StoreError(
-            f"{_WHERE}assumed_covariance must be true or false, got {assumed!r}"
-        )
+    diagnostics = texts(data["diagnostics"], _where("diagnostics"), error=StoreError)
+    assumed = boolean(
+        data["assumed_covariance"], _where("assumed_covariance"), error=StoreError
+    )
     try:
         return PcObservation(
             time_to_tca=_required(_number(data, "time_to_tca"), "time_to_tca"),
@@ -202,7 +176,7 @@ def observation_from_json(data: Mapping[str, object]) -> PcObservation:
             error=_text(data, "error"),
             message_id=_text(data, "message_id"),
             reported_pc=_number(data, "reported_pc"),
-            diagnostics=tuple(diagnostics),
+            diagnostics=diagnostics,
             assumed_covariance=assumed,
             method=_method(_text(data, "method")),
         )

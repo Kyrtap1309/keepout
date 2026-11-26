@@ -9,7 +9,7 @@ from sqlalchemy import TextClause, text
 
 from keepout.errors import StoreError
 from keepout.store import Store, db, open_store, upgrade
-from keepout.store.db import HEAD
+from keepout.store.db import head
 
 
 def _revision(path: Path) -> str | None:
@@ -51,7 +51,7 @@ def test_a_new_file_is_created_at_head(tmp_path: Path) -> None:
                 )
             )
     assert {"events", "cdms", "catalogs", "catalog_files", "results"} <= tables
-    assert _revision(path) == HEAD
+    assert _revision(path) == head()
 
 
 def test_an_old_sqlite_is_refused(
@@ -77,7 +77,7 @@ def test_a_path_may_hold_url_characters(tmp_path: Path) -> None:
     with open_store(path) as store:
         assert store.path == path
     assert path.is_file()
-    assert _revision(path) == HEAD
+    assert _revision(path) == head()
 
 
 def _empty(path: Path) -> None:
@@ -98,7 +98,7 @@ def test_an_empty_database_is_created_at_head(
     make(path)
     with open_store(path):
         pass
-    assert _revision(path) == HEAD
+    assert _revision(path) == head()
 
 
 def test_an_empty_file_is_no_store_without_create(tmp_path: Path) -> None:
@@ -187,6 +187,30 @@ def test_connections_use_wal_and_foreign_keys(tmp_path: Path) -> None:
         assert session.scalar(text("PRAGMA journal_mode")) == "wal"
         assert session.scalar(text("PRAGMA foreign_keys")) == 1
         assert session.scalar(text("PRAGMA busy_timeout")) == 30_000
+
+
+def _journal_mode(path: Path) -> str:
+    connection = sqlite3.connect(path)
+    mode = str(connection.execute("PRAGMA journal_mode").fetchone()[0])
+    connection.close()
+    return mode
+
+
+def test_a_new_store_is_in_wal_mode_before_its_first_use(tmp_path: Path) -> None:
+    # Switching to WAL takes an exclusive lock: left to the first connection
+    # of each process, two processes switching at once fail "locked".
+    path = tmp_path / "keepout.db"
+    open_store(path).close()
+    assert _journal_mode(path) == "wal"
+
+
+def test_opening_a_store_out_of_wal_mode_switches_it(tmp_path: Path) -> None:
+    path = _created(tmp_path / "keepout.db")
+    connection = sqlite3.connect(path)
+    connection.execute("PRAGMA journal_mode=DELETE")
+    connection.close()
+    open_store(path).close()
+    assert _journal_mode(path) == "wal"
 
 
 def _locked_for_writing(path: Path) -> bool:

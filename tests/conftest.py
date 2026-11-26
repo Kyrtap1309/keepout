@@ -29,7 +29,7 @@ from hypothesis import settings
 from web_builders import Clock
 
 from keepout.sources import _store
-from keepout.store import Store, open_store
+from keepout.store import Store, computing, open_store
 
 # The CLI tests read plain text: Typer (on import) and Rich take these to
 # mean a colour terminal, and GitHub Actions sets GITHUB_ACTIONS.
@@ -61,6 +61,7 @@ def _no_store_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     # A store exported in the shell must not be read or written by a test;
     # a test that needs $KEEPOUT_STORE sets it.
     monkeypatch.delenv("KEEPOUT_STORE", raising=False)
+    monkeypatch.delenv("KEEPOUT_HEARTBEAT_FILE", raising=False)
 
 
 @pytest.fixture(autouse=True, scope="session")
@@ -109,6 +110,15 @@ def _forget_verified() -> Iterator[None]:
     _store.forget_verified()
     yield
     _store.forget_verified()
+
+
+@pytest.fixture(autouse=True)
+def _forget_parsed_cdms() -> Iterator[None]:
+    """Start and end every test without the process-wide cache of parsed
+    store CDMs, so that a test counting parses sees them all."""
+    computing.parsed_cdm.cache_clear()
+    yield
+    computing.parsed_cdm.cache_clear()
 
 
 @pytest.fixture

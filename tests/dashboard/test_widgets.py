@@ -6,6 +6,7 @@ from pathlib import Path
 
 import dashboard_seed as seed
 import pytest
+from builders import job_of
 from dashboard_builders import TIMEOUT
 from hypothesis import given
 from hypothesis import strategies as st
@@ -118,7 +119,7 @@ def test_job_status_cancels_an_active_job(seed_copy: Path) -> None:
     app.button(key=f"cancel-job-{job.id}").click().run()
     assert not app.exception
     with open_store(seed_copy) as store:
-        assert JobQueue(store).job(job.id).status == JobStatus.CANCELLED
+        assert job_of(store, job.id).status == JobStatus.CANCELLED
     assert f"Job {job.id} (maneuver): **cancelled**" in app.markdown[0].value
     assert not app.button
 

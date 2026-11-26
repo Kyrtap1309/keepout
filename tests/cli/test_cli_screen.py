@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 from astropy.time import Time
+from builders import cached_pc
 from cli_builders import (
     DAYS,
     FIXTURE_CSV,
@@ -414,7 +415,7 @@ def test_screen_computes_and_stores_with_the_settings(tmp_path: Path) -> None:
     assert first["level"] == "yellow"
     with open_store(db, create=False) as store:
         (stored, _) = store.events()
-        (observation,) = store.observations(stored.event_id, load_settings(settings))
+        (observation,) = cached_pc(store, stored.event_id, load_settings(settings))
     assert observation.pc == first["pc"]
 
 
