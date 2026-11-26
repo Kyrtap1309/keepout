@@ -50,20 +50,20 @@ keepout screen --fleet examples/synthetic-operator/fleet.toml \
 ```text
 Screened 3 fleet satellites against 19886 objects (tests/screening/data/celestrak-public.csv.gz) from 2026-10-06T00:00:00 to 2026-10-13T00:00:00 UTC: 12 close approaches.
 Close approaches
-TCA (UTC)         Objects        Miss (m)  CDMs        Pc  Level   Action
-──────────────────────────────────────────────────────────────────────────
-2026-10-06 05:12  25544 / 58180      4633     1  1.44e-30  green   ignore
-2026-10-06 09:25  38771 / 35434      4085     1  1.46e-17  green   ignore
-2026-10-06 12:10  25544 / 58180      4902     1  4.33e-59  green   ignore
-2026-10-06 23:45  38771 / 31882      3374     1  4.28e-33  green   ignore
-2026-10-07 08:06  38771 / 30041      4511     1  8.48e-30  green   ignore
-2026-10-07 16:10  25544 / 46275      4104     1  7.48e-10  green   ignore
-2026-10-07 22:10  38771 / 35884      3314     1  1.55e-09  green   ignore
-2026-10-08 12:03  44476 / 55841      3647     1  7.38e-06  yellow  monitor
-2026-10-09 09:20  38771 / 29734      1476     1  3.90e-10  green   ignore
-2026-10-10 14:08  25544 / 49773      2751     1  1.09e-18  green   ignore
-2026-10-11 10:56  38771 / 30131      2019     1  2.67e-10  green   ignore
-2026-10-12 11:28  38771 / 35196       212     1  4.86e-06  yellow  monitor
+Event         TCA (UTC)         Objects        Miss (m)  CDMs        Pc  Level   Action
+────────────────────────────────────────────────────────────────────────────────────────
+026443d77699  2026-10-06 05:12  25544 / 58180      4633     1  1.44e-30  green   ignore
+ea4c6a976e3a  2026-10-06 09:25  38771 / 35434      4085     1  1.46e-17  green   ignore
+a351b16057ec  2026-10-06 12:10  25544 / 58180      4902     1  4.33e-59  green   ignore
+fd13fbdb9831  2026-10-06 23:45  38771 / 31882      3374     1  4.28e-33  green   ignore
+6d45833fc2cc  2026-10-07 08:06  38771 / 30041      4511     1  8.48e-30  green   ignore
+3f4c98d01163  2026-10-07 16:10  25544 / 46275      4104     1  7.48e-10  green   ignore
+2aa19608e416  2026-10-07 22:10  38771 / 35884      3314     1  1.55e-09  green   ignore
+3befe6f1305d  2026-10-08 12:03  44476 / 55841      3647     1  7.38e-06  yellow  monitor
+527a3e2689d5  2026-10-09 09:20  38771 / 29734      1476     1  3.90e-10  green   ignore
+d604685adedc  2026-10-10 14:08  25544 / 49773      2751     1  1.09e-18  green   ignore
+26151ac6b42f  2026-10-11 10:56  38771 / 30131      2019     1  2.67e-10  green   ignore
+b815c689dc80  2026-10-12 11:28  38771 / 35196       212     1  4.86e-06  yellow  monitor
 28 element sets left out (28 stale; --json lists them).
 3befe6f1305d: monitor (latest Pc 7.38e-06 is yellow, 2.50 d before TCA; trend undetermined)
   diagnostic: 2-D Pc assumptions questionable: the encounter lasts about 2.51e+03 s, 2.9% of the primary's orbital period (limit 1%); a 3-D Pc may differ
@@ -73,10 +73,10 @@ Covariances are assumed (keepout's model of GP element set errors), not orbit de
 12 CDMs written to cdms
 ```
 
-Each row is one close approach, the fleet satellite first. It shows
-keepout's Pc computed from the CDM issued for it, the Pc's risk level and
-the recommended action. The events that need more than `ignore` are
-explained below the table.
+Each row is one close approach, the fleet satellite first. It shows the
+approach's event id, keepout's Pc computed from the CDM issued for it, the
+Pc's risk level and the recommended action. The events that need more than
+`ignore` are explained below the table, each by its event id.
 
 A fleet satellite may not be screened, because its element set is too old
 for the window, too far in the future, or fails in SGP4. It then has no row
@@ -180,8 +180,8 @@ event.
   against, so that `maneuver` can re-screen a stored event against the
   same catalog later. It also caches their Pc with the settings, as
   `keepout store add` computes them. The rows are then in the store's
-  order, the reasons and `--json` name each approach by the id of its
-  stored event, and a line under the table gives those ids row by row.
+  order, and the Event column, the reasons and `--json` name each
+  approach by the id of its stored event.
   Each row stays the approach as screened: its one CDM and its Pc. A
   screening on a later day adds its CDM to the same stored event, and
   `keepout store add` or `assess --store` show the event with all of them.
@@ -391,24 +391,23 @@ keepout store add cdms/*.kvn --store keepout.db
 
 ```text
 Conjunction events
-TCA (UTC)         Objects        Miss (m)  CDMs        Pc  Level   Action
-──────────────────────────────────────────────────────────────────────────
-2026-10-06 05:12  25544 / 58180      4633     1  1.44e-30  green   ignore
-2026-10-06 09:25  38771 / 35434      4085     1  1.46e-17  green   ignore
-2026-10-06 12:10  25544 / 58180      4902     1  4.33e-59  green   ignore
-2026-10-06 23:45  38771 / 31882      3374     1  4.28e-33  green   ignore
-2026-10-07 08:06  38771 / 30041      4511     1  8.48e-30  green   ignore
-2026-10-07 16:10  25544 / 46275      4104     1  7.48e-10  green   ignore
-2026-10-07 22:10  38771 / 35884      3314     1  1.55e-09  green   ignore
-2026-10-08 12:03  44476 / 55841      3647     1  7.38e-06  yellow  monitor
-2026-10-09 09:20  38771 / 29734      1476     1  3.90e-10  green   ignore
-2026-10-10 14:08  25544 / 49773      2751     1  1.09e-18  green   ignore
-2026-10-11 10:56  38771 / 30131      2019     1  2.67e-10  green   ignore
-2026-10-12 11:28  38771 / 35196       212     1  4.86e-06  yellow  monitor
+Event         TCA (UTC)         Objects        Miss (m)  CDMs        Pc  Level   Action
+────────────────────────────────────────────────────────────────────────────────────────
+026443d77699  2026-10-06 05:12  25544 / 58180      4633     1  1.44e-30  green   ignore
+ea4c6a976e3a  2026-10-06 09:25  38771 / 35434      4085     1  1.46e-17  green   ignore
+a351b16057ec  2026-10-06 12:10  25544 / 58180      4902     1  4.33e-59  green   ignore
+fd13fbdb9831  2026-10-06 23:45  38771 / 31882      3374     1  4.28e-33  green   ignore
+6d45833fc2cc  2026-10-07 08:06  38771 / 30041      4511     1  8.48e-30  green   ignore
+3f4c98d01163  2026-10-07 16:10  25544 / 46275      4104     1  7.48e-10  green   ignore
+2aa19608e416  2026-10-07 22:10  38771 / 35884      3314     1  1.55e-09  green   ignore
+3befe6f1305d  2026-10-08 12:03  44476 / 55841      3647     1  7.38e-06  yellow  monitor
+527a3e2689d5  2026-10-09 09:20  38771 / 29734      1476     1  3.90e-10  green   ignore
+d604685adedc  2026-10-10 14:08  25544 / 49773      2751     1  1.09e-18  green   ignore
+26151ac6b42f  2026-10-11 10:56  38771 / 30131      2019     1  2.67e-10  green   ignore
+b815c689dc80  2026-10-12 11:28  38771 / 35196       212     1  4.86e-06  yellow  monitor
 12 events in the store for the 12 CDMs read: 2 monitor, 10 ignore.
 12 of 12 events rest on assumed covariances (COVARIANCE_METHOD = DEFAULT), not orbit determination.
 12 CDMs added to keepout.db (0 already stored), 12 new events.
-Event ids, row by row: 026443d77699, ea4c6a976e3a, a351b16057ec, fd13fbdb9831, 6d45833fc2cc, 3f4c98d01163, 2aa19608e416, 3befe6f1305d, 527a3e2689d5, d604685adedc, 26151ac6b42f, b815c689dc80.
 3befe6f1305d: monitor (latest Pc 7.38e-06 is yellow, 2.50 d before TCA; trend undetermined)
   diagnostic: 2-D Pc assumptions questionable: the encounter lasts about 2.51e+03 s, 2.9% of the primary's orbital period (limit 1%); a 3-D Pc may differ
   diagnostic: the covariances of primary (44476) and secondary (55841) are known only in position (zero velocity block): the 3-D methods need the velocity uncertainty, so the 2-D Pc is used
@@ -535,8 +534,14 @@ and geometry, and its manoeuvre plan. It needs the `dashboard`
 keepout dashboard --store keepout.db --as-of 2026-10-06
 ```
 
-It listens on 127.0.0.1 unless `--host` gives another address, and has no
-authentication: see [the warning](dashboard.md). It computes no Pc or plan itself but queues
+It listens on 127.0.0.1 unless `--host` gives another IP address, and has
+no authentication: see [the warning](dashboard.md). On an address other
+machines may reach, it says so on standard error as Streamlit starts. A
+scoped IPv6 address (`fe80::1%eth0`) is a usage error: give it without the
+zone. `--as-of` is also read from `$KEEPOUT_AS_OF`; a bad value is a usage
+error naming the variable or the option, whichever gave it. Ctrl+C or
+SIGTERM stops Streamlit too, killing it if it has not stopped within
+10 s or on a second Ctrl+C. It computes no Pc or plan itself but queues
 them for a [worker](#worker). [The dashboard](dashboard.md) describes its
 options, pages and demo.
 
@@ -595,13 +600,22 @@ reads such a file into [`Settings`](reference/settings.md).
 |---|---|
 | 0 | Done. |
 | 1 | An error in the data, a download or a file. One line `Error: ...` goes to standard error, with no traceback. A refused Space-Track query also gives status 1, with the time to wait. |
-| 2 | A usage error: an unknown option, a bad value, a missing file. |
+| 2 | A usage error: an unknown option, a bad value, a missing file, options that do not go together. |
 | 3 | `assess`, `assess --store` and `store add`: at least one event needs a manoeuvre. |
 | 4 | `maneuver`: no burn can be recommended (see [`maneuver`](#maneuver)). |
+
+## Output
+
+Tables and text go to standard output. Printed to a terminal, a table
+fits its width; piped or redirected, it is printed whole, a row a line,
+however wide. On a terminal, `screen`, `maneuver`, `validate` and the
+`fetch` commands show what they are doing on standard error while they
+work; standard output is the same either way.
 
 ## JSON output
 
 `--json` makes a command print one strict JSON document on standard
-output instead of tables, for scripts and other tools. Errors still go to
+output instead of tables, for scripts and other tools. Its first key,
+`"schema"`, is the version of the keys. Errors still go to
 standard error with the same exit status. [JSON output](cli-json.md)
 gives the keys of each command; `keepout worker` has no `--json`.

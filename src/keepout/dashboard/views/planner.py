@@ -38,9 +38,12 @@ from keepout.figures import PROVENANCE_LABELS, grid_figure
 from keepout.maneuver import BurnDirection
 from keepout.maneuver.wording import (
     NO_BURN_NEEDED,
+    ApproachKind,
+    burn_rows,
     conflict_line,
     event_line,
     gap_lines,
+    ranked_approaches,
     refusal,
     rescreen_head,
     return_lines,
@@ -55,10 +58,8 @@ if TYPE_CHECKING:
     from keepout.dashboard.context import DashboardContext
     from keepout.events import ConjunctionEvent
     from keepout.maneuver import (
-        ManeuverOption,
         ManeuverOutcome,
         NewApproach,
-        RescreenResult,
     )
     from keepout.store import Job
 
@@ -283,27 +284,12 @@ def _no_plan(
         st.rerun()
 
 
-def _option_row(name: str, option: ManeuverOption, *, burn: bool) -> dict[str, object]:
-    """A row of the burns table, as ``keepout maneuver`` prints it."""
-    return {
-        "Option": name,
-        "Before TCA (h)": option.burn_lead / HOUR if burn else None,
-        "Δv (m/s)": option.delta_v if burn else None,
-        "Pc": option.pc,
-        "Range (m)": option.range_at_tca,
-        "Method": option.method,
-        "Target": "met" if option.meets_target else "missed",
-    }
-
-
 def _burns(outcome: ManeuverOutcome) -> None:
     """The baseline and the smallest burn each way, and the direction with
     none."""
     st.subheader("Smallest burn each way")
-    rows = [_option_row("no burn", outcome.baseline, burn=False)]
-    rows += [_option_row(str(b.direction), b.option, burn=True) for b in outcome.burns]
     st.dataframe(
-        rows,
+        burn_rows(outcome),
         column_config={
             "Before TCA (h)": st.column_config.NumberColumn(format="%.1f"),
             "Pc": st.column_config.NumberColumn(format="%.2e"),
@@ -341,15 +327,7 @@ def _grid(outcome: ManeuverOutcome) -> None:
     )
 
 
-def _approaches(result: RescreenResult) -> list[tuple[str, NewApproach]]:
-    """The approaches the burn brings (``new``) or brings closer
-    (``closer``), the highest Pc first."""
-    found = [("new", item) for item in result.new_approaches]
-    found += [("closer", item) for item in result.closer_approaches]
-    return sorted(found, key=lambda pair: pair[1].pc, reverse=True)
-
-
-def _approach_rows(approaches: Sequence[tuple[str, NewApproach]]) -> None:
+def _approach_rows(approaches: Sequence[tuple[ApproachKind, NewApproach]]) -> None:
     """A data table of the approaches, a row each: its Pc with its
     provenance, and its risk level in words."""
     st.dataframe(
@@ -397,7 +375,7 @@ def _rescreens(outcome: ManeuverOutcome) -> None:
             st.markdown(conflict_line(result))
         for line in return_lines(result):
             st.warning(line)
-        approaches = _approaches(result)
+        approaches = ranked_approaches(result)
         if approaches:
             _approach_rows(approaches)
         if approaches or result.event_returns:

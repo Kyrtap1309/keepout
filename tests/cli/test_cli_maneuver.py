@@ -1,13 +1,12 @@
-"""``keepout maneuver``: real plans and re-screens of the fixture's crossing event.
+"""``keepout maneuver``: real plans of the fixture's crossing event.
 
 52939 crosses 47826 at 6 km/s, 19.6 h after the CDM's creation (1029 m, green
 at the CDM's hard-body radii). A radius of 100 m puts it above the target and
 of 1 km in the red. The plans use the small grid below, a fraction of a second
 a plan, unless a test restores the default one. A real re-screen, of a week,
-takes seconds: most screen a catalog of the objects near that orbit, a command
-line run as text and as JSON re-screens once (``rescreen_once``), and the tests
-of what is shown of a re-screen make its result without screening
-(:func:`replace_rescreen`).
+takes seconds: the tests of what is shown of a re-screen make its result
+without screening (:func:`replace_rescreen`), and one slow test re-screens
+for real; tests/maneuver/test_rescreen.py tests what a re-screen finds.
 """
 
 import dataclasses
@@ -156,32 +155,6 @@ def replace_rescreen(
     patch_rescreen(monkeypatch, rescreen)
 
 
-@pytest.fixture
-def rescreen_once(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Real re-screens, each burn's run once in the test: the same command
-    line run again (as text, then as JSON) takes its results."""
-    real = maneuver.rescreen
-    done: dict[tuple[float, float, tuple[int, ...]], RescreenResult] = {}
-
-    def rescreen(
-        plan: ManeuverPlan,
-        option: ManeuverOption,
-        omms: Sequence[Omm],
-        *,
-        workers: int | None,
-    ) -> RescreenResult:
-        key = (
-            option.burn_lead,
-            option.delta_v,
-            tuple(omm.catalog_number for omm in omms),
-        )
-        if key not in done:
-            done[key] = real(plan, option, omms, workers=workers)
-        return done[key]
-
-    patch_rescreen(monkeypatch, rescreen)
-
-
 def test_plan_prints_options_and_exits_zero(tmp_path: Path) -> None:
     result = keepout("maneuver", crossing(tmp_path), "--hbr", "1000")
     assert result.exit_code == ExitCode.OK
@@ -200,92 +173,126 @@ Not re-screened: nothing is known of the approaches a burn brings (--catalog or 
 """)
 
 
-def test_json_has_the_documented_keys(tmp_path: Path) -> None:
-    catalog = catalog_of(tmp_path)
-    args = (crossing(tmp_path), "--hbr", "1000", "--json")
-    result = keepout("maneuver", *args, "--catalog", catalog, "--workers", "1")
-    assert result.exit_code == ExitCode.OK
-    payload = json.loads(result.stdout)
-    assert list(payload) == [
-        "event",
-        "primary",
-        "secondary",
-        "target_pc",
-        "method",
-        "assumed_covariance",
-        "baseline",
-        "options",
-        "notes",
-        "refusal",
-    ]
-    assert payload["event"] == "2a85ed50c4e6"
-    assert payload["primary"] == str(PRIMARY)
-    assert payload["secondary"] == str(SECONDARY)
-    assert payload["target_pc"] == 1e-5
-    assert payload["method"] == "foster"
-    assert list(payload["baseline"]) == [
-        "pc",
-        "range_at_tca_m",
-        "method",
-        "meets_target",
-        "notes",
-    ]
-    assert payload["baseline"]["pc"] == pytest.approx(0.04254, rel=1e-3)
-    assert payload["baseline"]["meets_target"] is False
-    prograde, retrograde = payload["options"]
-    assert list(prograde) == [
-        "direction",
-        "burn_lead_s",
-        "delta_v_m_s",
-        "pc",
-        "range_at_tca_m",
-        "method",
-        "meets_target",
-        "notes",
-        "rescreen",
-    ]
-    assert prograde["direction"] == "prograde"
-    assert retrograde["direction"] == "retrograde"
-    assert prograde["delta_v_m_s"] > 0.0 > retrograde["delta_v_m_s"]
-    assert prograde["meets_target"] is True
-    assert list(prograde["rescreen"]) == [
-        "conflict",
-        "secondary_screened",
-        "event_range_m",
-        "catalog_objects",
-        "skipped_objects",
-        "window_start",
-        "window_end",
-        "new_approaches",
-        "closer_approaches",
-        "event_returns",
-    ]
-    assert prograde["rescreen"]["conflict"] is False
-    assert prograde["rescreen"]["secondary_screened"] is True
-    assert prograde["rescreen"]["catalog_objects"] == len(NEIGHBOURS)
-    assert prograde["rescreen"]["skipped_objects"] == 0
-    # The window starts at the burn and lasts 7 days, in UTC as every JSON time.
-    window = [prograde["rescreen"][key] for key in ("window_start", "window_end")]
-    assert all(re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d+", t) for t in window)
-    start, end = (Time(text, scale="utc") for text in window)
-    tca = Time("2026-10-06T19:36:42.717332", scale="utc")
-    assert (tca - start).sec == pytest.approx(prograde["burn_lead_s"], abs=1e-3)
-    assert (end - start).sec == pytest.approx(7 * 86400.0, abs=1e-3)
-    assert prograde["rescreen"]["event_returns"] == []
-    (new,) = retrograde["rescreen"]["new_approaches"]
-    assert list(new) == [
-        "secondary",
-        "tca",
-        "range_at_tca_m",
-        "relative_speed_m_s",
-        "pc",
-        "level",
-        "assumed_covariance",
-    ]
-    assert new["secondary"] == 62118
-    assert new["level"] == "yellow"
-    assert new["assumed_covariance"] is True
-    assert new["pc"] == pytest.approx(3.646e-6, rel=1e-3)
+def to_six_digits(value: object) -> object:
+    """``value``, a JSON value, with each float to 6 significant digits: a
+    Pc's last digits may differ between machines."""
+    if isinstance(value, float):
+        return float(f"{value:.6g}")
+    if isinstance(value, dict):
+        return {key: to_six_digits(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [to_six_digits(item) for item in value]
+    return value
+
+
+def test_json_has_the_documented_keys(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    replace_rescreen(
+        monkeypatch, per_direction(only(new=[red()]), only(returns=[back()]))
+    )
+    args = (crossing(tmp_path), "--hbr", "1000", "--catalog", catalog_of(tmp_path))
+    result = keepout("maneuver", *args, "--workers", "1", "--json")
+    assert result.exit_code == ExitCode.NO_SAFE_BURN
+    assert to_six_digits(json.loads(result.stdout)) == snapshot(
+        {
+            "schema": 1,
+            "event": "2a85ed50c4e6",
+            "primary": "52939",
+            "secondary": "47826",
+            "target_pc": 1e-05,
+            "method": "foster",
+            "assumed_covariance": True,
+            "baseline": {
+                "pc": 0.0425388,
+                "range_at_tca_m": 1028.74,
+                "method": "foster",
+                "meets_target": False,
+                "notes": [],
+            },
+            "options": [
+                {
+                    "direction": "prograde",
+                    "burn_lead_s": 25223.2,
+                    "delta_v_m_s": 0.251189,
+                    "pc": 2.11553e-06,
+                    "range_at_tca_m": 17005.5,
+                    "method": "foster",
+                    "meets_target": True,
+                    "notes": [],
+                    "rescreen": {
+                        "conflict": True,
+                        "secondary_screened": True,
+                        "event_range_m": None,
+                        "catalog_objects": 5,
+                        "skipped_objects": 0,
+                        "window_start": "2026-10-06T12:36:19.543616",
+                        "window_end": "2026-10-13T12:36:19.543616",
+                        "new_approaches": [
+                            {
+                                "secondary": 57087,
+                                "tca": "2026-10-11T17:22:20.541",
+                                "range_at_tca_m": 1082.11,
+                                "relative_speed_m_s": 4906.39,
+                                "pc": 0.01,
+                                "level": "red",
+                                "assumed_covariance": True,
+                            }
+                        ],
+                        "closer_approaches": [],
+                        "event_returns": [],
+                    },
+                },
+                {
+                    "direction": "retrograde",
+                    "burn_lead_s": 42240.5,
+                    "delta_v_m_s": -0.251189,
+                    "pc": 2.55389e-06,
+                    "range_at_tca_m": 29552.3,
+                    "method": "foster",
+                    "meets_target": True,
+                    "notes": [],
+                    "rescreen": {
+                        "conflict": False,
+                        "secondary_screened": True,
+                        "event_range_m": None,
+                        "catalog_objects": 5,
+                        "skipped_objects": 0,
+                        "window_start": "2026-10-06T07:52:42.214760",
+                        "window_end": "2026-10-13T07:52:42.214760",
+                        "new_approaches": [
+                            {
+                                "secondary": 47826,
+                                "tca": "2026-10-11T17:22:20.541",
+                                "range_at_tca_m": 1082.11,
+                                "relative_speed_m_s": 4906.39,
+                                "pc": 3e-05,
+                                "level": "yellow",
+                                "assumed_covariance": True,
+                            }
+                        ],
+                        "closer_approaches": [],
+                        "event_returns": [
+                            {
+                                "secondary": 47826,
+                                "tca": "2026-10-11T17:22:20.541",
+                                "range_at_tca_m": 1082.11,
+                                "relative_speed_m_s": 4906.39,
+                                "pc": 3e-05,
+                                "level": "yellow",
+                                "assumed_covariance": True,
+                            }
+                        ],
+                    },
+                },
+            ],
+            "notes": [
+                "every Pc rests on an assumed covariance (COVARIANCE_METHOD = DEFAULT)",
+                "drag is off: the CDM gives the primary no positive CD_AREA_OVER_MASS",
+            ],
+            "refusal": "Every burn brings an approach at red or this pair back above the target Pc 1.00e-05 (exit status 4).",
+        }
+    )
 
 
 def test_without_catalog_says_not_rescreened(tmp_path: Path) -> None:
@@ -318,7 +325,11 @@ No burn on the grid meets the target Pc 1.00e-05 (exit status 4).
 """)
     as_json = keepout("maneuver", *args, "--json")
     assert as_json.exit_code == ExitCode.NO_SAFE_BURN
-    assert json.loads(as_json.stdout)["options"] == []
+    payload = json.loads(as_json.stdout)
+    assert payload["options"] == []
+    assert payload["refusal"] == (
+        "No burn on the grid meets the target Pc 1.00e-05 (exit status 4)."
+    )
 
 
 def test_a_baseline_meeting_the_target_needs_no_burn_and_exits_zero(
@@ -339,15 +350,6 @@ def test_a_baseline_meeting_the_target_needs_no_burn_and_exits_zero(
     assert payload["refusal"] is None
 
 
-def test_json_names_the_refusal_on_exit_4(tmp_path: Path) -> None:
-    result = keepout("maneuver", crossing(tmp_path), "--hbr", "500000", "--json")
-    payload = json.loads(result.stdout)
-    assert result.exit_code == ExitCode.NO_SAFE_BURN
-    assert payload["refusal"] == (
-        "No burn on the grid meets the target Pc 1.00e-05 (exit status 4)."
-    )
-
-
 def test_json_refusal_is_null_with_a_safe_option(tmp_path: Path) -> None:
     result = keepout("maneuver", crossing(tmp_path), "--hbr", "1000", "--json")
     payload = json.loads(result.stdout)
@@ -355,8 +357,8 @@ def test_json_refusal_is_null_with_a_safe_option(tmp_path: Path) -> None:
     assert payload["refusal"] is None
 
 
-@pytest.mark.usefixtures("rescreen_once")
-def test_conflict_exits_four(tmp_path: Path) -> None:
+def test_conflict_exits_four(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    replace_rescreen(monkeypatch, only(new=[red()]))
     catalog = catalog_of(tmp_path)
     burn = ("--burn-before", "19", "--dv", "1")
     args = (crossing(tmp_path), "--hbr", "1000", *burn, "--workers", "1")
@@ -375,19 +377,14 @@ prograde re-screened against 5 objects (<catalog>) from 2026-10-06T00:36:42 to 2
   Event secondary 47826 on the element sets (SGP4, not the CDM's orbit): no approach within 10 min of the CDM's TCA after the burn.
   CONFLICT: a new or closer approach is at red.
   1 new approach:
-    100000 at 2026-10-10 17:28 UTC: range 1997 m, assumed Pc 1.02e-02, red
+    57087 at 2026-10-11 17:22 UTC: range 1082 m, assumed Pc 1.00e-02, red
   Covariances are assumed (keepout's model of GP element set errors), not orbit determination.
 This burn brings an approach at red (exit status 4).
 """)
     as_json = keepout("maneuver", *args, "--catalog", catalog, "--json")
     assert as_json.exit_code == ExitCode.NO_SAFE_BURN
     (option,) = json.loads(as_json.stdout)["options"]
-    assert option["meets_target"] is True
     assert option["rescreen"]["conflict"] is True
-    assert option["rescreen"]["new_approaches"][0]["level"] == "red"
-    # The burn leaves the event's secondary outside the volume: screened, no range.
-    assert option["rescreen"]["secondary_screened"] is True
-    assert option["rescreen"]["event_range_m"] is None
 
 
 @pytest.mark.slow
@@ -673,14 +670,17 @@ def test_a_calculated_covariance_is_not_labelled_assumed(tmp_path: Path) -> None
     )
 
 
-def test_pc_of_an_approach_of_the_catalog_is_labelled_assumed(tmp_path: Path) -> None:
+def test_pc_of_an_approach_of_the_catalog_is_labelled_assumed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     # Even for a CDM with covariances of its own: element sets have none.
+    replace_rescreen(monkeypatch, only(new=[red()]))
     file = write(tmp_path, "c.kvn", calculated(operator_kvn()[0]))
     burn = ("--burn-before", "19", "--dv", "1", "--workers", "1")
     args = (file, "--hbr", "1000", *burn)
     result = keepout("maneuver", *args, "--catalog", catalog_of(tmp_path))
     lines = result.stdout.splitlines()
-    assert any("assumed Pc" in line and "100000" in line for line in lines)
+    assert any("assumed Pc" in line and "57087" in line for line in lines)
     assert (
         "  Covariances are assumed (keepout's model of GP element set errors), "
         "not orbit determination."
@@ -758,6 +758,31 @@ def test_bad_options_are_usage_errors(
     assert f"Invalid value for '{option}': {reason}" in usage_error(result)
 
 
+def test_options_that_do_not_go_together_are_a_usage_error_of_the_command(
+    tmp_path: Path,
+) -> None:
+    both = ("--catalog", str(FIXTURE_CSV), "--source", "celestrak")
+    result = keepout("maneuver", crossing(tmp_path), *both)
+    assert result.exit_code == ExitCode.USAGE
+    error = usage_error(result)
+    assert "Usage: keepout maneuver" in error
+    assert "Invalid value" not in error
+
+
+def test_help_groups_the_options() -> None:
+    result = keepout("maneuver", "--help", env={"COLUMNS": "200"})
+    assert result.exit_code == ExitCode.OK
+    panels = re.findall(r"^╭─ (\S[^─]*?) ─", result.stdout, flags=re.MULTILINE)
+    assert panels == [
+        "Arguments",
+        "Options",
+        "Event",
+        "Burns",
+        "Re-screen",
+        "Settings",
+    ]
+
+
 def test_no_cdm_is_a_usage_error() -> None:
     result = keepout("maneuver")
     assert result.exit_code == ExitCode.USAGE
@@ -821,33 +846,34 @@ def rescreen_lines(result: Result, catalog: str) -> list[str]:
     return lines[lines.index(first) :]
 
 
-@pytest.mark.usefixtures("rescreen_once")
-def test_secondary_still_near_after_the_burn_gives_its_range(tmp_path: Path) -> None:
-    catalog = catalog_of(tmp_path)
-    burn = ("--burn-before", "16", "--dv", "0.008", "--workers", "1")
-    args = (crossing(tmp_path), "--hbr", "100", *burn, "--catalog", catalog)
-    result = keepout("maneuver", *args)
-    assert rescreen_lines(result, catalog) == snapshot(
-        [
-            "prograde re-screened against 5 objects (<catalog>) from 2026-10-06T03:36:42 to 2026-10-13T03:36:42 UTC; 0 catalog objects left out (not checked).",
-            "  Event secondary 47826 on the element sets (SGP4, not the CDM's orbit): range 1288 m after the burn.",
-            "  No new or closer approach at red among the objects screened.",
-            "  1 new approach:",
-            "    57087 at 2026-10-11 15:48 UTC: range 3276 m, assumed Pc 4.85e-08, green",
-            "  Covariances are assumed (keepout's model of GP element set errors), not orbit determination.",
-            "This burn misses the target Pc 1.00e-05 (exit status 4).",
-        ]
+def test_secondary_still_near_after_the_burn_gives_its_range(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    replace_rescreen(
+        monkeypatch, lambda result: dataclasses.replace(result, event_range=1288.0)
     )
+    catalog = catalog_of(tmp_path)
+    burn = ("--burn-before", "19", "--dv", "1", "--workers", "1")
+    args = (crossing(tmp_path), "--hbr", "1000", *burn, "--catalog", catalog)
+    result = keepout("maneuver", *args)
+    assert (
+        "  Event secondary 47826 on the element sets (SGP4, not the CDM's orbit): "
+        "range 1288 m after the burn."
+    ) in result.stdout.splitlines()
     (option,) = json.loads(keepout("maneuver", *args, "--json").stdout)["options"]
-    assert option["rescreen"]["event_range_m"] == pytest.approx(1288.0, abs=1.0)
+    assert option["rescreen"]["event_range_m"] == 1288.0
 
 
-@pytest.mark.usefixtures("rescreen_once")
-def test_a_secondary_not_screened_says_nothing_of_the_event(tmp_path: Path) -> None:
+def test_a_secondary_not_screened_says_nothing_of_the_event(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    replace_rescreen(
+        monkeypatch,
+        lambda result: dataclasses.replace(result, secondary_screened=False),
+    )
     catalog = catalog_of(tmp_path, NEIGHBOURS - {SECONDARY})
-    burn = ("--burn-before", "19", "--dv", "0.1", "--workers", "1")
-    goal = ("--target-pc", "0.01", "--hbr", "1000")
-    args = (crossing(tmp_path), *goal, *burn, "--catalog", catalog)
+    burn = ("--burn-before", "19", "--dv", "1", "--workers", "1")
+    args = (crossing(tmp_path), "--hbr", "1000", *burn, "--catalog", catalog)
     result = keepout("maneuver", *args)
     assert result.exit_code == ExitCode.OK
     assert rescreen_lines(result, catalog) == snapshot(
@@ -855,16 +881,10 @@ def test_a_secondary_not_screened_says_nothing_of_the_event(tmp_path: Path) -> N
             "prograde re-screened against 4 objects (<catalog>) from 2026-10-06T00:36:42 to 2026-10-13T00:36:42 UTC; 0 catalog objects left out (not checked).",
             "  Event secondary 47826 was NOT screened: this re-screen says nothing of the event.",
             "  No new or closer approach at red among the objects screened.",
-            "  1 new approach:",
-            "    57087 at 2026-10-11 03:14 UTC: range 4068 m, assumed Pc 1.23e-15, green",
-            "  Covariances are assumed (keepout's model of GP element set errors), not orbit determination.",
         ]
     )
     (option,) = json.loads(keepout("maneuver", *args, "--json").stdout)["options"]
-    rescreen = option["rescreen"]
-    assert rescreen["conflict"] is False
-    assert rescreen["secondary_screened"] is False
-    assert rescreen["event_range_m"] is None
+    assert option["rescreen"]["secondary_screened"] is False
 
 
 def test_objects_left_out_are_counted(
@@ -1317,6 +1337,7 @@ def test_queue_then_worker_then_cached(
     from_worker = text_and_json(*stored)
     assert planned == []
     assert json.loads(queue(db, event_id, "--json").stdout) == {
+        "schema": 1,
         "event": event_id,
         "job": None,
         "status": None,
@@ -1338,7 +1359,13 @@ def test_queue_then_worker_then_cached(
 def test_queue_twice_returns_the_same_job(tmp_path: Path) -> None:
     db, event_id = stored_crossing(tmp_path)
     first = json.loads(queue(db, event_id, "--json").stdout)
-    assert first == {"event": event_id, "job": 1, "status": "queued", "cached": False}
+    assert first == {
+        "schema": 1,
+        "event": event_id,
+        "job": 1,
+        "status": "queued",
+        "cached": False,
+    }
     again = queue(db, event_id)
     assert again.exit_code == ExitCode.OK
     assert again.stdout == f"Job 1 is already queued for event {event_id}.\n"

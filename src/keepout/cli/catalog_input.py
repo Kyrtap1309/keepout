@@ -29,8 +29,8 @@ CatalogFile: TypeAlias = Annotated[
         dir_okay=False,
         metavar="FILE",
         help=(
-            "Screen against the element sets in this file (OMM KVN or XML, "
-            "CelesTrak CSV or JSON, TLE; gzipped or not) instead of a source."
+            "Catalog file of element sets to screen against (OMM KVN or XML, "
+            "CelesTrak CSV or JSON, TLE; gzipped or not), instead of --source."
         ),
     ),
 ]
@@ -48,18 +48,13 @@ class CatalogInput(NamedTuple):
     keeps with the CDMs screened against them."""
 
 
-def require_one_catalog(catalog: Path | None, source: CatalogSourceName | None) -> None:
-    """A check that the command line names a catalog file or a source, not both.
-
-    Raises
-    ------
-    typer.BadParameter
-        If it names both: a usage error.
-    """
+def require_one_catalog(
+    ctx: typer.Context, catalog: Path | None, source: CatalogSourceName | None
+) -> None:
+    """A check that the command line names a catalog file or a source, not
+    both; a usage error if not."""
     if catalog is not None and source is not None:
-        raise typer.BadParameter(
-            "give either --catalog or --source, not both", param_hint="--source"
-        )
+        ctx.fail("give either --catalog or --source, not both")
 
 
 def catalog_input(

@@ -12,8 +12,10 @@ import enum
 import functools
 import inspect
 import json
-from collections.abc import Callable, Mapping, Sequence
-from typing import TYPE_CHECKING, NoReturn, ParamSpec, TypeAlias, TypeVar
+import sys
+from collections.abc import Callable, Generator, Mapping, Sequence
+from contextlib import contextmanager
+from typing import TYPE_CHECKING, Final, NoReturn, ParamSpec, TypeAlias, TypeVar
 
 import typer
 from rich import box
@@ -36,20 +38,28 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ASSUMED_COVARIANCES",
+    "JSON_SCHEMA",
     "ExitCode",
     "JsonOut",
     "duration_words",
     "fail",
+    "help_values",
     "isot",
     "minute",
     "objects",
     "pc_text",
     "plural",
+    "progress",
     "reported",
     "show",
     "table",
     "utc",
 ]
+
+
+JSON_SCHEMA: Final = 1
+"""The ``"schema"`` of every ``--json`` document: bumped on a breaking change
+of the keys."""
 
 
 class ExitCode(enum.IntEnum):
@@ -63,7 +73,8 @@ class ExitCode(enum.IntEnum):
     USAGE = 2
     """A wrong command line (Typer's status for it)."""
     MANEUVER = 3
-    """``keepout assess``: at least one event's decision is to maneuver."""
+    """``keepout assess`` and ``keepout store add``: at least one event's
+    decision is to maneuver."""
     NO_SAFE_BURN = 4
     """``keepout maneuver``: no burn exists, the burn given misses the target,
     or every burn brings an approach at red or the event's pair back above the
@@ -85,11 +96,13 @@ def show(payload: Mapping[str, JsonOut], *text: RenderableType, as_json: bool) -
     Parameters
     ----------
     payload
-        The result as JSON values, printed with ``as_json``.
+        The result as JSON values, printed with ``as_json`` after
+        ``"schema": JSON_SCHEMA``.
     *text
         The result for people (strings, rich tables), printed otherwise; text
         is printed as is (no rich markup or emoji codes) and long lines are
-        not broken.
+        not broken. Unless standard output is a terminal, a table is printed
+        at its full width.
     as_json
         Whether ``--json`` was given.
 
@@ -99,11 +112,43 @@ def show(payload: Mapping[str, JsonOut], *text: RenderableType, as_json: bool) -
         If ``payload`` holds a NaN or an infinity (not valid JSON).
     """
     if as_json:
-        typer.echo(json.dumps(payload, indent=2, allow_nan=False))
+        document = {"schema": JSON_SCHEMA, **payload}
+        typer.echo(json.dumps(document, indent=2, allow_nan=False))
         return
     console = Console(markup=False, emoji=False, highlight=False, soft_wrap=True)
+    if not console.is_terminal:
+        # Piped or redirected: each table whole, a row a line, not cut to
+        # 80 columns.
+        unbounded = console.options.update_width(sys.maxsize)
+        widths = [
+            console.measure(item, options=unbounded).maximum
+            for item in text
+            if isinstance(item, Table)
+        ]
+        console.width = max([console.width, *widths])
     for item in text:
         console.print(item)
+
+
+@contextmanager
+def progress(message: str) -> Generator[None]:
+    """A spinner and ``message`` on standard error while in the context, if
+    standard error is a terminal; nothing otherwise. Standard output is left
+    alone, so a command's output, text or JSON, is the same either way."""
+    if not sys.stderr.isatty():
+        yield
+        return
+    from rich.live import Live
+    from rich.spinner import Spinner
+
+    spinner = Spinner("dots", text=message)
+    with Live(
+        spinner,
+        console=Console(stderr=True),
+        transient=True,
+        redirect_stdout=False,
+    ):
+        yield
 
 
 def fail(message: str, status: ExitCode = ExitCode.ERROR) -> NoReturn:
@@ -138,6 +183,19 @@ def table(title: str) -> Table:
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
+_F = TypeVar("_F", bound=Callable[..., object])
+
+
+def help_values(**values: object) -> Callable[[_F], _F]:
+    """A decorator filling the ``{name}`` fields of a command's docstring, its
+    ``--help``, with ``values``: the library's defaults, not copies of them."""
+
+    def fill(command: _F) -> _F:
+        if command.__doc__ is not None:  # None under python -OO
+            command.__doc__ = command.__doc__.format_map(values)
+        return command
+
+    return fill
 
 
 def _radius_hint(command: Callable[..., object]) -> str:

@@ -15,6 +15,7 @@ from cli_builders import (
     START,
     keepout,
     operator_run,
+    table_event_ids,
     usage_error,
     write_fleet,
 )
@@ -58,10 +59,10 @@ def test_screen_issues_and_assesses_a_cdm_per_approach(tmp_path: Path) -> None:
     assert shown.replace(str(tmp_path), "<tmp>") == snapshot("""\
 Screened 2 fleet satellites against 217 objects (<catalog>) from 2026-10-06T00:00:00 to 2026-10-09T00:00:00 UTC: 2 close approaches.
 Close approaches
-TCA (UTC)         Objects        Miss (m)  CDMs        Pc  Level   Action \n\
-──────────────────────────────────────────────────────────────────────────
-2026-10-06 19:36  52939 / 47826      1029     1  4.37e-08  green   ignore \n\
-2026-10-08 12:03  44476 / 55841      3647     1  7.38e-06  yellow  monitor
+Event         TCA (UTC)         Objects        Miss (m)  CDMs        Pc  Level   Action \n\
+────────────────────────────────────────────────────────────────────────────────────────
+2a85ed50c4e6  2026-10-06 19:36  52939 / 47826      1029     1  4.37e-08  green   ignore \n\
+3befe6f1305d  2026-10-08 12:03  44476 / 55841      3647     1  7.38e-06  yellow  monitor
 5 element sets left out (5 stale; --json lists them).
 3befe6f1305d: monitor (latest Pc 7.38e-06 is yellow, 2.50 d before TCA; trend undetermined)
   diagnostic: 2-D Pc assumptions questionable: the encounter lasts about 2.51e+03 s, 2.9% of the primary's orbital period (limit 1%); a 3-D Pc may differ
@@ -348,7 +349,7 @@ def test_screen_with_store_shows_the_store_s_event_ids(tmp_path: Path) -> None:
     ]
     assert payload["store"]["events"] == ids
     text = keepout(*screen_fixture(tmp_path, "--store", str(db))).stdout
-    assert f"Event ids, row by row: {ids[0]}, {ids[1]}.\n" in text
+    assert table_event_ids(text) == ids
     assert f"\n{ids[1]}: monitor (latest Pc 7.38e-06" in text
     # The Pc is cached with the default settings: store add finds it.
     rebuilt = keepout("store", "rebuild", "--store", str(db))
@@ -357,7 +358,7 @@ def test_screen_with_store_shows_the_store_s_event_ids(tmp_path: Path) -> None:
         "store", "add", *sorted(map(str, cdms.iterdir())), "--store", str(db)
     )
     assert added.exit_code == ExitCode.OK
-    assert f"Event ids, row by row: {ids[0]}, {ids[1]}.\n" in added.stdout
+    assert table_event_ids(added.stdout) == ids
     assert keepout("store", "rebuild", "--store", str(db)).stdout == rebuilt.stdout
 
 

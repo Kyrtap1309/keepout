@@ -18,7 +18,8 @@ import typer
 
 from keepout._environment import STORE_VARIABLE
 from keepout.cli.cdm_input import CdmFiles, read_cdm_files
-from keepout.cli.events import Assessed, show_assessed
+from keepout.cli.events import show_assessed
+from keepout.cli.extras import install_hint, missing_extra
 from keepout.cli.options import (
     JsonFlag,
     SettingsFile,
@@ -55,10 +56,7 @@ __all__ = [
     "store_upgrade",
 ]
 
-STORE_HINT: Final = (
-    "--store needs the store extra: "
-    'pip install "keepout[cli,store] @ git+https://github.com/Kyrtap1309/keepout"'
-)
+STORE_HINT: Final = f"--store needs the store extra: {install_hint('cli', 'store')}"
 """What a command given a store prints (exit status 1) when the extra is
 missing."""
 
@@ -73,17 +71,14 @@ _STORE_HELP: Final = "The conjunction store, a SQLite file"
 
 
 def _without_extra(exc: ModuleNotFoundError) -> NoReturn:
-    """The end of a command that needs the ``store`` extra and lacks it.
+    """The end of a command lacking the extra: :data:`STORE_HINT` (status 1).
 
     Raises
     ------
-    typer.Exit
-        If ``exc`` is about a package of the extra: :data:`STORE_HINT`,
-        status 1.
     ModuleNotFoundError
-        Otherwise: ``exc`` again.
+        ``exc`` again, if it is not about a package of the extra.
     """
-    if (exc.name or "").partition(".")[0] not in _STORE_MODULES:
+    if not missing_extra(exc, _STORE_MODULES):
         raise exc
     fail(STORE_HINT)
 
@@ -108,13 +103,7 @@ def importing_store() -> Generator[None]:
 
 
 def _store_extra(ctx: typer.Context, value: Path | None) -> Path | None:
-    """``--store``, checked to have the ``store`` extra to open it with.
-
-    Raises
-    ------
-    typer.Exit
-        Without the extra: :data:`STORE_HINT`, status 1.
-    """
+    """``--store``, checked to have the ``store`` extra to open it with."""
     if value is not None and not ctx.resilient_parsing:
         with importing_store():
             import keepout.store  # noqa: F401 (the check)
@@ -254,22 +243,14 @@ def store_json(
     }
 
 
-def store_lines(
-    path: Path, report: IngestReport, rows: Sequence[Assessed] = ()
-) -> list[str]:
-    """What an ingest did, for people; with the rows of the table, their
-    events' ids in its order."""
-    lines = [
-        (
-            f"{plural(len(report.added), 'CDM')} added to {path} "
-            f"({len(report.already_stored)} already stored), "
-            f"{plural(len(report.new_events), 'new event')}."
-        )
-    ]
-    if rows:
-        ids = ", ".join(item.event.event_id for item in rows)
-        lines.append(f"Event ids, row by row: {ids}.")
-    return lines
+def store_lines(path: Path, report: IngestReport) -> list[str]:
+    """What an ingest did, for people."""
+    added = (
+        f"{plural(len(report.added), 'CDM')} added to {path} "
+        f"({len(report.already_stored)} already stored), "
+        f"{plural(len(report.new_events), 'new event')}."
+    )
+    return [added]
 
 
 def add_and_show(
@@ -310,7 +291,7 @@ def add_and_show(
         assessed,
         cdm_count=len(messages),
         store=store_json(path, report, ids),
-        store_lines=store_lines(path, report, assessed),
+        store_lines=store_lines(path, report),
         as_json=as_json,
     )
 

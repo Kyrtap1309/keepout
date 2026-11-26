@@ -7,13 +7,13 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Final
 
-from keepout._text import pc_text
+from keepout._text import PC_FAILED
 from keepout.units import DAY, HOUR, MINUTE, elapsed_seconds
 
 if TYPE_CHECKING:
     from astropy.time import Time
 
-    from keepout.risk import Assessment, PcObservation
+    from keepout.risk import Assessment
 
 __all__ = [
     "AFTER_TCA",
@@ -23,7 +23,6 @@ __all__ = [
     "NOT_COMPUTED",
     "countdown",
     "literal",
-    "pc_cell",
     "unrated",
 ]
 
@@ -36,7 +35,7 @@ DAYS_FROM: Final = 72 * HOUR
 NOT_COMPUTED: Final = "not computed"
 """The Pc, and the risk, of a CDM or event without a Pc for the settings."""
 
-FAILED: Final = "failed"
+FAILED: Final = PC_FAILED
 """The risk of an event whose latest Pc before TCA could not be computed."""
 
 AFTER_TCA: Final = "issued after TCA"
@@ -92,13 +91,3 @@ def unrated(assessment: Assessment) -> str:
     if assessment.trend.latest_observation is None:
         return AFTER_TCA
     return FAILED
-
-
-def pc_cell(observation: PcObservation | None) -> str:
-    """A cached Pc as the pages show it: :data:`NOT_COMPUTED` without one,
-    :data:`FAILED` if it could not be computed."""
-    if observation is None:
-        return NOT_COMPUTED
-    if observation.pc is None:
-        return FAILED
-    return pc_text(observation.pc)

@@ -1,6 +1,8 @@
+import io
 import json
 import math
 import re
+import sys
 
 import pytest
 import typer
@@ -10,6 +12,7 @@ from rich.table import Table
 from typer.testing import CliRunner
 
 import keepout as package
+from keepout._typing import override
 from keepout.cli.output import (
     ExitCode,
     JsonOut,
@@ -17,6 +20,7 @@ from keepout.cli.output import (
     fail,
     minute,
     plural,
+    progress,
     reported,
     show,
     utc,
@@ -160,7 +164,7 @@ def test_show_prints_json_or_text(capsys: pytest.CaptureFixture[str]) -> None:
         "ok": True,
     }
     show(payload, "text [bold]x[/]", as_json=True)
-    assert json.loads(capsys.readouterr().out) == payload
+    assert json.loads(capsys.readouterr().out) == {"schema": 1, **payload}
     table = Table("A", "B")
     table.add_row("1", "2")
     long = "/very/long/path/" * 10
@@ -169,6 +173,53 @@ def test_show_prints_json_or_text(capsys: pytest.CaptureFixture[str]) -> None:
     assert out.startswith("text [bold]x[/] :smile:\n")
     assert "│ 1 │ 2 │" in out
     assert out.endswith(long + "\n")
+
+
+def test_json_starts_with_its_schema(capsys: pytest.CaptureFixture[str]) -> None:
+    show({"a": 1}, as_json=True)
+    assert capsys.readouterr().out.startswith('{\n  "schema": 1,')
+
+
+def test_a_piped_table_is_printed_whole(capsys: pytest.CaptureFixture[str]) -> None:
+    table = Table("Column")
+    table.add_row("x" * 120)
+    show({}, table, as_json=False)
+    assert "x" * 120 in capsys.readouterr().out
+
+
+class Terminal(io.StringIO):
+    """Standard error on a terminal."""
+
+    @override
+    def isatty(self) -> bool:
+        return True
+
+
+def test_progress_is_shown_on_a_terminal_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    for stderr, shown in ((io.StringIO(), False), (Terminal(), True)):
+        monkeypatch.setattr(sys, "stderr", stderr)
+        with progress("Screening"):
+            pass
+        assert ("Screening" in stderr.getvalue()) is shown
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ("validate",),
+        ("fetch", "catalog"),
+        ("fetch", "cdm"),
+        ("fetch", "cara"),
+        ("fetch", "kelvins"),
+        ("jobs", "list"),
+        ("jobs", "cancel"),
+    ],
+)
+def test_help_ends_with_examples(command: tuple[str, ...]) -> None:
+    result = keepout(*command, "--help", env={"COLUMNS": "200"})
+    assert result.exit_code == ExitCode.OK
+    examples = result.stdout[result.stdout.index("Examples:") :]
+    assert f"keepout {' '.join(command)}" in examples
 
 
 def test_show_refuses_values_json_cannot_hold() -> None:

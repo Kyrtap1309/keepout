@@ -64,6 +64,7 @@ def test_fetch_cara_downloads_every_file_once(
     again = keepout("fetch", "cara", "--cache-dir", str(tmp_path), "--json")
     assert again.exit_code == ExitCode.OK
     assert json.loads(again.stdout) == {
+        "schema": 1,
         "source": "cara",
         "commit": cara.CARA_COMMIT,
         "files": 2,
@@ -125,6 +126,7 @@ def test_fetch_kelvins_keeps_the_raw_table(
     assert result.exit_code == ExitCode.OK
     path = tmp_path / "kelvins" / kelvins.ZENODO_RECORD / "raw_data_2015-2019.gz"
     assert json.loads(result.stdout) == {
+        "schema": 1,
         "source": "kelvins",
         "doi": kelvins.DOI,
         "path": str(path),

@@ -17,7 +17,7 @@ from keepout.cli.options import (
     OverriddenSettingsFile,
     operator_settings,
 )
-from keepout.cli.output import duration_words
+from keepout.cli.output import duration_words, help_values
 from keepout.cli.store import StoreOption, add_and_show
 
 # The library is imported where it is used: keepout --help need not load the
@@ -77,6 +77,10 @@ MethodOption: TypeAlias = Annotated[
 """``--method``: the Pc method; ``None``: the settings'."""
 
 
+@help_values(
+    tca_tolerance=duration_words(TCA_TOLERANCE),
+    decision_point=duration_words(DECISION_POINT),
+)
 def assess_command(
     files: CdmFiles,
     *,
@@ -111,29 +115,17 @@ def assess_command(
 
     from keepout.events import AssessedEvent, group_events
     from keepout.risk import assess
+    from keepout.settings import observation_arguments
 
     messages = load_cdms(files)
     assessed = [
         AssessedEvent(
             event,
             assess(
-                event.observations(
-                    compute=chosen.compute,
-                    policy=chosen.policy,
-                    combined_hard_body_radius=chosen.combined_hard_body_radius,
-                ),
+                event.observations(**observation_arguments(chosen)),
                 thresholds=chosen.thresholds,
             ),
         )
         for event in group_events(messages)
     ]
     show_assessed(assessed, cdm_count=len(messages), store=None, as_json=as_json)
-
-
-# The defaults in the help are the library's own (none under python -OO).
-assess_command.__doc__ = (assess_command.__doc__ or "").format_map(
-    {
-        "tca_tolerance": duration_words(TCA_TOLERANCE),
-        "decision_point": duration_words(DECISION_POINT),
-    }
-)

@@ -8,7 +8,7 @@ from collections import Counter
 from collections.abc import Mapping, Sequence
 from contextlib import ExitStack
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, NamedTuple, TypeAlias
+from typing import TYPE_CHECKING, Annotated, Final, NamedTuple, TypeAlias
 
 import typer
 
@@ -26,7 +26,16 @@ from keepout.cli.options import (
     positive,
     time_option,
 )
-from keepout.cli.output import ASSUMED_COVARIANCES, JsonOut, isot, plural, show, utc
+from keepout.cli.output import (
+    ASSUMED_COVARIANCES,
+    JsonOut,
+    help_values,
+    isot,
+    plural,
+    progress,
+    show,
+    utc,
+)
 from keepout.cli.store import (
     StoreOption,
     ingest_screened,
@@ -47,7 +56,7 @@ if TYPE_CHECKING:
     from keepout.store import IngestReport
     from keepout.synthetic import Fleet, OperatorEvent, OperatorResult
 
-__all__ = ["parse_time", "screen_command"]
+__all__ = ["HELP_PANELS", "parse_time", "screen_command"]
 
 
 FleetFile: TypeAlias = Annotated[
@@ -96,7 +105,9 @@ CdmDir: TypeAlias = Annotated[
 """``--cdm-dir``: where to write the CDMs, ``<MESSAGE_ID>.kvn``."""
 
 
+@help_values(radius=SOCRATES_RADIUS / KM)
 def screen_command(
+    ctx: typer.Context,
     *,
     fleet: FleetFile,
     days: Days = SCREENING_DURATION / DAY,
@@ -116,34 +127,37 @@ def screen_command(
     of a fleet satellite in the window becomes a CDM whose covariances come
     from keepout's model of GP element set errors, an assumption, not orbit
     determination. Each CDM's Pc is computed and its risk assessed as of the
-    start of the window, which is also the CDMs' creation date. The catalog
-    is the cached copy of keepout fetch catalog while it is current, else a
-    new download; --catalog reads a file instead. With --store the CDMs are
-    added to the store, with a copy of the catalog. --settings gives the Pc
-    method, covariance policy, hard-body radius and risk thresholds.
+    start of the window, which is also the CDMs' creation date.
+
+    The catalog is the cached copy of keepout fetch catalog while it is
+    current, else a new download; --catalog reads a file instead. With
+    --store the CDMs are added to the store, with a copy of the catalog.
+    --settings gives the Pc method, covariance policy, hard-body radius and
+    risk thresholds.
     """
     window_start = None if start is None else time_option(start, "--start")
-    require_one_catalog(catalog, source)
+    require_one_catalog(ctx, catalog, source)
     chosen = operator_settings(settings)
     with ExitStack() as stack:
         opened = None if store is None else stack.enter_context(open_cli_store(store))
+        from keepout.settings import observation_arguments
         from keepout.synthetic import load_fleet, run
 
         satellites = load_fleet(fleet)
-        screened = catalog_input(catalog, source, cache_dir)
+        with progress("Reading the catalog"):
+            screened = catalog_input(catalog, source, cache_dir)
         if window_start is None:
             window_start = _now()
-        result = run(
-            satellites,
-            screened.omms,
-            window_start,
-            days * DAY,
-            workers=workers,
-            compute=chosen.compute,
-            policy=chosen.policy,
-            combined_hard_body_radius=chosen.combined_hard_body_radius,
-            thresholds=chosen.thresholds,
-        )
+        with progress("Screening the fleet and computing each approach's Pc"):
+            result = run(
+                satellites,
+                screened.omms,
+                window_start,
+                days * DAY,
+                workers=workers,
+                **observation_arguments(chosen),
+                thresholds=chosen.thresholds,
+            )
         files = {} if cdm_dir is None else _write_cdms(result, cdm_dir)
         stored = (
             None
@@ -159,10 +173,20 @@ def screen_command(
     show(payload, *summary, as_json=as_json)
 
 
-# The volume in the help is the library's default (none under python -OO).
-screen_command.__doc__ = (screen_command.__doc__ or "").format_map(
-    {"radius": SOCRATES_RADIUS / KM}
-)
+HELP_PANELS: Final = {
+    "fleet": "Fleet and window",
+    "days": "Fleet and window",
+    "start": "Fleet and window",
+    "catalog": "Catalog",
+    "source": "Catalog",
+    "cache_dir": "Catalog",
+    "cdm_dir": "Results",
+    "store": "Results",
+    "settings": "Computing",
+    "workers": "Computing",
+}
+"""The panel of ``keepout screen --help`` each option is listed in (the
+others are under Typer's Options)."""
 
 
 class _Stored(NamedTuple):
@@ -288,7 +312,7 @@ def _summary(
     if cdm_dir is not None:
         tail.append(f"{plural(len(files), 'CDM')} written to {cdm_dir}")
     if stored is not None:
-        tail += store_lines(stored.path, stored.report, events)
+        tail += store_lines(stored.path, stored.report)
     table = [events_table(events, "Close approaches")] if events else []
     return [*head, *table, *tail]
 

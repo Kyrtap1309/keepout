@@ -10,13 +10,13 @@ from typing import TYPE_CHECKING, Final, Protocol
 import typer
 from rich.table import Table
 
+from keepout._text import pc_cell
 from keepout.cli.output import (
     ExitCode,
     JsonOut,
     isot,
     minute,
     objects,
-    pc_text,
     plural,
     show,
     table,
@@ -52,20 +52,14 @@ class Assessed(Protocol):
         ...
 
 
-def _pc(observation: PcObservation | None) -> str:
-    if observation is None:
-        return "-"
-    if observation.pc is None:
-        return "failed"
-    return pc_text(observation.pc)
-
-
 def events_table(events: Sequence[Assessed], title: str) -> Table:
-    """A table of the events: TCA, both objects' ids, miss distance,
-    CDMs, the latest Pc before TCA, its risk level and the action."""
+    """A table of the events: id, TCA, both objects' ids, miss distance,
+    CDMs, the latest Pc before TCA, its risk level and the action. Only a
+    terminal too narrow for it wraps the TCA, the objects and the action."""
     rows = table(title)
-    rows.add_column("TCA (UTC)", no_wrap=True)
-    rows.add_column("Objects", no_wrap=True)
+    rows.add_column("Event", no_wrap=True)
+    rows.add_column("TCA (UTC)")
+    rows.add_column("Objects")
     for column in ("Miss (m)", "CDMs", "Pc"):
         rows.add_column(column, justify="right", no_wrap=True)
     rows.add_column("Level", no_wrap=True)
@@ -74,11 +68,12 @@ def events_table(events: Sequence[Assessed], title: str) -> Table:
         latest = item.event.latest
         level = item.assessment.level
         rows.add_row(
+            item.event.event_id,
             minute(latest.tca),
             objects(latest),
             f"{latest.miss_distance:.0f}",
             str(len(item.event.cdms)),
-            _pc(item.assessment.trend.latest_observation),
+            pc_cell(item.assessment.trend.latest_observation, missing="-"),
             "-" if level is None else level.key,
             item.assessment.decision.action.label,
         )

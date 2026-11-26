@@ -9,6 +9,11 @@ same exit status as without `--json` (see
 page gives the keys each command prints; [Command line](cli.md) explains
 the commands themselves.
 
+Every document starts with `"schema": 1`, the version of the keys below.
+It is bumped on a breaking change: a key removed, renamed or given another
+type or meaning. A key added keeps it, so a script should ignore the keys
+it does not know. The tables below leave `schema` out.
+
 ## `screen` and `assess`
 
 Both commands describe each event in the same shape:
@@ -75,6 +80,7 @@ from a clone of the repository, prints this (exit status 3):
 
 ```json
 {
+  "schema": 1,
   "cdm_count": 1,
   "events": [
     {

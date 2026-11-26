@@ -1,5 +1,6 @@
 """What a manoeuvre outcome says, in words: why no burn can be recommended,
-the direction without a burn, and what a re-screen found.
+the table of burns, the direction without a burn, and what a re-screen
+found.
 
 Shared by ``keepout maneuver`` and the dashboard's planner page, so both read
 an outcome the same way.
@@ -7,21 +8,26 @@ an outcome the same way.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, Literal, TypeAlias, TypedDict
 
 from keepout._text import minute, pc_text, plural, utc
 from keepout.maneuver.planner import BurnDirection
-from keepout.units import MINUTE
+from keepout.units import HOUR, MINUTE
 
 if TYPE_CHECKING:
     from keepout.maneuver.outcome import ManeuverOutcome
-    from keepout.maneuver.rescreen import RescreenResult
+    from keepout.maneuver.planner import ManeuverOption
+    from keepout.maneuver.rescreen import NewApproach, RescreenResult
 
 __all__ = [
     "NO_BURN_NEEDED",
+    "ApproachKind",
+    "BurnRow",
+    "burn_rows",
     "conflict_line",
     "event_line",
     "gap_lines",
+    "ranked_approaches",
     "refusal",
     "rescreen_head",
     "return_lines",
@@ -51,6 +57,59 @@ def refusal(outcome: ManeuverOutcome) -> str:
         brought.append(f"this pair back above {target}")
     burns = "Every burn" if verdict.burns > 1 else "This burn"
     return f"{burns} brings {' or '.join(brought)}"
+
+
+BurnRow = TypedDict(
+    "BurnRow",
+    {
+        "Option": str,
+        "Before TCA (h)": float | None,
+        "Δv (m/s)": float | None,
+        "Pc": float,
+        "Range (m)": float,
+        "Method": str,
+        "Target": str,
+    },
+)
+"""A row of the table of burns, by column: the option (``no burn`` or the
+direction), its time before TCA [h] and signed Δv [m/s] (``None`` without
+a burn), its Pc and range at the closest approach [m], the method, and
+whether it meets the target (``met`` or ``missed``)."""
+
+
+def _burn_row(name: str, option: ManeuverOption, *, burn: bool) -> BurnRow:
+    return {
+        "Option": name,
+        "Before TCA (h)": option.burn_lead / HOUR if burn else None,
+        "Δv (m/s)": option.delta_v if burn else None,
+        "Pc": option.pc,
+        "Range (m)": option.range_at_tca,
+        "Method": option.method,
+        "Target": "met" if option.meets_target else "missed",
+    }
+
+
+def burn_rows(outcome: ManeuverOutcome) -> list[BurnRow]:
+    """The table of burns of an outcome: the baseline (``no burn``), then
+    each burn."""
+    rows = [_burn_row("no burn", outcome.baseline, burn=False)]
+    rows += [
+        _burn_row(str(burn.direction), burn.option, burn=True) for burn in outcome.burns
+    ]
+    return rows
+
+
+ApproachKind: TypeAlias = Literal["new", "closer"]
+"""Whether a burn brings an approach (``new``) or brings it closer."""
+
+
+def ranked_approaches(result: RescreenResult) -> list[tuple[ApproachKind, NewApproach]]:
+    """The approaches a re-screen found, new then closer, each with its
+    kind, the highest Pc first."""
+    found: list[tuple[ApproachKind, NewApproach]] = []
+    found.extend(("new", item) for item in result.new_approaches)
+    found.extend(("closer", item) for item in result.closer_approaches)
+    return sorted(found, key=lambda pair: pair[1].pc, reverse=True)
 
 
 def gap_lines(outcome: ManeuverOutcome) -> list[str]:

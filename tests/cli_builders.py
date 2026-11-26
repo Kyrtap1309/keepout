@@ -5,6 +5,7 @@ with jobs queued."""
 
 import functools
 import json
+import re
 import sys
 import time
 import urllib.request
@@ -45,6 +46,11 @@ def keepout(
     return runner.invoke(
         app, list(args), input=stdin, env=environ, catch_exceptions=False
     )
+
+
+def table_event_ids(text: str) -> list[str]:
+    """The event ids of the rows of an events table in ``text``, in order."""
+    return re.findall(r"^([0-9a-f]{12})  ", text, flags=re.MULTILINE)
 
 
 def usage_error(result: Result) -> str:

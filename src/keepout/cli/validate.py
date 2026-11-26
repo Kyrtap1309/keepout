@@ -8,8 +8,9 @@ from typing import TYPE_CHECKING, Annotated, Final, NoReturn, TypeAlias
 
 import typer
 
+from keepout.cli.extras import install_hint, missing_extra
 from keepout.cli.options import CacheDir, JsonFlag, Workers
-from keepout.cli.output import JsonOut, fail, show, table
+from keepout.cli.output import JsonOut, fail, progress, show, table
 
 if TYPE_CHECKING:
     from rich.table import Table
@@ -20,7 +21,7 @@ __all__ = ["VALIDATION_HINT", "validate_command"]
 
 VALIDATION_HINT: Final = (
     "keepout validate needs the validation extra to read CARA's spreadsheets: "
-    'pip install "keepout[cli,validation] @ git+https://github.com/Kyrtap1309/keepout"'
+    + install_hint("cli", "validation")
 )
 """What ``keepout validate`` prints (exit status 1) when the extra is
 missing."""
@@ -61,10 +62,12 @@ def validate_command(
     from keepout.validation.evaluation import evaluate, summarise
 
     try:
-        cases = (load_monte_carlo_cases if monte_carlo else load_all)(cache_dir)
+        with progress("Reading CARA's cases (downloaded on first use)"):
+            cases = (load_monte_carlo_cases if monte_carlo else load_all)(cache_dir)
     except ModuleNotFoundError as exc:
         _without_extra(exc)
-    outcomes = evaluate(cases, workers=workers)
+    with progress(f"Running {len(cases)} validation cases"):
+        outcomes = evaluate(cases, workers=workers)
     summary = summarise(outcomes)
     failed = [o for o in outcomes if not o.passed]
     payload: dict[str, JsonOut] = {
@@ -92,17 +95,14 @@ def validate_command(
 
 
 def _without_extra(exc: ModuleNotFoundError) -> NoReturn:
-    """The end of ``keepout validate`` without the ``validation`` extra.
+    """The end of a command lacking the extra: :data:`VALIDATION_HINT` (status 1).
 
     Raises
     ------
-    typer.Exit
-        If ``exc`` is about a package of the extra: :data:`VALIDATION_HINT`,
-        status 1.
     ModuleNotFoundError
-        Otherwise: ``exc`` again.
+        ``exc`` again, if it is not about a package of the extra.
     """
-    if (exc.name or "").partition(".")[0] not in _VALIDATION_MODULES:
+    if not missing_extra(exc, _VALIDATION_MODULES):
         raise exc
     fail(VALIDATION_HINT)
 

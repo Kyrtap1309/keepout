@@ -11,12 +11,12 @@ import sys
 from typing import Final
 
 from keepout._workers import ONE_THREAD
+from keepout.cli.extras import install_hint, missing_extra
 
 __all__ = ["EXTRA_MODULES", "INSTALL_HINT", "main"]
 
 INSTALL_HINT: Final = (
-    "keepout's command line needs the 'cli' extra: "
-    'pip install "keepout[cli] @ git+https://github.com/Kyrtap1309/keepout"'
+    f"keepout's command line needs the 'cli' extra: {install_hint('cli')}"
 )
 """What ``keepout`` prints (exit status 1) when the extra is missing."""
 
@@ -43,7 +43,7 @@ def main() -> None:
     try:
         from keepout.cli.app import run
     except ModuleNotFoundError as exc:
-        if (exc.name or "").partition(".")[0] not in EXTRA_MODULES:
+        if not missing_extra(exc, EXTRA_MODULES):
             raise
         sys.exit(INSTALL_HINT)
     run()

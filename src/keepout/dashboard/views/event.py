@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Final
 import numpy as np
 import streamlit as st
 
-from keepout._text import plural, utc
+from keepout._text import pc_cell, plural, utc
 from keepout.dashboard.event_data import (
     EventView,
     encounter_plot,
@@ -32,7 +32,7 @@ from keepout.dashboard.routes import (
     PLANNER_PAGE,
     refresh_job_key,
 )
-from keepout.dashboard.text import NOT_COMPUTED, literal, pc_cell
+from keepout.dashboard.text import NOT_COMPUTED, literal
 from keepout.dashboard.widgets import (
     assessment_chip,
     job_status,
@@ -99,7 +99,7 @@ def _header(data: EventView) -> None:
     )
     pc, origin, risk = st.columns([2, 3, 4], vertical_alignment="center")
     observation = data.observations.get(latest.message_id)
-    pc.markdown(f"Latest Pc: {pc_cell(observation)}")
+    pc.markdown(f"Latest Pc: {pc_cell(observation, missing=NOT_COMPUTED)}")
     if observation is not None:
         with origin:
             provenance_badge(_provenance(observation, latest))
@@ -199,7 +199,7 @@ def _cdm_row(data: EventView, cdm: Cdm, level: RiskLevel | None) -> None:
     before.markdown(f"{time_to_tca(cdm) / HOUR:.1f} h")
     miss.markdown(f"{cdm.miss_distance:.1f}")
     observation = data.observations.get(cdm.message_id)
-    pc.markdown(pc_cell(observation))
+    pc.markdown(pc_cell(observation, missing=NOT_COMPUTED))
     if observation is None:
         return
     with origin:

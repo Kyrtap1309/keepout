@@ -12,6 +12,7 @@ from cli_builders import (
     block_store_extra,
     keepout,
     operator_kvn,
+    table_event_ids,
     usage_error,
     without_hbr,
     write,
@@ -61,7 +62,7 @@ def test_store_add_prints_store_event_ids(tmp_path: Path) -> None:
     assert (
         "2 events in the store for the 2 CDMs read: 1 monitor, 1 ignore." in text.stdout
     )
-    assert f"Event ids, row by row: {ids[0]}, {ids[1]}.\n" in text.stdout
+    assert table_event_ids(text.stdout) == ids
     assert f"{ids[1]}: monitor (latest Pc 7.38e-06" in text.stdout
 
 
@@ -263,7 +264,12 @@ def test_store_on_an_old_database_says_upgrade(tmp_path: Path) -> None:
     assert upgraded.exit_code == ExitCode.OK
     assert upgraded.stdout == f"Upgraded {db}: base -> {head()}.\n"
     again = keepout("store", "upgrade", "--store", str(db), "--json")
-    assert json.loads(again.stdout) == {"path": str(db), "from": head(), "to": head()}
+    assert json.loads(again.stdout) == {
+        "schema": 1,
+        "path": str(db),
+        "from": head(),
+        "to": head(),
+    }
     same = keepout("store", "upgrade", "--store", str(db))
     assert same.stdout == f"{db} is up to date (revision {head()}).\n"
     assert keepout("store", "add", *files, "--store", str(db)).exit_code == 0
@@ -292,7 +298,12 @@ def test_rebuild_computes_what_the_settings_miss(tmp_path: Path) -> None:
         "store", "rebuild", "--store", str(db), "--settings", settings, "--json"
     )
     assert foster.exit_code == ExitCode.OK
-    assert json.loads(foster.stdout) == {"path": str(db), "computed": 2, "skipped": []}
+    assert json.loads(foster.stdout) == {
+        "schema": 1,
+        "path": str(db),
+        "computed": 2,
+        "skipped": [],
+    }
 
 
 def test_rebuild_skips_the_cdms_without_hbr_and_says_so(tmp_path: Path) -> None:
@@ -315,7 +326,7 @@ def test_rebuild_skips_the_cdms_without_hbr_and_says_so(tmp_path: Path) -> None:
         keepout("store", "rebuild", "--store", str(db), "--json").stdout
     )
     bare = keepout_cdm.loads(without_hbr(yellow)).message_id
-    assert payload == {"path": str(db), "computed": 0, "skipped": [bare]}
+    assert payload == {"schema": 1, "path": str(db), "computed": 0, "skipped": [bare]}
 
 
 def test_store_add_points_to_the_settings_for_a_missing_hbr(tmp_path: Path) -> None:
@@ -386,6 +397,7 @@ def test_purge_keeps_the_later_events_and_yes_does_not_ask(tmp_path: Path) -> No
     )
     assert none.stderr == ""
     assert json.loads(none.stdout) == {
+        "schema": 1,
         "path": str(db),
         "before": "2026-10-07T00:00:00.000",
         "deleted": 0,

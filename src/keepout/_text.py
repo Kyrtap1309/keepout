@@ -10,13 +10,17 @@ from keepout.units import DAY, HOUR, MINUTE
 if TYPE_CHECKING:
     from astropy.time import Time
 
+    from keepout.risk import PcObservation
+
 __all__ = [
     "ASSUMED_COVARIANCES",
+    "PC_FAILED",
     "before_tca",
     "days_text",
     "duration_words",
     "isot",
     "minute",
+    "pc_cell",
     "pc_text",
     "plural",
     "utc",
@@ -56,6 +60,20 @@ def duration_words(seconds: float) -> str:
 def pc_text(pc: float | None) -> str:
     """A Pc for tables, ``1.23e-05``, or ``-`` if there is none."""
     return "-" if pc is None else f"{pc:.2e}"
+
+
+PC_FAILED: Final = "failed"
+"""A Pc that could not be computed, in a table."""
+
+
+def pc_cell(observation: PcObservation | None, *, missing: str) -> str:
+    """The Pc of ``observation`` for a table: ``missing`` without one,
+    :data:`PC_FAILED` if it could not be computed."""
+    if observation is None:
+        return missing
+    if observation.pc is None:
+        return PC_FAILED
+    return pc_text(observation.pc)
 
 
 def plural(count: int, noun: str, nouns: str | None = None) -> str:

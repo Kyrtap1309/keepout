@@ -26,6 +26,7 @@ from keepout._environment import (
     SETTINGS_VARIABLE,
     STORE_VARIABLE,
 )
+from keepout.cli.extras import install_hint
 from keepout.cli.options import SettingsFile, operator_settings, time_option
 from keepout.cli.output import ExitCode, fail, isot
 from keepout.cli.store import StorePath, open_cli_store
@@ -36,8 +37,7 @@ if TYPE_CHECKING:
 __all__ = ["DASHBOARD_HINT", "DEFAULT_HOST", "EXPOSED_WARNING", "dashboard_command"]
 
 DASHBOARD_HINT: Final = (
-    "keepout dashboard needs the dashboard extra: "
-    'pip install "keepout[cli,dashboard] @ git+https://github.com/Kyrtap1309/keepout"'
+    f"keepout dashboard needs the dashboard extra: {install_hint('cli', 'dashboard')}"
 )
 """What ``keepout dashboard`` prints (exit status 1) when the extra is
 missing."""
@@ -53,8 +53,11 @@ EXPOSED_WARNING: Final = (
     "Warning: the dashboard listens on {host}, which other machines may "
     "reach; it has no authentication (see the deployment docs)."
 )
-"""What ``keepout dashboard`` prints on standard error when ``--host`` is
-not a loopback address."""
+"""What ``keepout dashboard`` prints on standard error, as Streamlit starts,
+when ``--host`` is not a loopback address."""
+
+_STOP_TIMEOUT: Final = 10.0
+"""How long Streamlit has to stop after Ctrl+C before it is killed [s]."""
 
 Host: TypeAlias = Annotated[
     str,
@@ -90,14 +93,8 @@ AsOf: TypeAlias = Annotated[
 
 
 def _app_path() -> Path:
-    """The dashboard's entry script, found without running it.
-
-    Raises
-    ------
-    typer.Exit
-        Without the ``dashboard`` extra: :data:`DASHBOARD_HINT`, status 1;
-        or if this keepout has no dashboard app.
-    """
+    """The dashboard's entry script, found without running it; the command ends
+    (status 1) without the ``dashboard`` extra or the app."""
     if any(importlib.util.find_spec(name) is None for name in _DASHBOARD_MODULES):
         fail(DASHBOARD_HINT)
     # Loads keepout.dashboard's __init__, which imports nothing, not the app.
@@ -108,13 +105,12 @@ def _app_path() -> Path:
 
 
 def _host(value: str) -> str:
-    """The ``--host`` address ``value``, warned about on standard error if
-    it is not a loopback address.
+    """The ``--host`` address ``value``, checked.
 
     Raises
     ------
     typer.BadParameter
-        If ``value`` is not an IP address.
+        If ``value`` is not an IP address, or is a scoped IPv6 one.
     """
     try:
         address = ipaddress.ip_address(value)
@@ -122,9 +118,20 @@ def _host(value: str) -> str:
         raise typer.BadParameter(
             f"{value!r} is not an IP address", param_hint="--host"
         ) from None
-    if not address.is_loopback:
-        typer.echo(EXPOSED_WARNING.format(host=value), err=True)
+    if isinstance(address, ipaddress.IPv6Address) and address.scope_id:
+        # Streamlit's URL would carry the zone unescaped: not a valid URL.
+        raise typer.BadParameter(
+            f"{value!r} is a scoped IPv6 address: give it without %{address.scope_id}",
+            param_hint="--host",
+        )
     return value
+
+
+def _warn_if_exposed(host: str) -> None:
+    """:data:`EXPOSED_WARNING` on standard error unless ``host`` is a loopback
+    address."""
+    if not ipaddress.ip_address(host).is_loopback:
+        typer.echo(EXPOSED_WARNING.format(host=host), err=True)
 
 
 def _server_address(host: str) -> str:
@@ -138,28 +145,42 @@ def _server_address(host: str) -> str:
 
 
 def _run(args: Sequence[str], env: Mapping[str, str]) -> int:
-    """Run ``args`` until it exits, passing SIGTERM on to it (a container's
-    stop): it stops cleanly rather than being killed with this process.
-
-    Returns
-    -------
-    int
-        Its exit status; 0 if Ctrl+C stopped it.
-    """
+    """Run ``args`` until it exits, passing SIGTERM (a container's stop) and
+    Ctrl+C on to it; its exit status, 0 if Ctrl+C stopped it."""
     with subprocess.Popen(args, env=env) as child:  # noqa: S603 (this interpreter, fixed arguments)
         previous = signal.signal(signal.SIGTERM, lambda *_: child.terminate())
         try:
             return child.wait()
         except KeyboardInterrupt:
-            # Ctrl+C reaches Streamlit too (same process group): a stop,
-            # not an error, once it has stopped.
-            child.wait()
+            _stop(child)
             return ExitCode.OK
         finally:
             signal.signal(signal.SIGTERM, previous)
 
 
+def _stop(child: subprocess.Popen[bytes]) -> None:
+    """Stop ``child`` after Ctrl+C: SIGTERM (Ctrl+C may have reached this
+    process alone), then SIGKILL after :data:`_STOP_TIMEOUT` or a second
+    Ctrl+C."""
+    try:
+        child.terminate()
+        child.wait(timeout=_STOP_TIMEOUT)
+    except (subprocess.TimeoutExpired, KeyboardInterrupt):
+        child.kill()
+        child.wait()
+
+
+def _as_of_name(ctx: typer.Context) -> str:
+    """Where ``--as-of`` came from, for its errors: the option or its variable."""
+    source = ctx.get_parameter_source("as_of")
+    # The enum is Typer's vendored Click's: compared by name.
+    if source is not None and source.name == "ENVIRONMENT":
+        return AS_OF_VARIABLE
+    return "--as-of"
+
+
 def dashboard_command(
+    ctx: typer.Context,
     *,
     store: StorePath,
     settings: SettingsFile = None,
@@ -177,7 +198,7 @@ def dashboard_command(
     Streamlit's status.
     """
     address = _host(host)
-    when = None if as_of is None else time_option(as_of, "--as-of")
+    when = None if as_of is None else time_option(as_of, _as_of_name(ctx))
     if settings is not None:
         operator_settings(settings)  # A bad file fails here, not in the browser.
     app_path = _app_path()
@@ -222,6 +243,7 @@ def dashboard_command(
         "--client.toolbarMode",
         "minimal",
     ]
+    _warn_if_exposed(address)
     status = _run(args, env)
     if status:
         raise typer.Exit(status)

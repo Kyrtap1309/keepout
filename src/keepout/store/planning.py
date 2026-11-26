@@ -2,7 +2,9 @@
 
 :func:`plan_stored` plans a stored event as it was at one of its CDMs. Its
 burns are re-screened against the store's copy of that CDM's catalog, if
-the CDM was made from one. :func:`run_maneuver_job` is the same plan as the
+the CDM was made from one, or against a catalog given.
+:func:`cached_or_planned` gives the plan the store caches: the cached one,
+else one planned and cached. :func:`run_maneuver_job` is the same plan as the
 computation of a queued job (:mod:`keepout.store.worker`), and
 :func:`run_refresh_job` the computation of the Pc a stored event lacks
 (:func:`compute_missing`), in batches its worker writes as they come.
@@ -14,10 +16,11 @@ module.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, assert_never
+from typing import TYPE_CHECKING, NamedTuple, assert_never
 
 from sqlalchemy import select
 
+from keepout.errors import StoreError
 from keepout.settings import plan_arguments
 from keepout.store import models
 from keepout.store.codec import observation_to_json
@@ -33,16 +36,19 @@ from keepout.store.models import JobKind
 from keepout.store.queries import cdms_of, oldest_first, pinned_in, require_events
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Sequence
 
     from keepout._types import JsonValue
     from keepout.maneuver import BurnGrid, ManeuverOutcome
+    from keepout.omm import Omm
     from keepout.risk import PcObservation
     from keepout.settings import Settings
     from keepout.store.jobs import Job
     from keepout.store.repo import Store
 
 __all__ = [
+    "CachedPlan",
+    "cached_or_planned",
     "compute_missing",
     "plan_stored",
     "run_job",
@@ -59,6 +65,9 @@ def plan_stored(
     message_id: str | None = None,
     workers: int | None,
     grid: BurnGrid | None = None,
+    burn: tuple[float, float] | None = None,
+    catalog: Sequence[Omm] | None = None,
+    catalog_label: str | None = None,
 ) -> ManeuverOutcome:
     """The outcome of a stored event's burns, by
     :func:`~keepout.maneuver.plan_event`.
@@ -83,11 +92,21 @@ def plan_stored(
     grid
         The burns tried; ``None``: the default grid of
         :func:`~keepout.maneuver.plan_maneuver`.
+    burn
+        One burn to evaluate instead of the grid, as for
+        :func:`~keepout.maneuver.plan_event`.
+    catalog
+        The element sets to re-screen each burn against instead of the
+        stored copy, which is then not read; ``None``: the stored copy, if
+        any.
+    catalog_label
+        What ``catalog`` is, for people; given with ``catalog`` and only then.
 
     Returns
     -------
     ManeuverOutcome
-        The outcome. Its catalog label is ``stored copy of`` the catalog's.
+        The outcome. Re-screened against the stored copy, its catalog label
+        is ``stored copy of`` the catalog's.
 
     Raises
     ------
@@ -108,18 +127,79 @@ def plan_stored(
 
     with store.read() as session:
         event, reference = pinned_in(session, store.path.parent, event_id, message_id)
-    if reference is None:
-        catalog, label = None, None
-    else:
-        catalog, label = load_reference(reference), f"stored copy of {reference.label}"
+    if catalog is None and reference is not None:
+        catalog = load_reference(reference)
+        catalog_label = f"stored copy of {reference.label}"
     return outcome.plan_event(
         event,
         **plan_arguments(settings),
+        burn=burn,
         grid=DEFAULT_BURN_GRID if grid is None else grid,
         catalog=catalog,
-        catalog_label=label,
+        catalog_label=catalog_label,
         workers=workers,
     )
+
+
+class CachedPlan(NamedTuple):
+    """The plan :func:`cached_or_planned` gives."""
+
+    outcome: ManeuverOutcome
+    unsaved: StoreError | None
+    """Why a plan made now could not be cached; ``None`` if it was, or was
+    read from the cache."""
+
+
+def cached_or_planned(
+    store: Store, event_id: str, settings: Settings, *, workers: int | None
+) -> CachedPlan:
+    """The plan of a stored event at its latest CDM, against its stored
+    catalog: the cached one, else :func:`plan_stored`'s, then cached.
+
+    A plan that cannot be cached (e.g. the database locked) is given all
+    the same, with the reason.
+
+    Parameters
+    ----------
+    store
+        The open store that holds the event.
+    event_id
+        The store's id of the event.
+    settings
+        The operator's settings of the plan.
+    workers
+        Processes of each re-screen, as for
+        :func:`~keepout.maneuver.plan_event`.
+
+    Returns
+    -------
+    CachedPlan
+        The plan, and why it was not cached.
+
+    Raises
+    ------
+    StoreError
+        If there is no such event, or the cache cannot be read.
+    SourceUnavailable
+        If the copy of the catalog is gone; the message names it.
+    ChecksumMismatch
+        If the copy of the catalog changed; the message names it.
+    KeepoutError
+        As :func:`~keepout.maneuver.plan_event`.
+    ValueError
+        As :func:`~keepout.maneuver.plan_event`, or if a settings file
+        cannot hold ``settings`` (:func:`~keepout.store.codec.maneuver_key`).
+    """
+    cached = store.maneuver(event_id, settings)
+    if cached is not None:
+        return CachedPlan(cached, None)
+    planned = plan_stored(store, event_id, settings, workers=workers)
+    try:
+        # Planned at the event's latest CDM then: cached on it.
+        store.save_maneuver(planned.event.latest.message_id, settings, planned)
+    except StoreError as exc:
+        return CachedPlan(planned, exc)
+    return CachedPlan(planned, None)
 
 
 def run_maneuver_job(

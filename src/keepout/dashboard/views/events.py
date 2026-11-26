@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Final, cast
 import streamlit as st
 
 from keepout._environment import MAX_UPLOAD_MB
-from keepout._text import plural, utc
+from keepout._text import pc_cell, plural, utc
 from keepout.dashboard import text
 from keepout.dashboard.listing import PAGE_SIZE, read_page
 from keepout.dashboard.routes import (
@@ -152,7 +152,7 @@ def _row(summary: EventSummary, as_of: Time) -> None:
     objects.markdown(text.literal(f"{summary.object1} / {summary.object2}"))
     tca.markdown(utc(summary.tca))
     countdown.markdown(text.countdown(summary.tca, as_of))
-    pc.markdown(text.pc_cell(summary.latest))
+    pc.markdown(pc_cell(summary.latest, missing=text.NOT_COMPUTED))
     if summary.provenance is not None:
         with origin:
             provenance_badge(summary.provenance)

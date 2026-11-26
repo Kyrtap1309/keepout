@@ -10,10 +10,12 @@ from keepout.cli.options import CacheDir, JsonFlag, SourceOption
 from keepout.cli.output import (
     JsonOut,
     duration_words,
+    help_values,
     isot,
     minute,
     pc_text,
     plural,
+    progress,
     show,
     table,
     utc,
@@ -42,7 +44,8 @@ def fetch_cara(*, cache_dir: CacheDir = None, as_json: JsonFlag = False) -> None
     """
     from keepout.sources import cara
 
-    cara.prefetch(cara.MANIFEST, cache=cache_dir)
+    with progress("Downloading NASA CARA's validation files"):
+        cara.prefetch(cara.MANIFEST, cache=cache_dir)
     folder = cara.commit_dir(cache_dir)
     payload: dict[str, JsonOut] = {
         "source": "cara",
@@ -66,7 +69,8 @@ def fetch_kelvins(*, cache_dir: CacheDir = None, as_json: JsonFlag = False) -> N
     """
     from keepout.sources import kelvins
 
-    path = kelvins.fetch_raw(cache=cache_dir)
+    with progress("Downloading ESA's Kelvins data set (221 MB)"):
+        path = kelvins.fetch_raw(cache=cache_dir)
     payload: dict[str, JsonOut] = {
         "source": "kelvins",
         "doi": kelvins.DOI,
@@ -79,6 +83,9 @@ def fetch_kelvins(*, cache_dir: CacheDir = None, as_json: JsonFlag = False) -> N
     )
 
 
+@help_values(
+    **{name: duration_words(source.reuse) for name, source in CATALOG_SOURCES.items()}
+)
 def fetch_catalog(
     *,
     source: SourceOption = None,
@@ -96,7 +103,8 @@ def fetch_catalog(
     Squadron); cite it as such.
     """
     described = CATALOG_SOURCES[source or DEFAULT_SOURCE]
-    catalog = described.fetch(cache_dir)
+    with progress(f"Downloading the catalog from {described.title}"):
+        catalog = described.fetch(cache_dir)
     payload: dict[str, JsonOut] = {
         "source": described.name,
         "objects": len(catalog.omms),
@@ -119,12 +127,7 @@ def fetch_catalog(
     )
 
 
-# The reuse times in the help are the sources' own (none under python -OO).
-fetch_catalog.__doc__ = (fetch_catalog.__doc__ or "").format_map(
-    {name: duration_words(source.reuse) for name, source in CATALOG_SOURCES.items()}
-)
-
-
+@help_values(interval=duration_words(CDM_PUBLIC_INTERVAL))
 def fetch_cdm(*, cache_dir: CacheDir = None, as_json: JsonFlag = False) -> None:
     """Download Space-Track's public CDM summaries of approaches to come.
 
@@ -136,7 +139,8 @@ def fetch_cdm(*, cache_dir: CacheDir = None, as_json: JsonFlag = False) -> None:
     """
     from keepout.sources import spacetrack
 
-    public = spacetrack.fetch_public_cdms(cache=cache_dir)
+    with progress("Downloading Space-Track's public CDMs"):
+        public = spacetrack.fetch_public_cdms(cache=cache_dir)
     rows = sorted(public.cdms, key=lambda cdm: (cdm.tca.jd1, cdm.tca.jd2, cdm.cdm_id))
     payload: dict[str, JsonOut] = {
         "source": "spacetrack",
@@ -164,12 +168,6 @@ def fetch_cdm(*, cache_dir: CacheDir = None, as_json: JsonFlag = False) -> None:
         f"{utc(public.retrieval.retrieved)} UTC; cached in {public.retrieval.path}",
         as_json=as_json,
     )
-
-
-# The interval in the help is Space-Track's own (none under python -OO).
-fetch_cdm.__doc__ = (fetch_cdm.__doc__ or "").format_map(
-    {"interval": duration_words(CDM_PUBLIC_INTERVAL)}
-)
 
 
 def _retrieval_json(retrieval: Retrieval) -> dict[str, JsonOut]:

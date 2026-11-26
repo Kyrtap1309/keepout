@@ -21,6 +21,7 @@ from keepout.events import (
     missing_hard_body_radius,
     without_hard_body_radius,
 )
+from keepout.settings import observation_arguments
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator, Sequence
@@ -111,9 +112,7 @@ def refuse_lacking_hard_body_radius(lacking: Sequence[Cdm]) -> None:
 def observation_of(event_id: str, cdm: Cdm, settings: Settings) -> PcObservation:
     """The Pc observation of a CDM of an event, computed with ``settings``."""
     (observation,) = ConjunctionEvent(event_id, (cdm,)).observations(
-        compute=settings.compute,
-        policy=settings.policy,
-        combined_hard_body_radius=settings.combined_hard_body_radius,
+        **observation_arguments(settings)
     )
     return observation
 

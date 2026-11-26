@@ -52,14 +52,18 @@ The options (`keepout dashboard --help` lists them all):
   [Jobs](#jobs)).
 - **`--host ADDRESS`**: the IP address to listen on, 127.0.0.1 (this
   machine only) by default. Any address that is not a loopback address,
-  such as `0.0.0.0` (every interface), prints a warning: the dashboard has
-  no authentication. A container needs `0.0.0.0` to be reached from its
-  host; [Deployment](deployment.md) publishes it on the host's 127.0.0.1
-  only. A value that is not an IP address is a usage error.
+  such as `0.0.0.0` (every interface), prints a warning as Streamlit
+  starts: the dashboard has no authentication. A container needs
+  `0.0.0.0` to be reached from its host; [Deployment](deployment.md)
+  publishes it on the host's 127.0.0.1 only. A value that is not an IP
+  address, or a scoped IPv6 address such as `fe80::1%eth0`, is a usage
+  error.
 - **`--port N`**: the port, 8501 by default.
 - **`--as-of TIME`**: see [Data time](#data-time-as-of).
 
-`keepout dashboard` runs headless (no browser opens) until Ctrl+C.
+`keepout dashboard` runs headless (no browser opens) until Ctrl+C or
+SIGTERM, which it passes on to Streamlit; Streamlit is killed if it has not
+stopped 10 s later, or on a second Ctrl+C.
 
 ## The demo
 
@@ -99,7 +103,8 @@ TCA is in 2020, so it is listed with the past events.
 Every page shows, at its top, the time it sees the data at:
 `Data as of 2026-10-07T12:00:00 UTC (fixed)`. By default it is the
 clock, read again on every page. `--as-of TIME` (or `KEEPOUT_AS_OF`; empty
-means the clock) fixes it, so that frozen
+means the clock; a bad value is a usage error naming whichever gave it)
+fixes it, so that frozen
 data such as the demo's look as they did then, and the page says
 `(fixed)`. The time decides which events are past, how far each TCA is
 (`in 30 h`, `2.5 d ago`) and nothing else: the risk of an event comes from

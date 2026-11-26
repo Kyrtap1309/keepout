@@ -9,6 +9,7 @@ from cli_builders import (
     keepout,
     operator_kvn,
     operator_run,
+    table_event_ids,
     without_hbr,
     write,
 )
@@ -39,10 +40,10 @@ def test_assess_prints_each_event_and_why(tmp_path: Path) -> None:
     assert result.exit_code == ExitCode.OK
     assert result.stdout == snapshot("""\
 Conjunction events
-TCA (UTC)         Objects        Miss (m)  CDMs        Pc  Level   Action \n\
-──────────────────────────────────────────────────────────────────────────
-2026-10-06 19:36  52939 / 47826      1029     1  4.37e-08  green   ignore \n\
-2026-10-08 12:03  44476 / 55841      3647     1  7.38e-06  yellow  monitor
+Event         TCA (UTC)         Objects        Miss (m)  CDMs        Pc  Level   Action \n\
+────────────────────────────────────────────────────────────────────────────────────────
+2a85ed50c4e6  2026-10-06 19:36  52939 / 47826      1029     1  4.37e-08  green   ignore \n\
+3befe6f1305d  2026-10-08 12:03  44476 / 55841      3647     1  7.38e-06  yellow  monitor
 2 events from 2 CDMs: 1 monitor, 1 ignore.
 2 of 2 events rest on assumed covariances (COVARIANCE_METHOD = DEFAULT), not orbit determination.
 3befe6f1305d: monitor (latest Pc 7.38e-06 is yellow, 2.50 d before TCA; trend undetermined)
@@ -58,11 +59,10 @@ def test_assess_exits_with_3_when_an_event_needs_a_manoeuvre(tmp_path: Path) -> 
     assert result.exit_code == ExitCode.MANEUVER
     assert result.stdout == snapshot("""\
 Conjunction events
-TCA (UTC)         Objects        Miss (m)  CDMs        Pc  Level  Action        \n\
-────────────────────────────────────────────────────────────────────────────────
-2026-10-06 19:36  52939 / 47826      1029     1  4.25e-02  red    maneuver      \n\
-2026-10-08 12:03  44476 / 55841      3647     1  1.73e-02  red    prepare       \n\
-                                                                  maneuver      \n\
+Event         TCA (UTC)         Objects        Miss (m)  CDMs        Pc  Level  Action          \n\
+────────────────────────────────────────────────────────────────────────────────────────────────
+2a85ed50c4e6  2026-10-06 19:36  52939 / 47826      1029     1  4.25e-02  red    maneuver        \n\
+3befe6f1305d  2026-10-08 12:03  44476 / 55841      3647     1  1.73e-02  red    prepare maneuver
 2 events from 2 CDMs: 1 maneuver, 1 prepare maneuver.
 2 of 2 events rest on assumed covariances (COVARIANCE_METHOD = DEFAULT), not orbit determination.
 2a85ed50c4e6: maneuver (latest Pc 4.25e-02 is red, 0.82 d before TCA; trend undetermined; within the decision point (2.00 d before TCA))
@@ -203,10 +203,10 @@ def test_assess_shows_a_pc_that_failed_or_is_missing(tmp_path: Path) -> None:
     assert result.exit_code == ExitCode.OK
     assert result.stdout == snapshot("""\
 Conjunction events
-TCA (UTC)         Objects        Miss (m)  CDMs      Pc  Level  Action \n\
-───────────────────────────────────────────────────────────────────────
-2026-10-06 19:36  52939 / 47826      1029     1  failed  -      monitor
-2026-10-08 12:03  44476 / 55841      3647     1       -  -      monitor
+Event         TCA (UTC)         Objects        Miss (m)  CDMs      Pc  Level  Action \n\
+─────────────────────────────────────────────────────────────────────────────────────
+2a85ed50c4e6  2026-10-06 19:36  52939 / 47826      1029     1  failed  -      monitor
+3befe6f1305d  2026-10-08 12:03  44476 / 55841      3647     1       -  -      monitor
 2 events from 2 CDMs: 2 monitor.
 2 of 2 events rest on assumed covariances (COVARIANCE_METHOD = DEFAULT), not orbit determination.
 2a85ed50c4e6: monitor (latest observation has no Pc: GeometryError: relative velocity is zero: the encounter plane is undefined; use method 'hall3d' or 'auto', which need both covariances)
@@ -269,7 +269,7 @@ def test_assess_with_store_shows_the_same_ids_as_store_add(tmp_path: Path) -> No
     assert [event["event_id"] for event in added["events"]] == ids
     assert added["store"]["already_stored"] == payload["store"]["added"]
     text = keepout("assess", *files, "--store", str(db))
-    assert f"Event ids, row by row: {ids[0]}, {ids[1]}.\n" in text.stdout
+    assert table_event_ids(text.stdout) == ids
     assert f"{ids[1]}: monitor (latest Pc 7.38e-06" in text.stdout
 
 

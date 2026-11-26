@@ -63,12 +63,14 @@ if TYPE_CHECKING:
 __all__ = [
     "SETTINGS_KEYS",
     "ManeuverTable",
+    "ObservationArguments",
     "PcTable",
     "PlanArguments",
     "RiskTable",
     "Settings",
     "SettingsData",
     "load_settings",
+    "observation_arguments",
     "plan_arguments",
     "settings_from_data",
     "settings_to_data",
@@ -188,12 +190,12 @@ class _Fields(TypedDict, total=False):
     target_pc: float
 
 
-class PlanArguments(TypedDict):
-    """The keyword arguments of :func:`~keepout.maneuver.plan_event` that
-    settings hold; pass them as ``plan_event(event, **plan_arguments(settings))``."""
+class ObservationArguments(TypedDict):
+    """The keyword arguments of
+    :meth:`~keepout.events.ConjunctionEvent.observations` (and of
+    :func:`~keepout.synthetic.run`) that settings hold; pass them as
+    ``event.observations(**observation_arguments(settings))``."""
 
-    target_pc: float
-    """Pc a burn must take the event below (:attr:`Settings.target_pc`)."""
     compute: PcComputation
     """The Pc method and its options (:attr:`Settings.compute`)."""
     policy: Policy
@@ -201,9 +203,39 @@ class PlanArguments(TypedDict):
     combined_hard_body_radius: float | None
     """The combined hard-body radius [m]; ``None`` for the sum of the CDM's
     radii (:attr:`Settings.combined_hard_body_radius`)."""
+
+
+class PlanArguments(ObservationArguments):
+    """The keyword arguments of :func:`~keepout.maneuver.plan_event` that
+    settings hold; pass them as ``plan_event(event, **plan_arguments(settings))``."""
+
+    target_pc: float
+    """Pc a burn must take the event below (:attr:`Settings.target_pc`)."""
     thresholds: Thresholds
     """The Pc thresholds, whose basis turns a result into the Pc compared
     with ``target_pc`` (:attr:`Settings.thresholds`)."""
+
+
+def observation_arguments(settings: Settings) -> ObservationArguments:
+    """The keyword arguments of
+    :meth:`~keepout.events.ConjunctionEvent.observations` that ``settings``
+    give.
+
+    Parameters
+    ----------
+    settings
+        The operator's settings.
+
+    Returns
+    -------
+    ObservationArguments
+        The keyword arguments, by name.
+    """
+    return {
+        "compute": settings.compute,
+        "policy": settings.policy,
+        "combined_hard_body_radius": settings.combined_hard_body_radius,
+    }
 
 
 def plan_arguments(settings: Settings) -> PlanArguments:

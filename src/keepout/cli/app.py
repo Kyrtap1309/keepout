@@ -12,11 +12,11 @@ traceback.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Annotated, Any, Final, cast
+from collections.abc import Callable, Mapping
+from typing import Annotated, Any, ClassVar, Final, cast
 
 import typer
-from typer.core import TyperCommand
+from typer.core import TyperArgument, TyperCommand, TyperOption
 
 import keepout
 from keepout._typing import override
@@ -24,8 +24,10 @@ from keepout.cli.assess import assess_command
 from keepout.cli.dashboard import dashboard_command
 from keepout.cli.fetch import fetch_cara, fetch_catalog, fetch_cdm, fetch_kelvins
 from keepout.cli.jobs import jobs_cancel, jobs_list
+from keepout.cli.maneuver import HELP_PANELS as MANEUVER_PANELS
 from keepout.cli.maneuver import maneuver_command
 from keepout.cli.output import ExitCode, reported
+from keepout.cli.screen import HELP_PANELS as SCREEN_PANELS
 from keepout.cli.screen import screen_command
 from keepout.cli.store import store_add, store_purge, store_rebuild, store_upgrade
 from keepout.cli.validate import validate_command
@@ -75,6 +77,16 @@ _EXAMPLES: Final = {
         "keepout maneuver --event 3befe6f1305d --store keepout.db --queue",
     ),
     "store add": ("keepout store add cdms/*.kvn --store keepout.db",),
+    "validate": ("keepout validate", "keepout validate --json --workers 2"),
+    "fetch catalog": (
+        "keepout fetch catalog",
+        "keepout fetch catalog --source spacetrack --json",
+    ),
+    "fetch cdm": ("keepout fetch cdm",),
+    "fetch cara": ("keepout fetch cara --cache-dir ~/keepout-cache",),
+    "fetch kelvins": ("keepout fetch kelvins",),
+    "jobs list": ("keepout jobs list --store keepout.db",),
+    "jobs cancel": ("keepout jobs cancel 1 --store keepout.db",),
     "dashboard": (
         "keepout dashboard --store keepout.db",
         "keepout dashboard --store keepout.db --as-of 2026-10-07T12:00 --port 8502",
@@ -94,7 +106,12 @@ def _examples(command: str) -> str | None:
 
 class _Command(TyperCommand):
     """A command whose usage line names its arguments as the help does:
-    ``CDM...``, not Typer's ``{CDM...}`` for a required one."""
+    ``CDM...``, not Typer's ``{CDM...}`` for a required one, and whose help
+    lists its parameters in the panels of :attr:`panels`."""
+
+    panels: ClassVar[Mapping[str, str]] = {}
+    """The help panel of each parameter listed, by name; the others are in
+    Typer's own."""
 
     @override
     def collect_usage_pieces(self, ctx: object) -> list[str]:
@@ -106,6 +123,15 @@ class _Command(TyperCommand):
             piece[1:-1] if piece.startswith("{") and piece.endswith("}") else piece
             for piece in pieces
         ]
+
+    @override
+    def format_help(self, ctx: object, formatter: object) -> None:
+        """The help, each parameter of :attr:`panels` in its panel."""
+        for param in self.params:
+            panel = self.panels.get(param.name or "")
+            if panel is not None and isinstance(param, (TyperOption, TyperArgument)):
+                param.rich_help_panel = panel
+        super().format_help(cast("Any", ctx), cast("Any", formatter))
 
 
 app = typer.Typer(
@@ -172,18 +198,34 @@ def _keepout(
     collision and risk."""
 
 
-def _add(group: typer.Typer, name: str, command: Callable[..., None]) -> None:
+def _panelled(by_name: Mapping[str, str]) -> type[_Command]:
+    """A :class:`_Command` whose help lists parameters in the panels of
+    ``by_name``."""
+
+    class Panelled(_Command):
+        panels = by_name
+
+    return Panelled
+
+
+def _add(
+    group: typer.Typer,
+    name: str,
+    command: Callable[..., None],
+    panels: Mapping[str, str] | None = None,
+) -> None:
     full = name if group is app else f"{group.info.name} {name}"
-    group.command(name, cls=_Command, epilog=_examples(full))(reported(command))
+    cls = _Command if panels is None else _panelled(panels)
+    group.command(name, cls=cls, epilog=_examples(full))(reported(command))
 
 
 _add(fetch_app, "catalog", fetch_catalog)
 _add(fetch_app, "cdm", fetch_cdm)
 _add(fetch_app, "cara", fetch_cara)
 _add(fetch_app, "kelvins", fetch_kelvins)
-_add(app, "screen", screen_command)
+_add(app, "screen", screen_command, SCREEN_PANELS)
 _add(app, "assess", assess_command)
-_add(app, "maneuver", maneuver_command)
+_add(app, "maneuver", maneuver_command, MANEUVER_PANELS)
 _add(app, "validate", validate_command)
 _add(app, "worker", worker_command)
 _add(app, "dashboard", dashboard_command)

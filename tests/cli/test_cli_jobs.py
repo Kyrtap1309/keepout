@@ -192,6 +192,7 @@ def test_cancel_json_gives_the_job_its_event_and_status(
     job = queued_job(db, event_id)
     cancelled = keepout("jobs", "cancel", str(job), "--store", str(db), "--json")
     assert json.loads(cancelled.stdout) == {
+        "schema": 1,
         "job": job,
         "event": event_id,
         "status": "cancelled",
