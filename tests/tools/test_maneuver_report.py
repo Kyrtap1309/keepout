@@ -150,7 +150,11 @@ def with_timings(folder: Path, timings: report.Timings) -> None:
         report.render_page(summary, relative(images, docs)), encoding="utf-8"
     )
     readme = folder / "README.md"
-    block = report.render_summary(summary, relative(images, folder))
+    block = report.render_summary(
+        summary,
+        relative(docs / "maneuver-report.md", folder),
+        relative(images, folder),
+    )
     readme.write_text(
         readme_with(readme, report.START, report.END, block), encoding="utf-8"
     )

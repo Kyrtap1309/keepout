@@ -16,8 +16,12 @@ uv run pre-commit install     # every CI lint check, run on commit
 uv run pytest -n auto         # offline test suite, without the slow tests
 uv run pytest -n auto -m slow # the slow tests CI also runs (tens of seconds each)
 uv run pytest -m validation   # reference checks; downloads CARA and Kelvins data
-docker compose down -v && docker compose up --wait   # then the browser scenario:
+# A fresh stack under its own project name: `down -v` deletes that project's
+# volume only, never the default project's `data` volume with your own store.
+# If your own stack holds port 8501, add KEEPOUT_PORT=8601 (and that URL below).
+docker compose -p keepout-e2e down -v && docker compose -p keepout-e2e up --wait
 uv run pytest -m e2e --base-url http://127.0.0.1:8501   # needs uv run playwright install chromium
+docker compose -p keepout-e2e down -v   # when done
 # (CI's e2e job also restarts the services and checks the upload is kept)
 uv run pytest -n0 --inline-snapshot=fix   # update the CLI snapshots (not under -n)
 ```
@@ -34,8 +38,8 @@ uv run mkdocs serve           # the documentation, served locally
 
 ## Reports
 
-The reports in `docs/` and their summaries in `README.md` are generated.
-Regenerate them with:
+The reports in `docs/` and their summaries, in `README.md` (validation) and
+`docs/reports.md` (the others), are generated. Regenerate them with:
 
 ```bash
 uv run python tools/validation_report.py   # validation report
@@ -48,7 +52,7 @@ uv run python tools/synthetic_operator_report.py   # synthetic operator report (
 uv run python tools/maneuver_report.py   # manoeuvre report (downloads one CARA CDM)
 uv run python tools/spacetrack_snapshot.py verify   # frozen Space-Track catalog (offline)
 uv run python tools/dashboard_seed.py   # the dashboard's seed and the demo's update CDM (offline)
-uv run python tools/dashboard_gif.py   # README GIF; on a fresh docker compose up (see its --help)
+uv run python tools/dashboard_gif.py   # README GIF; on a fresh stack, -p keepout-docs (see its --help)
 ```
 
 ## Test data

@@ -1,11 +1,12 @@
-"""The validation reports and the README summaries, generated from CARA cases.
+"""The validation reports and their summaries, generated from CARA cases.
 
 Usage: ``uv run python tools/validation_report.py [--monte-carlo] [--check]``.
 Downloads the pinned CARA files, runs every case, and writes the results, the
-page rendered from them and the README summary block: ``docs/validation.json``
-and ``.md`` (2-D, 3-D and maximum Pc; a few minutes) or, with
-``--monte-carlo``, ``docs/validation-monte-carlo.json`` and ``.md`` (up to
-hours). Published results are kept while every fresh one reproduces them (see
+page rendered from them and the summary block: ``docs/validation.json``
+and ``.md`` with the block in ``README.md`` (2-D, 3-D and maximum Pc; a few
+minutes) or, with ``--monte-carlo``, ``docs/validation-monte-carlo.json`` and
+``.md`` with the block in ``docs/reports.md`` (up to hours). Published
+results are kept while every fresh one reproduces them (see
 :meth:`~keepout.validation.criteria.Criterion.reproduces`). ``--check`` fails
 instead of writing when a file is out of date. Exits 1 if a case fails.
 """
@@ -18,10 +19,13 @@ import sys
 from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Final, TypeAlias, TypedDict, cast
+from pathlib import Path
+from typing import Any, Final, TypeAlias, TypedDict, cast
 
 from generated import (
+    README,
     REPO,
+    REPORTS,
     generated_notice,
     json_text,
     parse_json,
@@ -52,9 +56,6 @@ from keepout.validation.criteria import (
     IntervalCriterion,
 )
 from keepout.validation.evaluation import Outcome, evaluate
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 TOOL: Final = "tools/validation_report.py"
 
@@ -153,10 +154,11 @@ NOT_COMPARED_MONTE_CARLO: Final = f"""\
 
 @dataclass(frozen=True, slots=True)
 class Report:
-    """One validation page and its README summary block."""
+    """One validation page and its summary block, in ``summaries``."""
 
     title: str
     page: Path
+    summaries: Path
     start: str
     end: str
     not_compared: str
@@ -272,6 +274,7 @@ def _monte_carlo_introduction(record: Record) -> list[str]:
 MAIN: Final = Report(
     "Validation against NASA CARA",
     REPO / "docs/validation.md",
+    README,
     "<!-- validation-summary:start -->",
     "<!-- validation-summary:end -->",
     NOT_COMPARED,
@@ -280,6 +283,7 @@ MAIN: Final = Report(
 MONTE_CARLO: Final = Report(
     "Monte Carlo validation against NASA CARA",
     REPO / "docs/validation-monte-carlo.md",
+    REPORTS,
     "<!-- validation-monte-carlo-summary:start -->",
     "<!-- validation-monte-carlo-summary:end -->",
     NOT_COMPARED_MONTE_CARLO,
@@ -740,7 +744,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     int
         0 on success; 1 if a case fails or, with ``--check``, a file is stale.
     """
-    parser = report_parser(TOOL, page=None, workers=False)
+    parser = report_parser(TOOL, page=None, readme=None, workers=False)
+    parser.add_argument(
+        "--readme",
+        type=Path,
+        default=None,
+        help="the Markdown file holding the summary block (default: the report's)",
+    )
     parser.add_argument(
         "--monte-carlo", action="store_true", help="the Monte Carlo cases and page"
     )
@@ -761,7 +771,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         page,
         record.to_json(),
         render_page(record, report),
-        readme=args.readme,
+        readme=args.readme if args.readme is not None else report.summaries,
         markers=(report.start, report.end),
         block=render_summary(record.rows),
     )

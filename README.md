@@ -26,17 +26,26 @@ keepout needs Python 3.11 or later. It is not on PyPI yet:
 pip install "keepout[cli,store] @ git+https://github.com/Kyrtap1309/keepout"
 ```
 
-The extras (`cli`, `store`, `dashboard`, `validation`) and running the
-examples from a clone (`uv sync`) are in
+The extras (`cli`, `store`, `dashboard`, `validation`) are in
 [Install](docs/index.md#install).
 
 ## Example
+
+The examples read a sample CDM, a fleet file and a frozen catalog committed
+to the repository. From a clone:
+
+```bash
+git clone https://github.com/Kyrtap1309/keepout && cd keepout
+uv sync --extra cli --extra store
+```
+
+Assess the sample CDM from Python (`uv run python`):
 
 ```python
 import keepout.cdm
 from keepout import compute_pc
 
-# A sample CDM in the repository; any CDM 1.0 or 2.0, KVN or XML, works.
+# Any CDM 1.0 or 2.0, KVN or XML, works.
 cdm = keepout.cdm.load("tests/cdm/data/tracss_v2.kvn")
 conjunction = cdm.conjunction(combined_hard_body_radius=20.0)  # [m]
 result = compute_pc(conjunction)  # picks Foster, Hall 3D-Nc or a maximum Pc
@@ -45,14 +54,13 @@ print(result.method, f"{result.value:.2e}")  # hall3d 4.50e-02
 
 The same from the command line: screen three real satellites (a
 [fleet file](docs/synthetic.md#the-fleet-file)) against the public catalog
-frozen in the repository, write a CDM per close approach,
-then assess them.
+frozen in the repository, write a CDM per close approach, then assess them.
 
 ```bash
-keepout screen --fleet examples/synthetic-operator/fleet.toml \
+uv run keepout screen --fleet examples/synthetic-operator/fleet.toml \
     --catalog tests/screening/data/celestrak-public.csv.gz \
     --start 2026-10-06 --days 7 --cdm-dir cdms
-keepout assess cdms/*.kvn   # exit status 3 if an event needs a manoeuvre
+uv run keepout assess cdms/*.kvn   # exit status 3 if an event needs a manoeuvre
 ```
 
 GP data has no covariance, so these CDMs carry keepout's
@@ -104,99 +112,23 @@ Every Pc method against every applicable CARA reference case
 | CARA unit tests, maximum Pc | dilution | 4 / 4 | 1.0e-03 |
 <!-- validation-summary:end -->
 
-Monte Carlo against CARA's two-body Monte Carlo
-([full report](docs/validation-monte-carlo.md), checked nightly):
+## Reports
 
-<!-- validation-monte-carlo-summary:start -->
-| Suite | Method | Cases passed | Worst relative error |
-|---|---|---|---|
-| Alfano (2009), Monte Carlo | montecarlo | 12 / 12 | 2.5e-02 |
-| CARA Pc method test set, Monte Carlo | montecarlo | 21 / 21 | 9.5e-02 |
-<!-- validation-monte-carlo-summary:end -->
+Each report is generated from the data it names and rerun by CI; their
+summaries are in the [reports overview](docs/reports.md).
 
-<!-- screening-socrates-summary:start -->
-Close approaches from `screen` against CelesTrak's SOCRATES, on the 1275 SOCRATES approaches computed from the same element sets ([report](docs/screening-socrates.md)):
-
-| Approaches | Compared | Within tolerance | Worst TCA | Worst range |
-|---|---|---|---|---|
-| fast (>= 1 km/s) | 266 | 261 | 0.493 ms | 0.49565 m |
-| slow (< 1 km/s) | 1008 | 1008 | 324.653 ms | 0.49998 m |
-
-5 approaches outside tolerance involve 2 objects whose element sets evidently differ from SOCRATES's. keepout also reports 5 minima of these pairs that SOCRATES does not list.
-<!-- screening-socrates-summary:end -->
-
-## Risk on real events
-
-<!-- risk-kelvins-summary:start -->
-keepout's decision for each of the 15321 events of ESA's Kelvins data, from ESA's Pc of every CDM ([report](docs/risk-kelvins.md)):
-
-| Decision | Events | Share |
-|---|---|---|
-| ignore | 13823 | 90.2% |
-| monitor | 1468 | 9.6% |
-| prepare maneuver | 6 | <0.1% |
-| maneuver | 24 | 0.2% |
-
-![Kelvins event 734: maneuver](docs/img/risk-kelvins/event-734.svg)
-<!-- risk-kelvins-summary:end -->
-
-Kelvins data: ESA, *Collision Avoidance Challenge dataset*, Zenodo, 2021,
-[doi:10.5281/zenodo.4463683](https://doi.org/10.5281/zenodo.4463683); © ESA,
-[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
-
-## Performance
-
-The target is to screen 20 primaries against the public catalog, and
-against the full catalog, for a week in under 60 s with 4 worker processes.
-CI also times each change against its merge base and fails on a slowdown of
-more than 20 %.
-
-<!-- screening-benchmark-summary:start -->
-Screening 20 LEO primaries against the 19914 element sets of the frozen public catalog (CelesTrak, retrieved 2026-10-06) for 7 days from 2026-10-06 00:00 UTC, with 4 worker processes (`tools/screening_benchmark.py`):
-
-| Volume | Screened | Left out | Approaches | Wall time | CPU time |
-|---|---|---|---|---|---|
-| 5 km sphere (default) | 19886 | 28 stale | 715 | 8.5 s | 40.3 s |
-| 10 km sphere (NASA, GP data) | 19886 | 28 stale | 2551 | 9.5 s | 44.3 s |
-| SFS Handbook Table 3 | 19886 | 28 stale | 345 | 14.8 s | 65.2 s |
-
-Times: median of 3 runs on 2026-10-07, Intel(R) Core(TM) i5-14600K (20 logical CPUs), Python 3.13.7; `--check` checks the counts, not the times.
-<!-- screening-benchmark-summary:end -->
-
-On the full catalog, which adds most of the rocket bodies and debris the
-public catalog lacks (retrieved nine days later, so the week differs):
-
-<!-- screening-benchmark-spacetrack-summary:start -->
-Screening 20 LEO primaries against the 31930 element sets of the frozen full catalog (Space-Track, retrieved 2026-10-15) for 7 days from 2026-10-15 00:00 UTC, with 4 worker processes (`tools/screening_benchmark.py --source spacetrack`):
-
-| Volume | Screened | Left out | Approaches | Wall time | CPU time |
-|---|---|---|---|---|---|
-| 5 km sphere (default) | 31914 | 5 future epoch, 11 propagation failed | 866 | 13.1 s | 56.1 s |
-| 10 km sphere (NASA, GP data) | 31914 | 5 future epoch, 11 propagation failed | 2689 | 14.2 s | 59.3 s |
-| SFS Handbook Table 3 | 31914 | 5 future epoch, 11 propagation failed | 787 | 20.1 s | 83.9 s |
-
-Times: median of 3 runs on 2026-10-16, Intel(R) Core(TM) i5-14600K (20 logical CPUs), Python 3.13.7; `--check` checks the counts, not the times.
-<!-- screening-benchmark-spacetrack-summary:end -->
-
-## Manoeuvre planning
-
-<!-- maneuver-report-summary:start -->
-The burns of METOP-B (38771) that clear a red event, CARA test CDM `000038771_conj_000030802_20201216_182131_20201215_171306` (2020 test data; HBR 10 m, CARA's value; [report](docs/maneuver-report.md)):
-
-![Pc after an along-track burn of METOP-B (38771)](docs/img/maneuver/heatmap.svg)
-
-| Burn | Before TCA | Δv | Pc | Range at TCA | Method |
-|---|---|---|---|---|---|
-| none | - | - | 1.56e-03 | 148 m | foster |
-| retrograde | 22.6 h | -0.00200 m/s | 7.87e-06 | 624 m | foster |
-| prograde | 21.6 h | +0.00398 m/s | 6.43e-06 | 793 m | foster |
-
-The plan of the 5642 cells took 9.9 to 11.0 s (CPU time 162.8 to 181.9 s, numerical libraries on their default threads) over 3 runs on 2026-11-03, Intel(R) Core(TM) i5-14600K (20 logical CPUs), Python 3.13.7; `--check` checks the numbers, not the times.
-<!-- maneuver-report-summary:end -->
-
-CARA test CDM: NASA CARA Analysis Tools (NASA Open Source Agreement),
-downloaded on demand; only numbers derived from it and the figure are
-committed.
+- [Monte Carlo validation](docs/validation-monte-carlo.md): keepout's Monte
+  Carlo against CARA's, checked nightly.
+- [Screening against SOCRATES](docs/screening-socrates.md): `screen`
+  against CelesTrak's close approaches from the same element sets.
+- [Risk on ESA's Kelvins data](docs/risk-kelvins.md): keepout's decision
+  for each real event of ESA's Collision Avoidance Challenge.
+- [Screening performance](docs/reports.md#screening-performance): 20
+  primaries against the public and the full catalog for a week.
+- [Synthetic operator](docs/synthetic-operator.md): a small real fleet
+  over a week of public data.
+- [Manoeuvre planning on a CARA event](docs/maneuver-report.md): the
+  burns that clear a red event.
 
 ## Licence
 

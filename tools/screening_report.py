@@ -6,10 +6,11 @@ see ``tools/screening_snapshot.py``) with :func:`keepout.screening.screen` over
 SOCRATES's week and with its defaults (the 5 km sphere SOCRATES also uses),
 matches every approach of the excerpt with one of keepout's, and writes
 ``docs/screening-socrates.json`` (the numbers), ``docs/screening-socrates.md``
-(the page) and the README summary block. Needs no network. ``--check`` fails
-instead of writing when a file is out of date. Exits 1 if an approach differs
-from SOCRATES beyond the tolerances (:data:`TOLERANCES`) without a known cause
-(:data:`KNOWN_DIFFERENCES`), or a known cause no longer shows.
+(the page) and the summary block in ``docs/reports.md``. Needs no network.
+``--check`` fails instead of writing when a file is out of date. Exits 1 if an
+approach differs from SOCRATES beyond the tolerances (:data:`TOLERANCES`)
+without a known cause (:data:`KNOWN_DIFFERENCES`), or a known cause no longer
+shows.
 
 Each approach depends only on its own pair's element sets (see
 :mod:`keepout.screening.pipeline`), so screening the excerpt's objects alone
@@ -36,6 +37,7 @@ from typing import (
 import screening_snapshot as snapshot
 from generated import (
     REPO,
+    REPORTS,
     generated_notice,
     minute_text,
     relative,
@@ -695,7 +697,7 @@ AGREEMENT_HEADER: Final = (
     "Worst relative speed",
     "Range change over the TCA difference",
 )
-"""The columns of the agreement table; the README shows the first five."""
+"""The columns of the agreement table; the summary block shows the first five."""
 
 
 def _agreement(summary: Summary, columns: int = len(AGREEMENT_HEADER)) -> list[str]:
@@ -716,7 +718,7 @@ def _agreement(summary: Summary, columns: int = len(AGREEMENT_HEADER)) -> list[s
 
 
 def render_summary(summary: Summary, page: str) -> str:
-    """The README block."""
+    """The summary block, with a link to the ``page``."""
     socrates = summary["socrates"]
     differences = summary["differences"]
     causes = {d["cause"] for d in differences if d["cause"] is not None}
@@ -1079,7 +1081,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         0 on success; 1 if, with ``--check``, a file is out of date, or if an
         approach differs without a known cause (:func:`problems`).
     """
-    parser = report_parser(TOOL, page=PAGE)
+    parser = report_parser(TOOL, page=PAGE, readme=REPORTS)
     parser.add_argument("--data", type=Path, default=snapshot.DATA)
     args = parser.parse_args(argv)
 

@@ -395,8 +395,8 @@ below are measurements on sample cases, not bounds.
 - **Re-screen accuracy.** The burned orbit of a re-screen is SGP4 plus a
   Cowell difference, accurate to metres on the orbits measured (see
   [Re-screen](#re-screen)).
-- **Re-screen Pc assumed.** The Pc of a new or closer approach rests on
-  the [synthetic covariance model](assumptions.md). The re-screen also
+- **Re-screen Pc assumed.** The Pc of a new or closer approach is assumed
+  (see [Re-screen](#re-screen)). The re-screen also
   sees only the objects in the catalog given, and the public catalog
   lacks most debris (see [Screening](screening.md#the-public-catalog)).
 

@@ -40,7 +40,7 @@ def test_replace_block_rewrites_only_the_marked_block() -> None:
 
 @pytest.mark.parametrize("text", ["no markers", "<e>\n<s>\n", "<s> only"])
 def test_replace_block_needs_both_markers_in_order(text: str) -> None:
-    with pytest.raises(ValueError, match="README needs <s> and <e>, in that order"):
+    with pytest.raises(ValueError, match="needs <s> and <e>, in that order"):
         replace_block(text, "<s>", "<e>", "new")
 
 

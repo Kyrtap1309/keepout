@@ -2,12 +2,15 @@
 recorded in a browser, converted with ffmpeg and optimised with gifsicle.
 
 Usage: ``uv run python tools/dashboard_gif.py [--url URL]``, with the
-dashboard running on a fresh volume (``docker compose down -v && docker
-compose up --wait``): the scenario uploads the demo's update, which a
-second run would find already stored. Writes :data:`GIF`. Run by hand; CI
-runs the scenario (``tests/e2e``) but never compares the GIF, whose pixels
-differ between runs. ffmpeg comes from the ``imageio-ffmpeg`` package of the
-development environment; gifsicle from the system (``apt install gifsicle``).
+dashboard of this tree running on a fresh volume under its own project name
+(``docker compose -p keepout-docs down -v && docker compose -p keepout-docs
+up --build --wait``, so the default project's volume is kept): the scenario
+uploads the demo's update, which a second run would find already stored.
+Writes :data:`GIF`. Run by hand; CI runs the scenario (``tests/e2e``) but
+never compares the GIF, whose pixels differ between runs. ffmpeg comes from
+the ``imageio-ffmpeg`` package of the development environment; gifsicle from
+the system (``apt install gifsicle``), and so does a colour emoji font for
+the risk column (``apt install fonts-noto-color-emoji``).
 """
 
 from __future__ import annotations
@@ -133,7 +136,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         prog=TOOL,
         description=(
             "Record the dashboard GIF. Needs the dashboard on a fresh volume: "
-            "docker compose down -v && docker compose up --wait."
+            "docker compose -p keepout-docs down -v && "
+            "docker compose -p keepout-docs up --build --wait."
         ),
     )
     parser.add_argument("--url", default=DEFAULT_URL, help="the dashboard's URL")

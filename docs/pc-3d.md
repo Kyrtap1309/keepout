@@ -279,7 +279,9 @@ them by two-body motion. A sample is a collision when the relative distance
 the window start are not collisions in the window, following CARA's
 convention. For Alfano case 9 they are 8.4% of the samples, matching
 Alfano's "instantaneous probability" 0.0842, and CARA's 0.280 excludes
-them.
+them. A sample whose elements are no ellipse (an unbound or degenerate
+orbit, possible far in a wide covariance's tail) is counted as a miss:
+`details["non_elliptic"]` gives how many, and a diagnostic says so.
 
 Time is searched only inside the encounter segments of the 3D-Nc rate scan,
 since outside them the collision rate is below 1e-16 of its peak. On the

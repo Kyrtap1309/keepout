@@ -12,10 +12,10 @@ re-screens each option with :func:`keepout.maneuver.rescreen`: a
 demonstration of the mechanism, not a recommendation.
 
 Writes ``docs/maneuver-report.json`` (the numbers), the page, the heatmap
-(``tools/maneuver_heatmap.py``) and the README summary block. The CARA
-plan's timings are shown, never checked: ``--check`` takes them from the
-committed JSON, and requires the heatmap only to exist (SVG bytes vary with
-the matplotlib version). CARA's files are not redistributed: only numbers
+(``tools/maneuver_heatmap.py``) and the summary block in ``docs/reports.md``.
+The CARA plan's timings are shown, never checked: ``--check`` takes them from
+the committed JSON, and requires the heatmap only to exist (SVG bytes vary
+with the matplotlib version). CARA's files are not redistributed: only numbers
 derived from them and the figure are written. ``--help`` lists the options.
 """
 
@@ -34,6 +34,7 @@ from astropy.time import Time
 from generated import (
     CARA_CDM_ID,
     REPO,
+    REPORTS,
     Machine,
     generated_notice,
     machine,
@@ -726,7 +727,7 @@ def _span(values: Sequence[float]) -> str:
 
 def radius_text(settings: Settings, *, short: bool = False) -> str:
     """Where the combined hard-body radius comes from: for the page, or
-    ``short`` for the README."""
+    ``short`` for the summary block."""
     radius = f"HBR {settings['hard_body_radius']:g} m"
     if settings["hard_body_radius_source"] == "given":
         return f"{radius}, given with `--hbr`"
@@ -867,8 +868,9 @@ def render_page(summary: Summary, images: str) -> str:
     return "\n".join(lines) + "\n"
 
 
-def render_summary(summary: Summary, images: str) -> str:
-    """The README block: the heatmap and the minimum burns."""
+def render_summary(summary: Summary, page: str, images: str) -> str:
+    """The summary block: the heatmap and the minimum burns, with a link to
+    the ``page``."""
     settings, plan = summary["settings"], summary["event"]
     return "\n".join(
         [
@@ -877,7 +879,7 @@ def render_summary(summary: Summary, images: str) -> str:
                 f"{_level_text(settings, plan)} event, CARA test CDM "
                 f"`{settings['cdm']}` ({plan['tca'][:4]} test data; "
                 f"{radius_text(settings, short=True)}; "
-                "[report](docs/maneuver-report.md)):"
+                f"[report]({page})):"
             ),
             "",
             f"![{_alt_text(plan)}]({images}/{HEATMAP})",
@@ -935,6 +937,7 @@ def _parser() -> argparse.ArgumentParser:
         TOOL,
         page=PAGE,
         images=IMAGES,
+        readme=REPORTS,
         check=(
             "fail if out of date (the timings are not checked, and the heatmap "
             "only needs to exist: its SVG bytes vary with the matplotlib version)"
@@ -1052,7 +1055,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         render_page(summary, relative(args.images, args.page.parent)),
         readme=args.readme,
         markers=(START, END),
-        block=render_summary(summary, relative(args.images, args.readme.parent)),
+        block=render_summary(
+            summary,
+            relative(args.page, args.readme.parent),
+            relative(args.images, args.readme.parent),
+        ),
     )
     status = write_or_check(files, check=args.check, tool=TOOL)
     figures = {

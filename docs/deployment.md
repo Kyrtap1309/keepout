@@ -67,8 +67,8 @@ turns red with a rising trend:
 ![The demo: the events list, the planner, the upload, and the event turning red](img/dashboard/dashboard.gif)
 
 The planner names the catalog its re-screen used as
-`stored copy of /src/tests/screening/data/celestrak-public.csv.gz`: the
-path it had when the image was built, kept by the store as a label.
+`stored copy of tests/screening/data/celestrak-public.csv.gz`: the store
+keeps a copy of the catalog, labelled by its path in the repository.
 
 ## Your own data
 

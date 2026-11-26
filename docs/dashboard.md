@@ -14,12 +14,18 @@ It needs the `dashboard` extra ([Install](index.md#install)), which adds
 the extra, `keepout dashboard` prints the line to install it and exits
 with status 1.
 
-!!! warning "For this machine only"
-    The dashboard listens on 127.0.0.1 and has no authentication: anyone
-    who reaches its port, other users of a shared machine included, can read
-    every event, store CDMs and queue or cancel jobs. Do not expose it or
-    forward its port. From another machine, use an SSH tunnel:
-    `ssh -L 8501:127.0.0.1:8501 HOST`, then open http://127.0.0.1:8501.
+!!! warning "For this machine only, by default"
+    The dashboard listens on 127.0.0.1 by default and has no
+    authentication: anyone who reaches its port, other users of a shared
+    machine included, can read every event, store CDMs and queue or cancel
+    jobs. `--host` makes it listen on another address (see
+    [Running it](#running-it)); give one other machines can reach only on a
+    network you trust, and never expose the port to the internet.
+    `docker compose` listens on all addresses inside the container but
+    publishes the port on the host's 127.0.0.1 only
+    ([Deployment](deployment.md)). From another machine, prefer an SSH
+    tunnel: `ssh -L 8501:127.0.0.1:8501 HOST`, then open
+    http://127.0.0.1:8501.
 
 ## Running it
 

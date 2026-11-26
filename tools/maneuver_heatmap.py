@@ -1,7 +1,7 @@
 """The manoeuvre report's heatmap: a plan's Pc over burn size and time.
 
-``tools/maneuver_report.py`` draws it for the page and the README from a
-:class:`keepout.figures.GridFigure`; this module only draws.
+``tools/maneuver_report.py`` draws it for the page and the summary block from
+a :class:`keepout.figures.GridFigure`; this module only draws.
 """
 
 from __future__ import annotations

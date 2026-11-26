@@ -1,5 +1,5 @@
 """Shared by the report tools: the repository's paths, a report's command
-line and files, command-line counts, JSON read back, README blocks, Markdown
+line and files, command-line counts, JSON read back, summary blocks, Markdown
 tables, links, plain-text numbers and times, risk thresholds as settings,
 the machine a timing ran on, the generated-page notice, reproducible SVGs
 and writing or checking files and figures."""
@@ -32,7 +32,10 @@ REPO: Final = Path(__file__).resolve().parents[1]
 """The repository's root directory."""
 
 README: Final = REPO / "README.md"
-"""The README, whose summary blocks the report tools write."""
+"""The README, holding the validation report's summary block."""
+
+REPORTS: Final = REPO / "docs" / "reports.md"
+"""The reports overview, holding the summary blocks of the other reports."""
 
 CARA_CDM_ID: Final = "000038771_conj_000030802_20201216_182131_20201215_171306"
 """The CARA test CDM the manoeuvre report plans and the dashboard's seed can
@@ -64,7 +67,7 @@ def report_parser(
     *,
     page: Path | None,
     images: Path | None = None,
-    readme: bool = True,
+    readme: Path | None = README,
     workers: bool = True,
     check: str = "fail if out of date",
 ) -> argparse.ArgumentParser:
@@ -81,7 +84,9 @@ def report_parser(
         The default of ``--images``, the page's figures; no such option if
         ``None``.
     readme
-        Add ``--readme``, the README holding the report's summary block.
+        The default of ``--readme``, the Markdown file holding the report's
+        summary block (:data:`README` or :data:`REPORTS`); no such option if
+        ``None``.
     workers
         Add ``--workers``, the processes to screen with.
     check
@@ -94,8 +99,13 @@ def report_parser(
     )
     if images is not None:
         parser.add_argument("--images", type=Path, default=images)
-    if readme:
-        parser.add_argument("--readme", type=Path, default=README)
+    if readme is not None:
+        parser.add_argument(
+            "--readme",
+            type=Path,
+            default=readme,
+            help="the Markdown file holding the summary block",
+        )
     if workers:
         parser.add_argument(
             "--workers",
@@ -189,7 +199,7 @@ def replace_block(text: str, start: str, end: str, block: str) -> str:
     first = text.find(start)
     last = text.find(end)
     if first < 0 or last < first:
-        raise ValueError(f"README needs {start} and {end}, in that order")
+        raise ValueError(f"the text needs {start} and {end}, in that order")
     head = text[: first + len(start)]
     return f"{head}\n{block}\n{text[last:]}"
 
@@ -203,7 +213,10 @@ def readme_with(readme: Path, start: str, end: str, block: str) -> str:
     ValueError
         If the markers are missing or out of order.
     """
-    return replace_block(readme.read_text(encoding="utf-8"), start, end, block)
+    try:
+        return replace_block(readme.read_text(encoding="utf-8"), start, end, block)
+    except ValueError as exc:
+        raise ValueError(f"{readme}: {exc}") from exc
 
 
 def report_files(
@@ -216,7 +229,7 @@ def report_files(
     block: str = "",
 ) -> dict[Path, str]:
     """What a report writes: ``summary`` as JSON next to ``page``, the page's
-    ``text`` and, with ``readme``, that README with ``block`` between its
+    ``text`` and, with ``readme``, that Markdown file with ``block`` between its
     ``markers`` (:func:`readme_with`).
 
     Raises

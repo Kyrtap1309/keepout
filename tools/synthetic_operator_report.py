@@ -577,7 +577,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     int
         0 on success; 1 if, with ``--check``, a file is out of date.
     """
-    parser = report_parser(TOOL, page=PAGE, readme=False)
+    parser = report_parser(TOOL, page=PAGE, readme=None)
     parser.add_argument("--data", type=Path, default=snapshot.DATA)
     parser.add_argument("--fleet", type=Path, default=FLEET)
     args = parser.parse_args(argv)

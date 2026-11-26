@@ -101,9 +101,8 @@ keepout assess cdms/*.kvn --hbr 1000  # a 1 km hard body: exit status 3
 The second command sets a combined hard-body radius of 1 km instead of
 each CDM's `HBR`. It prints `12 events from 12 CDMs: 2 maneuver,
 4 prepare maneuver, 1 monitor, 5 ignore.` and ends with status 3, so a
-script can act on it. The next line says that all 12 events rest on
-assumed covariances (`COVARIANCE_METHOD = DEFAULT`), not orbit
-determination.
+script can act on it. The next line counts the events with assumed
+covariances: all 12 (see [Assess](#assess)).
 
 On live data, download the catalog and screen from now on:
 

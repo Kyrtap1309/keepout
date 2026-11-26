@@ -52,15 +52,9 @@ The extras add optional parts; without them you get the library only:
 
 Give several extras as `keepout[cli,store]`. The examples on these pages
 read files committed to the repository: a sample CDM, the example fleet
-and the frozen catalogs. To run them, clone the repository and work
-inside it, with the extras you need:
-
-```bash
-git clone https://github.com/Kyrtap1309/keepout
-cd keepout
-uv sync --extra cli --extra store   # or --all-extras
-uv run keepout --help
-```
+and the frozen catalogs. To run them, work inside a clone as in the
+[Quickstart](#quickstart), with the extras you need (`uv sync
+--all-extras` for every one).
 
 ## Where to start
 
@@ -211,13 +205,13 @@ next to CelesTrak's.
 
 ## Synthetic operator and command line
 
-From a clone of the repository (see [Install](#install)):
+From a clone of the repository (see the [Quickstart](#quickstart)):
 
 ```bash
-keepout screen --fleet examples/synthetic-operator/fleet.toml \
+uv run keepout screen --fleet examples/synthetic-operator/fleet.toml \
     --catalog tests/screening/data/celestrak-public.csv.gz \
     --start 2026-10-06 --days 7 --cdm-dir cdms
-keepout assess cdms/*.kvn   # exit status 3 if an event needs a manoeuvre
+uv run keepout assess cdms/*.kvn   # exit status 3 if an event needs a manoeuvre
 ```
 
 `keepout screen` acts as a conjunction assessment service for a fleet of
@@ -227,11 +221,10 @@ the public catalog frozen on 2026-10-06. It writes a CDM for each close
 approach and assesses each event (12 approaches that week, 2 to monitor).
 
 !!! warning "Assumed covariances"
-    GP data has no covariance, so these CDMs carry keepout's model of GP
-    element-set errors, the
-    [synthetic covariance model](assumptions.md). It is an explicit
-    assumption from the literature, not orbit determination. Its Pc values show what the model implies, not the
-    satellites' real risk.
+    GP data has no covariance, so these CDMs carry keepout's
+    [synthetic covariance model](assumptions.md) of GP element-set errors,
+    not orbit determination. Their Pc values show what the model implies,
+    not the satellites' real risk.
 
 Other commands download data and check keepout against CARA:
 
@@ -245,8 +238,9 @@ local SQLite file. `screen` and `assess` use it with `--store`, as do
 `keepout store add` and `keepout maneuver --event ID`. Each event has a
 stable id of 12 hexadecimal characters. `keepout worker` computes queued
 manoeuvre plans in the background. See [The conjunction store](store.md).
-`keepout dashboard` shows a store in the browser, on this machine only
-(the `dashboard` extra, see [The dashboard](dashboard.md)).
+`keepout dashboard` shows a store in the browser, by default on this
+machine only (the `dashboard` extra; `--host` and its warning are in
+[The dashboard](dashboard.md)).
 
 See [Synthetic operator](synthetic.md) for what a run does,
 [Command line](cli.md) for every command,

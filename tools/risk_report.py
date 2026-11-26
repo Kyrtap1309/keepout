@@ -5,9 +5,10 @@ Downloads the Kelvins raw table (221 MB, once), assesses each of its 15 321
 events with keepout's default thresholds, trend and decision point, and
 writes ``docs/risk-kelvins.json`` (the numbers), ``docs/risk-kelvins.md``
 (the page), plots of a few example events under ``docs/img/risk-kelvins/``
-and the README summary block. ``--check`` fails instead of writing when the
-numbers, the page or the README are out of date; the plots are then only
-required to exist (SVG bytes vary with the matplotlib version).
+and the summary block in ``docs/reports.md``. ``--check`` fails instead of
+writing when the numbers, the page or the summary are out of date; the plots
+are then only required to exist (SVG bytes vary with the matplotlib
+version).
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from typing import (
 
 from generated import (
     REPO,
+    REPORTS,
     generated_notice,
     relative,
     report_files,
@@ -306,13 +308,14 @@ def image(event_id: int) -> str:
     return f"event-{event_id}.svg"
 
 
-def render_summary(summary: Summary, images: str) -> str:
-    """The README block: the decisions and the first example plot."""
+def render_summary(summary: Summary, page: str, images: str) -> str:
+    """The summary block: the decisions and the first example plot, with a
+    link to the ``page``."""
     total = summary["events"]
     lines = [
         (
             f"keepout's decision for each of the {total} events of ESA's Kelvins "
-            "data, from ESA's Pc of every CDM ([report](docs/risk-kelvins.md)):"
+            f"data, from ESA's Pc of every CDM ([report]({page})):"
         ),
         "",
         *_counts_table("Decision", summary["actions"], total),
@@ -543,6 +546,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         TOOL,
         page=PAGE,
         images=IMAGES,
+        readme=REPORTS,
         workers=False,
         check=(
             "fail if out of date (the plots only need to exist: their SVG bytes "
@@ -562,7 +566,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         render_page(summary, relative(args.images, args.page.parent)),
         readme=args.readme,
         markers=(START, END),
-        block=render_summary(summary, relative(args.images, args.readme.parent)),
+        block=render_summary(
+            summary,
+            relative(args.page, args.readme.parent),
+            relative(args.images, args.readme.parent),
+        ),
     )
     status = write_or_check(files, check=args.check, tool=TOOL)
     by_id = {event.event_id: event for event in events}

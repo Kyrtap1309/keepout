@@ -17,7 +17,7 @@ import snapshot_files
 import spacetrack_snapshot
 from astropy.time import Time
 from benchmark_runs import Comparison, TimingFailed
-from generated import README, cpu_model, json_text, read_json
+from generated import REPORTS, cpu_model, json_text, read_json
 from report_builders import (
     assert_writes_then_checks,
     fake_python,
@@ -388,9 +388,9 @@ def test_each_source_defaults_to_its_own_committed_files(name: str) -> None:
     source = benchmark.SOURCES[name]
     results = json.loads(source.results.read_text(encoding="utf-8"))
     assert results["settings"]["source"] == name
-    readme = README.read_text(encoding="utf-8")
-    assert source.start in readme
-    assert source.end in readme
+    summaries = REPORTS.read_text(encoding="utf-8")
+    assert source.start in summaries
+    assert source.end in summaries
 
 
 def test_the_spacetrack_source_reads_the_catalog_and_its_retrieval_day(

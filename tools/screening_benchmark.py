@@ -3,11 +3,11 @@
 The benchmark (no command) screens :data:`PRIMARIES` (20 LEO satellites)
 against a frozen catalog (``--source``: :data:`SOURCES`) for 7 days from 0 h
 UTC of its retrieval day with each volume of :data:`VOLUMES`, and writes the
-source's results file and README block: what each volume found (the data)
-and the median wall and CPU time of the runs (the timings). ``--check``
-screens once and fails when the data differs from the committed files; it
-shows the committed timings, never checks them. The runs of a volume must
-find the same, or the tool fails.
+source's results file and summary block (in ``docs/reports.md``): what each
+volume found (the data) and the median wall and CPU time of the runs (the
+timings). ``--check`` screens once and fails when the data differs from the
+committed files; it shows the committed timings, never checks them. The runs
+of a volume must find the same, or the tool fails.
 
 ``compare`` is CI's regression check: this tree and ``--base-python`` (the
 merge base's environment) each time ``tools/screening_timing.py`` on a
@@ -47,8 +47,8 @@ from benchmark_runs import (
     write_step_summary,
 )
 from generated import (
-    README,
     REPO,
+    REPORTS,
     Machine,
     json_text,
     machine,
@@ -121,7 +121,7 @@ VOLUMES: Final[Mapping[str, ScreeningVolume | VolumeRule]] = {
     "10 km sphere (NASA, GP data)": ScreeningVolume.nasa_gp_data(),
     "SFS Handbook Table 3": ScreeningVolume.sfs_handbook,
 }
-"""The volumes benchmarked, by the name the README gives them."""
+"""The volumes benchmarked, by the name the summary block gives them."""
 
 WORKERS: Final = 4
 """Processes the benchmark screens with unless told otherwise, as in the
@@ -226,7 +226,7 @@ class Source(Generic[_Manifest]):
     name
         Its ``--source`` name.
     catalog, provider
-        What the README block calls it: the frozen ``catalog`` catalog
+        What the summary block calls it: the frozen ``catalog`` catalog
         (``provider``, retrieved ...).
     data
         Its directory (the default of ``--data``).
@@ -254,7 +254,7 @@ class Source(Generic[_Manifest]):
 
     @property
     def stem(self) -> str:
-        """The name of its results file and README block:
+        """The name of its results file and summary block:
         ``screening-benchmark``, and the source's name unless it is the
         default."""
         if self.name == DEFAULT_SOURCE:
@@ -268,12 +268,12 @@ class Source(Generic[_Manifest]):
 
     @property
     def start(self) -> str:
-        """The start marker of its README block."""
+        """The start marker of its summary block."""
         return f"<!-- {self.stem}-summary:start -->"
 
     @property
     def end(self) -> str:
-        """The end marker of its README block."""
+        """The end marker of its summary block."""
         return f"<!-- {self.stem}-summary:end -->"
 
     @property
@@ -370,7 +370,7 @@ def _seconds_text(value: float) -> str:
 
 
 def render_summary(summary: Summary) -> str:
-    """The README block."""
+    """The summary block."""
     settings = summary["settings"]
     source = SOURCES[settings["source"]]
     timings = summary["timings"]
@@ -439,7 +439,7 @@ class BenchmarkOptions:
     results
         The results file.
     readme
-        The README holding the source's block.
+        The Markdown file holding the source's summary block.
     workers
         Processes to screen with.
     repeat
@@ -691,7 +691,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--check", action="store_true", help="fail if out of date")
     parser.add_argument("--results", type=Path, help="default: the source's")
-    parser.add_argument("--readme", type=Path, default=README)
+    parser.add_argument(
+        "--readme",
+        type=Path,
+        default=REPORTS,
+        help="the Markdown file holding the summary block",
+    )
     parser.add_argument("--workers", type=positive, default=WORKERS)
     parser.add_argument(
         "--repeat", type=positive, default=REPEAT, help="runs per volume (not --check)"
