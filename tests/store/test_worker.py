@@ -682,8 +682,11 @@ def test_a_refresh_keeps_the_pc_it_sent_before_its_time_limit(
     ).events
     submitted = JobQueue(store).submit_refresh(event_id, FOSTER).job
     assert submitted is not None
+    # The child sleeps once its parts are sent, so the limit always stops it;
+    # it is long enough for a spawned child to import and compute A and B on
+    # a loaded machine (the limit counts from the child's start).
     ran = run_worker(
-        path, compute=pc_one_by_one_then_sleep, until_idle=True, time_limit=1.0, **FAST
+        path, compute=pc_one_by_one_then_sleep, until_idle=True, time_limit=5.0, **FAST
     )
     assert ran == 1
     assert job_of(store, submitted.id).status is JobStatus.FAILED
