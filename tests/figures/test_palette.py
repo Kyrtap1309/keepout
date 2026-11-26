@@ -9,11 +9,15 @@ import pytest
 
 from keepout._types import FloatArray
 from keepout.figures import (
+    DECISION_POINT_COLOUR,
     FIT_COLOUR,
+    INK_COLOUR,
+    MUTED_COLOUR,
     NO_PC,
     PROVENANCE_HELP,
     PROVENANCE_LABELS,
     RISK_COLOURS,
+    RULE_COLOUR,
     SEQUENTIAL,
     SERIES,
     TARGET_COLOUR,
@@ -143,7 +147,13 @@ def test_sequences_are_distinct_and_hex() -> None:
 
 
 def test_marks_are_hex() -> None:
-    assert all(HEX.match(colour) for colour in (TARGET_COLOUR, NO_PC, FIT_COLOUR))
+    marks = (TARGET_COLOUR, NO_PC, FIT_COLOUR, DECISION_POINT_COLOUR)
+    assert all(HEX.match(colour) for colour in marks)
+
+
+def test_page_colours_are_hex() -> None:
+    page = (INK_COLOUR, MUTED_COLOUR, RULE_COLOUR)
+    assert all(HEX.match(colour) for colour in page)
 
 
 def test_threshold_labels_name_where_each_level_starts() -> None:

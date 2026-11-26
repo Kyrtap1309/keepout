@@ -35,7 +35,8 @@
       "pc": 0.00156,
       "range_at_tca": 147.8,
       "method": "foster",
-      "meets_target": false
+      "meets_target": false,
+      "notes": []
     },
     "burn_times": 91,
     "cells": 5642,
@@ -50,7 +51,8 @@
       "pc": 6.43e-06,
       "range_at_tca": 793.2,
       "method": "foster",
-      "meets_target": true
+      "meets_target": true,
+      "notes": []
     },
     "retrograde": {
       "burn_lead_hours": 22.61,
@@ -58,7 +60,8 @@
       "pc": 7.87e-06,
       "range_at_tca": 624.4,
       "method": "foster",
-      "meets_target": true
+      "meets_target": true,
+      "notes": []
     },
     "notes": []
   },
@@ -89,7 +92,8 @@
         "pc": 7.38e-06,
         "range_at_tca": 3646.5,
         "method": "foster",
-        "meets_target": false
+        "meets_target": false,
+        "notes": []
       },
       "burn_times": 15,
       "cells": 930,
@@ -104,7 +108,10 @@
         "pc": 6.54e-08,
         "range_at_tca": 7770.6,
         "method": "foster",
-        "meets_target": true
+        "meets_target": true,
+        "notes": [
+          "2-D Pc assumptions questionable: the encounter lasts about 8.4e+03 s, 9.7% of the primary's orbital period (limit 1%); a 3-D Pc may differ"
+        ]
       },
       "retrograde": {
         "burn_lead_hours": 12.1,
@@ -112,7 +119,10 @@
         "pc": 4.64e-08,
         "range_at_tca": 9156.8,
         "method": "foster",
-        "meets_target": true
+        "meets_target": true,
+        "notes": [
+          "2-D Pc assumptions questionable: the encounter lasts about 7.17e+03 s, 8.3% of the primary's orbital period (limit 1%); a 3-D Pc may differ"
+        ]
       },
       "notes": [
         "2-D Pc assumptions questionable: the encounter lasts about 2.51e+03 s, 2.9% of the primary's orbital period (limit 1%); a 3-D Pc may differ",
@@ -120,9 +130,7 @@
         "every Pc rests on an assumed covariance (COVARIANCE_METHOD = DEFAULT)",
         "drag is off: the CDM gives the primary no positive CD_AREA_OVER_MASS",
         "slow encounter (1.99 m/s, below 100 m/s). The planner looks for the new TCA only within 1/20 of an orbit of TCA. After a burn the pair can meet again hours away, at a Pc no cell shows: only a re-screen shows it",
-        "240 of 930 cells have no Pc and are never options: 240 without a closest approach to trust, 0 where Foster's Pc failed",
-        "prograde: 2-D Pc assumptions questionable: the encounter lasts about 8.4e+03 s, 9.7% of the primary's orbital period (limit 1%); a 3-D Pc may differ",
-        "retrograde: 2-D Pc assumptions questionable: the encounter lasts about 7.17e+03 s, 8.3% of the primary's orbital period (limit 1%); a 3-D Pc may differ"
+        "240 of 930 cells have no Pc and are never options: 240 without a closest approach to trust, 0 where Foster's Pc failed"
       ]
     },
     "rescreens": [

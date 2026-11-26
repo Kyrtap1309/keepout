@@ -1,19 +1,26 @@
 import argparse
+import datetime
 import importlib
 import json
+import platform
 from pathlib import Path
 from typing import Literal, TypedDict
 
 import pytest
 from generated import (
     REPO,
+    Machine,
+    cpu_model,
     day_text,
     generated_notice,
     json_text,
+    machine,
+    machine_text,
     minute_text,
     parse_json,
     positive,
     read_json,
+    read_timings,
     readme_with,
     replace_block,
     second_text,
@@ -113,13 +120,20 @@ with an older tree's keepout, so it imports nothing else from ``tools/``
 (``positive`` included), and that tool always passes ``--workers 1``."""
 
 
+def has_workers(text: str) -> bool:
+    """Whether a tool's ``text`` adds ``--workers``: itself, or with
+    :func:`generated.report_parser` (unless told not to)."""
+    shared = "report_parser(" in text and "workers=False" not in text
+    return '"--workers"' in text or shared
+
+
 def test_every_tool_with_a_workers_option_is_listed() -> None:
     with_workers = {
         tool.stem
         for tool in (REPO / "tools").glob("*.py")
-        if '"--workers"' in tool.read_text(encoding="utf-8")
+        if has_workers(tool.read_text(encoding="utf-8"))
     }
-    assert with_workers - {"screening_timing"} == set(WORKERS_ARGUMENTS)
+    assert with_workers - {"generated", "screening_timing"} == set(WORKERS_ARGUMENTS)
 
 
 @pytest.mark.parametrize("name", sorted(WORKERS_ARGUMENTS))
@@ -232,3 +246,89 @@ def test_thresholds_are_recorded_and_written() -> None:
         "basis": thresholds.basis,
     }
     assert threshold_text(1e-7, 1e-4) == "green below 1e-07, red from 1e-04"
+
+
+def test_cpu_model_reads_the_systems_name(tmp_path: Path) -> None:
+    cpuinfo = tmp_path / "cpuinfo"
+    cpuinfo.write_text("processor\t: 0\nmodel name\t: Some CPU @ 3 GHz\n")
+    assert cpu_model(cpuinfo) == "Some CPU @ 3 GHz"
+
+
+@pytest.mark.parametrize(
+    ("processor", "machine", "expected"),
+    [
+        ("Intel64 Family 6", "AMD64", "Intel64 Family 6"),
+        ("", "arm64", "arm64"),
+        ("", "", "unknown CPU"),
+    ],
+)
+@pytest.mark.parametrize("cpuinfo", ["processor\t: 0\n", None])
+def test_cpu_model_falls_back_to_the_platforms_name(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    processor: str,
+    machine: str,
+    expected: str,
+    cpuinfo: str | None,
+) -> None:
+    # Without a model name in /proc/cpuinfo (or without the file: macOS,
+    # Windows).
+    monkeypatch.setattr(platform, "processor", lambda: processor)
+    monkeypatch.setattr(platform, "machine", lambda: machine)
+    path = tmp_path / "cpuinfo"
+    if cpuinfo is not None:
+        path.write_text(cpuinfo)
+    assert cpu_model(path) == expected
+
+
+def test_the_machine_is_this_one_today() -> None:
+    measured = machine()
+    assert measured["cpu_model"] == cpu_model()
+    assert measured["python"] == platform.python_version()
+    assert measured["logical_cpus"] >= 1
+    assert measured["date"] == datetime.datetime.now(datetime.UTC).date().isoformat()
+
+
+def test_machine_text_names_where_and_when() -> None:
+    measured: Machine = {
+        "cpu_model": "Some CPU",
+        "logical_cpus": 8,
+        "python": "3.13.7",
+        "date": "2026-11-02",
+    }
+    assert machine_text(measured) == (
+        "2026-11-02, Some CPU (8 logical CPUs), Python 3.13.7"
+    )
+
+
+class Measurement(TypedDict):
+    seconds: float
+
+
+def test_read_timings_reads_only_the_timings(tmp_path: Path) -> None:
+    path = tmp_path / "results.json"
+    path.write_text(json_text({"other": [1, "a"], "timings": {"seconds": 1.5}}))
+    assert read_timings(path, Measurement) == {"seconds": 1.5}
+
+
+def test_read_timings_of_a_missing_file_or_null_timings_are_none(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "results.json"
+    assert read_timings(path, Measurement) is None
+    path.write_text(json_text({"timings": None}))
+    assert read_timings(path, Measurement) is None
+
+
+def test_read_timings_checks_the_timings(tmp_path: Path) -> None:
+    path = tmp_path / "results.json"
+    path.write_text(json_text({"timings": {"seconds": "slow"}}))
+    with pytest.raises(ValueError, match=r"the timings of .* is not a Measurement"):
+        read_timings(path, Measurement)
+
+
+def test_read_timings_needs_timings(tmp_path: Path) -> None:
+    path = tmp_path / "results.json"
+    path.write_text(json_text({"other": 1}))
+    with pytest.raises(ValueError, match="has no timings"):
+        read_timings(path, Measurement)

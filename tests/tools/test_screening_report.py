@@ -177,7 +177,13 @@ def comparison() -> report.Comparison:
 @pytest.fixture(scope="module")
 def inputs() -> report.Inputs:
     manifest = snapshot.read_manifest(snapshot.DATA)
-    return report.Inputs(tuple(ROWS), tuple(objects()), manifest["socrates"], "day")
+    return report.Inputs(
+        tuple(ROWS),
+        tuple(objects()),
+        manifest["socrates"],
+        "day",
+        snapshot.window_start(manifest),
+    )
 
 
 def test_matches_keep_the_excerpts_order(comparison: report.Comparison) -> None:
@@ -269,10 +275,6 @@ def test_render_without_findings(
 )
 def test_groups_split_at_one_kilometre_per_second(speed: float, group: str) -> None:
     assert report.group(dataclasses.replace(ROWS[0], relative_speed=speed)) == group
-
-
-def test_the_window_starts_at_midnight_of_the_first_tca() -> None:
-    assert report.window_start(ROWS).isot == "2026-10-06T00:00:00.000"
 
 
 def test_tolerances_bound_each_value(comparison: report.Comparison) -> None:

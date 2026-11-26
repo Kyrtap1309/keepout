@@ -283,30 +283,31 @@ def add_data_commands(
 
 
 def build_or_verify(
-    args: argparse.Namespace,
+    *,
+    raw: Path | None,
+    data: Path,
+    check: bool,
     from_raw: Callable[[Path], _Inputs],
     from_data: Callable[[Path], _Inputs],
     files: Callable[[Path, _Inputs], Mapping[str, bytes]],
     tool: str,
 ) -> int:
-    """The ``build`` command (or with ``--check`` its verification) or ``verify``.
+    """The ``build`` command (or with ``check`` its verification), or
+    ``verify`` when there is no ``raw``.
 
     ``build`` makes the inputs of the files ``from_raw`` (the ``RAW``
-    directory), ``verify`` ``from_data`` (the committed data), and ``files``
-    gives the bytes each file should hold.
+    directory), ``verify`` ``from_data`` (the committed data in ``data``),
+    and ``files`` gives the bytes each file in ``data`` should hold.
 
     Returns
     -------
     int
         1 if ``build --check`` or ``verify`` found a file out of date, else 0.
     """
-    if args.command == "build":
-        inputs, check = from_raw(args.raw), args.check
-    else:
-        inputs, check = from_data(args.data), True
-    stored = files(args.data, inputs)
+    inputs = from_data(data) if raw is None else from_raw(raw)
+    stored = files(data, inputs)
     return write_or_check(
-        {args.data / name: content for name, content in stored.items()},
-        check=check,
+        {data / name: content for name, content in stored.items()},
+        check=check or raw is None,
         tool=f"{tool} build",
     )

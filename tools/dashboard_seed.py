@@ -6,13 +6,14 @@ Usage: ``uv run python tools/dashboard_seed.py [--check] [--cara] [--dir DIR]``.
 
 Runs the example fleet (``examples/synthetic-operator/fleet.toml``) against
 the committed public catalog (``tests/screening/data/``) as
-``tools/synthetic_operator_report.py`` does, but as an operator receives
-updates: every :data:`CADENCE` (12 h) over the first two days of the
-snapshot's week (:data:`ISSUES`, 4 runs), each run screening the rest of the
-week and issuing its CDMs at its own start (``CREATION_DATE``). An approach
-screened by several runs thus gets several CDMs, which a store groups into
-one event. Writes each CDM to ``examples/dashboard/cdms/<MESSAGE_ID>.kvn``
-(:data:`SEED_DIR`), removing any other ``.kvn`` file there. The creation
+``tools/synthetic_operator_report.py`` does (``tools/operator_example.py``),
+but as an operator receives updates: every :data:`CADENCE` (12 h) over the
+first two days of the snapshot's week (:data:`ISSUES`, 4 runs), each run
+screening the rest of the week and issuing its CDMs at its own start
+(``CREATION_DATE``). An approach screened by several runs thus gets several
+CDMs, which a store groups into one event. Writes each CDM to
+``examples/dashboard/cdms/<MESSAGE_ID>.kvn`` (:data:`SEED_DIR`), removing
+any other ``.kvn`` file there. The creation
 dates follow from the snapshot, not the clock, so a run gives the same files
 again; ``TCA`` is rounded to the millisecond and the real values to
 :data:`SIGNIFICANT_DIGITS` (:func:`seed_text`) so that no digit depends on
@@ -25,7 +26,8 @@ an event's CDMs give the same Pc (a flat trend), and only the time to TCA,
 and so the decision, changes between them.
 
 The demo: :data:`DEMO_DIR` holds one more CDM, :func:`demo_update`, which
-the demo uploads to show a rising trend; writing and ``--check`` cover it.
+the demo uploads to show a rising trend; writing and ``--check`` cover it,
+unless ``--dir`` names another directory than :data:`SEED_DIR`.
 ``--store PATH`` builds the demo's store instead (:func:`demo_store`): the
 seed with its Pc and the cached manoeuvre plan of :data:`DEMO_EVENT`, as
 the Docker image packages it.
@@ -45,29 +47,29 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import math
 import re
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
 import screening_snapshot as snapshot
-import synthetic_operator_report as report
 from astropy import units as u
 from astropy.time import Time
-from generated import REPO, write_or_check
+from generated import CARA_CDM_ID, REPO, write_or_check
+from operator_example import operator_run, rounded
 
+from keepout._text import isot
 from keepout._workers import DEFAULT_WORKERS
 from keepout.cdm import Cdm, kvn, load, make_message_id, read_text
 from keepout.cdm.keywords import covariance_names
 from keepout.cdm.model import Field, Section
 from keepout.errors import SourceUnavailable
-from keepout.screening import DEFAULT_DURATION, DEFAULT_VOLUME
+from keepout.screening import DEFAULT_DURATION
 from keepout.settings import load_settings
 from keepout.sources import cara
 from keepout.sources.catalog import CatalogReference
-from keepout.synthetic import load_fleet
-from keepout.synthetic.operator import run
-from keepout.units import DAY, elapsed_seconds
+from keepout.units import DAY, KM, elapsed_seconds
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -123,6 +125,16 @@ near 1.5e-5 as the miss goes to 0. With both, the update's Pc is 3.2e-4,
 red under :data:`SETTINGS` (red from 1e-4); a miss of 0.25 gives 1.2e-4,
 too near the threshold."""
 
+NARROWED_COMMENT: Final = (
+    "keepout demo: the covariance below is the model's times "
+    f"{COVARIANCE_SCALE:g} (each sigma times {math.sqrt(COVARIANCE_SCALE):g})"
+)
+"""The comment :func:`demo_update` adds to each object's covariance comments,
+before the sigmas it states for the narrowed covariance."""
+
+SIGMAS: Final = "Sigmas: "
+"""How the model's comment stating an object's sigmas starts."""
+
 CADENCE: Final = DAY / 2
 """How often [s] the seed's operator screens and issues CDMs."""
 
@@ -139,10 +151,6 @@ moving the states at their 8th digit); 7 digits keep the metre."""
 
 _TCA: Final = re.compile(r"^(?P<key>TCA\s*=\s*)(?P<value>\S+)$")
 
-CARA_CDM_ID: Final = "000038771_conj_000030802_20201216_182131_20201215_171306"
-"""CARA's Metop-B test CDM, the one ``tools/maneuver_report.py`` plans
-(its ``CDM_ID``): Metop-B (38771) against 30802."""
-
 CARA_FILE: Final = cara.PC_METHOD_CDMS[CARA_CDM_ID]
 """Where that CDM is in CARA's repository, and its digest."""
 
@@ -151,17 +159,16 @@ def seed_text(text: str) -> str:
     """A synthetic CDM's KVN ``text`` as the seed writes it: ``TCA`` to the
     millisecond (as the ``MESSAGE_ID`` gives it) and every real value to
     :data:`SIGNIFICANT_DIGITS` significant digits, those below
-    :data:`synthetic_operator_report.NOISE_FLOOR` as 0.0
-    (:func:`synthetic_operator_report.rounded`)."""
+    :data:`operator_example.NOISE_FLOOR` as 0.0
+    (:func:`operator_example.rounded`)."""
 
     def tca(line: str) -> str:
         match = _TCA.match(line)
         if match is None:
             return line
-        value = Time(match["value"], scale="utc", precision=3).isot
-        return f"{match['key']}{value}"
+        return f"{match['key']}{isot(Time(match['value'], scale='utc'))}"
 
-    lines = report.rounded(text, SIGNIFICANT_DIGITS).split("\n")
+    lines = rounded(text, SIGNIFICANT_DIGITS).split("\n")
     return "\n".join(tca(line) for line in lines)
 
 
@@ -181,22 +188,14 @@ def synthetic_cdms(*, workers: int = DEFAULT_WORKERS) -> list[tuple[str, str]]:
     workers
         Processes to screen with; the CDMs do not depend on it.
     """
-    start = report.window_start(snapshot.read_manifest(snapshot.DATA))
+    start = snapshot.window_start(snapshot.read_manifest(snapshot.DATA))
     end = start + DEFAULT_DURATION * u.s
-    fleet = load_fleet(report.FLEET)
     catalog = snapshot.read_catalog(snapshot.DATA)
     cdms = [
         cdm
         for issued in issue_times(start)
-        for cdm in run(
-            fleet,
-            catalog,
-            issued,
-            elapsed_seconds(issued, end),
-            DEFAULT_VOLUME,
-            workers=workers,
-            thresholds=report.THRESHOLDS,
-            decision_config=report.DECISION,
+        for cdm in operator_run(
+            catalog, issued, elapsed_seconds(issued, end), workers=workers
         ).cdms
     ]
     return sorted(
@@ -331,6 +330,37 @@ def _number(section: Section, keyword: str) -> float:
     return value
 
 
+def _sigmas_comment(section: Section) -> str:
+    """The model's comment of an object's sigmas, for the covariance of
+    ``section``.
+
+    Raises
+    ------
+    ValueError
+        If the section has no real value of a variance.
+    """
+    radial, transverse, normal = (
+        math.sqrt(_number(section, keyword)) / KM
+        for keyword in ("CR_R", "CT_T", "CN_N")
+    )
+    return f"{SIGMAS}R {radial:.3f} km, T {transverse:.3f} km, N {normal:.3f} km"
+
+
+def _restated(section: Section) -> Section:
+    """``section`` with its sigmas comment stating its covariance, after
+    :data:`NARROWED_COMMENT`."""
+    fields: list[Field] = []
+    for field in section.fields:
+        if field.keyword == "COMMENT" and str(field.value).startswith(SIGMAS):
+            fields += [
+                Field("COMMENT", NARROWED_COMMENT),
+                Field("COMMENT", _sigmas_comment(section)),
+            ]
+        else:
+            fields.append(field)
+    return dataclasses.replace(section, fields=tuple(fields))
+
+
 def demo_update() -> tuple[str, str]:
     """The CDM the demo uploads: :data:`DEMO_EVENT`'s latest seed CDM,
     created at :data:`DEMO_AS_OF` with the miss scaled by
@@ -340,6 +370,9 @@ def demo_update() -> tuple[str, str]:
     Object 2 is moved towards object 1 along their separation (its
     velocity, and so the relative velocity, kept), the relative position
     and miss distance scaled with it, and :data:`DEMO_COMMENT` says so.
+    Each object's comments say its covariance is scaled
+    (:data:`NARROWED_COMMENT`) and state the sigmas it gives. Element set
+    ages are to TCA, which does not move, so they stay true.
 
     Raises
     ------
@@ -375,7 +408,7 @@ def demo_update() -> tuple[str, str]:
             for field in section.fields
             if field.keyword in covariance
         }
-        return _replaced(section, {**scaled_covariance, **values})
+        return _restated(_replaced(section, {**scaled_covariance, **values}))
 
     update = Cdm(
         header=_replaced(
@@ -613,8 +646,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     except SourceUnavailable as exc:
         print(f"{TOOL}: {exc}", file=sys.stderr)
         return 1
-    if args.dir is not None:  # Elsewhere: the seed only, not the demo's update.
-        return write_seed(cdms, args.dir, check=args.check)
+    directory = SEED_DIR if args.dir is None else args.dir
+    if directory.resolve() != SEED_DIR.resolve():
+        # Elsewhere: the seed only, not the demo's update.
+        return write_seed(cdms, directory, check=args.check)
     status = write_seed(cdms, SEED_DIR, check=args.check)
     return max(status, write_demo(check=args.check))
 

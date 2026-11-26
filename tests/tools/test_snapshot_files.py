@@ -209,7 +209,16 @@ def run(argv: list[str], default: Path) -> int:
     def files(data: Path, text: str) -> dict[str, bytes]:
         return {"text": text.encode()}
 
-    return snapshot_files.build_or_verify(args, read, read, files, "tool.py")
+    building = args.command == "build"
+    return snapshot_files.build_or_verify(
+        raw=args.raw if building else None,
+        data=args.data,
+        check=building and args.check,
+        from_raw=read,
+        from_data=read,
+        files=files,
+        tool="tool.py",
+    )
 
 
 def test_build_writes_the_data_from_raw_and_verify_checks_it(

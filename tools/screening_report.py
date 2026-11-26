@@ -19,7 +19,6 @@ whole catalog, in seconds instead of minutes.
 
 from __future__ import annotations
 
-import argparse
 import sys
 from collections import defaultdict
 from dataclasses import asdict, dataclass
@@ -35,17 +34,13 @@ from typing import (
 )
 
 import screening_snapshot as snapshot
-from astropy.time import Time
 from generated import (
-    README,
     REPO,
-    day_text,
     generated_notice,
-    json_text,
     minute_text,
-    positive,
-    readme_with,
     relative,
+    report_files,
+    report_parser,
     significant,
     table,
     write_or_check,
@@ -53,7 +48,6 @@ from generated import (
 from screening_snapshot import SocratesSummary
 
 from keepout._text import plural
-from keepout._workers import DEFAULT_WORKERS
 from keepout.screening import (
     DEFAULT_DURATION,
     DEFAULT_VOLUME,
@@ -68,6 +62,8 @@ from keepout.units import DAY, KM, MINUTE, julian_seconds_between
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
+
+    from astropy.time import Time
 
     from keepout.omm import Omm
 
@@ -176,12 +172,16 @@ class Inputs:
         Counts and times of the whole SOCRATES report (from the manifest).
     retrieved
         The day the data was retrieved (UTC, ISO 8601).
+    start
+        Where SOCRATES's week starts: 0 h UTC of the day of its first TCA
+        (:func:`screening_snapshot.window_start`).
     """
 
     approaches: tuple[SocratesApproach, ...]
     catalog: tuple[Omm, ...]
     socrates: SocratesSummary
     retrieved: str
+    start: Time
 
 
 def read_inputs(data: Path) -> Inputs:
@@ -192,6 +192,7 @@ def read_inputs(data: Path) -> Inputs:
         catalog=snapshot.read_catalog(data),
         socrates=manifest["socrates"],
         retrieved=snapshot.retrieval_day(manifest),
+        start=snapshot.window_start(manifest),
     )
 
 
@@ -205,12 +206,6 @@ def objects(approaches: Sequence[SocratesApproach]) -> set[int]:
 def group(approach: SocratesApproach) -> Group:
     """Whether SOCRATES's approach is fast or slow (:data:`FAST`)."""
     return "fast" if approach.relative_speed >= FAST else "slow"
-
-
-def window_start(approaches: Sequence[SocratesApproach]) -> Time:
-    """0 h UTC of the day of the first TCA: where SOCRATES's week starts."""
-    first = min(approaches, key=lambda a: (a.tca.jd1, a.tca.jd2))
-    return Time(day_text(first.tca.isot), scale="utc")
 
 
 @dataclass(frozen=True, slots=True)
@@ -1084,32 +1079,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         0 on success; 1 if, with ``--check``, a file is out of date, or if an
         approach differs without a known cause (:func:`problems`).
     """
-    parser = argparse.ArgumentParser(prog=TOOL)
-    parser.add_argument("--check", action="store_true", help="fail if out of date")
+    parser = report_parser(TOOL, page=PAGE)
     parser.add_argument("--data", type=Path, default=snapshot.DATA)
-    parser.add_argument("--page", type=Path, default=PAGE)
-    parser.add_argument("--readme", type=Path, default=README)
-    parser.add_argument(
-        "--workers",
-        type=positive,
-        default=DEFAULT_WORKERS,
-        help="processes to screen with",
-    )
     args = parser.parse_args(argv)
 
     inputs = read_inputs(args.data)
-    start = window_start(inputs.approaches)
-    comparison = compare(inputs.approaches, inputs.catalog, start, workers=args.workers)
+    comparison = compare(
+        inputs.approaches, inputs.catalog, inputs.start, workers=args.workers
+    )
     known = known_differences(inputs.approaches)
-    summary = summarise(comparison, inputs, start, known)
-    page = relative(args.page, args.readme.parent)
-    files = {
-        args.page.with_suffix(".json"): json_text(summary),
-        args.page: render_page(summary, known),
-        args.readme: readme_with(
-            args.readme, START, END, render_summary(summary, page)
-        ),
-    }
+    summary = summarise(comparison, inputs, inputs.start, known)
+    files = report_files(
+        args.page,
+        summary,
+        render_page(summary, known),
+        readme=args.readme,
+        markers=(START, END),
+        block=render_summary(summary, relative(args.page, args.readme.parent)),
+    )
     status = write_or_check(files, check=args.check, tool=TOOL)
     for problem in problems(summary, known):
         print(problem)

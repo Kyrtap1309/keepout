@@ -6,7 +6,8 @@ against the committed public catalog (``tests/screening/data/``, see
 ``tools/screening_snapshot.py``) with :func:`keepout.synthetic.run`
 over the week of the snapshot's SOCRATES report, with the defaults: the 5 km
 sphere, the published covariance model, keepout's risk thresholds and
-decision point. Writes ``docs/synthetic-operator.json`` (the numbers) and
+decision point (``tools/operator_example.py``). Writes
+``docs/synthetic-operator.json`` (the numbers) and
 ``docs/synthetic-operator.md`` (the page: the fleet, the model, every
 approach with its Pc and decision, and the CDM of the closest approach).
 Needs no network. ``--check`` fails instead of writing when a file is out of
@@ -19,22 +20,18 @@ gives the largest Pc over a scale factor of the combined covariance
 
 from __future__ import annotations
 
-import argparse
-import re
 import sys
 from collections import Counter
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, TypedDict
 
 import screening_snapshot as snapshot
-from astropy.time import Time
 from generated import (
     REPO,
-    day_text,
     generated_notice,
-    json_text,
     minute_text,
-    positive,
+    report_files,
+    report_parser,
     second_text,
     significant,
     table,
@@ -42,48 +39,45 @@ from generated import (
     threshold_text,
     write_or_check,
 )
+from operator_example import (
+    DECISION,
+    FLEET,
+    NOISE_FLOOR,
+    THRESHOLDS,
+    level_key,
+    operator_run,
+    rounded,
+    shown,
+)
 
 from keepout._text import isot, pc_text
-from keepout._workers import DEFAULT_WORKERS
 from keepout.ccsds.message import UNKNOWN
 from keepout.cdm import kvn
 from keepout.omm import Omm, deduplicate
 from keepout.pc import dilution
-from keepout.risk import Action, DecisionConfig, Thresholds
+from keepout.risk import Action
 from keepout.screening import DEFAULT_DURATION, DEFAULT_VOLUME
 from keepout.synthetic import (
     FleetSatellite,
     OperatorEvent,
     OperatorResult,
     OrbitRegime,
+    RegimeParameters,
     SyntheticCovarianceModel,
-    load_fleet,
     orbit_regime,
 )
-from keepout.synthetic.operator import run
 from keepout.units import DAY, KM
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
 PAGE: Final = REPO / "docs/synthetic-operator.md"
-FLEET: Final = REPO / "examples/synthetic-operator/fleet.toml"
 TOOL: Final = "tools/synthetic_operator_report.py"
-
-THRESHOLDS: Final = Thresholds()
-DECISION: Final = DecisionConfig()
 
 SIGNIFICANT_DIGITS: Final = 10
 """Significant digits of the numbers of the example CDM on the page: enough
 to read, and the last digits of a full-precision value could differ with the
 machine's floating-point library."""
-
-NOISE_FLOOR: Final = 1e-6
-"""Numbers of the example CDM smaller than this in magnitude (in the CDM's
-units: m, m/s, km, km/s, m**2, ...) are shown as 0.0. They are rounding
-noise, such as the off-diagonal terms (about 1e-9 m**2) of the model's
-diagonal RTN covariance after its rotations, whose digits depend on the
-machine."""
 
 
 class Settings(TypedDict):
@@ -166,27 +160,6 @@ class Summary(TypedDict):
     example: str | None
 
 
-def shown(path: Path) -> str:
-    """``path`` as the page names it: from the repository's root if inside
-    it, else as given."""
-    resolved = path.resolve()
-    if resolved.is_relative_to(REPO):
-        return resolved.relative_to(REPO).as_posix()
-    return path.as_posix()
-
-
-def window_start(manifest: snapshot.Manifest) -> Time:
-    """0 h UTC of the day of the first TCA of the snapshot's SOCRATES report:
-    the week ``tools/screening_report.py`` screens too."""
-    return Time(day_text(manifest["socrates"]["first_tca"]), scale="utc")
-
-
-def level_key(event: OperatorEvent) -> str | None:
-    """The key of an event's risk level; ``None`` without one."""
-    level = event.assessment.level
-    return None if level is None else level.key
-
-
 def _satellite(satellite: FleetSatellite, omm: Omm, approaches: int) -> Satellite:
     return {
         "catalog_number": satellite.catalog_number,
@@ -246,6 +219,16 @@ def _event(
     }
 
 
+def _regime(regime: OrbitRegime, parameters: RegimeParameters) -> Regime:
+    return {
+        "regime": str(regime),
+        "radial": parameters.radial,
+        "transverse": parameters.transverse,
+        "normal": parameters.normal,
+        "transverse_rate_per_day": round(parameters.transverse_rate * DAY, 6),
+    }
+
+
 def closest(result: OperatorResult) -> OperatorEvent | None:
     """The event of the closest approach (the earliest of equals)."""
     return min(result.events, key=lambda e: e.approach.range_at_tca, default=None)
@@ -274,7 +257,7 @@ def summarise(
         The event whose CDM the page shows: :func:`closest`.
     """
     screening = result.screening
-    elements = {omm.catalog_number: omm for omm in deduplicate(catalog).kept}
+    elements = deduplicate(catalog).by_number
     per_satellite = Counter(e.approach.primary_number for e in result.events)
     actions = Counter(e.action for e in result.events)
     model = result.model
@@ -296,15 +279,7 @@ def summarise(
             "skipped": len(screening.skipped),
         },
         "regimes": [
-            {
-                "regime": str(regime),
-                "radial": parameters.radial,
-                "transverse": parameters.transverse,
-                "normal": parameters.normal,
-                "transverse_rate_per_day": round(parameters.transverse_rate * DAY, 6),
-            }
-            for regime in OrbitRegime
-            for parameters in (model.parameters(regime),)
+            _regime(regime, model.parameters(regime)) for regime in OrbitRegime
         ],
         "fleet": [
             _satellite(
@@ -318,32 +293,6 @@ def summarise(
         "events": [_event(event, elements, model) for event in result.events],
         "example": None if example is None else example.cdm.message_id,
     }
-
-
-_NUMBER: Final = re.compile(
-    r"^(?P<key>[A-Z0-9_]+\s*=\s*)"
-    r"(?P<value>[-+]?(?:\d+\.\d*(?:[eE][-+]?\d+)?|\d+[eE][-+]?\d+))"
-    r"(?P<unit>\s*\[[^\]]*\])?$"
-)
-
-
-def rounded(
-    text: str, digits: int = SIGNIFICANT_DIGITS, floor: float = NOISE_FLOOR
-) -> str:
-    """KVN ``text`` with every real value rounded to ``digits`` significant
-    digits, and those smaller than ``floor`` in magnitude to 0.0 (integers,
-    times, names and comments unchanged)."""
-
-    def shorten(line: str) -> str:
-        match = _NUMBER.match(line)
-        if match is None:
-            return line
-        number = float(match["value"])
-        number = 0.0 if abs(number) < floor else significant(number, digits)
-        value = repr(number)
-        return f"{match['key']}{value}{match['unit'] or ''}"
-
-    return "\n".join(shorten(line) for line in text.split("\n"))
 
 
 def _km(metres: float) -> str:
@@ -579,7 +528,10 @@ def _example(summary: Summary, cdm: str | None) -> list[str]:
         '??? example "The CDM in KVN"',
         "",
         "    ```text",
-        *(f"    {line}" for line in rounded(cdm).rstrip("\n").split("\n")),
+        *(
+            f"    {line}"
+            for line in rounded(cdm, SIGNIFICANT_DIGITS).rstrip("\n").split("\n")
+        ),
         "    ```",
     ]
 
@@ -625,41 +577,26 @@ def main(argv: Sequence[str] | None = None) -> int:
     int
         0 on success; 1 if, with ``--check``, a file is out of date.
     """
-    parser = argparse.ArgumentParser(prog=TOOL)
-    parser.add_argument("--check", action="store_true", help="fail if out of date")
+    parser = report_parser(TOOL, page=PAGE, readme=False)
     parser.add_argument("--data", type=Path, default=snapshot.DATA)
     parser.add_argument("--fleet", type=Path, default=FLEET)
-    parser.add_argument("--page", type=Path, default=PAGE)
-    parser.add_argument(
-        "--workers",
-        type=positive,
-        default=DEFAULT_WORKERS,
-        help="processes to screen with",
-    )
     args = parser.parse_args(argv)
 
     manifest = snapshot.read_manifest(args.data)
     catalog = snapshot.read_catalog(args.data)
-    fleet = load_fleet(args.fleet)
-    result = run(
-        fleet,
+    result = operator_run(
         catalog,
-        window_start(manifest),
+        snapshot.window_start(manifest),
         DEFAULT_DURATION,
-        DEFAULT_VOLUME,
         workers=args.workers,
-        thresholds=THRESHOLDS,
-        decision_config=DECISION,
+        fleet=args.fleet,
     )
     example = closest(result)
     summary = summarise(
         result, catalog, snapshot.retrieval_day(manifest), shown(args.fleet), example
     )
     cdm = None if example is None else kvn.dumps(example.cdm)
-    files = {
-        args.page.with_suffix(".json"): json_text(summary),
-        args.page: render_page(summary, cdm),
-    }
+    files = report_files(args.page, summary, render_page(summary, cdm))
     return write_or_check(files, check=args.check, tool=TOOL)
 
 

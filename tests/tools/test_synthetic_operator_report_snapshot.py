@@ -1,12 +1,12 @@
 """The example synthetic operator on the frozen catalog (offline, about 10 s):
 the events and decisions the report describes."""
 
+import operator_example as example
 import pytest
 import screening_snapshot as snapshot
 import synthetic_operator_report as report
 
-from keepout.screening import DEFAULT_DURATION, DEFAULT_VOLUME
-from keepout.synthetic import load_fleet, run
+from keepout.screening import DEFAULT_DURATION
 
 pytestmark = pytest.mark.slow
 
@@ -15,21 +15,14 @@ pytestmark = pytest.mark.slow
 def summary() -> report.Summary:
     manifest = snapshot.read_manifest(snapshot.DATA)
     catalog = snapshot.read_catalog(snapshot.DATA)
-    result = run(
-        load_fleet(report.FLEET),
-        catalog,
-        report.window_start(manifest),
-        DEFAULT_DURATION,
-        DEFAULT_VOLUME,
-        workers=4,
-        thresholds=report.THRESHOLDS,
-        decision_config=report.DECISION,
+    result = example.operator_run(
+        catalog, snapshot.window_start(manifest), DEFAULT_DURATION, workers=4
     )
     return report.summarise(
         result,
         catalog,
         snapshot.retrieval_day(manifest),
-        report.shown(report.FLEET),
+        example.shown(example.FLEET),
         report.closest(result),
     )
 

@@ -16,10 +16,9 @@ number of approaches, of catalog objects screened and of objects read.
 ``compare`` command runs this file of the tree being tested with the Python
 environment of an older tree, to time that tree's keepout under the same
 measurement. So this file imports nothing else from ``tools/`` and only
-names keepout has had since it could screen: ``keepout.omm.load``,
-``keepout.screening`` (``screen``, ``ScreeningResult``, ``ScreeningVolume``,
-``VolumeRule``) and ``keepout.screening.volume.SOCRATES_RADIUS``. CPU time
-comes from ``resource`` (Linux and macOS).
+names keepout has had since it could screen
+(``tests/tools/test_timing_imports.py`` holds the list). CPU time comes
+from ``resource`` (Linux and macOS).
 """
 
 from __future__ import annotations

@@ -12,7 +12,7 @@ required to exist (SVG bytes vary with the matplotlib version).
 
 from __future__ import annotations
 
-import argparse
+import functools
 import sys
 from collections import Counter
 from dataclasses import dataclass
@@ -28,22 +28,27 @@ from typing import (
 )
 
 from generated import (
-    README,
     REPO,
     generated_notice,
-    json_text,
-    readme_with,
     relative,
-    save_svg,
+    report_files,
+    report_parser,
     table,
     threshold_settings,
     threshold_text,
     write_or_check,
+    write_or_check_figures,
 )
 from matplotlib.figure import Figure
 
 from keepout._text import plural
-from keepout.figures import FIT_COLOUR, RISK_COLOURS, THRESHOLD_LABELS, trend_figure
+from keepout.figures import (
+    DECISION_POINT_COLOUR,
+    FIT_COLOUR,
+    RISK_COLOURS,
+    THRESHOLD_LABELS,
+    trend_figure,
+)
 from keepout.risk import (
     Action,
     Assessment,
@@ -502,7 +507,7 @@ def trend_plot(figure: TrendFigure, title: str) -> Figure:
         )
     axes.axvline(
         DECISION.decision_point / DAY,
-        color="#424242",
+        color=DECISION_POINT_COLOUR,
         linestyle=":",
         label="decision point",
     )
@@ -518,9 +523,11 @@ def trend_plot(figure: TrendFigure, title: str) -> Figure:
     return drawing
 
 
-def plot(figure: TrendFigure, title: str, path: Path) -> None:
-    """An event's plot (:func:`trend_plot`), saved as a reproducible SVG."""
-    save_svg(trend_plot(figure, title), path)
+def _event_plot(event: KelvinsEvent) -> Figure:
+    """The plot of an event (:func:`trend_plot`), assessed as the report
+    assesses it."""
+    assessment = assess_with_settings(event.observations())
+    return trend_plot(trend_figure(assessment), plot_title(event, assessment))
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -532,11 +539,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         0 on success; 1 if, with ``--check``, a file is out of date or a plot
         is missing.
     """
-    parser = argparse.ArgumentParser(prog=TOOL)
-    parser.add_argument(
-        "--check",
-        action="store_true",
-        help=(
+    parser = report_parser(
+        TOOL,
+        page=PAGE,
+        images=IMAGES,
+        workers=False,
+        check=(
             "fail if out of date (the plots only need to exist: their SVG bytes "
             "vary with the matplotlib version)"
         ),
@@ -544,40 +552,25 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--table", type=Path, default=None, help="a local raw table or excerpt"
     )
-    parser.add_argument("--page", type=Path, default=PAGE)
-    parser.add_argument("--images", type=Path, default=IMAGES)
-    parser.add_argument("--readme", type=Path, default=README)
     args = parser.parse_args(argv)
 
     events = kelvins.load(args.table)
     summary = summarise(events)
-    block = render_summary(summary, relative(args.images, args.readme.parent))
-    files = {
-        args.page.with_suffix(".json"): json_text(summary),
-        args.page: render_page(summary, relative(args.images, args.page.parent)),
-        args.readme: readme_with(args.readme, START, END, block),
-    }
+    files = report_files(
+        args.page,
+        summary,
+        render_page(summary, relative(args.images, args.page.parent)),
+        readme=args.readme,
+        markers=(START, END),
+        block=render_summary(summary, relative(args.images, args.readme.parent)),
+    )
     status = write_or_check(files, check=args.check, tool=TOOL)
     by_id = {event.event_id: event for event in events}
-    for event_id in summary["examples"].values():
-        path = args.images / image(event_id)
-        if args.check:
-            # Only its existence: matplotlib versions write different SVG
-            # bytes for the same figure.
-            if not path.exists():
-                print(f"{path} is missing; run {TOOL}")
-                status = 1
-            continue
-        args.images.mkdir(parents=True, exist_ok=True)
-        event = by_id[event_id]
-        assessment = assess_with_settings(event.observations())
-        plot(
-            trend_figure(assessment),
-            plot_title(event, assessment),
-            path,
-        )
-        print(f"wrote {path}")
-    return status
+    figures = {
+        args.images / image(event_id): functools.partial(_event_plot, by_id[event_id])
+        for event_id in summary["examples"].values()
+    }
+    return max(status, write_or_check_figures(figures, check=args.check, tool=TOOL))
 
 
 if __name__ == "__main__":

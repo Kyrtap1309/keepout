@@ -8,7 +8,7 @@ from pathlib import Path
 import dashboard_benchmark as benchmark
 import dashboard_timing as timing
 import pytest
-from benchmark_runs import Comparison
+from benchmark_runs import Comparison, TimingFailed
 from report_builders import fake_python
 
 from keepout.settings import Settings
@@ -22,7 +22,7 @@ CDMS = 100
 def small_store(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """A store of 20 events and 100 CDMs, built once (read-only)."""
     path = tmp_path_factory.mktemp("bench") / "bench.db"
-    return benchmark.build_store(path, events=EVENTS, cdms=CDMS)
+    return timing.build_store(path, events=EVENTS, cdms=CDMS)
 
 
 def _rows(path: Path, query: str) -> list[tuple[object, ...]]:
@@ -53,12 +53,12 @@ def test_build_store_counts(small_store: Path) -> None:
 
 
 def test_build_store_spreads_the_remainder(tmp_path: Path) -> None:
-    path = benchmark.build_store(tmp_path / "odd.db", events=3, cdms=7)
+    path = timing.build_store(tmp_path / "odd.db", events=3, cdms=7)
     assert _counts(path) == [2, 2, 3]
 
 
 def test_build_store_is_deterministic(small_store: Path, tmp_path: Path) -> None:
-    again = benchmark.build_store(tmp_path / "again.db", events=EVENTS, cdms=CDMS)
+    again = timing.build_store(tmp_path / "again.db", events=EVENTS, cdms=CDMS)
     query = "SELECT message_id, content FROM cdms ORDER BY message_id"
     assert _rows(again, query) == _rows(small_store, query)
     query = "SELECT id FROM events ORDER BY id"
@@ -67,7 +67,7 @@ def test_build_store_is_deterministic(small_store: Path, tmp_path: Path) -> None
 
 def test_build_store_needs_a_cdm_per_event(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="at least one CDM per event"):
-        benchmark.build_store(tmp_path / "s.db", events=3, cdms=2)
+        timing.build_store(tmp_path / "s.db", events=3, cdms=2)
 
 
 def test_timing_main_prints_one_measurement(
@@ -297,7 +297,7 @@ def test_compare_main_reports_a_failure_of_this_tree(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     def failing(command: Sequence[str]) -> str:
-        raise benchmark.TimingFailed("StoreError: disk full")
+        raise TimingFailed("StoreError: disk full")
 
     monkeypatch.setattr(benchmark, "run_process", failing)
     assert benchmark.main(compare_arguments("base-python")) == 1

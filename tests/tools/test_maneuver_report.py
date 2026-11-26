@@ -6,16 +6,18 @@ drifting past Luch-5X), whose primary the fleet below makes manoeuvrable.
 """
 
 import copy
+import dataclasses
 import shutil
 from pathlib import Path
 from typing import Final
 
 import astropy.units as u
+import maneuver_heatmap as heatmap
 import maneuver_report as report
 import pytest
 from builders import CROSSING_TCA, crossing_conjunction
 from cli_builders import write_fleet
-from generated import json_text, read_json, readme_with, relative
+from generated import json_text, read_json, readme_with, relative, save_svg
 from matplotlib.collections import QuadMesh
 from matplotlib.colors import to_hex
 from report_builders import fixture_data, readme_with_markers
@@ -192,11 +194,12 @@ def test_the_heatmap_is_a_reproducible_svg(generated: Path, tmp_path: Path) -> N
     plan, _, _ = report.timed_plan(event, 10.0, 1)
     title = report.heatmap_title(written(generated)["event"])
     one, two = tmp_path / "one.svg", tmp_path / "two.svg"
-    report.plot(grid_figure(plan), title, one)
-    report.plot(grid_figure(plan), title, two)
+    for path in (one, two):
+        drawing = heatmap.heatmap_figure(grid_figure(plan), title)
+        save_svg(drawing, path, facecolor=heatmap.FACECOLOR, dpi=heatmap.DPI)
     assert one.read_bytes() == two.read_bytes()
-    heatmap = generated / "docs" / "img" / "maneuver" / report.HEATMAP
-    assert one.read_bytes() == heatmap.read_bytes()
+    written_svg = generated / "docs" / "img" / "maneuver" / report.HEATMAP
+    assert one.read_bytes() == written_svg.read_bytes()
     text = one.read_text(encoding="utf-8")
     assert text.startswith("<?xml")
     assert "<dc:date>" not in text
@@ -370,7 +373,7 @@ def test_a_plan_without_options_says_so(generated: Path) -> None:
 def test_plot_uses_figure_colours(generated: Path) -> None:
     event, _ = report.load_event(generated / f"{NAME}.kvn")
     plan, _, _ = report.timed_plan(event, 10.0, 1)
-    drawing = report.heatmap_figure(grid_figure(plan), "a heatmap")
+    drawing = heatmap.heatmap_figure(grid_figure(plan), "a heatmap")
     meshes = [
         mesh
         for axes in drawing.axes[:2]
@@ -468,19 +471,24 @@ def test_a_radius_must_be_positive(
 
 
 def test_delta_v_keeps_three_figures_both_ways() -> None:
-    assert report.delta_v_text(-0.0019953) == "-0.00200"
-    assert report.delta_v_text(0.003981) == "+0.00398"
-    assert report.delta_v_text(0.0794) == "+0.0794"
+    assert heatmap.delta_v_text(-0.0019953) == "-0.00200"
+    assert heatmap.delta_v_text(0.003981) == "+0.00398"
+    assert heatmap.delta_v_text(0.0794) == "+0.0794"
 
 
 def test_a_note_repeated_for_the_options_is_one_caveat(generated: Path) -> None:
     plan = copy.deepcopy(written(generated)["event"])
+    prograde, retrograde = plan["prograde"], plan["retrograde"]
+    assert prograde is not None
+    assert retrograde is not None
     plan["notes"] = [
         "2-D Pc assumptions questionable: lasts 1 s; a 3-D Pc may differ",
         "drag is off: no CD_AREA_OVER_MASS",
-        "prograde: 2-D Pc assumptions questionable: lasts 2 s; a 3-D Pc may differ",
-        "retrograde: covariance repaired",
     ]
+    prograde["notes"] = [
+        "2-D Pc assumptions questionable: lasts 2 s; a 3-D Pc may differ"
+    ]
+    retrograde["notes"] = ["covariance repaired"]
     assert report._caveats(plan) == [
         "",
         "Caveats:",
@@ -491,3 +499,17 @@ def test_a_note_repeated_for_the_options_is_one_caveat(generated: Path) -> None:
         "- drag is off: no CD_AREA_OVER_MASS.",
         "- retrograde: covariance repaired.",
     ]
+
+
+def test_an_options_notes_are_written_with_the_option_only(generated: Path) -> None:
+    event, _ = report.load_event(generated / f"{NAME}.kvn")
+    plan, _, _ = report.timed_plan(event, 10.0, 1)
+    assert plan.prograde is not None
+    option = dataclasses.replace(plan.prograde, notes=("covariance repaired",))
+    notes = ("drag is off", "prograde: covariance repaired")
+    summary = report.plan_summary(
+        dataclasses.replace(plan, prograde=option, notes=notes)
+    )
+    assert summary["notes"] == ["drag is off"]
+    assert summary["prograde"] is not None
+    assert summary["prograde"]["notes"] == ["covariance repaired"]

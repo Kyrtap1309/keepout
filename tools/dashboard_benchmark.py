@@ -23,6 +23,7 @@ import statistics
 import sys
 import tempfile
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
@@ -32,6 +33,7 @@ from benchmark_runs import (
     Side,
     TimingFailed,
     alternate,
+    cpu_cells,
     cpu_change,
     run_process,
     skipped_lines,
@@ -56,11 +58,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 __all__ = [
-    "TimingFailed",
-    "Timings",
-    "build_store",
     "main",
-    "measure",
     "render_comparison",
     "run_timing",
 ]
@@ -81,6 +79,41 @@ THRESHOLD: Final = 0.2
 """``compare`` fails when this tree's median CPU time of a read exceeds the
 base's by more than this fraction, unless told otherwise."""
 
+DIGITS: Final = 3
+"""Decimals of the times [s] the tool prints."""
+
+
+@dataclass(frozen=True, slots=True)
+class StoreSize:
+    """The synthetic store timed: ``events`` events of ``cdms`` CDMs in all,
+    drawn with the random ``seed`` (:func:`dashboard_timing.build_store`)."""
+
+    events: int
+    cdms: int
+    seed: int
+
+
+@dataclass(frozen=True, slots=True)
+class RunOptions:
+    """What ``run`` is asked: the store to build (unless ``store`` exists),
+    the store's file (``None``: a temporary one) and the timed reads."""
+
+    size: StoreSize
+    store: Path | None
+    repeat: int
+
+
+@dataclass(frozen=True, slots=True)
+class CompareOptions:
+    """What ``compare`` is asked: the store each tree builds, the base's
+    Python, the timing processes per tree and the largest CPU time change
+    that is not a regression."""
+
+    size: StoreSize
+    base_python: str
+    repeat: int
+    threshold: float
+
 
 def run_timing(command: Sequence[str]) -> Timings:
     """The measurement printed by a timing process run as ``command``.
@@ -97,12 +130,7 @@ def run_timing(command: Sequence[str]) -> Timings:
 
 def _seconds(values: Sequence[float]) -> str:
     """The median of ``values`` [s]."""
-    return f"{statistics.median(values):.3f} s"
-
-
-def _range(values: Sequence[float]) -> str:
-    """The range of ``values`` [s]."""
-    return f"{min(values):.3f} - {max(values):.3f} s"
+    return f"{statistics.median(values):.{DIGITS}f} s"
 
 
 def render_comparison(
@@ -132,10 +160,8 @@ def render_comparison(
     rows: list[tuple[str, ...]] = [
         (
             name,
-            _seconds(list_cpu[side]),
-            _range(list_cpu[side]),
-            _seconds(event_cpu[side]),
-            _range(event_cpu[side]),
+            *cpu_cells(list_cpu[side], DIGITS),
+            *cpu_cells(event_cpu[side], DIGITS),
             _seconds([run["list_wall"] for run in runs[side]]),
             _seconds([run["event_wall"] for run in runs[side]]),
         )
@@ -159,7 +185,7 @@ def _command(python: str, action: str, store: Path, *options: str) -> list[str]:
     return [python, str(TIMING), action, str(store), *options]
 
 
-def _compared(args: argparse.Namespace, directory: Path) -> Comparison[Timings]:
+def _compared(options: CompareOptions, directory: Path) -> Comparison[Timings]:
     """The comparison of this tree with the base, each timing its own store
     built in ``directory`` (the base's schema may differ).
 
@@ -168,10 +194,11 @@ def _compared(args: argparse.Namespace, directory: Path) -> Comparison[Timings]:
     TimingFailed
         If this tree cannot build its store or time it.
     """
-    pythons: dict[Side, str] = {"head": sys.executable, "base": args.base_python}
+    pythons: dict[Side, str] = {"head": sys.executable, "base": options.base_python}
     stores = {side: directory / f"{side}.db" for side in pythons}
-    size = ["--events", str(args.events), "--cdms", str(args.cdms)]
-    size += ["--seed", str(args.seed)]
+    store = options.size
+    size = ["--events", str(store.events), "--cdms", str(store.cdms)]
+    size += ["--seed", str(store.seed)]
     run_process(_command(pythons["head"], "build", stores["head"], *size))
     try:
         run_process(_command(pythons["base"], "build", stores["base"], *size))
@@ -181,7 +208,7 @@ def _compared(args: argparse.Namespace, directory: Path) -> Comparison[Timings]:
         _command(pythons[side], "time", stores[side], "--repeat", str(REPEAT))
         for side in SIDES
     )
-    return alternate(head, base, repeat=args.repeat, run=run_timing)
+    return alternate(head, base, repeat=options.repeat, run=run_timing)
 
 
 def _warning(text: str) -> str:
@@ -192,7 +219,7 @@ def _warning(text: str) -> str:
     return f"::warning::The merge base cannot be timed: {last}"
 
 
-def compare_main(args: argparse.Namespace) -> int:
+def compare_main(options: CompareOptions) -> int:
     """The comparison of this tree's dashboard reads with another tree's.
 
     Returns
@@ -203,15 +230,16 @@ def compare_main(args: argparse.Namespace) -> int:
     """
     try:
         with tempfile.TemporaryDirectory() as directory:
-            comparison = _compared(args, Path(directory))
+            comparison = _compared(options, Path(directory))
     except (TimingFailed, ValueError) as error:
         print(f"Error: this tree cannot be timed: {error}", file=sys.stderr)
         return 1
+    size = options.size
     setting = (
-        f"{plural(args.events, 'event')}, {plural(args.cdms, 'CDM')}, "
-        f"{plural(args.repeat, 'run')} per tree"
+        f"{plural(size.events, 'event')}, {plural(size.cdms, 'CDM')}, "
+        f"{plural(options.repeat, 'run')} per tree"
     )
-    text, regression = render_comparison(comparison, setting, args.threshold)
+    text, regression = render_comparison(comparison, setting, options.threshold)
     print(text)
     # A base without the dashboard is skipped quietly; any other failure warns.
     if comparison.skipped and NO_DASHBOARD not in comparison.skipped:
@@ -224,10 +252,10 @@ def _target(name: str, seconds: float, target: float) -> tuple[str, bool]:
     """A read's line of ``run``, and whether it missed its target."""
     missed = seconds >= target
     verdict = "missed" if missed else "met"
-    return f"{name}: {seconds:.3f} s (target < {target:g} s): {verdict}.", missed
+    return f"{name}: {seconds:.{DIGITS}f} s (target < {target:g} s): {verdict}.", missed
 
 
-def _timed_store(args: argparse.Namespace, directory: Path) -> Timings:
+def _timed_store(options: RunOptions, directory: Path) -> Timings:
     """The timings of ``--store``, built first unless it exists, or of a
     store built in ``directory``.
 
@@ -238,18 +266,19 @@ def _timed_store(args: argparse.Namespace, directory: Path) -> Timings:
     ValueError
         If it cannot be built as asked, or has no upcoming event.
     """
-    path: Path = args.store or directory / "dashboard.db"
+    path = options.store or directory / "dashboard.db"
+    size = options.size
     if not path.exists():
         start = time.perf_counter()
-        build_store(path, events=args.events, cdms=args.cdms, seed=args.seed)
+        build_store(path, events=size.events, cdms=size.cdms, seed=size.seed)
         print(
-            f"Built a store of {plural(args.events, 'event')} and "
-            f"{plural(args.cdms, 'CDM')} in {time.perf_counter() - start:.1f} s."
+            f"Built a store of {plural(size.events, 'event')} and "
+            f"{plural(size.cdms, 'CDM')} in {time.perf_counter() - start:.1f} s."
         )
-    return measure(path, repeat=args.repeat)
+    return measure(path, repeat=options.repeat)
 
 
-def run_main(args: argparse.Namespace) -> int:
+def run_main(options: RunOptions) -> int:
     """The dashboard's reads timed against their targets.
 
     Returns
@@ -260,11 +289,11 @@ def run_main(args: argparse.Namespace) -> int:
     """
     try:
         with tempfile.TemporaryDirectory() as directory:
-            timings = _timed_store(args, Path(directory))
+            timings = _timed_store(options, Path(directory))
     except (KeepoutError, ValueError) as error:
         print(f"Error: {error}", file=sys.stderr)
         return 1
-    reads = plural(args.repeat, "read")
+    reads = plural(options.repeat, "read")
     print(f"Median of {reads} after a warm one, without Streamlit:")
     lines = [
         _target("Events list (first page)", timings["list_wall"], LIST_TARGET),
@@ -308,9 +337,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     comparing.add_argument("--repeat", type=positive, default=COMPARE_REPEAT)
     comparing.add_argument("--threshold", type=float, default=THRESHOLD)
     args = parser.parse_args(argv)
+    size = StoreSize(events=args.events, cdms=args.cdms, seed=args.seed)
     if args.command == "compare":
-        return compare_main(args)
-    return run_main(args)
+        return compare_main(
+            CompareOptions(
+                size=size,
+                base_python=args.base_python,
+                repeat=args.repeat,
+                threshold=args.threshold,
+            )
+        )
+    return run_main(RunOptions(size=size, store=args.store, repeat=args.repeat))
 
 
 if __name__ == "__main__":

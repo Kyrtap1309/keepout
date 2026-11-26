@@ -19,13 +19,13 @@ def inputs() -> report.Inputs:
 
 @pytest.fixture(scope="module")
 def comparison(inputs: report.Inputs) -> report.Comparison:
-    start = report.window_start(inputs.approaches)
+    start = inputs.start
     return report.compare(inputs.approaches, inputs.catalog, start, workers=4)
 
 
 @pytest.fixture(scope="module")
 def summary(inputs: report.Inputs, comparison: report.Comparison) -> report.Summary:
-    start = report.window_start(inputs.approaches)
+    start = inputs.start
     return report.summarise(comparison, inputs, start)
 
 
@@ -103,8 +103,6 @@ def test_socrates_leaves_out_terrasar_x_and_tandem_x(inputs: report.Inputs) -> N
     assert {31698, 36605} <= objects
     assert frozenset((31698, 36605)) not in pairs
     by_number = {omm.catalog_number: omm for omm in inputs.catalog}
-    result = screen(
-        [by_number[31698]], [by_number[36605]], report.window_start(inputs.approaches)
-    )
+    result = screen([by_number[31698]], [by_number[36605]], inputs.start)
     assert len(result.approaches) > 100
     assert all(100.0 < a.range_at_tca < 500.0 for a in result.approaches)

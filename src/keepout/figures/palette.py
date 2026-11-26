@@ -1,5 +1,6 @@
-"""Colours shared by the figures: risk levels, series, a ramp and marks;
-and the words of threshold lines and provenances.
+"""Colours shared by the figures: risk levels, series, a ramp, marks and the
+text and rules of a page's figure; and the words of threshold lines and
+provenances.
 
 The risk colours stay apart for readers with a red-green colour vision
 deficiency (deuteranopia and protanopia), and every figure shows the level
@@ -18,11 +19,15 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 __all__ = [
+    "DECISION_POINT_COLOUR",
     "FIT_COLOUR",
+    "INK_COLOUR",
+    "MUTED_COLOUR",
     "NO_PC",
     "PROVENANCE_HELP",
     "PROVENANCE_LABELS",
     "RISK_COLOURS",
+    "RULE_COLOUR",
     "SEQUENTIAL",
     "SERIES",
     "TARGET_COLOUR",
@@ -105,3 +110,15 @@ grey."""
 FIT_COLOUR: Final = "#757575"
 """The line joining an event's Pc: a mid grey that shows on light and dark
 backgrounds."""
+
+DECISION_POINT_COLOUR: Final = "#424242"
+"""The decision point's line on a trend: a dark grey, apart from the fit."""
+
+INK_COLOUR: Final = "#0b0b0b"
+"""A figure's titles and labels on a white page: near black."""
+
+MUTED_COLOUR: Final = "#52514e"
+"""A figure's axis labels and ticks on a white page: a dark warm grey."""
+
+RULE_COLOUR: Final = "#c3c2b7"
+"""A figure's spines and outlines on a white page: a light warm grey."""

@@ -18,11 +18,15 @@ from keepout.figures.encounter import SIGMAS, EncounterFigure, encounter_figure
 from keepout.figures.geometry import GeometryFigure, geometry_figure
 from keepout.figures.grid import LOWEST_LOG_PC, GridFigure, GridPanel, grid_figure
 from keepout.figures.palette import (
+    DECISION_POINT_COLOUR,
     FIT_COLOUR,
+    INK_COLOUR,
+    MUTED_COLOUR,
     NO_PC,
     PROVENANCE_HELP,
     PROVENANCE_LABELS,
     RISK_COLOURS,
+    RULE_COLOUR,
     SEQUENTIAL,
     SERIES,
     TARGET_COLOUR,
@@ -31,12 +35,16 @@ from keepout.figures.palette import (
 from keepout.figures.trend import TrendFigure, trend_figure
 
 __all__ = [
+    "DECISION_POINT_COLOUR",
     "FIT_COLOUR",
+    "INK_COLOUR",
     "LOWEST_LOG_PC",
+    "MUTED_COLOUR",
     "NO_PC",
     "PROVENANCE_HELP",
     "PROVENANCE_LABELS",
     "RISK_COLOURS",
+    "RULE_COLOUR",
     "SEQUENTIAL",
     "SERIES",
     "SIGMAS",

@@ -1,34 +1,17 @@
 """The measurement behind the dashboard benchmark: a synthetic store, and how
 long the events list and the event page take to read it.
 
-Usage::
+``build`` makes a store of synthetic events and CDMs with their Pc cached
+(:func:`build_store`); ``time`` reads it as the dashboard does, without
+Streamlit (:func:`measure`), and prints one JSON object (:class:`Timings`).
+``--help`` lists the options.
 
-    uv run python tools/dashboard_timing.py build STORE [--events N]
-        [--cdms N] [--seed N]
-    uv run python tools/dashboard_timing.py time STORE [--repeat N]
-
-``build`` makes ``STORE`` a store of ``--events`` events (1 000) and
-``--cdms`` CDMs (20 000) with their Pc cached (:func:`build_store`); it
-prints how long that took. ``time`` reads it as the dashboard does, without
-Streamlit (:func:`measure`), and prints one JSON object (:class:`Timings`):
-the median wall and CPU time [s] of the events list's first page and of the
-event page's data path.
-
-``tools/dashboard_benchmark.py`` runs both, and its ``compare`` command
-runs this file of the tree being tested with the Python environment of an
-older tree, to time that tree's keepout under the same measurement. So this
-file imports nothing from ``tools/`` and only names keepout has had since
-its dashboard: ``keepout.cdm`` (``make_cdm``, ``ObjectMetadata``),
-``keepout.conjunction.Conjunction``, ``keepout.objects.ObjectState``,
-``keepout.state.StateVector``, ``keepout.covariance.Covariance``,
-``keepout.orbits.EARTH_MU``, ``keepout.propagation.forces.EARTH_RADIUS``,
-``keepout.risk`` (``assess``, ``PcObservation``,
-``DEFAULT_DECISION_CONFIG``), ``keepout.settings.Settings``,
-``keepout.store`` (``open_store``, ``CdmInput``, ``Store.ingest``,
-``Store.cache``), ``keepout.dashboard.listing`` (``read_page``: the
-events page's read) and ``keepout.dashboard.event_data`` (the event page's
-data path, without Streamlit). A keepout without ``keepout.dashboard``
-cannot be timed.
+``tools/dashboard_benchmark.py compare`` runs this file of the tree being
+tested with the Python environment of an older tree. So it imports nothing
+from ``tools/`` and only names keepout has had since its dashboard
+(``tests/tools/test_timing_imports.py`` holds the list), and of the store
+only ``Store.ingest`` and ``Store.cache``. A keepout without
+``keepout.dashboard`` cannot be timed.
 """
 
 from __future__ import annotations

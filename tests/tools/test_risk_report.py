@@ -10,6 +10,7 @@ from builders import KELVINS_EXCERPT as EXCERPT
 from builders import series
 from matplotlib.collections import PathCollection
 from matplotlib.colors import to_rgba_array
+from matplotlib.figure import Figure
 from report_builders import assert_writes_then_checks, readme_with_markers
 
 from keepout.figures import RISK_COLOURS, TrendFigure, trend_figure
@@ -147,13 +148,15 @@ def test_plots_use_the_reports_settings(
         figures[id(figure)] = assessment
         return figure
 
-    def draw(figure: TrendFigure, title: str, path: Path) -> None:
-        event_id = int(path.stem.removeprefix("event-"))
-        assert title.startswith(f"Kelvins event {event_id} ")
+    real_plot = report.trend_plot
+
+    def draw(figure: TrendFigure, title: str) -> Figure:
+        event_id = int(title.removeprefix("Kelvins event ").split(" ", 1)[0])
         plotted[event_id] = figures[id(figure)]
+        return real_plot(figure, title)
 
     monkeypatch.setattr(report, "trend_figure", record)
-    monkeypatch.setattr(report, "plot", draw)
+    monkeypatch.setattr(report, "trend_plot", draw)
     assert report.main(paths(tmp_path)) == 0
     expected = {
         "thresholds": thresholds,

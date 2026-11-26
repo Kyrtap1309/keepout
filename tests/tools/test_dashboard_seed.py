@@ -1,15 +1,18 @@
 import hashlib
+import math
 import shutil
 from pathlib import Path
 
 import dashboard_seed as seed
+import operator_example
 import pytest
-import synthetic_operator_report as report
 from astropy.time import Time
 from builders import cached_pc
+from generated import CARA_CDM_ID
 from sqlalchemy import select
 
-from keepout.cdm import load
+from keepout.cdm import kvn, load
+from keepout.cdm.model import Section
 from keepout.errors import SourceUnavailable
 from keepout.settings import Settings, load_settings, settings_to_data
 from keepout.sources import cara
@@ -86,7 +89,7 @@ def test_seed_as_of_is_latest_creation() -> None:
 
 def test_settings_are_the_reports_defaults() -> None:
     settings = load_settings(seed.SETTINGS)
-    defaults = Settings(thresholds=report.THRESHOLDS)
+    defaults = Settings(thresholds=operator_example.THRESHOLDS)
     assert settings_to_data(settings) == settings_to_data(defaults)
     assert settings.combined_hard_body_radius is None  # the CDMs give HBR
 
@@ -246,7 +249,7 @@ def test_cara_reads_the_cached_cdm(
     monkeypatch.setattr(seed, "CARA_FILE", cara.CaraFile(seed.CARA_FILE.path, digest))
     cache_cara(tmp_path, text)
 
-    assert seed.cara_cdm(cache=tmp_path) == (f"{seed.CARA_CDM_ID}.cdm", text)
+    assert seed.cara_cdm(cache=tmp_path) == (f"{CARA_CDM_ID}.cdm", text)
 
 
 def test_main_without_the_cara_cache_fails(
@@ -261,12 +264,6 @@ def test_main_without_the_cara_cache_fails(
 
     assert "keepout fetch cara" in capsys.readouterr().err
     assert not (tmp_path / "cdms").exists()
-
-
-def test_the_cara_cdm_is_the_maneuver_reports() -> None:
-    import maneuver_report
-
-    assert seed.CARA_CDM_ID == maneuver_report.CDM_ID
 
 
 def test_demo_event_is_upcoming_and_yellow(tmp_path: Path) -> None:
@@ -301,6 +298,64 @@ def test_demo_update_joins_event_and_is_red(tmp_path: Path) -> None:
     assert update.cdm.creation_date.utc.isot == seed.DEMO_AS_OF.utc.isot
     assert update.cdm.header.comments[0] == seed.DEMO_COMMENT
     assert name == f"{update.cdm.message_id}.kvn"
+
+
+def sigma_km(section: Section, keyword: str) -> float:
+    """The sigma [km] of the variance ``keyword`` of ``section``."""
+    variance = section.get(keyword)
+    assert isinstance(variance, float)
+    return math.sqrt(variance) / 1e3
+
+
+def test_demo_update_states_its_narrowed_sigmas() -> None:
+    _, text = seed.demo_update()
+    for section in kvn.loads(text).object_sections:
+        radial, transverse, normal = (
+            sigma_km(section, keyword) for keyword in ("CR_R", "CT_T", "CN_N")
+        )
+        stated = f"Sigmas: R {radial:.3f} km, T {transverse:.3f} km, N {normal:.3f} km"
+        assert [c for c in section.comments if c.startswith("Sigmas:")] == [stated]
+
+
+def test_demo_update_says_its_covariance_is_scaled() -> None:
+    _, text = seed.demo_update()
+    for section in kvn.loads(text).object_sections:
+        assert seed.NARROWED_COMMENT in section.comments
+
+
+def record_demo_writes(monkeypatch: pytest.MonkeyPatch) -> list[bool]:
+    """The ``check`` of each demo write of a run whose seed has no CDM."""
+    demos: list[bool] = []
+
+    def write_demo(*, check: bool) -> int:
+        demos.append(check)
+        return 0
+
+    monkeypatch.setattr(seed, "seed_cdms", lambda *, cara: [])
+    monkeypatch.setattr(seed, "write_demo", write_demo)
+    return demos
+
+
+def test_the_default_dir_given_explicitly_writes_the_demo_too(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    demos = record_demo_writes(monkeypatch)
+    monkeypatch.setattr(seed, "write_seed", lambda cdms, directory, *, check: 0)
+    default = seed.SEED_DIR.parent / ".." / "dashboard" / seed.SEED_DIR.name
+
+    assert seed.main(["--dir", str(default), "--check"]) == 0
+
+    assert demos == [True]
+
+
+def test_another_dir_writes_the_seed_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    demos = record_demo_writes(monkeypatch)
+
+    assert seed.main(["--dir", str(tmp_path)]) == 0
+
+    assert demos == []
 
 
 def test_demo_update_file_is_current() -> None:

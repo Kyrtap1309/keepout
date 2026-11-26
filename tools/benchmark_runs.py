@@ -28,6 +28,7 @@ __all__ = [
     "Side",
     "TimingFailed",
     "alternate",
+    "cpu_cells",
     "cpu_change",
     "run_process",
     "skipped_lines",
@@ -124,6 +125,16 @@ def alternate(
                     raise
                 return Comparison(tuple(runs["head"]), (), str(error))
     return Comparison(tuple(runs["head"]), tuple(runs["base"]))
+
+
+def cpu_cells(values: Sequence[float], digits: int) -> tuple[str, str]:
+    """A tree's CPU times [s] as its comparison table gives them, to
+    ``digits`` decimals: the median (``1.23 s``) and the range
+    (``1.20 - 1.31 s``)."""
+    return (
+        f"{statistics.median(values):.{digits}f} s",
+        f"{min(values):.{digits}f} - {max(values):.{digits}f} s",
+    )
 
 
 def cpu_change(head: Iterable[float], base: Iterable[float]) -> float:

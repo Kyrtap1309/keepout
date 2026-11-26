@@ -5,9 +5,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
-import screening_snapshot as snapshot
 import synthetic_operator_report as report
-from astropy.time import Time
 from cli_builders import write_fleet
 from generated import read_json
 from report_builders import assert_writes_then_checks, fixture_data
@@ -155,54 +153,6 @@ def test_check_fails_when_a_file_is_out_of_date(
     json_file.write_text("{}\n", encoding="utf-8")
     assert report.main(["--check", *args]) == 1
     assert "synthetic-operator.json is out of date" in capsys.readouterr().out
-
-
-def test_the_window_is_the_week_of_the_socrates_report() -> None:
-    manifest = snapshot.read_manifest(snapshot.DATA)
-    start = report.window_start(manifest)
-    assert start == Time("2026-10-06T00:00:00", scale="utc")
-    assert start.scale == "utc"
-
-
-def test_paths_are_shown_from_the_repository() -> None:
-    assert report.shown(report.FLEET) == "examples/synthetic-operator/fleet.toml"
-    assert report.shown(Path("/elsewhere/fleet.toml")) == "/elsewhere/fleet.toml"
-
-
-def test_rounded_shortens_real_values_only() -> None:
-    text = "\n".join(
-        [
-            "CCSDS_CDM_VERS                 = 2.0",
-            "COMMENT Sigmas: R 0.204 km, T 19.579123456789 km",
-            "TCA                            = 2026-10-12T11:28:28.709977",
-            "MESSAGE_ID                     = 38771_35196_20261012T112828.710Z",
-            "OBJECT_DESIGNATOR              = 38771",
-            "MISS_DISTANCE                  = 212.3720068512821 [m]",
-            "Z_DOT                          = -0.35235483308181775 [km/s]",
-            "CR_R                           = 41616.00000000085 [m**2]",
-            "CT_R                           = 6.058122821e-09 [m**2]",
-            "CN_T                           = -1.8e-07 [m**2]",
-            "CT_T                           = 1.2345678901234e+20 [m**2]",
-            "CD_AREA_OVER_MASS              = 0.012345678901234",
-            "",
-        ]
-    )
-    assert report.rounded(text).split("\n") == [
-        "CCSDS_CDM_VERS                 = 2.0",
-        "COMMENT Sigmas: R 0.204 km, T 19.579123456789 km",
-        "TCA                            = 2026-10-12T11:28:28.709977",
-        "MESSAGE_ID                     = 38771_35196_20261012T112828.710Z",
-        "OBJECT_DESIGNATOR              = 38771",
-        "MISS_DISTANCE                  = 212.3720069 [m]",
-        "Z_DOT                          = -0.3523548331 [km/s]",
-        "CR_R                           = 41616.0 [m**2]",
-        "CT_R                           = 0.0 [m**2]",
-        "CN_T                           = 0.0 [m**2]",
-        "CT_T                           = 1.23456789e+20 [m**2]",
-        "CD_AREA_OVER_MASS              = 0.0123456789",
-        "",
-    ]
-    assert report.rounded("X = 1.23456 [km]", digits=3, floor=0.0) == "X = 1.23 [km]"
 
 
 def test_a_rounded_cdm_still_reads(generated: Path) -> None:

@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 import screening_snapshot as snapshot
 import snapshot_files
+from astropy.time import Time
 from celestrak_builders import SAMPLE, SOCRATES_HEADER
 from hypothesis import given
 from hypothesis import strategies as st
@@ -310,3 +311,10 @@ def test_select_fixture_parts(
     monkeypatch.setattr(snapshot, part, value)
     chosen = snapshot.select_fixture(SAMPLE, read_socrates(SOCRATES_CSV))
     assert [omm.catalog_number for omm in chosen] == expected
+
+
+def test_the_window_is_the_week_of_the_socrates_report() -> None:
+    manifest = snapshot.read_manifest(snapshot.DATA)
+    start = snapshot.window_start(manifest)
+    assert start == Time("2026-10-06T00:00:00", scale="utc")
+    assert start.scale == "utc"

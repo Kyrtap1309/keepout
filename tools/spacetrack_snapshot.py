@@ -56,9 +56,9 @@ import statistics
 import sys
 import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Final, Literal, TypedDict
+from typing import TYPE_CHECKING, Final, Literal, TypedDict, cast
 
 import snapshot_files
 from generated import REPO, day_text, json_text, positive, second_text
@@ -190,16 +190,7 @@ class Saved:
 
     def record(self) -> SavedRecord:
         """The answer as JSON."""
-        return SavedRecord(
-            method=self.method,
-            url=self.url,
-            status=self.status,
-            file=self.file,
-            sha256=self.sha256,
-            size=self.size,
-            retrieved=self.retrieved,
-            redacted=self.redacted,
-        )
+        return cast("SavedRecord", asdict(self))
 
 
 INDEX: Final = RawIndex("answers", Saved)
@@ -679,14 +670,17 @@ class ComparisonSummary(TypedDict):
 
 
 def spread(values: Sequence[float]) -> Spread:
-    """The median and 90th percentile of ``values``."""
+    """The median and 90th percentile of ``values`` (interpolated between
+    the values around it)."""
     if not values:
         return {"median": None, "p90": None}
-    ordered = sorted(values)
-    return {
-        "median": statistics.median(ordered),
-        "p90": ordered[min(len(ordered) - 1, (9 * len(ordered)) // 10)],
-    }
+    # Before Python 3.13, quantiles needs two values.
+    p90 = (
+        values[0]
+        if len(values) == 1
+        else statistics.quantiles(values, n=10, method="inclusive")[-1]
+    )
+    return {"median": statistics.median(values), "p90": p90}
 
 
 def summarise(comparison: Comparison) -> ComparisonSummary:
@@ -746,8 +740,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         print(json_text(summarise(comparison)), end="")
         return 0
+    building = args.command == "build"
     return snapshot_files.build_or_verify(
-        args, inputs_from_raw, inputs_from_data, stored_files, TOOL
+        raw=args.raw if building else None,
+        data=args.data,
+        check=building and args.check,
+        from_raw=inputs_from_raw,
+        from_data=inputs_from_data,
+        files=stored_files,
+        tool=TOOL,
     )
 
 

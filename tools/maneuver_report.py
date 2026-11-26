@@ -1,42 +1,28 @@
 """The manoeuvre report: the Pc of along-track burns on a CARA test event, and
 a re-screen of burns on the frozen catalog.
 
-Usage: ``uv run python tools/maneuver_report.py [--check] [--keep-timings]
-[--cdm PATH] [--hbr METRES] [--workers N] [--repeat N]``.
+Plans the burns of CARA test CDM :data:`generated.CARA_CDM_ID` (Metop-B
+against a Fengyun 1C fragment, downloaded on demand at
+:data:`~keepout.sources.cara.CARA_COMMIT`) with
+:func:`keepout.maneuver.plan_maneuver`, the hard-body radius CARA's own test
+table gives it (:data:`HBR_COLUMN`) and the default grid and target. Then
+plans the highest-Pc yellow event of the example synthetic operator on the
+frozen catalog (``tools/operator_example.py``) to ``green_below`` and
+re-screens each option with :func:`keepout.maneuver.rescreen`: a
+demonstration of the mechanism, not a recommendation.
 
-Plans the burns of CARA test CDM :data:`CDM_ID` (Metop-B against a Fengyun
-1C fragment, from :data:`keepout.sources.cara.PC_METHOD_CDMS`, downloaded on
-demand at :data:`~keepout.sources.cara.CARA_COMMIT`; ``--cdm`` reads another
-file instead) with :func:`keepout.maneuver.plan_maneuver`, the combined
-hard-body radius CARA's own test table gives the CDM (``HBR_m`` of
-:data:`keepout.sources.cara.PC_METHOD_TABLE`, 10 m; ``--hbr`` gives another)
-and the default grid and target. Then runs the example synthetic operator on
-the frozen public catalog (as ``tools/synthetic_operator_report.py``), plans
-its yellow event of the highest Pc with the target ``green_below`` and
-re-screens each option against the catalog with
-:func:`keepout.maneuver.rescreen`: a demonstration of the mechanism, not a
-recommendation.
-
-Writes ``docs/maneuver-report.json`` (the numbers), ``docs/maneuver-report.md``
-(the page), the heatmap ``docs/img/maneuver/heatmap.svg`` and the README
-summary block. The plan of the CARA event is timed over ``--repeat`` runs
-(3): the range of wall and CPU times, with the CPU model. ``--check`` fails
-instead of writing when the numbers, the page or the README are out of date;
-it plans once and takes the timings from the committed JSON, so they are
-shown but never checked, and the heatmap is then only required to exist (SVG
-bytes vary with the matplotlib version). ``--keep-timings`` writes the files
-with the committed JSON's timings instead of measuring again, for a change of
-the text alone. CARA's files are not redistributed:
-only numbers derived from them and the figure are written.
+Writes ``docs/maneuver-report.json`` (the numbers), the page, the heatmap
+(``tools/maneuver_heatmap.py``) and the README summary block. The CARA
+plan's timings are shown, never checked: ``--check`` takes them from the
+committed JSON, and requires the heatmap only to exist (SVG bytes vary with
+the matplotlib version). CARA's files are not redistributed: only numbers
+derived from them and the figure are written. ``--help`` lists the options.
 """
 
 from __future__ import annotations
 
 import argparse
-import datetime
 import os
-import platform
-import re
 import sys
 import time
 from pathlib import Path
@@ -46,44 +32,40 @@ import numpy as np
 import screening_snapshot as snapshot
 from astropy.time import Time
 from generated import (
-    README,
+    CARA_CDM_ID,
     REPO,
+    Machine,
     generated_notice,
-    json_text,
+    machine,
+    machine_text,
     minute_text,
     positive,
     read_timings,
-    readme_with,
     relative,
-    save_svg,
+    report_files,
+    report_parser,
     second_text,
     significant,
     table,
     threshold_settings,
     threshold_text,
     write_or_check,
+    write_or_check_figures,
 )
-from matplotlib.colors import Colormap, LinearSegmentedColormap
-from matplotlib.figure import Figure
-from matplotlib.lines import Line2D
-from matplotlib.patches import Patch
-from screening_benchmark import cpu_model
-from synthetic_operator_report import FLEET, level_key, shown, window_start
+from maneuver_heatmap import DPI, FACECOLOR, delta_v_text, heatmap_figure
+from operator_example import FLEET, THRESHOLDS, level_key, operator_run, shown
 
-from keepout._defaults import TCA_TOLERANCE
-from keepout._methods import Method
 from keepout._text import pc_text, plural
 from keepout._validation import require_positive
-from keepout._workers import DEFAULT_WORKERS, ONE_THREAD
+from keepout._workers import ONE_THREAD
 from keepout.cdm import Cdm, load
-from keepout.events import ConjunctionEvent, group_events, time_to_tca
-from keepout.figures import (
-    LOWEST_LOG_PC,
-    NO_PC,
-    SEQUENTIAL,
-    TARGET_COLOUR,
-    grid_figure,
+from keepout.events import (
+    DEFAULT_TCA_TOLERANCE,
+    ConjunctionEvent,
+    group_events,
+    time_to_tca,
 )
+from keepout.figures import grid_figure
 from keepout.maneuver import (
     DEFAULT_BURN_GRID,
     TARGET_PC,
@@ -96,23 +78,18 @@ from keepout.maneuver import (
     plan_maneuver,
     rescreen,
 )
+from keepout.pc.result import Method
 from keepout.risk import RiskLevel, Thresholds
 from keepout.screening import DEFAULT_DURATION, DEFAULT_VOLUME
 from keepout.sources import cara
-from keepout.synthetic import OperatorEvent, OperatorResult, load_fleet
-from keepout.synthetic.operator import run
 from keepout.units import DAY, HOUR, MINUTE
 from keepout.validation.cara_inputs import column_number
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from matplotlib.artist import Artist
-    from matplotlib.axes import Axes
-    from matplotlib.collections import QuadMesh
-
-    from keepout.figures import GridFigure, GridPanel
     from keepout.omm import Omm
+    from keepout.synthetic import OperatorEvent, OperatorResult
 
 PAGE: Final = REPO / "docs/maneuver-report.md"
 IMAGES: Final = REPO / "docs/img/maneuver"
@@ -121,23 +98,15 @@ START: Final = "<!-- maneuver-report-summary:start -->"
 END: Final = "<!-- maneuver-report-summary:end -->"
 TOOL: Final = "tools/maneuver_report.py"
 
-CDM_ID: Final = "000038771_conj_000030802_20201216_182131_20201215_171306"
-"""The CARA test CDM of the heatmap: Metop-B (38771) against 30802."""
-
 HBR_COLUMN: Final = "HBR_m"
 """The column of :data:`~keepout.sources.cara.PC_METHOD_TABLE` that gives a
 CDM's combined hard-body radius [m]."""
 
-THRESHOLDS: Final = Thresholds()
 DEMONSTRATION_TARGET: Final = THRESHOLDS.green_below
 """The target of the re-screen demonstration: green."""
 
-TOLERANCE: Final = f"{TCA_TOLERANCE / MINUTE:g} minutes"
+TOLERANCE: Final = f"{DEFAULT_TCA_TOLERANCE / MINUTE:g} minutes"
 """How far apart the TCAs of one approach may be, for the page."""
-
-INK: Final = "#0b0b0b"
-MUTED: Final = "#52514e"
-RULE: Final = "#c3c2b7"
 
 
 class Option(TypedDict):
@@ -149,6 +118,8 @@ class Option(TypedDict):
     range_at_tca: float
     method: Method
     meets_target: bool
+    notes: list[str]
+    """What the burn's own Pc says that the baseline's does not."""
 
 
 class Plan(TypedDict):
@@ -173,6 +144,7 @@ class Plan(TypedDict):
     prograde: Option | None
     retrograde: Option | None
     notes: list[str]
+    """The plan's notes but those of its options, which they hold."""
 
 
 class Grid(TypedDict):
@@ -248,14 +220,10 @@ class Settings(TypedDict):
     basis: str
 
 
-class Timings(TypedDict):
+class Timings(Machine):
     """The time of the CARA event's plan and where it was measured: shown,
     never checked."""
 
-    cpu_model: str
-    logical_cpus: int
-    python: str
-    date: str
     one_thread: bool
     runs: int
     wall: list[float]
@@ -291,11 +259,22 @@ def option_summary(option: ManeuverOption) -> Option:
         "range_at_tca": round(option.range_at_tca, 1),
         "method": option.method,
         "meets_target": option.meets_target,
+        "notes": list(option.notes),
     }
 
 
 def _optional(option: ManeuverOption | None) -> Option | None:
     return None if option is None else option_summary(option)
+
+
+def _event_notes(plan: ManeuverPlan) -> list[str]:
+    """The plan's notes but those of its options, which the planner repeats
+    with the option's direction before each."""
+    options = [option for option in (plan.prograde, plan.retrograde) if option]
+    repeated = {
+        f"{option.direction}: {note}" for option in options for note in option.notes
+    }
+    return [note for note in plan.notes if note not in repeated]
 
 
 def plan_summary(plan: ManeuverPlan) -> Plan:
@@ -324,7 +303,7 @@ def plan_summary(plan: ManeuverPlan) -> Plan:
         },
         "prograde": _optional(plan.prograde),
         "retrograde": _optional(plan.retrograde),
-        "notes": list(plan.notes),
+        "notes": _event_notes(plan),
     }
 
 
@@ -389,14 +368,8 @@ def demonstrate(
 ) -> tuple[OperatorEvent | None, ManeuverPlan | None, list[RescreenResult]]:
     """The demonstration: the operator's run from ``start``, its yellow event
     of the highest Pc, that event's plan and the re-screen of each option."""
-    result = run(
-        load_fleet(fleet),
-        catalog,
-        start,
-        DEFAULT_DURATION,
-        DEFAULT_VOLUME,
-        workers=workers,
-        thresholds=THRESHOLDS,
+    result = operator_run(
+        catalog, start, DEFAULT_DURATION, workers=workers, fleet=fleet
     )
     chosen = demonstration_event(result)
     if chosen is None:
@@ -448,11 +421,6 @@ def cara_radius(table: Path, conjunction_id: str) -> float:
     raise ValueError(f"{table} has no row {conjunction_id}")
 
 
-def delta_v_text(delta_v: float) -> str:
-    """A signed Δv to 3 significant figures, trailing zeros kept: ``-0.00200``."""
-    return f"{delta_v:+#.3g}"
-
-
 def primary_text(plan: Plan) -> str:
     """The primary of a plan, named as the page names it."""
     return _object(plan["primary"], plan["primary_name"])
@@ -499,35 +467,36 @@ def options_table(plan: Plan) -> list[str]:
     )
 
 
-DIRECTION_NOTE: Final = re.compile(r"(?P<direction>prograde|retrograde): (?P<note>.*)")
-"""A plan's note about one direction's option, as the planner words it."""
+WITHOUT_A_BURN: Final = "without a burn"
+"""What a plan's own note is about, beside its options'."""
 
 
-def _caveat_groups(notes: Sequence[str]) -> dict[str, list[tuple[str, str]]]:
-    """The notes by their lead (the text before the first colon, or the whole
-    note), each with what it is about (the event, or a direction's option)
-    and its text."""
+def _caveat_groups(plan: Plan) -> dict[str, list[tuple[str, str]]]:
+    """The notes of a plan and its options by their lead (the text before the
+    first colon, or the whole note), each with what it is about (the event,
+    or a direction's option) and its text."""
+    notes = [(WITHOUT_A_BURN, note) for note in plan["notes"]]
+    for direction in ("prograde", "retrograde"):
+        option = plan[direction]
+        if option is not None:
+            notes += [(direction, note) for note in option["notes"]]
     groups: dict[str, list[tuple[str, str]]] = {}
-    for note in notes:
-        match = DIRECTION_NOTE.fullmatch(note)
-        about, text = (
-            (match["direction"], match["note"]) if match else ("without a burn", note)
-        )
-        lead = text.split(": ", 1)[0]
-        groups.setdefault(lead, []).append((about, text))
+    for about, text in notes:
+        groups.setdefault(text.split(": ", 1)[0], []).append((about, text))
     return groups
 
 
 def _caveats(plan: Plan) -> list[str]:
-    """The plan's notes as a list, a note repeated for several options given
-    once with what differs."""
-    if not plan["notes"]:
+    """The notes of a plan and its options as a list, a note repeated for
+    several options given once with what differs."""
+    groups = _caveat_groups(plan)
+    if not groups:
         return []
     lines = ["", "Caveats:", ""]
-    for lead, members in _caveat_groups(plan["notes"]).items():
+    for lead, members in groups.items():
         if len(members) == 1:
             about, text = members[0]
-            prefix = "" if about == "without a burn" else f"{about}: "
+            prefix = "" if about == WITHOUT_A_BURN else f"{about}: "
             lines.append(f"- {prefix}{text}.")
             continue
         details = [
@@ -779,8 +748,7 @@ def _timing_line(timings: Timings | None, plan: Plan, *, check_note: bool) -> st
         f"The plan of the {plan['cells']} cells took {_span(timings['wall'])} "
         f"(CPU time {_span(timings['cpu'])}, numerical libraries on {threads}) "
         f"{'in 1 run' if runs == 1 else f'over {runs} runs'} "
-        f"on {timings['date']}, {timings['cpu_model']} "
-        f"({timings['logical_cpus']} logical CPUs), Python {timings['python']}"
+        f"on {machine_text(timings)}"
         + ("; `--check` checks the numbers, not the times." if check_note else ".")
     )
 
@@ -921,131 +889,6 @@ def render_summary(summary: Summary, images: str) -> str:
     )
 
 
-def _mark(axes: Axes, panel: GridPanel) -> None:
-    """The option of a panel: a ringed dot and its label."""
-    if panel.minimum is None:
-        return
-    sign = panel.direction.sign
-    lead, size = panel.minimum
-    axes.scatter(
-        [size],
-        [lead],
-        s=64,
-        color=TARGET_COLOUR,
-        edgecolors="white",
-        linewidths=2.0,
-        zorder=3,
-    )
-    axes.annotate(
-        f"{delta_v_text(sign * size)} m/s\n{lead:.1f} h before TCA",
-        (size, lead),
-        xytext=(10 * sign, -10),
-        textcoords="offset points",
-        ha="left" if sign > 0 else "right",
-        va="top",
-        fontsize="small",
-        color=INK,
-        bbox={"boxstyle": "round,pad=0.2", "fc": "white", "ec": "none"},
-    )
-
-
-def _panel(
-    axes: Axes, figure: GridFigure, panel: GridPanel, cmap: Colormap
-) -> QuadMesh:
-    """One direction's cells, the target contour and the option."""
-    values = panel.log_pc
-    mesh = axes.pcolormesh(
-        panel.delta_v,
-        panel.hours_before_tca,
-        np.ma.masked_invalid(values),
-        cmap=cmap,
-        vmin=LOWEST_LOG_PC,
-        vmax=figure.top_log_pc,
-        shading="flat",
-        edgecolors="none",
-        rasterized=True,
-    )
-    if panel.crosses(figure.target_log_pc):
-        axes.contour(
-            panel.delta_v_centres,
-            panel.hour_centres,
-            np.ma.masked_invalid(values),
-            levels=[figure.target_log_pc],
-            colors=TARGET_COLOUR,
-            linewidths=2.0,
-            linestyles="solid",
-        )
-    _mark(axes, panel)
-    axes.set_xscale("log")
-    axes.set_title(panel.direction, color=INK)
-    axes.set_xlabel("|Δv| along the velocity (m/s)", color=MUTED)
-    axes.tick_params(colors=MUTED)
-    for spine in axes.spines.values():
-        spine.set_color(RULE)
-    return mesh
-
-
-def _legend(drawing: Figure, figure: GridFigure) -> None:
-    handles: list[Artist] = [
-        Line2D([], [], color=TARGET_COLOUR, linewidth=2.0),
-        Line2D(
-            [],
-            [],
-            linestyle="none",
-            marker="o",
-            markersize=8,
-            markerfacecolor=TARGET_COLOUR,
-            markeredgecolor="white",
-        ),
-    ]
-    labels = [f"target Pc {figure.target_pc:.0e}", "smallest burn meeting it"]
-    if any(np.isnan(panel.log_pc).any() for panel in figure.directions):
-        handles.append(Patch(facecolor=NO_PC))
-        labels.append("no Pc (no minimum to trust)")
-    drawing.legend(
-        handles,
-        labels,
-        loc="lower center",
-        ncol=len(labels),
-        frameon=False,
-        fontsize="small",
-        labelcolor=INK,
-    )
-
-
-def heatmap_figure(figure: GridFigure, title: str) -> Figure:
-    """The heatmap of a plan: log10 Pc over |Δv| (retrograde mirrored to the
-    left) and hours before TCA."""
-    cmap = LinearSegmentedColormap.from_list("pc", SEQUENTIAL).with_extremes(bad=NO_PC)
-    retrograde, prograde = figure.directions
-    drawing = Figure(figsize=(9.0, 4.8))
-    grid = drawing.add_gridspec(1, 3, width_ratios=(1.0, 1.0, 0.05), wspace=0.12)
-    left = drawing.add_subplot(grid[0, 0])
-    right = drawing.add_subplot(grid[0, 1], sharey=left)
-    _panel(left, figure, retrograde, cmap)
-    mesh = _panel(right, figure, prograde, cmap)
-    left.invert_xaxis()
-    left.set_ylabel("burn time before TCA (h)", color=MUTED)
-    right.tick_params(labelleft=False)
-    colourbar = drawing.colorbar(
-        mesh, cax=drawing.add_subplot(grid[0, 2]), extend="min"
-    )
-    colourbar.set_label("log10 Pc (Foster)", color=MUTED)
-    colourbar.ax.axhline(figure.target_log_pc, color=TARGET_COLOUR, linewidth=2.0)
-    colourbar.ax.tick_params(colors=MUTED)
-    colourbar.outline.set_edgecolor(RULE)
-    _legend(drawing, figure)
-    drawing.suptitle(title, color=INK, fontsize=11)
-    drawing.subplots_adjust(left=0.08, right=0.93, top=0.84, bottom=0.2)
-    return drawing
-
-
-def plot(figure: GridFigure, title: str, path: Path) -> None:
-    """The heatmap of a plan (:func:`heatmap_figure`), saved as a
-    reproducible SVG."""
-    save_svg(heatmap_figure(figure, title), path, facecolor="white", dpi=200)
-
-
 def heatmap_title(plan: Plan) -> str:
     """The title of a plan's heatmap."""
     secondary = _object(plan["secondary"], plan["secondary_name"])
@@ -1088,11 +931,11 @@ def positive_radius(text: str) -> float:
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog=TOOL)
-    parser.add_argument(
-        "--check",
-        action="store_true",
-        help=(
+    parser = report_parser(
+        TOOL,
+        page=PAGE,
+        images=IMAGES,
+        check=(
             "fail if out of date (the timings are not checked, and the heatmap "
             "only needs to exist: its SVG bytes vary with the matplotlib version)"
         ),
@@ -1107,20 +950,11 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--data", type=Path, default=snapshot.DATA)
     parser.add_argument("--fleet", type=Path, default=FLEET)
-    parser.add_argument("--page", type=Path, default=PAGE)
-    parser.add_argument("--images", type=Path, default=IMAGES)
-    parser.add_argument("--readme", type=Path, default=README)
     parser.add_argument(
         "--hbr",
         type=positive_radius,
         default=None,
         help="combined hard-body radius [m] instead of CARA's",
-    )
-    parser.add_argument(
-        "--workers",
-        type=positive,
-        default=DEFAULT_WORKERS,
-        help="processes to screen with",
     )
     parser.add_argument(
         "--repeat", type=positive, default=3, help="runs of the timed plan"
@@ -1132,7 +966,7 @@ def demonstration_summary(
     catalog: Sequence[Omm], manifest: snapshot.Manifest, fleet: Path, workers: int
 ) -> Demonstration:
     """The re-screen demonstration's numbers, on the frozen catalog."""
-    start = window_start(manifest)
+    start = snapshot.window_start(manifest)
     chosen, plan, results = demonstrate(catalog, start, fleet, workers)
     pc = None if chosen is None else chosen.observation.pc
     return {
@@ -1156,10 +990,7 @@ def demonstration_summary(
 def measured_timings(repeat: int, wall: list[float], cpu: list[float]) -> Timings:
     """The timings of the plan, with where they were measured."""
     return {
-        "cpu_model": cpu_model(),
-        "logical_cpus": os.cpu_count() or 1,
-        "python": platform.python_version(),
-        "date": datetime.datetime.now(datetime.UTC).date().isoformat(),
+        **machine(),
         "one_thread": all(os.environ.get(name) == "1" for name in ONE_THREAD),
         "runs": repeat,
         "wall": wall,
@@ -1179,7 +1010,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     """
     args = _parser().parse_args(argv)
 
-    path = args.cdm or cara.fetch(cara.PC_METHOD_CDMS[CDM_ID])
+    path = args.cdm or cara.fetch(cara.PC_METHOD_CDMS[CARA_CDM_ID])
     event, name = load_event(path)
     source: Literal["cara", "given"]
     if args.hbr is None:
@@ -1197,7 +1028,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.workers,
     )
     timings = (
-        read_timings(args.page.with_suffix(".json"), Summary)
+        read_timings(args.page.with_suffix(".json"), Timings)
         if committed_timings
         else measured_timings(args.repeat, wall, cpu)
     )
@@ -1215,29 +1046,26 @@ def main(argv: Sequence[str] | None = None) -> int:
         "demonstration": demonstration,
         "timings": timings,
     }
-    files = {
-        args.page.with_suffix(".json"): json_text(summary),
-        args.page: render_page(summary, relative(args.images, args.page.parent)),
-        args.readme: readme_with(
-            args.readme,
-            START,
-            END,
-            render_summary(summary, relative(args.images, args.readme.parent)),
-        ),
-    }
+    files = report_files(
+        args.page,
+        summary,
+        render_page(summary, relative(args.images, args.page.parent)),
+        readme=args.readme,
+        markers=(START, END),
+        block=render_summary(summary, relative(args.images, args.readme.parent)),
+    )
     status = write_or_check(files, check=args.check, tool=TOOL)
-    heatmap = args.images / HEATMAP
-    if args.check:
-        # Only its existence: matplotlib versions write different SVG bytes
-        # for the same figure, so comparing them would fail on another setup.
-        if not heatmap.exists():
-            print(f"{heatmap} is missing; run {TOOL}")
-            status = 1
-        return status
-    args.images.mkdir(parents=True, exist_ok=True)
-    plot(grid_figure(plan), heatmap_title(summary["event"]), heatmap)
-    print(f"wrote {heatmap}")
-    return status
+    figures = {
+        args.images / HEATMAP: lambda: heatmap_figure(
+            grid_figure(plan), heatmap_title(summary["event"])
+        )
+    }
+    return max(
+        status,
+        write_or_check_figures(
+            figures, check=args.check, tool=TOOL, facecolor=FACECOLOR, dpi=DPI
+        ),
+    )
 
 
 if __name__ == "__main__":

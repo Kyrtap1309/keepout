@@ -1,929 +1,929 @@
 {
- "cara_commit": "1c78beb1f7aefc384886c3be1d09e4681acb5d37",
- "rows": [
-  {
-   "suite": "Alfano (2009), Monte Carlo",
-   "case_id": "1",
-   "hard_body_radius": 15.0,
-   "reference": 0.21686537,
-   "criterion": {
-    "relative": null,
-    "absolute": null,
-    "small": 0.0,
-    "interval": true
-   },
-   "method": "montecarlo",
-   "value": 0.21847,
-   "error": 0.007399198867020566,
-   "relative": true,
-   "passed": true,
-   "paper": null,
-   "interval": [
-    0.216784601089679,
-    0.216946155301232
-   ],
-   "informative": null,
-   "ci": [
-    0.2137699702513359,
-    0.22322097415069855
-   ],
-   "samples": 100000
-  },
-  {
-   "suite": "Alfano (2009), Monte Carlo",
-   "case_id": "2",
-   "hard_body_radius": 4.0,
-   "reference": 0.0155469,
-   "criterion": {
-    "relative": null,
-    "absolute": null,
-    "small": 0.0,
-    "interval": true
-   },
-   "method": "montecarlo",
-   "value": 0.01553,
-   "error": 0.001087033427885961,
-   "relative": true,
-   "passed": true,
-   "paper": null,
-   "interval": [
-    0.0155226614929474,
-    0.0155711665578351
-   ],
-   "informative": null,
-   "ci": [
-    0.014156076532340618,
-    0.016991896167239482
-   ],
-   "samples": 100000
-  },
-  {
-   "suite": "Alfano (2009), Monte Carlo",
-   "case_id": "3",
-   "hard_body_radius": 15.0,
-   "reference": 0.10034086,
-   "criterion": {
-    "relative": null,
-    "absolute": null,
-    "small": 0.0,
-    "interval": true
-   },
-   "method": "montecarlo",
-   "value": 0.10028,
-   "error": 0.0006065325730715263,
-   "relative": true,
-   "passed": true,
-   "paper": null,
-   "interval": [
-    0.100281978677948,
-    0.100399764459375
-   ],
-   "informative": null,
-   "ci": [
-    0.09687964061324747,
-    0.10375273182262683
-   ],
-   "samples": 100000
-  },
-  {
-   "suite": "Alfano (2009), Monte Carlo",
-   "case_id": "4",
-   "hard_body_radius": 15.0,
-   "reference": 0.07364054,
-   "criterion": {
-    "relative": null,
-    "absolute": null,
-    "small": 0.0,
-    "interval": true
-   },
-   "method": "montecarlo",
-   "value": 0.07405,
-   "error": 0.0055602525456766114,
-   "relative": true,
-   "passed": true,
-   "paper": null,
-   "interval": [
-    0.0735893560196113,
-    0.0736917486638813
-   ],
-   "informative": null,
-   "ci": [
-    0.07109205481780895,
-    0.07708509016050281
-   ],
-   "samples": 100000
-  },
-  {
-   "suite": "Alfano (2009), Monte Carlo",
-   "case_id": "5",
-   "hard_body_radius": 10.0,
-   "reference": 0.04446611,
-   "criterion": {
-    "relative": null,
-    "absolute": null,
-    "small": 0.0,
-    "interval": true
-   },
-   "method": "montecarlo",
-   "value": 0.04428,
-   "error": 0.004185434705217146,
-   "relative": true,
-   "passed": true,
-   "paper": null,
-   "interval": [
-    0.044425717781909,
-    0.0445065285915099
-   ],
-   "informative": null,
-   "ci": [
-    0.04196600828641556,
-    0.04667658146487922
-   ],
-   "samples": 100000
-  },
-  {
-   "suite": "Alfano (2009), Monte Carlo",
-   "case_id": "6",
-   "hard_body_radius": 10.0,
-   "reference": 0.00432422,
-   "criterion": {
-    "relative": null,
-    "absolute": null,
-    "small": 0.0,
-    "interval": true
-   },
-   "method": "montecarlo",
-   "value": 0.00437,
-   "error": 0.010586880408489763,
-   "relative": true,
-   "passed": true,
-   "paper": null,
-   "interval": [
-    0.00431136875715775,
-    0.00433709995038931
-   ],
-   "informative": null,
-   "ci": [
-    0.003655937415667748,
-    0.0051744379665112855
-   ],
-   "samples": 100000
-  },
-  {
-   "suite": "Alfano (2009), Monte Carlo",
-   "case_id": "7",
-   "hard_body_radius": 10.0,
-   "reference": 0.00016011,
-   "criterion": {
-    "relative": null,
-    "absolute": null,
-    "small": 0.0,
-    "interval": true
-   },
-   "method": "montecarlo",
-   "value": 0.00016291188788459914,
-   "error": 0.0174997681881152,
-   "relative": true,
-   "passed": true,
-   "paper": null,
-   "interval": [
-    0.000157639645593939,
-    0.000162609365493197
-   ],
-   "informative": null,
-   "ci": [
-    0.00013533553241115698,
-    0.0001941376665149753
-   ],
-   "samples": 2498283
-  },
-  {
-   "suite": "Alfano (2009), Monte Carlo",
-   "case_id": "8",
-   "hard_body_radius": 4.0,
-   "reference": 0.03523735,
-   "criterion": {
-    "relative": null,
-    "absolute": null,
-    "small": 0.0,
-    "interval": true
-   },
-   "method": "montecarlo",
-   "value": 0.03534,
-   "error": 0.002913102148714439,
-   "relative": true,
-   "passed": true,
-   "paper": null,
-   "interval": [
-    0.0352012207992815,
-    0.0352735061089634
-   ],
-   "informative": null,
-   "ci": [
-    0.033267605209481,
-    0.03749663341126292
-   ],
-   "samples": 100000
-  },
-  {
-   "suite": "Alfano (2009), Monte Carlo",
-   "case_id": "9",
-   "hard_body_radius": 6.0,
-   "reference": 0.27977477,
-   "criterion": {
-    "relative": null,
-    "absolute": null,
-    "small": 0.0,
-    "interval": true
-   },
-   "method": "montecarlo",
-   "value": 0.28122,
-   "error": 0.005165690959195568,
-   "relative": true,
-   "passed": true,
-   "paper": null,
-   "interval": [
-    0.279686790854236,
-    0.279862761894709
-   ],
-   "informative": null,
-   "ci": [
-    0.2760986281440246,
-    0.28638095646314177
-   ],
-   "samples": 100000
-  },
-  {
-   "suite": "Alfano (2009), Monte Carlo",
-   "case_id": "10",
-   "hard_body_radius": 6.0,
-   "reference": 0.36404591,
-   "criterion": {
-    "relative": null,
-    "absolute": null,
-    "small": 0.0,
-    "interval": true
-   },
-   "method": "montecarlo",
-   "value": 0.36522,
-   "error": 0.0032251152059365714,
-   "relative": true,
-   "passed": true,
-   "paper": null,
-   "interval": [
-    0.363951602995593,
-    0.364140224874815
-   ],
-   "informative": null,
-   "ci": [
-    0.35972664919354896,
-    0.3707377347649851
-   ],
-   "samples": 100000
-  },
-  {
-   "suite": "Alfano (2009), Monte Carlo",
-   "case_id": "11",
-   "hard_body_radius": 4.0,
-   "reference": 0.00243642,
-   "criterion": {
-    "relative": null,
-    "absolute": null,
-    "small": 0.0,
-    "interval": true
-   },
-   "method": "montecarlo",
-   "value": 0.0023754994639898644,
-   "error": 0.025004119162597368,
-   "relative": true,
-   "passed": true,
-   "paper": null,
-   "interval": [
-    0.00242676679408548,
-    0.00244610202771047
-   ],
-   "informative": null,
-   "ci": [
-    0.0019656025194183693,
-    0.002840694320662698
-   ],
-   "samples": 164176
-  },
-  {
-   "suite": "Alfano (2009), Monte Carlo",
-   "case_id": "12",
-   "hard_body_radius": 4.0,
-   "reference": 0.00242273,
-   "criterion": {
-    "relative": null,
-    "absolute": null,
-    "small": 0.0,
-    "interval": true
-   },
-   "method": "montecarlo",
-   "value": 0.0023742610718092837,
-   "error": 0.020005914068309892,
-   "relative": true,
-   "passed": true,
-   "paper": null,
-   "interval": [
-    0.00241310391323561,
-    0.00243238490940897
-   ],
-   "informative": null,
-   "ci": [
-    0.0019655630626069735,
-    0.0028379450326637494
-   ],
-   "samples": 165104
-  },
-  {
-   "suite": "CARA Pc method test set, Monte Carlo",
-   "case_id": "000020580_conj_000022015_20210315_212955_20210313_065123",
-   "hard_body_radius": 10.0,
-   "reference": 0.000611125,
-   "criterion": {
-    "relative": null,
-    "absolute": null,
-    "small": 0.0,
-    "interval": true
-   },
-   "method": "montecarlo",
-   "value": 0.000582096187957484,
-   "error": 0.04750061287382446,
-   "relative": true,
-   "passed": true,
-   "paper": null,
-   "interval": [
-    0.0005990748485437574,
-    0.0006233564419388285
-   ],
-   "informative": null,
-   "ci": [
-    0.0004804705362457352,
-    0.0006976438295749235
-   ],
-   "samples": 654531
-  },
-  {
-   "suite": "CARA Pc method test set, Monte Carlo",
-   "case_id": "000025994_conj_000037558_20210324_151047_20210323_154356",
-   "hard_body_radius": 15.0,
-   "reference": 0.021608695652173913,
-   "criterion": {
-    "relative": null,
-    "absolute": null,
-    "small": 0.0,
-    "interval": true
-   },
-   "method": "montecarlo",
-   "value": 0.02147,
-   "error": 0.0064185110663984015,
-   "relative": true,
-   "passed": true,
-   "paper": null,
-   "interval": [
-    0.021190439499234423,
-    0.02203299247280005
-   ],
-   "informative": null,
-   "ci": [
-    0.019852271205478503,
-    0.023174560429202944
-   ],
-   "samples": 100000
-  },
-  {
-   "suite": "CARA Pc method test set, Monte Carlo",
-   "case_id": "000028485_conj_000044777_20220407_231108_20220406_140506",
-   "hard_body_radius": 8.7,
-   "reference": 0.0023277272727272725,
-   "criterion": {
-    "relative": null,
-    "absolute": null,
-    "small": 0.0,
-    "interval": true
-   },
-   "method": "montecarlo",
-   "value": 0.002286984555580126,
-   "error": 0.017503217676962047,
-   "relative": true,
-   "passed": true,
-   "paper": null,
-   "interval": [
-    0.0022829134965229557,
-    0.00237319797317905
-   ],
-   "informative": null,
-   "ci": [
-    0.0018937680352782266,
-    0.0027330396796409195
-   ],
-   "samples": 171842
-  },
-  {
-   "suite": "CARA Pc method test set, Monte Carlo",
-   "case_id": "000029108_conj_000034995_20220706_165058_20220705_143113",
-   "hard_body_radius": 14.8,
-   "reference": 0.0017750877192982456,
-   "criterion": {
-    "relative": null,
-    "absolute": null,
-    "small": 0.0,
-    "interval": true
-   },
-   "method": "montecarlo",
-   "value": 0.0016064542182736385,
-   "error": 0.09500009446928842,
-   "relative": true,
-   "passed": true,
-   "paper": null,
-   "interval": [
-    0.0017406963924566127,
-    0.001809986718603604
-   ],
-   "informative": null,
-   "ci": [
-    0.0013192852498934977,
-    0.0019339878375100698
-   ],
-   "samples": 225341
-  },
-  {
-   "suite": "CARA Pc method test set, Monte Carlo",
-   "case_id": "000032060_conj_000044396_20221004_061656_20221003_054027",
-   "hard_body_radius": 20.0,
-   "reference": 0.006642,
-   "criterion": {
-    "relative": null,
-    "absolute": null,
-    "small": 0.0,
-    "interval": true
-   },
-   "method": "montecarlo",
-   "value": 0.00663,
-   "error": 0.001806684733514111,
-   "relative": true,
-   "passed": true,
-   "paper": null,
-   "interval": [
-    0.00651263142575975,
-    0.0067732789485503205
-   ],
-   "informative": null,
-   "ci": [
-    0.005742230898598465,
-    0.007607583930213287
-   ],
-   "samples": 100000
-  },
-  {
-   "suite": "CARA Pc method test set, Monte Carlo",
-   "case_id": "000033591_conj_000042216_20211203_183431_20211202_153618",
-   "hard_body_radius": 6.0,
-   "reference": 0.004585454545454545,
-   "criterion": {
-    "relative": null,
-    "absolute": null,
-    "small": 0.0,
-    "interval": true
-   },
-   "method": "montecarlo",
-   "value": 0.00498,
-   "error": 0.08604282315622526,
-   "relative": true,
-   "passed": true,
-   "paper": null,
-   "interval": [
-    0.004496604852460483,
-    0.0046756121643321755
-   ],
-   "informative": null,
-   "ci": [
-    0.004215274664999007,
-    0.005834939670363562
-   ],
-   "samples": 100000
-  },
-  {
-   "suite": "CARA Pc method test set, Monte Carlo",
-   "case_id": "000037849_conj_000013512_20210612_084905_20210611_062043",
-   "hard_body_radius": 6.0,
-   "reference": 0.01060842105263158,
-   "criterion": {
-    "relative": null,
-    "absolute": null,
-    "small": 0.0,
-    "interval": true
-   },
-   "method": "montecarlo",
-   "value": 0.01046,
-   "error": 0.013990871204604086,
-   "relative": true,
-   "passed": true,
-   "paper": null,
-   "interval": [
-    0.010403374293120006,
-    0.01081645990253584
-   ],
-   "informative": null,
-   "ci": [
-    0.009336795958645021,
-    0.011672190262536838
-   ],
-   "samples": 100000
-  },
-  {
-   "suite": "CARA Pc method test set, Monte Carlo",
-   "case_id": "000038771_conj_000030802_20201216_182131_20201215_171306",
-   "hard_body_radius": 10.0,
-   "reference": 0.00156734375,
-   "criterion": {
-    "relative": null,
-    "absolute": null,
-    "small": 0.0,
-    "interval": true
-   },
-   "method": "montecarlo",
-   "value": 0.001516404202046166,
-   "error": 0.03250055895768484,
-   "relative": true,
-   "passed": true,
-   "paper": null,
-   "interval": [
-    0.001536843485501179,
-    0.0015982963552663189
-   ],
-   "informative": null,
-   "ci": [
-    0.0012537008685384432,
-    0.0018147435270922342
-   ],
-   "samples": 255209
-  },
-  {
-   "suite": "CARA Pc method test set, Monte Carlo",
-   "case_id": "000040059_conj_000035921_20220326_194122_20220325_215435",
-   "hard_body_radius": 6.0,
-   "reference": 0.0007953076923076923,
-   "criterion": {
-    "relative": null,
-    "absolute": null,
-    "small": 0.0,
-    "interval": true
-   },
-   "method": "montecarlo",
-   "value": 0.0008350730688935282,
-   "error": 0.049999989903846354,
-   "relative": true,
-   "passed": true,
-   "paper": null,
-   "interval": [
-    0.0007800565245031537,
-    0.0008107818837772823
-   ],
-   "informative": null,
-   "ci": [
-    0.000695837727657495,
-    0.0009924090622831165
-   ],
-   "samples": 502950
-  },
-  {
-   "suite": "CARA Pc method test set, Monte Carlo",
-   "case_id": "000041848_conj_000044431_20210708_055146_20210707_060703",
-   "hard_body_radius": 20.0,
-   "reference": 0.0024835,
-   "criterion": {
-    "relative": null,
-    "absolute": null,
-    "small": 0.0,
-    "interval": true
-   },
-   "method": "montecarlo",
-   "value": 0.002315849600158943,
-   "error": 0.06750569754018806,
-   "relative": true,
-   "passed": true,
-   "paper": null,
-   "interval": [
-    0.0024349589842068667,
-    0.002532763443473826
-   ],
-   "informative": null,
-   "ci": [
-    0.0019077685735988184,
-    0.002780315357843003
-   ],
-   "samples": 161064
-  },
-  {
-   "suite": "CARA Pc method test set, Monte Carlo",
-   "case_id": "000043477_conj_000046952_20220130_183651_20220129_070200",
-   "hard_body_radius": 3.1,
-   "reference": 0.00012993589743589743,
-   "criterion": {
-    "relative": null,
-    "absolute": null,
-    "small": 0.0,
-    "interval": true
-   },
-   "method": "montecarlo",
-   "value": 0.0001234390643059054,
-   "error": 0.050000294439011245,
-   "relative": true,
-   "passed": true,
-   "paper": null,
-   "interval": [
-    0.00012741854111624246,
-    0.00013249047510409536
-   ],
-   "informative": null,
-   "ci": [
-    0.00010185769449827338,
-    0.00014798325631692932
-   ],
-   "samples": 3078442
-  },
-  {
-   "suite": "CARA Pc method test set, Monte Carlo",
-   "case_id": "000044628_conj_000027127_20220313_181420_20220311_225243",
-   "hard_body_radius": 4.5,
-   "reference": 0.00015716129032258065,
-   "criterion": {
-    "relative": null,
-    "absolute": null,
-    "small": 0.0,
-    "interval": true
-   },
-   "method": "montecarlo",
-   "value": 0.00015441096734345556,
-   "error": 0.017500002535483963,
-   "relative": true,
-   "passed": true,
-   "paper": null,
-   "interval": [
-    0.00015405632424312502,
-    0.00016031308381614113
-   ],
-   "informative": null,
-   "ci": [
-    0.00012783892967320522,
-    0.0001845658485902861
-   ],
-   "samples": 2545156
-  },
-  {
-   "suite": "CARA Pc method test set, Monte Carlo",
-   "case_id": "000028654_conj_000041835_20220106_193032_20220105_161142",
-   "hard_body_radius": 6.0,
-   "reference": 0.005024,
-   "criterion": {
-    "relative": null,
-    "absolute": null,
-    "small": 0.0,
-    "interval": true
-   },
-   "method": "montecarlo",
-   "value": 0.00515,
-   "error": 0.025079617834394954,
-   "relative": true,
-   "passed": true,
-   "paper": null,
-   "interval": [
-    0.0049264811876992345,
-    0.005122956267695375
-   ],
-   "informative": null,
-   "ci": [
-    0.00437172376652393,
-    0.006018447270807516
-   ],
-   "samples": 100000
-  },
-  {
-   "suite": "CARA Pc method test set, Monte Carlo",
-   "case_id": "000040115_conj_000030660_20230721_100115_20230720_061903",
-   "hard_body_radius": 20.0,
-   "reference": 0.00010509677419354839,
-   "criterion": {
-    "relative": null,
-    "absolute": null,
-    "small": 0.0,
-    "interval": true
-   },
-   "method": "montecarlo",
-   "value": 0.00010378306344481999,
-   "error": 0.012500010193548362,
-   "relative": true,
-   "passed": true,
-   "paper": null,
-   "interval": [
-    0.00010302354436593787,
-    0.00010720122538325375
-   ],
-   "informative": null,
-   "ci": [
-    8.59656695606102e-05,
-    0.00012399656136143398
-   ],
-   "samples": 3806016
-  },
-  {
-   "suite": "CARA Pc method test set, Monte Carlo",
-   "case_id": "000025994_conj_000026980_20220928_223445_20220924_220647",
-   "hard_body_radius": 15.0,
-   "reference": 0.00010694565217391305,
-   "criterion": {
-    "relative": null,
-    "absolute": null,
-    "small": 0.0,
-    "interval": true
-   },
-   "method": "montecarlo",
-   "value": 0.0001056088174539559,
-   "error": 0.012500131541422698,
-   "relative": true,
-   "passed": true,
-   "paper": null,
-   "interval": [
-    0.00010484289767542505,
-    0.00010907996692562582
-   ],
-   "informative": null,
-   "ci": [
-    8.747799308077383e-05,
-    0.00012617788924830988
-   ],
-   "samples": 3740218
-  },
-  {
-   "suite": "CARA Pc method test set, Monte Carlo",
-   "case_id": "000027424_conj_000041740_20220530_042037_20220525_221911",
-   "hard_body_radius": 17.3,
-   "reference": 0.000255325,
-   "criterion": {
-    "relative": null,
-    "absolute": null,
-    "small": 0.0,
-    "interval": true
-   },
-   "method": "montecarlo",
-   "value": 0.00025085677482444813,
-   "error": 0.017500147559196533,
-   "relative": true,
-   "passed": true,
-   "paper": null,
-   "interval": [
-    0.0002503975121874247,
-    0.0002603250503227852
-   ],
-   "informative": null,
-   "ci": [
-    0.00020768941730423294,
-    0.00029984371067619096
-   ],
-   "samples": 1566631
-  },
-  {
-   "suite": "CARA Pc method test set, Monte Carlo",
-   "case_id": "000032060_conj_000035644_20220303_131758_20220227_152710",
-   "hard_body_radius": 20.0,
-   "reference": 0.00017701754385964912,
-   "criterion": {
-    "relative": null,
-    "absolute": null,
-    "small": 0.0,
-    "interval": true
-   },
-   "method": "montecarlo",
-   "value": 0.00018011527377521613,
-   "error": 0.0174995644387829,
-   "relative": true,
-   "passed": true,
-   "paper": null,
-   "interval": [
-    0.00017358051253248488,
-    0.00018050550524866568
-   ],
-   "informative": null,
-   "ci": [
-    0.00014962708842599206,
-    0.0002146381197075888
-   ],
-   "samples": 2259664
-  },
-  {
-   "suite": "CARA Pc method test set, Monte Carlo",
-   "case_id": "000025994_conj_000026132_20220224_100307_20220221_225515",
-   "hard_body_radius": 15.0,
-   "reference": 0.0012158536585365853,
-   "criterion": {
-    "relative": null,
-    "absolute": null,
-    "small": 0.0,
-    "interval": true
-   },
-   "method": "montecarlo",
-   "value": 0.001148981570700362,
-   "error": 0.055000112362791446,
-   "relative": true,
-   "passed": true,
-   "paper": null,
-   "interval": [
-    0.0011921173424689854,
-    0.0012399432734387335
-   ],
-   "informative": null,
-   "ci": [
-    0.0009476851041627551,
-    0.0013779458073677918
-   ],
-   "samples": 328987
-  },
-  {
-   "suite": "CARA Pc method test set, Monte Carlo",
-   "case_id": "000054234_conj_000028343_20221130_142342_20221127_152412",
-   "hard_body_radius": 12.0,
-   "reference": 0.00015155384615384615,
-   "criterion": {
-    "relative": null,
-    "absolute": null,
-    "small": 0.0,
-    "interval": true
-   },
-   "method": "montecarlo",
-   "value": 0.0001534482667165784,
-   "error": 0.012499983410577174,
-   "relative": true,
-   "passed": true,
-   "paper": null,
-   "interval": [
-    0.00014857588127412311,
-    0.00015457647685520261
-   ],
-   "informative": null,
-   "ci": [
-    0.00012741335907121628,
-    0.00018293771819088834
-   ],
-   "samples": 2639326
-  },
-  {
-   "suite": "CARA Pc method test set, Monte Carlo",
-   "case_id": "000035946_conj_000030648_20221210_140311_20221206_003234",
-   "hard_body_radius": 20.0,
-   "reference": 0.00015056060606060605,
-   "criterion": {
-    "relative": null,
-    "absolute": null,
-    "small": 0.0,
-    "interval": true
-   },
-   "method": "montecarlo",
-   "value": 0.00013701012294023725,
-   "error": 0.0900001897901118,
-   "relative": true,
-   "passed": true,
-   "paper": null,
-   "interval": [
-    0.00014761492359038428,
-    0.0001535502770391515
-   ],
-   "informative": null,
-   "ci": [
-    0.00011256701603159011,
-    0.0001648869398167364
-   ],
-   "samples": 2656738
-  },
-  {
-   "suite": "CARA Pc method test set, Monte Carlo",
-   "case_id": "000032060_conj_000049574_20220227_152525_20220222_065043",
-   "hard_body_radius": 20.0,
-   "reference": 0.00014418571428571428,
-   "criterion": {
-    "relative": null,
-    "absolute": null,
-    "small": 0.0,
-    "interval": true
-   },
-   "method": "montecarlo",
-   "value": 0.00013409271141229904,
-   "error": 0.07000001992857095,
-   "relative": true,
-   "passed": true,
-   "paper": null,
-   "interval": [
-    0.0001413865258901289,
-    0.0001470263770045363
-   ],
-   "informative": null,
-   "ci": [
-    0.00011041313543951186,
-    0.00016106029362861823
-   ],
-   "samples": 2774200
-  }
- ]
+  "cara_commit": "1c78beb1f7aefc384886c3be1d09e4681acb5d37",
+  "rows": [
+    {
+      "suite": "Alfano (2009), Monte Carlo",
+      "case_id": "1",
+      "hard_body_radius": 15.0,
+      "reference": 0.21686537,
+      "criterion": {
+        "relative": null,
+        "absolute": null,
+        "small": 0.0,
+        "interval": true
+      },
+      "method": "montecarlo",
+      "value": 0.21847,
+      "error": 0.007399198867020566,
+      "relative": true,
+      "passed": true,
+      "paper": null,
+      "interval": [
+        0.216784601089679,
+        0.216946155301232
+      ],
+      "informative": null,
+      "ci": [
+        0.2137699702513359,
+        0.22322097415069855
+      ],
+      "samples": 100000
+    },
+    {
+      "suite": "Alfano (2009), Monte Carlo",
+      "case_id": "2",
+      "hard_body_radius": 4.0,
+      "reference": 0.0155469,
+      "criterion": {
+        "relative": null,
+        "absolute": null,
+        "small": 0.0,
+        "interval": true
+      },
+      "method": "montecarlo",
+      "value": 0.01553,
+      "error": 0.001087033427885961,
+      "relative": true,
+      "passed": true,
+      "paper": null,
+      "interval": [
+        0.0155226614929474,
+        0.0155711665578351
+      ],
+      "informative": null,
+      "ci": [
+        0.014156076532340618,
+        0.016991896167239482
+      ],
+      "samples": 100000
+    },
+    {
+      "suite": "Alfano (2009), Monte Carlo",
+      "case_id": "3",
+      "hard_body_radius": 15.0,
+      "reference": 0.10034086,
+      "criterion": {
+        "relative": null,
+        "absolute": null,
+        "small": 0.0,
+        "interval": true
+      },
+      "method": "montecarlo",
+      "value": 0.10028,
+      "error": 0.0006065325730715263,
+      "relative": true,
+      "passed": true,
+      "paper": null,
+      "interval": [
+        0.100281978677948,
+        0.100399764459375
+      ],
+      "informative": null,
+      "ci": [
+        0.09687964061324747,
+        0.10375273182262683
+      ],
+      "samples": 100000
+    },
+    {
+      "suite": "Alfano (2009), Monte Carlo",
+      "case_id": "4",
+      "hard_body_radius": 15.0,
+      "reference": 0.07364054,
+      "criterion": {
+        "relative": null,
+        "absolute": null,
+        "small": 0.0,
+        "interval": true
+      },
+      "method": "montecarlo",
+      "value": 0.07405,
+      "error": 0.0055602525456766114,
+      "relative": true,
+      "passed": true,
+      "paper": null,
+      "interval": [
+        0.0735893560196113,
+        0.0736917486638813
+      ],
+      "informative": null,
+      "ci": [
+        0.07109205481780895,
+        0.07708509016050281
+      ],
+      "samples": 100000
+    },
+    {
+      "suite": "Alfano (2009), Monte Carlo",
+      "case_id": "5",
+      "hard_body_radius": 10.0,
+      "reference": 0.04446611,
+      "criterion": {
+        "relative": null,
+        "absolute": null,
+        "small": 0.0,
+        "interval": true
+      },
+      "method": "montecarlo",
+      "value": 0.04428,
+      "error": 0.004185434705217146,
+      "relative": true,
+      "passed": true,
+      "paper": null,
+      "interval": [
+        0.044425717781909,
+        0.0445065285915099
+      ],
+      "informative": null,
+      "ci": [
+        0.04196600828641556,
+        0.04667658146487922
+      ],
+      "samples": 100000
+    },
+    {
+      "suite": "Alfano (2009), Monte Carlo",
+      "case_id": "6",
+      "hard_body_radius": 10.0,
+      "reference": 0.00432422,
+      "criterion": {
+        "relative": null,
+        "absolute": null,
+        "small": 0.0,
+        "interval": true
+      },
+      "method": "montecarlo",
+      "value": 0.00437,
+      "error": 0.010586880408489763,
+      "relative": true,
+      "passed": true,
+      "paper": null,
+      "interval": [
+        0.00431136875715775,
+        0.00433709995038931
+      ],
+      "informative": null,
+      "ci": [
+        0.003655937415667748,
+        0.0051744379665112855
+      ],
+      "samples": 100000
+    },
+    {
+      "suite": "Alfano (2009), Monte Carlo",
+      "case_id": "7",
+      "hard_body_radius": 10.0,
+      "reference": 0.00016011,
+      "criterion": {
+        "relative": null,
+        "absolute": null,
+        "small": 0.0,
+        "interval": true
+      },
+      "method": "montecarlo",
+      "value": 0.00016291188788459914,
+      "error": 0.0174997681881152,
+      "relative": true,
+      "passed": true,
+      "paper": null,
+      "interval": [
+        0.000157639645593939,
+        0.000162609365493197
+      ],
+      "informative": null,
+      "ci": [
+        0.00013533553241115698,
+        0.0001941376665149753
+      ],
+      "samples": 2498283
+    },
+    {
+      "suite": "Alfano (2009), Monte Carlo",
+      "case_id": "8",
+      "hard_body_radius": 4.0,
+      "reference": 0.03523735,
+      "criterion": {
+        "relative": null,
+        "absolute": null,
+        "small": 0.0,
+        "interval": true
+      },
+      "method": "montecarlo",
+      "value": 0.03534,
+      "error": 0.002913102148714439,
+      "relative": true,
+      "passed": true,
+      "paper": null,
+      "interval": [
+        0.0352012207992815,
+        0.0352735061089634
+      ],
+      "informative": null,
+      "ci": [
+        0.033267605209481,
+        0.03749663341126292
+      ],
+      "samples": 100000
+    },
+    {
+      "suite": "Alfano (2009), Monte Carlo",
+      "case_id": "9",
+      "hard_body_radius": 6.0,
+      "reference": 0.27977477,
+      "criterion": {
+        "relative": null,
+        "absolute": null,
+        "small": 0.0,
+        "interval": true
+      },
+      "method": "montecarlo",
+      "value": 0.28122,
+      "error": 0.005165690959195568,
+      "relative": true,
+      "passed": true,
+      "paper": null,
+      "interval": [
+        0.279686790854236,
+        0.279862761894709
+      ],
+      "informative": null,
+      "ci": [
+        0.2760986281440246,
+        0.28638095646314177
+      ],
+      "samples": 100000
+    },
+    {
+      "suite": "Alfano (2009), Monte Carlo",
+      "case_id": "10",
+      "hard_body_radius": 6.0,
+      "reference": 0.36404591,
+      "criterion": {
+        "relative": null,
+        "absolute": null,
+        "small": 0.0,
+        "interval": true
+      },
+      "method": "montecarlo",
+      "value": 0.36522,
+      "error": 0.0032251152059365714,
+      "relative": true,
+      "passed": true,
+      "paper": null,
+      "interval": [
+        0.363951602995593,
+        0.364140224874815
+      ],
+      "informative": null,
+      "ci": [
+        0.35972664919354896,
+        0.3707377347649851
+      ],
+      "samples": 100000
+    },
+    {
+      "suite": "Alfano (2009), Monte Carlo",
+      "case_id": "11",
+      "hard_body_radius": 4.0,
+      "reference": 0.00243642,
+      "criterion": {
+        "relative": null,
+        "absolute": null,
+        "small": 0.0,
+        "interval": true
+      },
+      "method": "montecarlo",
+      "value": 0.0023754994639898644,
+      "error": 0.025004119162597368,
+      "relative": true,
+      "passed": true,
+      "paper": null,
+      "interval": [
+        0.00242676679408548,
+        0.00244610202771047
+      ],
+      "informative": null,
+      "ci": [
+        0.0019656025194183693,
+        0.002840694320662698
+      ],
+      "samples": 164176
+    },
+    {
+      "suite": "Alfano (2009), Monte Carlo",
+      "case_id": "12",
+      "hard_body_radius": 4.0,
+      "reference": 0.00242273,
+      "criterion": {
+        "relative": null,
+        "absolute": null,
+        "small": 0.0,
+        "interval": true
+      },
+      "method": "montecarlo",
+      "value": 0.0023742610718092837,
+      "error": 0.020005914068309892,
+      "relative": true,
+      "passed": true,
+      "paper": null,
+      "interval": [
+        0.00241310391323561,
+        0.00243238490940897
+      ],
+      "informative": null,
+      "ci": [
+        0.0019655630626069735,
+        0.0028379450326637494
+      ],
+      "samples": 165104
+    },
+    {
+      "suite": "CARA Pc method test set, Monte Carlo",
+      "case_id": "000020580_conj_000022015_20210315_212955_20210313_065123",
+      "hard_body_radius": 10.0,
+      "reference": 0.000611125,
+      "criterion": {
+        "relative": null,
+        "absolute": null,
+        "small": 0.0,
+        "interval": true
+      },
+      "method": "montecarlo",
+      "value": 0.000582096187957484,
+      "error": 0.04750061287382446,
+      "relative": true,
+      "passed": true,
+      "paper": null,
+      "interval": [
+        0.0005990748485437574,
+        0.0006233564419388285
+      ],
+      "informative": null,
+      "ci": [
+        0.0004804705362457352,
+        0.0006976438295749235
+      ],
+      "samples": 654531
+    },
+    {
+      "suite": "CARA Pc method test set, Monte Carlo",
+      "case_id": "000025994_conj_000037558_20210324_151047_20210323_154356",
+      "hard_body_radius": 15.0,
+      "reference": 0.021608695652173913,
+      "criterion": {
+        "relative": null,
+        "absolute": null,
+        "small": 0.0,
+        "interval": true
+      },
+      "method": "montecarlo",
+      "value": 0.02147,
+      "error": 0.0064185110663984015,
+      "relative": true,
+      "passed": true,
+      "paper": null,
+      "interval": [
+        0.021190439499234423,
+        0.02203299247280005
+      ],
+      "informative": null,
+      "ci": [
+        0.019852271205478503,
+        0.023174560429202944
+      ],
+      "samples": 100000
+    },
+    {
+      "suite": "CARA Pc method test set, Monte Carlo",
+      "case_id": "000028485_conj_000044777_20220407_231108_20220406_140506",
+      "hard_body_radius": 8.7,
+      "reference": 0.0023277272727272725,
+      "criterion": {
+        "relative": null,
+        "absolute": null,
+        "small": 0.0,
+        "interval": true
+      },
+      "method": "montecarlo",
+      "value": 0.002286984555580126,
+      "error": 0.017503217676962047,
+      "relative": true,
+      "passed": true,
+      "paper": null,
+      "interval": [
+        0.0022829134965229557,
+        0.00237319797317905
+      ],
+      "informative": null,
+      "ci": [
+        0.0018937680352782266,
+        0.0027330396796409195
+      ],
+      "samples": 171842
+    },
+    {
+      "suite": "CARA Pc method test set, Monte Carlo",
+      "case_id": "000029108_conj_000034995_20220706_165058_20220705_143113",
+      "hard_body_radius": 14.8,
+      "reference": 0.0017750877192982456,
+      "criterion": {
+        "relative": null,
+        "absolute": null,
+        "small": 0.0,
+        "interval": true
+      },
+      "method": "montecarlo",
+      "value": 0.0016064542182736385,
+      "error": 0.09500009446928842,
+      "relative": true,
+      "passed": true,
+      "paper": null,
+      "interval": [
+        0.0017406963924566127,
+        0.001809986718603604
+      ],
+      "informative": null,
+      "ci": [
+        0.0013192852498934977,
+        0.0019339878375100698
+      ],
+      "samples": 225341
+    },
+    {
+      "suite": "CARA Pc method test set, Monte Carlo",
+      "case_id": "000032060_conj_000044396_20221004_061656_20221003_054027",
+      "hard_body_radius": 20.0,
+      "reference": 0.006642,
+      "criterion": {
+        "relative": null,
+        "absolute": null,
+        "small": 0.0,
+        "interval": true
+      },
+      "method": "montecarlo",
+      "value": 0.00663,
+      "error": 0.001806684733514111,
+      "relative": true,
+      "passed": true,
+      "paper": null,
+      "interval": [
+        0.00651263142575975,
+        0.0067732789485503205
+      ],
+      "informative": null,
+      "ci": [
+        0.005742230898598465,
+        0.007607583930213287
+      ],
+      "samples": 100000
+    },
+    {
+      "suite": "CARA Pc method test set, Monte Carlo",
+      "case_id": "000033591_conj_000042216_20211203_183431_20211202_153618",
+      "hard_body_radius": 6.0,
+      "reference": 0.004585454545454545,
+      "criterion": {
+        "relative": null,
+        "absolute": null,
+        "small": 0.0,
+        "interval": true
+      },
+      "method": "montecarlo",
+      "value": 0.00498,
+      "error": 0.08604282315622526,
+      "relative": true,
+      "passed": true,
+      "paper": null,
+      "interval": [
+        0.004496604852460483,
+        0.0046756121643321755
+      ],
+      "informative": null,
+      "ci": [
+        0.004215274664999007,
+        0.005834939670363562
+      ],
+      "samples": 100000
+    },
+    {
+      "suite": "CARA Pc method test set, Monte Carlo",
+      "case_id": "000037849_conj_000013512_20210612_084905_20210611_062043",
+      "hard_body_radius": 6.0,
+      "reference": 0.01060842105263158,
+      "criterion": {
+        "relative": null,
+        "absolute": null,
+        "small": 0.0,
+        "interval": true
+      },
+      "method": "montecarlo",
+      "value": 0.01046,
+      "error": 0.013990871204604086,
+      "relative": true,
+      "passed": true,
+      "paper": null,
+      "interval": [
+        0.010403374293120006,
+        0.01081645990253584
+      ],
+      "informative": null,
+      "ci": [
+        0.009336795958645021,
+        0.011672190262536838
+      ],
+      "samples": 100000
+    },
+    {
+      "suite": "CARA Pc method test set, Monte Carlo",
+      "case_id": "000038771_conj_000030802_20201216_182131_20201215_171306",
+      "hard_body_radius": 10.0,
+      "reference": 0.00156734375,
+      "criterion": {
+        "relative": null,
+        "absolute": null,
+        "small": 0.0,
+        "interval": true
+      },
+      "method": "montecarlo",
+      "value": 0.001516404202046166,
+      "error": 0.03250055895768484,
+      "relative": true,
+      "passed": true,
+      "paper": null,
+      "interval": [
+        0.001536843485501179,
+        0.0015982963552663189
+      ],
+      "informative": null,
+      "ci": [
+        0.0012537008685384432,
+        0.0018147435270922342
+      ],
+      "samples": 255209
+    },
+    {
+      "suite": "CARA Pc method test set, Monte Carlo",
+      "case_id": "000040059_conj_000035921_20220326_194122_20220325_215435",
+      "hard_body_radius": 6.0,
+      "reference": 0.0007953076923076923,
+      "criterion": {
+        "relative": null,
+        "absolute": null,
+        "small": 0.0,
+        "interval": true
+      },
+      "method": "montecarlo",
+      "value": 0.0008350730688935282,
+      "error": 0.049999989903846354,
+      "relative": true,
+      "passed": true,
+      "paper": null,
+      "interval": [
+        0.0007800565245031537,
+        0.0008107818837772823
+      ],
+      "informative": null,
+      "ci": [
+        0.000695837727657495,
+        0.0009924090622831165
+      ],
+      "samples": 502950
+    },
+    {
+      "suite": "CARA Pc method test set, Monte Carlo",
+      "case_id": "000041848_conj_000044431_20210708_055146_20210707_060703",
+      "hard_body_radius": 20.0,
+      "reference": 0.0024835,
+      "criterion": {
+        "relative": null,
+        "absolute": null,
+        "small": 0.0,
+        "interval": true
+      },
+      "method": "montecarlo",
+      "value": 0.002315849600158943,
+      "error": 0.06750569754018806,
+      "relative": true,
+      "passed": true,
+      "paper": null,
+      "interval": [
+        0.0024349589842068667,
+        0.002532763443473826
+      ],
+      "informative": null,
+      "ci": [
+        0.0019077685735988184,
+        0.002780315357843003
+      ],
+      "samples": 161064
+    },
+    {
+      "suite": "CARA Pc method test set, Monte Carlo",
+      "case_id": "000043477_conj_000046952_20220130_183651_20220129_070200",
+      "hard_body_radius": 3.1,
+      "reference": 0.00012993589743589743,
+      "criterion": {
+        "relative": null,
+        "absolute": null,
+        "small": 0.0,
+        "interval": true
+      },
+      "method": "montecarlo",
+      "value": 0.0001234390643059054,
+      "error": 0.050000294439011245,
+      "relative": true,
+      "passed": true,
+      "paper": null,
+      "interval": [
+        0.00012741854111624246,
+        0.00013249047510409536
+      ],
+      "informative": null,
+      "ci": [
+        0.00010185769449827338,
+        0.00014798325631692932
+      ],
+      "samples": 3078442
+    },
+    {
+      "suite": "CARA Pc method test set, Monte Carlo",
+      "case_id": "000044628_conj_000027127_20220313_181420_20220311_225243",
+      "hard_body_radius": 4.5,
+      "reference": 0.00015716129032258065,
+      "criterion": {
+        "relative": null,
+        "absolute": null,
+        "small": 0.0,
+        "interval": true
+      },
+      "method": "montecarlo",
+      "value": 0.00015441096734345556,
+      "error": 0.017500002535483963,
+      "relative": true,
+      "passed": true,
+      "paper": null,
+      "interval": [
+        0.00015405632424312502,
+        0.00016031308381614113
+      ],
+      "informative": null,
+      "ci": [
+        0.00012783892967320522,
+        0.0001845658485902861
+      ],
+      "samples": 2545156
+    },
+    {
+      "suite": "CARA Pc method test set, Monte Carlo",
+      "case_id": "000028654_conj_000041835_20220106_193032_20220105_161142",
+      "hard_body_radius": 6.0,
+      "reference": 0.005024,
+      "criterion": {
+        "relative": null,
+        "absolute": null,
+        "small": 0.0,
+        "interval": true
+      },
+      "method": "montecarlo",
+      "value": 0.00515,
+      "error": 0.025079617834394954,
+      "relative": true,
+      "passed": true,
+      "paper": null,
+      "interval": [
+        0.0049264811876992345,
+        0.005122956267695375
+      ],
+      "informative": null,
+      "ci": [
+        0.00437172376652393,
+        0.006018447270807516
+      ],
+      "samples": 100000
+    },
+    {
+      "suite": "CARA Pc method test set, Monte Carlo",
+      "case_id": "000040115_conj_000030660_20230721_100115_20230720_061903",
+      "hard_body_radius": 20.0,
+      "reference": 0.00010509677419354839,
+      "criterion": {
+        "relative": null,
+        "absolute": null,
+        "small": 0.0,
+        "interval": true
+      },
+      "method": "montecarlo",
+      "value": 0.00010378306344481999,
+      "error": 0.012500010193548362,
+      "relative": true,
+      "passed": true,
+      "paper": null,
+      "interval": [
+        0.00010302354436593787,
+        0.00010720122538325375
+      ],
+      "informative": null,
+      "ci": [
+        8.59656695606102e-05,
+        0.00012399656136143398
+      ],
+      "samples": 3806016
+    },
+    {
+      "suite": "CARA Pc method test set, Monte Carlo",
+      "case_id": "000025994_conj_000026980_20220928_223445_20220924_220647",
+      "hard_body_radius": 15.0,
+      "reference": 0.00010694565217391305,
+      "criterion": {
+        "relative": null,
+        "absolute": null,
+        "small": 0.0,
+        "interval": true
+      },
+      "method": "montecarlo",
+      "value": 0.0001056088174539559,
+      "error": 0.012500131541422698,
+      "relative": true,
+      "passed": true,
+      "paper": null,
+      "interval": [
+        0.00010484289767542505,
+        0.00010907996692562582
+      ],
+      "informative": null,
+      "ci": [
+        8.747799308077383e-05,
+        0.00012617788924830988
+      ],
+      "samples": 3740218
+    },
+    {
+      "suite": "CARA Pc method test set, Monte Carlo",
+      "case_id": "000027424_conj_000041740_20220530_042037_20220525_221911",
+      "hard_body_radius": 17.3,
+      "reference": 0.000255325,
+      "criterion": {
+        "relative": null,
+        "absolute": null,
+        "small": 0.0,
+        "interval": true
+      },
+      "method": "montecarlo",
+      "value": 0.00025085677482444813,
+      "error": 0.017500147559196533,
+      "relative": true,
+      "passed": true,
+      "paper": null,
+      "interval": [
+        0.0002503975121874247,
+        0.0002603250503227852
+      ],
+      "informative": null,
+      "ci": [
+        0.00020768941730423294,
+        0.00029984371067619096
+      ],
+      "samples": 1566631
+    },
+    {
+      "suite": "CARA Pc method test set, Monte Carlo",
+      "case_id": "000032060_conj_000035644_20220303_131758_20220227_152710",
+      "hard_body_radius": 20.0,
+      "reference": 0.00017701754385964912,
+      "criterion": {
+        "relative": null,
+        "absolute": null,
+        "small": 0.0,
+        "interval": true
+      },
+      "method": "montecarlo",
+      "value": 0.00018011527377521613,
+      "error": 0.0174995644387829,
+      "relative": true,
+      "passed": true,
+      "paper": null,
+      "interval": [
+        0.00017358051253248488,
+        0.00018050550524866568
+      ],
+      "informative": null,
+      "ci": [
+        0.00014962708842599206,
+        0.0002146381197075888
+      ],
+      "samples": 2259664
+    },
+    {
+      "suite": "CARA Pc method test set, Monte Carlo",
+      "case_id": "000025994_conj_000026132_20220224_100307_20220221_225515",
+      "hard_body_radius": 15.0,
+      "reference": 0.0012158536585365853,
+      "criterion": {
+        "relative": null,
+        "absolute": null,
+        "small": 0.0,
+        "interval": true
+      },
+      "method": "montecarlo",
+      "value": 0.001148981570700362,
+      "error": 0.055000112362791446,
+      "relative": true,
+      "passed": true,
+      "paper": null,
+      "interval": [
+        0.0011921173424689854,
+        0.0012399432734387335
+      ],
+      "informative": null,
+      "ci": [
+        0.0009476851041627551,
+        0.0013779458073677918
+      ],
+      "samples": 328987
+    },
+    {
+      "suite": "CARA Pc method test set, Monte Carlo",
+      "case_id": "000054234_conj_000028343_20221130_142342_20221127_152412",
+      "hard_body_radius": 12.0,
+      "reference": 0.00015155384615384615,
+      "criterion": {
+        "relative": null,
+        "absolute": null,
+        "small": 0.0,
+        "interval": true
+      },
+      "method": "montecarlo",
+      "value": 0.0001534482667165784,
+      "error": 0.012499983410577174,
+      "relative": true,
+      "passed": true,
+      "paper": null,
+      "interval": [
+        0.00014857588127412311,
+        0.00015457647685520261
+      ],
+      "informative": null,
+      "ci": [
+        0.00012741335907121628,
+        0.00018293771819088834
+      ],
+      "samples": 2639326
+    },
+    {
+      "suite": "CARA Pc method test set, Monte Carlo",
+      "case_id": "000035946_conj_000030648_20221210_140311_20221206_003234",
+      "hard_body_radius": 20.0,
+      "reference": 0.00015056060606060605,
+      "criterion": {
+        "relative": null,
+        "absolute": null,
+        "small": 0.0,
+        "interval": true
+      },
+      "method": "montecarlo",
+      "value": 0.00013701012294023725,
+      "error": 0.0900001897901118,
+      "relative": true,
+      "passed": true,
+      "paper": null,
+      "interval": [
+        0.00014761492359038428,
+        0.0001535502770391515
+      ],
+      "informative": null,
+      "ci": [
+        0.00011256701603159011,
+        0.0001648869398167364
+      ],
+      "samples": 2656738
+    },
+    {
+      "suite": "CARA Pc method test set, Monte Carlo",
+      "case_id": "000032060_conj_000049574_20220227_152525_20220222_065043",
+      "hard_body_radius": 20.0,
+      "reference": 0.00014418571428571428,
+      "criterion": {
+        "relative": null,
+        "absolute": null,
+        "small": 0.0,
+        "interval": true
+      },
+      "method": "montecarlo",
+      "value": 0.00013409271141229904,
+      "error": 0.07000001992857095,
+      "relative": true,
+      "passed": true,
+      "paper": null,
+      "interval": [
+        0.0001413865258901289,
+        0.0001470263770045363
+      ],
+      "informative": null,
+      "ci": [
+        0.00011041313543951186,
+        0.00016106029362861823
+      ],
+      "samples": 2774200
+    }
+  ]
 }

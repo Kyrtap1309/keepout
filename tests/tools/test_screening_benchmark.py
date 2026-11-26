@@ -4,7 +4,6 @@ import gzip
 import io
 import json
 import os
-import platform
 import shutil
 import sys
 from collections.abc import Callable, Sequence
@@ -17,8 +16,8 @@ import screening_snapshot as snapshot
 import snapshot_files
 import spacetrack_snapshot
 from astropy.time import Time
-from benchmark_runs import Comparison
-from generated import README, json_text, read_json
+from benchmark_runs import Comparison, TimingFailed
+from generated import README, cpu_model, json_text, read_json
 from report_builders import (
     assert_writes_then_checks,
     fake_python,
@@ -80,13 +79,13 @@ def offline_subprocesses(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
 
 def test_measurement_processes_are_offline() -> None:
     connect = "import socket; socket.create_connection(('192.0.2.1', 9), timeout=1)"
-    with pytest.raises(benchmark.TimingFailed, match="must not access the network"):
+    with pytest.raises(TimingFailed, match="must not access the network"):
         benchmark.run_timing([sys.executable, "-c", connect])
     iers = (
         "from astropy.utils import iers; "
         "assert not iers.conf.auto_download; raise SystemExit(3)"
     )
-    with pytest.raises(benchmark.TimingFailed, match="exit status 3"):
+    with pytest.raises(TimingFailed, match="exit status 3"):
         benchmark.run_timing([sys.executable, "-c", iers])
 
 
@@ -151,7 +150,7 @@ def benchmarked() -> Benchmarked:
     return benchmark.benchmark(
         [fixture_by_number()[int(number)] for number in PRIMARIES],
         FIXTURE,
-        benchmark.window_start("2026-10-06"),
+        benchmark.retrieval_start("2026-10-06"),
         workers=1,
         repeat=1,
     )
@@ -222,7 +221,7 @@ def test_main_writes_then_checks(written_once: tuple[Path, list[Call]]) -> None:
     timings = summary["timings"]
     assert timings is not None
     assert timings["runs"] == 1
-    assert timings["cpu_model"] == benchmark.cpu_model()
+    assert timings["cpu_model"] == cpu_model()
     readme = (folder / "README.md").read_text(encoding="utf-8")
     assert (
         "| Volume | Screened | Left out | Approaches | Wall time | CPU time |" in readme
@@ -266,7 +265,7 @@ def test_runs_that_find_different_results_fail(
         }
 
     monkeypatch.setattr(benchmark, "found", found)
-    start = benchmark.window_start("2026-10-06")
+    start = benchmark.retrieval_start("2026-10-06")
     with pytest.raises(RuntimeError, match="the runs found different results"):
         benchmark.benchmark(
             FIXTURE[:1],
@@ -288,7 +287,7 @@ def test_benchmark_takes_the_median_of_the_runs(
         return result, next(times)
 
     monkeypatch.setattr(benchmark, "timed", fake)
-    start = benchmark.window_start("2026-10-06")
+    start = benchmark.retrieval_start("2026-10-06")
     found, measured = benchmark.benchmark(
         FIXTURE[:1],
         FIXTURE[:5],
@@ -409,39 +408,6 @@ def test_an_unknown_source_is_a_usage_error(
         benchmark.main(["--source", "elsewhere"])
     assert raised.value.code == 2
     assert "argument --source: invalid choice: 'elsewhere'" in capsys.readouterr().err
-
-
-def test_cpu_model_reads_the_systems_name(tmp_path: Path) -> None:
-    cpuinfo = tmp_path / "cpuinfo"
-    cpuinfo.write_text("processor\t: 0\nmodel name\t: Some CPU @ 3 GHz\n")
-    assert benchmark.cpu_model(cpuinfo) == "Some CPU @ 3 GHz"
-
-
-@pytest.mark.parametrize(
-    ("processor", "machine", "expected"),
-    [
-        ("Intel64 Family 6", "AMD64", "Intel64 Family 6"),
-        ("", "arm64", "arm64"),
-        ("", "", "unknown CPU"),
-    ],
-)
-@pytest.mark.parametrize("cpuinfo", ["processor\t: 0\n", None])
-def test_cpu_model_falls_back_to_the_platforms_name(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    processor: str,
-    machine: str,
-    expected: str,
-    cpuinfo: str | None,
-) -> None:
-    # Without a model name in /proc/cpuinfo (or without the file: macOS,
-    # Windows).
-    monkeypatch.setattr(platform, "processor", lambda: processor)
-    monkeypatch.setattr(platform, "machine", lambda: machine)
-    path = tmp_path / "cpuinfo"
-    if cpuinfo is not None:
-        path.write_text(cpuinfo)
-    assert benchmark.cpu_model(path) == expected
 
 
 @pytest.mark.parametrize(

@@ -60,6 +60,7 @@ gives. It is not covered by keepout's MIT licence.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import functools
 import gzip
 import math
@@ -76,6 +77,7 @@ from typing import (
     TypeAlias,
     TypedDict,
     TypeVar,
+    cast,
     get_args,
 )
 from urllib.parse import parse_qs, urlsplit
@@ -145,7 +147,14 @@ NOTICE: Final = "NOTICE"
 GZIPPED: Final = frozenset({SNAPSHOT, SOCRATES})
 
 EARTH_RADIUS: Final = 6_378_137.0
-"""Equatorial radius of the Earth [m] (WGS 84), for altitudes."""
+"""Equatorial radius of the Earth [m] (WGS 84), for altitudes.
+
+Not :func:`keepout.synthetic.orbit_regime`'s or
+:func:`keepout.screening.sfs_regime`'s WGS 72 and SGP4 elements: the
+fixture (:func:`select_fixture`) was chosen with this two-body reading of
+the mean elements (:func:`regime`, :func:`perigee_altitude`), and the
+library's would move some objects across a regime boundary and so change
+the committed fixture."""
 
 CLOSEST: Final = 10
 """Closest pairs of comparable SOCRATES approaches taken into the fixture."""
@@ -205,13 +214,7 @@ class Body:
 
     def record(self) -> BodyRecord:
         """The body as JSON."""
-        return BodyRecord(
-            url=self.url,
-            file=self.file,
-            sha256=self.sha256,
-            size=self.size,
-            retrieved=self.retrieved,
-        )
+        return cast("BodyRecord", dataclasses.asdict(self))
 
 
 INDEX: Final = RawIndex("bodies", Body)
@@ -542,6 +545,12 @@ def retrieval_day(manifest: Manifest) -> str:
     return day_text(manifest["retrieved"]["first"])
 
 
+def window_start(manifest: Manifest) -> Time:
+    """0 h UTC of the day of the SOCRATES report's first TCA: where its week,
+    the window the screening reports screen, starts."""
+    return Time(day_text(manifest["socrates"]["first_tca"]), scale="utc")
+
+
 def summarise_socrates(
     approaches: Sequence[SocratesApproach], omms: Sequence[Omm]
 ) -> SocratesSummary:
@@ -754,8 +763,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"{len(report.approaches())} SOCRATES approaches"
         )
         return 0
+    building = args.command == "build"
     return snapshot_files.build_or_verify(
-        args, inputs_from_raw, inputs_from_data, stored_files, TOOL
+        raw=args.raw if building else None,
+        data=args.data,
+        check=building and args.check,
+        from_raw=inputs_from_raw,
+        from_data=inputs_from_data,
+        files=stored_files,
+        tool=TOOL,
     )
 
 

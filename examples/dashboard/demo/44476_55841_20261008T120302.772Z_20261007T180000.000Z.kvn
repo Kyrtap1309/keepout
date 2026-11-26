@@ -45,7 +45,8 @@ COMMENT sigma_T = f (sigma_T0 + k |t - epoch|); sigma_R, sigma_N constant
 COMMENT Regime GEO: sigma_R0 0.359 km, sigma_T0 0.432 km, sigma_N0 0.086 km
 COMMENT k 1.500 km/day, safety factor f 2
 COMMENT Element set epoch 2026-10-05T04:28:37.438752 UTC, age +3.316 days
-COMMENT Sigmas: R 0.718 km, T 10.811 km, N 0.172 km
+COMMENT keepout demo: the covariance below is the model's times 0.04 (each sigma times 0.2)
+COMMENT Sigmas: R 0.144 km, T 2.162 km, N 0.034 km
 CR_R                           = 20620.96 [m**2]
 CT_R                           = 0.0 [m**2]
 CT_T                           = 4674860.0 [m**2]
@@ -88,7 +89,8 @@ COMMENT sigma_T = f (sigma_T0 + k |t - epoch|); sigma_R, sigma_N constant
 COMMENT Regime GEO: sigma_R0 0.359 km, sigma_T0 0.432 km, sigma_N0 0.086 km
 COMMENT k 1.500 km/day, safety factor f 2
 COMMENT Element set epoch 2026-10-05T09:36:37.907136 UTC, age +3.102 days
-COMMENT Sigmas: R 0.718 km, T 10.169 km, N 0.172 km
+COMMENT keepout demo: the covariance below is the model's times 0.04 (each sigma times 0.2)
+COMMENT Sigmas: R 0.144 km, T 2.034 km, N 0.034 km
 CR_R                           = 20620.96 [m**2]
 CT_R                           = 0.0 [m**2]
 CT_T                           = 4136368.0 [m**2]

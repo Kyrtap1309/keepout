@@ -371,5 +371,12 @@ def test_the_spread_of_nothing_is_unknown() -> None:
     assert snapshot.spread([]) == {"median": None, "p90": None}
 
 
+def test_the_spread_of_one_value_is_that_value() -> None:
+    assert snapshot.spread([7.0]) == {"median": 7.0, "p90": 7.0}
+
+
 def test_the_spread_is_the_median_and_90th_percentile() -> None:
-    assert snapshot.spread([3.0, 1.0, 2.0]) == {"median": 2.0, "p90": 3.0}
+    assert snapshot.spread([3.0, 1.0, 2.0, 4.0, 5.0]) == {
+        "median": 3.0,
+        "p90": pytest.approx(4.6),
+    }

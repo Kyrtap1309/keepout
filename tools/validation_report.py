@@ -12,24 +12,22 @@ instead of writing when a file is out of date. Exits 1 if a case fails.
 
 from __future__ import annotations
 
-import argparse
 import dataclasses
-import json
 import re
 import sys
 from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Final, TypeAlias, TypedDict, TypeVar
+from typing import TYPE_CHECKING, Any, Final, TypeAlias, TypedDict, cast
 
 from generated import (
-    README,
     REPO,
     generated_notice,
+    json_text,
     parse_json,
     positive,
-    readme_with,
+    report_files,
+    report_parser,
     table,
     write_or_check,
 )
@@ -55,10 +53,10 @@ from keepout.validation.criteria import (
 )
 from keepout.validation.evaluation import Outcome, evaluate
 
-TOOL: Final = "tools/validation_report.py"
+if TYPE_CHECKING:
+    from pathlib import Path
 
-_A = TypeVar("_A")
-_B = TypeVar("_B")
+TOOL: Final = "tools/validation_report.py"
 
 PAPER: Final = BoundCriterion(relative=1e-3)
 """Agreement with Alfano's published values (as in CARA's own tests). The
@@ -352,11 +350,6 @@ class RecordJson(TypedDict):
     rows: list[RowJson]
 
 
-def _list(pair: tuple[_A, _B] | None) -> list[_A | _B] | None:
-    """A pair as a JSON list; ``None`` stays ``None``."""
-    return None if pair is None else [pair[0], pair[1]]
-
-
 def _pair(values: list[float] | None) -> tuple[float, float] | None:
     """A JSON pair of numbers as a tuple.
 
@@ -388,6 +381,10 @@ def _labelled(values: list[str | float] | None) -> tuple[str, float] | None:
     if not isinstance(label, str) or isinstance(value, str):
         raise ValueError(f"expected [label, value], got {values}")
     return label, value
+
+
+_PAIRS: Final = ("interval", "informative", "ci")
+"""The fields of a :class:`Row` that are pairs: lists in JSON."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -456,43 +453,22 @@ class Row:
         ValueError
             If a pair is not two numbers, or the criterion is invalid.
         """
-        return cls(
-            suite=data["suite"],
-            case_id=data["case_id"],
-            hard_body_radius=data["hard_body_radius"],
-            reference=data["reference"],
-            criterion=_criterion(data["criterion"]),
-            method=data["method"],
-            value=data["value"],
-            error=data["error"],
-            relative=data["relative"],
-            passed=data["passed"],
-            paper=data["paper"],
-            interval=_pair(data["interval"]),
-            informative=_labelled(data["informative"]),
-            ci=_pair(data["ci"]),
-            samples=data["samples"],
-        )
+        fields: dict[str, Any] = {
+            **data,
+            "criterion": _criterion(data["criterion"]),
+            "interval": _pair(data["interval"]),
+            "informative": _labelled(data["informative"]),
+            "ci": _pair(data["ci"]),
+        }
+        return cls(**fields)
 
     def to_json(self) -> RowJson:
-        """The row as JSON values."""
-        return {
-            "suite": self.suite,
-            "case_id": self.case_id,
-            "hard_body_radius": self.hard_body_radius,
-            "reference": self.reference,
-            "criterion": _criterion_json(self.criterion),
-            "method": self.method,
-            "value": self.value,
-            "error": self.error,
-            "relative": self.relative,
-            "passed": self.passed,
-            "paper": self.paper,
-            "interval": _list(self.interval),
-            "informative": _list(self.informative),
-            "ci": _list(self.ci),
-            "samples": self.samples,
-        }
+        """The row as JSON values: its fields, with lists for the pairs."""
+        fields = dataclasses.asdict(self)
+        fields["criterion"] = _criterion_json(self.criterion)
+        for name in _PAIRS:
+            fields[name] = None if fields[name] is None else list(fields[name])
+        return cast("RowJson", fields)
 
     def difference(self, previous: Row) -> str | None:
         """Why this row does not repeat ``previous`` (``None`` if it does).
@@ -538,13 +514,16 @@ class Record:
         data = parse_json(text, RecordJson, source)
         return cls(data["cara_commit"], tuple(Row.from_json(r) for r in data["rows"]))
 
-    def dumps(self) -> str:
-        """The record as JSON text."""
-        data: RecordJson = {
+    def to_json(self) -> RecordJson:
+        """The record as JSON values."""
+        return {
             "cara_commit": self.cara_commit,
             "rows": [row.to_json() for row in self.rows],
         }
-        return json.dumps(data, indent=1) + "\n"
+
+    def dumps(self) -> str:
+        """The record as JSON text (:func:`generated.json_text`)."""
+        return json_text(self.to_json())
 
     def differences(self, previous: Record) -> list[str]:
         """Why this record does not reproduce ``previous`` (empty if it does)."""
@@ -753,18 +732,6 @@ def published(fresh: Record, data: Path) -> tuple[Record, list[str]]:
     return (fresh if differences else previous), differences
 
 
-def rendered_files(
-    record: Record, data: Path, page: Path, readme: Path, report: Report = MAIN
-) -> dict[Path, str]:
-    """What the results, the page and the README should contain for ``record``."""
-    summary = render_summary(record.rows)
-    return {
-        data: record.dumps(),
-        page: render_page(record, report),
-        readme: readme_with(readme, report.start, report.end, summary),
-    }
-
-
 def main(argv: Sequence[str] | None = None) -> int:
     """The entry point writing (or with ``--check`` verifying) a page and summary.
 
@@ -773,15 +740,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     int
         0 on success; 1 if a case fails or, with ``--check``, a file is stale.
     """
-    parser = argparse.ArgumentParser(prog=TOOL)
-    parser.add_argument("--check", action="store_true", help="fail if out of date")
+    parser = report_parser(TOOL, page=None, workers=False)
     parser.add_argument(
         "--monte-carlo", action="store_true", help="the Monte Carlo cases and page"
     )
-    parser.add_argument(
-        "--page", type=Path, default=None, help="the page; its results go next to it"
-    )
-    parser.add_argument("--readme", type=Path, default=README)
     parser.add_argument(
         "--workers",
         type=positive,
@@ -794,9 +756,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     cases = load_monte_carlo_cases() if args.monte_carlo else load_all()
     fresh = Record.of(evaluate(cases, workers=args.workers))
     page = args.page if args.page is not None else report.page
-    data = page.with_suffix(".json")
-    record, differences = published(fresh, data)
-    files = rendered_files(record, data, page, args.readme, report)
+    record, differences = published(fresh, page.with_suffix(".json"))
+    files = report_files(
+        page,
+        record.to_json(),
+        render_page(record, report),
+        readme=args.readme,
+        markers=(report.start, report.end),
+        block=render_summary(record.rows),
+    )
     status = write_or_check(files, check=args.check, tool=TOOL)
     for difference in differences:
         print(f"not reproduced: {difference}")
