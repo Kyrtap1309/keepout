@@ -8,10 +8,16 @@ from typing import TYPE_CHECKING, Final, Literal, NamedTuple, TypeAlias, get_arg
 import numpy as np
 import numpy.typing as npt
 
-from keepout._linalg import from_eigen, symmetric_part
+from keepout._linalg import (
+    NEGLIGIBLE_VARIANCE,
+    correlation_parts,
+    from_eigen,
+    symmetric_part,
+    to_correlation,
+)
 from keepout._types import FloatArray, read_only
 from keepout._validation import require_choice
-from keepout.errors import CovarianceError, UnsupportedFrame
+from keepout.errors import CovarianceError, GeometryError, UnsupportedFrame
 from keepout.frames import inertial_to_rtn_covariance, rtn_to_inertial_covariance
 from keepout.state import StateVector, require_frame
 
@@ -33,6 +39,7 @@ __all__ = [
     "make_covariance",
     "problems",
     "repair",
+    "require_covariance_frame",
     "to_correlation",
 ]
 
@@ -62,19 +69,10 @@ PSD_RTOL: Final = 1e-10
 velocity variance of 1e-4 m^2/s^2 is checked as strictly as a position
 variance of 1e8 m^2."""
 
-NEGLIGIBLE_VARIANCE: Final = 1e-200
-"""Variance, relative to the largest absolute entry, below which it is taken
-as 0 when forming the correlation matrix. Dividing by its square root would
-otherwise overflow; real covariances span far less (a mm/s velocity next to
-a 10 km position is 1e-14)."""
-
-
 RANK_RTOL: Final = 1e-8
 """Position-block correlation eigenvalue below which :func:`repair` treats
 the direction as unknown: velocity correlations along it are dropped rather
 than divided by a vanishing variance."""
-
-_SMALLEST_NORMAL: Final = float(np.finfo(np.float64).tiny)
 
 
 def _eigh(matrix: FloatArray) -> tuple[FloatArray, FloatArray]:
@@ -112,33 +110,8 @@ class _Inspection(NamedTuple):
     """Eigenvalues of ``correlation``, ascending."""
 
 
-def to_correlation(matrix: FloatArray) -> tuple[FloatArray, FloatArray]:
-    """A square matrix ``C`` scaled to correlation units ``D^-1 C D^-1``.
-
-    ``D = diag(sqrt|C[i, i]|)``, with 1 where a variance is negligible (see
-    :data:`NEGLIGIBLE_VARIANCE`), so that row and column are left as they are
-    instead of being divided by a vanishing deviation.
-
-    Parameters
-    ----------
-    matrix
-        A square matrix, e.g. a 6x6 covariance [m, m/s].
-
-    Returns
-    -------
-    tuple
-        The deviations (diagonal of ``D``) and the scaled matrix.
-    """
-    variances = np.abs(np.diag(matrix))
-    floor = max(_SMALLEST_NORMAL, NEGLIGIBLE_VARIANCE * float(np.max(np.abs(matrix))))
-    deviations = np.where(variances >= floor, np.sqrt(variances), 1.0)
-    scaled: FloatArray = matrix / np.outer(deviations, deviations)
-    return deviations, scaled
-
-
 def _inspect(array: FloatArray) -> _Inspection:
-    deviations, scaled = to_correlation(array)
-    scale = np.outer(deviations, deviations)
+    _, scale, scaled = correlation_parts(array)
     asymmetry = float(np.max(np.abs(scaled - scaled.T)))
     correlation = symmetric_part(scaled)
     eigenvalues, _ = _eigh(correlation)
@@ -474,6 +447,33 @@ class Covariance:
             return self
         matrix = rotate(self.matrix, state.r, state.v)
         return Covariance._trusted(matrix, target, self.epoch, self.repairs)
+
+
+def require_covariance_frame(
+    covariance: Covariance, frame: CovarianceFrame, what: str
+) -> None:
+    """Raise :class:`GeometryError` unless ``covariance`` is in ``frame``, as
+    :func:`~keepout.state.require_frame` does for a state.
+
+    Parameters
+    ----------
+    covariance
+        The covariance to check.
+    frame
+        The frame it must be in.
+    what
+        What needs the covariance, for the error: ``"ObjectState"``.
+
+    Raises
+    ------
+    GeometryError
+        If ``covariance`` is in another frame.
+    """
+    if covariance.frame != frame:
+        hint = "; convert with Covariance.in_gcrf" if frame == "GCRF" else ""
+        raise GeometryError(
+            f"{what} needs a {frame} covariance, got {covariance.frame}{hint}"
+        )
 
 
 def make_covariance(

@@ -2,8 +2,8 @@ import numpy as np
 import pytest
 from builders import EPOCH
 
-from keepout.errors import UnsupportedFrame
-from keepout.state import REF_FRAMES, StateVector, as_ref_frame
+from keepout.errors import GeometryError, UnsupportedFrame
+from keepout.state import REF_FRAMES, StateVector, as_ref_frame, relative_motion
 
 
 def test_state_vector_copies_and_freezes_arrays() -> None:
@@ -52,3 +52,10 @@ def test_as_ref_frame_rejects_other_names(name: str | None) -> None:
         UnsupportedFrame, match=r"expected one of GCRF, EME2000, ITRF, TEME$"
     ):
         as_ref_frame(name)
+
+
+def test_relative_motion_needs_states_in_one_frame() -> None:
+    primary = StateVector(EPOCH, [7000e3, 0.0, 0.0], [0.0, 7500.0, 0.0], "GCRF")
+    secondary = StateVector(EPOCH, [7000e3, 10.0, 0.0], [0.0, -7500.0, 0.0], "TEME")
+    with pytest.raises(GeometryError, match="needs a GCRF state, got TEME"):
+        relative_motion(primary, secondary)

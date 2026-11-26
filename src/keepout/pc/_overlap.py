@@ -155,7 +155,7 @@ def _iterate_overlap(
         primary_inverse = _floored_inverse(primary_covariance[:, :3, :3], floor)
         secondary_inverse = _floored_inverse(secondary_covariance[:, :3, :3], floor)
         precision = primary_inverse + secondary_inverse
-        rhs = _apply(primary_inverse, primary_mean[:, :3]) + _apply(
+        rhs = np.matvec(primary_inverse, primary_mean[:, :3]) + np.matvec(
             secondary_inverse, secondary_mean[:, :3]
         )
         # numpy < 2.5 types the solution as any floating dtype; it is float64.
@@ -164,7 +164,7 @@ def _iterate_overlap(
         )
         if previous is not None:
             step = peak - previous
-            distance = np.einsum("mi,mi->m", _apply(precision, step), step)
+            distance = np.vecdot(np.matvec(precision, step), step)
             done = distance <= OVERLAP_TOLERANCE
             for target, source in zip(result, current, strict=True):
                 target[rows[done]] = source[done]
@@ -211,12 +211,6 @@ def _floored_inverse(matrix: FloatArray, floor: float) -> FloatArray:
     return from_eigen(1.0 / np.maximum(values, floor), vectors)
 
 
-def _apply(matrix: FloatArray, vector: FloatArray) -> FloatArray:
-    """Batched matrix-vector products ``(m, i, j) x (m, j) -> (m, i)``."""
-    result: FloatArray = (matrix @ vector[..., None])[..., 0]
-    return result
-
-
 def _conditioned_state(
     x: FloatArray, p: FloatArray, inverse: FloatArray, peak: FloatArray
 ) -> FloatArray:
@@ -225,5 +219,5 @@ def _conditioned_state(
     ``[peak, v + P_vr A^-1 (peak - r)]`` with the object's mean ``(r, v)``,
     covariance ``P`` and floored inverse position covariance ``A^-1``.
     """
-    velocity = x[:, 3:] + _apply(p[:, 3:, :3], _apply(inverse, peak - x[:, :3]))
+    velocity = x[:, 3:] + np.matvec(p[:, 3:, :3], np.matvec(inverse, peak - x[:, :3]))
     return np.concatenate([peak, velocity], axis=1)

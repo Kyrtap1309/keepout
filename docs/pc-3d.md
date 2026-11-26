@@ -251,7 +251,7 @@ other failure raises `PcConvergenceError`.
 - several encounters (below);
 - a rate still above 1e-16 of its peak at the edge of an automatic window;
 - a time integral whose worst piece agrees to worse than both `rtol` and
-  1e-4 of `Nc` (`QUIET_DISAGREEMENT`). Smaller misses cannot affect a result
+  1e-4 of `Nc`. Smaller misses cannot affect a result
   at the validation accuracy.
 
 **Several encounters, long encounters.** `Nc` counts every entry into the

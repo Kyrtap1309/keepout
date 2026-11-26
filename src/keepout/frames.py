@@ -23,6 +23,7 @@ import numpy as np
 import numpy.typing as npt
 from astropy.time import Time
 
+from keepout._linalg import as_vectors
 from keepout._types import FloatArray, read_only
 from keepout.errors import GeometryError
 from keepout.state import RefFrame, StateVector, as_ref_frame
@@ -147,16 +148,10 @@ def relative_position_rtn(
     GeometryError
         If a finite position is zero or parallel to its velocity.
     """
-    position = _components(r, "r")
-    velocity = _components(v, "v")
-    secondary = _components(r_secondary, "r_secondary")
-    try:
-        np.broadcast_shapes(position.shape, velocity.shape, secondary.shape)
-    except ValueError:
-        raise ValueError(
-            f"r {position.shape}, v {velocity.shape} and r_secondary "
-            f"{secondary.shape} do not broadcast"
-        ) from None
+    position = as_vectors(r, "r")
+    velocity = as_vectors(v, "v")
+    secondary = as_vectors(r_secondary, "r_secondary")
+    _broadcast(None, r=position, v=velocity, r_secondary=secondary)
     result: FloatArray = np.einsum(
         "...ij,...j->...i", _rtn_basis(position, velocity), secondary - position
     )
@@ -220,8 +215,11 @@ def inertial_to_rtn_covariance(
     return _rotate_covariance(covariance, rtn_rotation(r, v))
 
 
-def _itrf_to_gcrf(states: Sequence[StateVector]) -> list[StateVector]:
-    """ITRF states in GCRF, by one astropy transformation for all of them."""
+def _itrf_to_gcrf(
+    epochs: Time, position: FloatArray, velocity: FloatArray
+) -> tuple[FloatArray, FloatArray]:
+    """ITRF states ``(..., 3)`` in GCRF, by one astropy transformation;
+    ``epochs`` broadcasts against their leading axes."""
     # Imported here: astropy.coordinates is slow to import and only ITRF needs it.
     from astropy.coordinates import (
         GCRS,
@@ -230,25 +228,20 @@ def _itrf_to_gcrf(states: Sequence[StateVector]) -> list[StateVector]:
         CartesianRepresentation,
     )
 
-    epochs = Time([state.epoch for state in states])
     representation = CartesianRepresentation(
-        np.stack([state.r for state in states], axis=1) * u.m,
-        differentials=CartesianDifferential(
-            np.stack([state.v for state in states], axis=1) * u.m / u.s
-        ),
+        np.moveaxis(position, -1, 0) * u.m,
+        differentials=CartesianDifferential(np.moveaxis(velocity, -1, 0) * u.m / u.s),
     )
     cartesian = (
         ITRS(representation, obstime=epochs)
         .transform_to(GCRS(obstime=epochs))
         .cartesian
     )
-    velocity = cartesian.differentials["s"]
-    positions = cartesian.xyz.to_value(u.m)
-    velocities = velocity.d_xyz.to_value(u.m / u.s)
-    return [
-        StateVector(state.epoch, positions[:, i], velocities[:, i], "GCRF")
-        for i, state in enumerate(states)
-    ]
+    gcrf_r: FloatArray = np.moveaxis(cartesian.xyz.to_value(u.m), 0, -1)
+    gcrf_v: FloatArray = np.moveaxis(
+        cartesian.differentials["s"].d_xyz.to_value(u.m / u.s), 0, -1
+    )
+    return gcrf_r, gcrf_v
 
 
 def _teme_rotation(
@@ -266,40 +259,25 @@ def _teme_rotation(
     return rotation
 
 
-def _components(value: npt.ArrayLike, name: str) -> FloatArray:
-    """``value`` as a float64 array whose last axis has length 3.
+def _broadcast(epochs: Time | None, **vectors: FloatArray) -> tuple[int, ...]:
+    """The broadcast shape of ``epochs`` and the vector arrays ``(..., 3)``,
+    without their 3 components.
 
     Raises
     ------
     ValueError
-        If ``value`` is a scalar or its last axis does not have length 3.
+        If the shapes do not broadcast (the message names every argument).
     """
-    array = np.asarray(value, dtype=np.float64)
-    if array.ndim == 0 or array.shape[-1] != 3:
-        raise ValueError(f"{name} must have 3 components on its last axis")
-    return array
-
-
-def _broadcast(
-    epochs: Time, position: FloatArray, velocity: FloatArray
-) -> tuple[int, ...]:
-    """The broadcast shape of states at ``epochs``, without the 3 components.
-
-    Raises
-    ------
-    ValueError
-        If the shapes of ``epochs``, ``position`` and ``velocity`` (without
-        its components) do not broadcast.
-    """
+    shapes = {name: array.shape for name, array in vectors.items()}
+    leading = [shape[:-1] for shape in shapes.values()]
+    if epochs is not None:
+        shapes = {"epochs": epochs.shape, **shapes}
+        leading.append(epochs.shape)
     try:
-        return np.broadcast_shapes(
-            epochs.shape, position.shape[:-1], velocity.shape[:-1]
-        )
+        return np.broadcast_shapes(*leading)
     except ValueError:
-        raise ValueError(
-            f"epochs {epochs.shape}, r {position.shape} and v {velocity.shape} "
-            "do not broadcast"
-        ) from None
+        *first, last = (f"{name} {shape}" for name, shape in shapes.items())
+        raise ValueError(f"{', '.join(first)} and {last} do not broadcast") from None
 
 
 def teme_to_gcrf(
@@ -351,9 +329,9 @@ def teme_to_gcrf(
     D. A. Vallado, P. Crawford, R. Hujsak and T. S. Kelso, "Revisiting
     Spacetrack Report #3", AIAA 2006-6753, 2006.
     """
-    position = _components(r, "r")
-    velocity = _components(v, "v")
-    _broadcast(epochs, position, velocity)
+    position = as_vectors(r, "r")
+    velocity = as_vectors(v, "v")
+    _broadcast(epochs, r=position, v=velocity)
     tt, utc = epochs.tt, epochs.utc
     tt1, tt2 = np.asarray(tt.jd1), np.asarray(tt.jd2)
     ut1, ut2 = np.asarray(utc.jd1), np.asarray(utc.jd2)
@@ -362,27 +340,13 @@ def teme_to_gcrf(
     later = _teme_rotation(tt1, tt2 + step, ut1, ut2 + step)
     earlier = _teme_rotation(tt1, tt2 - step, ut1, ut2 - step)
     rate = (later - earlier) / (2.0 * TEME_RATE_STEP)
-    column_r, column_v = position[..., None], velocity[..., None]
-    gcrf_r: FloatArray = (rotation @ column_r)[..., 0]
-    gcrf_v: FloatArray = (rotation @ column_v + rate @ column_r)[..., 0]
+    gcrf_r: FloatArray = np.matvec(rotation, position)
+    gcrf_v: FloatArray = np.matvec(rotation, velocity) + np.matvec(rate, position)
     return gcrf_r, gcrf_v
 
 
-def _teme_states_to_gcrf(states: Sequence[StateVector]) -> list[StateVector]:
-    """TEME states in GCRF, by one :func:`teme_to_gcrf` call for all of them."""
-    positions, velocities = teme_to_gcrf(
-        Time([state.epoch for state in states]),
-        np.stack([state.r for state in states]),
-        np.stack([state.v for state in states]),
-    )
-    return [
-        StateVector(state.epoch, positions[i], velocities[i], "GCRF")
-        for i, state in enumerate(states)
-    ]
-
-
 def to_gcrf_all(states: Sequence[StateVector]) -> list[StateVector]:
-    """Several state vectors in GCRF, ITRF and TEME ones converted together.
+    """Several state vectors in GCRF, those of each frame converted together.
 
     Parameters
     ----------
@@ -394,20 +358,21 @@ def to_gcrf_all(states: Sequence[StateVector]) -> list[StateVector]:
     list of StateVector
         GCRF states in the same order; GCRF inputs are returned as they are.
     """
-    converted = [
-        StateVector(state.epoch, FRAME_BIAS.T @ state.r, FRAME_BIAS.T @ state.v, "GCRF")
-        if state.frame == "EME2000"
-        else state
-        for state in states
-    ]
+    converted = list(states)
     # All states of a frame in one call: the conversions are vectorised.
-    for frame, convert in (("ITRF", _itrf_to_gcrf), ("TEME", _teme_states_to_gcrf)):
-        indices = [i for i, state in enumerate(converted) if state.frame == frame]
-        if indices:
-            for i, state in zip(
-                indices, convert([converted[i] for i in indices]), strict=True
-            ):
-                converted[i] = state
+    for frame in ("EME2000", "ITRF", "TEME"):
+        indices = [i for i, state in enumerate(states) if state.frame == frame]
+        if not indices:
+            continue
+        group = [states[i] for i in indices]
+        positions, velocities = frame_to_gcrf(
+            frame,
+            Time([state.epoch for state in group]),
+            np.stack([state.r for state in group]),
+            np.stack([state.v for state in group]),
+        )
+        for i, state, r, v in zip(indices, group, positions, velocities, strict=True):
+            converted[i] = StateVector(state.epoch, r, v, "GCRF")
     return converted
 
 
@@ -416,10 +381,9 @@ def frame_to_gcrf(
 ) -> tuple[FloatArray, FloatArray]:
     """Positions and velocities in one frame, in GCRF, many at once.
 
-    TEME states go through :func:`teme_to_gcrf` in one call; EME2000 states
-    are rotated by :data:`FRAME_BIAS` in one call; ITRF states go as
-    :class:`~keepout.state.StateVector` through :func:`to_gcrf_all`; GCRF
-    states are copied.
+    TEME states go through :func:`teme_to_gcrf`, EME2000 states are rotated
+    by :data:`FRAME_BIAS` and ITRF states go through one astropy
+    transformation (ITRS -> GCRS); GCRF states are copied.
 
     Parameters
     ----------
@@ -450,43 +414,33 @@ def frame_to_gcrf(
     frame = as_ref_frame(frame)
     if frame == "TEME":
         return teme_to_gcrf(epochs, r, v)
-    position = _components(r, "r")
-    velocity = _components(v, "v")
-    shape = _broadcast(epochs, position, velocity)
+    position = as_vectors(r, "r")
+    velocity = as_vectors(v, "v")
+    shape = _broadcast(epochs, r=position, v=velocity)
     position = np.broadcast_to(position, (*shape, 3))
     velocity = np.broadcast_to(velocity, (*shape, 3))
     if frame == "GCRF":
         return position.copy(), velocity.copy()
+    _require_finite(position, "r")
+    _require_finite(velocity, "v")
     if frame == "EME2000":
-        return _eme2000_to_gcrf(position, "r"), _eme2000_to_gcrf(velocity, "v")
-    # Time broadcasts through numpy's __array_function__, unknown to its stubs.
-    times = np.broadcast_to(epochs, shape).ravel()  # type: ignore[call-overload]
-    states = to_gcrf_all(
-        [
-            StateVector(times[i], r_i, v_i, frame)
-            for i, (r_i, v_i) in enumerate(
-                zip(position.reshape(-1, 3), velocity.reshape(-1, 3), strict=True)
-            )
-        ]
-    )
-    gcrf_r = np.array([state.r for state in states]).reshape(*shape, 3)
-    gcrf_v = np.array([state.v for state in states]).reshape(*shape, 3)
-    return gcrf_r, gcrf_v
+        # The same sum, term by term, as FRAME_BIAS.T @ x on each vector.
+        to_gcrf_r: FloatArray = np.einsum("ji,...j->...i", FRAME_BIAS, position)
+        to_gcrf_v: FloatArray = np.einsum("ji,...j->...i", FRAME_BIAS, velocity)
+        return to_gcrf_r, to_gcrf_v
+    return _itrf_to_gcrf(epochs, position, velocity)
 
 
-def _eme2000_to_gcrf(vectors: FloatArray, name: str) -> FloatArray:
-    """EME2000 vectors ``(..., 3)`` in GCRF, ``FRAME_BIAS.T @ x`` for each.
+def _require_finite(vectors: FloatArray, name: str) -> None:
+    """A check that every component of ``vectors`` is finite.
 
     Raises
     ------
     ValueError
-        If a component is not finite.
+        If one is not.
     """
     if not np.all(np.isfinite(vectors)):
         raise ValueError(f"{name} must be finite")
-    # The same sum, term by term, as FRAME_BIAS.T @ x on each vector.
-    gcrf: FloatArray = np.einsum("ji,...j->...i", FRAME_BIAS, vectors)
-    return gcrf
 
 
 def to_gcrf(state: StateVector) -> StateVector:

@@ -9,7 +9,8 @@ from builders import TYPICAL_HEAD_ON, approx
 from keepout.encounter import EncounterPlane
 from keepout.errors import CovarianceError, GeometryError
 from keepout.pc import elrod, foster
-from keepout.pc._plane import SIGMA_FLOOR, plane_gaussian, require_known_covariance
+from keepout.pc._errors import require_known_covariance
+from keepout.pc._plane import SIGMA_FLOOR, plane_gaussian
 from keepout.pc.result import PcResult
 
 

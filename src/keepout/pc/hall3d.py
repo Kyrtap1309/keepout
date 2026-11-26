@@ -39,7 +39,7 @@ from keepout.pc._encounters import (
     check_fallbacks,
     straight_line_closest_time,
 )
-from keepout.pc._plane import require_known_covariance
+from keepout.pc._errors import require_known_covariance
 from keepout.pc._quadrature import RateIntegral, integrate_segments
 from keepout.pc._screen import reach
 from keepout.pc._timeline import RATE_FLOOR, negligible_note
@@ -51,10 +51,8 @@ if TYPE_CHECKING:
 
 __all__ = [
     "HALL_RTOL",
-    "QUIET_DISAGREEMENT",
     "hall3d",
     "hall3d_over_scan",
-    "is_long",
 ]
 
 HALL_RTOL: Final = 1e-6
@@ -64,7 +62,7 @@ nested Clenshaw-Curtis rules."""
 # What hall3d suggests when it does not converge after its scan.
 _MONTE_CARLO_HINT: Final = "try method 'montecarlo', or 'auto', which falls back to it"
 
-QUIET_DISAGREEMENT: Final = 1e-4
+_QUIET_DISAGREEMENT: Final = 1e-4
 """Time-integral disagreement below which a missed ``rtol`` is not reported. It
 is per piece (the last two Clenshaw-Curtis rules of one piece of an
 encounter segment, relative to the total Nc) and 10 times inside Hall's
@@ -99,7 +97,7 @@ def _integral_notes(
             "edge (the window spans an orbital period): the encounter may be "
             "longer; pass window="
         )
-    if integral.worst_disagreement > max(rtol, QUIET_DISAGREEMENT):
+    if integral.worst_disagreement > max(rtol, _QUIET_DISAGREEMENT):
         notes.append(
             f"the time integral did not reach rtol: its worst piece agrees to "
             f"{integral.worst_disagreement:.1e} of Nc (rtol {rtol:.1e})"
@@ -162,22 +160,9 @@ def hall3d(
         raise PcConvergenceError(f"{exc}; {_MONTE_CARLO_HINT}") from exc
 
 
-def is_long(conjunction: Conjunction) -> bool:
-    """Whether the encounter is long (see
-    :func:`~keepout.pc._duration.long_encounter`), so that a sample can leave
-    the hard-body sphere and enter it again.
-
-    Parameters
-    ----------
-    conjunction
-        The conjunction; without an encounter plane (zero relative velocity) the
-        encounter is not called long.
-
-    Returns
-    -------
-    bool
-        ``True`` if the encounter is long.
-    """
+def _is_long(conjunction: Conjunction) -> bool:
+    """Whether a sample can leave the hard-body sphere and enter it again: a
+    long encounter (never one without an encounter plane)."""
     if not conjunction.has_plane:
         return False
     return long_encounter(conjunction, encounter_duration(conjunction)) is not None
@@ -193,7 +178,7 @@ def hall3d_over_scan(
 
     The core of :func:`hall3d`, without its argument checks: for
     :func:`~keepout.pc.compute_pc`, which has already scanned the rate. A
-    long encounter (:func:`is_long`) only adds the note that Nc counts
+    long encounter only adds the note that Nc counts
     repeated entries (the duration itself is in ``compute_pc``'s
     applicability warning).
 
@@ -282,7 +267,7 @@ def _entry_notes(
     if not conjunction.has_plane:
         notes.append(f"relative velocity is zero: {repeated}")
     else:
-        if is_long(conjunction):
+        if _is_long(conjunction):
             notes.append(f"long encounter: {repeated}")
         if integral.scan.peak <= 0.0 and not window_given:
             extent = reach(

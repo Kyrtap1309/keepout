@@ -126,6 +126,24 @@ def test_frisbee_with_a_zero_miss_adds_nothing() -> None:
     assert result.value == pc_with(plane, plane.covariance, 5.0)
 
 
+def test_frisbee_with_a_perfectly_known_object_is_the_line_covariance_maximum() -> None:
+    # The known covariance is zero, so the unknown one alone spreads the miss:
+    # the maximum is over line-like covariances along it, Alfano's bound for
+    # a 25 sqrt(2) m miss and a 20 m hard body.
+    miss, radius = 25.0 * math.sqrt(2.0), 20.0
+    plane = with_unknown(PlaneCase(miss, 0.0, 0.0, 0.0, 0.0, radius), "secondary")
+    search = optimize.minimize_scalar(
+        lambda log_s: -line_pc(miss, radius, 10.0**log_s),
+        bounds=(-3.0, 6.0),
+        method="bounded",
+        options={"xatol": 1e-12},
+    )
+    result = frisbee(plane, radius)
+    assert result.value == approx(-search.fun, rel=1e-9)
+    assert result.value == approx(0.274133, rel=1e-5)
+    assert result.details["added_variance_m2"] == approx(100.0**search.x, rel=1e-4)
+
+
 @pytest.mark.parametrize("roles", [(), ("primary", "secondary")])
 def test_frisbee_needs_exactly_one_unknown_covariance(roles: tuple[Role, ...]) -> None:
     with pytest.raises(ValueError, match="exactly one unknown"):
@@ -184,6 +202,14 @@ def test_dilution_with_the_miss_inside_the_hard_body_is_one() -> None:
     assert result.details["scale_factor"] == 0.0
     assert result.diluted is True
     assert "inside the hard body" in result.diagnostics[-1]
+
+
+def test_a_miss_inside_the_hard_body_with_a_pc_of_one_is_not_diluted() -> None:
+    # A 1 m sigma 16.5 sigmas inside the 20 m hard body: the nominal Pc is
+    # already the maximum, 1, so no smaller covariance can raise it.
+    result = dilution(PlaneCase(3.5, 0.0, 1.0, 1.0, 0.0, 20.0).plane(), 20.0)
+    assert (result.value, result.details["pc_nominal"]) == (1.0, 1.0)
+    assert result.diluted is False
 
 
 def test_dilution_at_the_optimal_scale_reports_scale_one() -> None:

@@ -13,6 +13,7 @@ from builders import (
 from faults import (
     misleading_newton_search,
     monte_carlo_batches,
+    monte_carlo_samples_off_the_ellipse,
     not_converging,
     overlap_failing_where,
 )
@@ -131,6 +132,20 @@ def test_samples_already_inside_at_the_window_start_do_not_count() -> None:
     assert result.details["inside_at_start"] == 1.0
     assert result.value == 0.0
     assert "already overlap" in result.diagnostics[0]
+
+
+def test_samples_off_the_ellipse_are_counted_as_misses_and_reported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monte_carlo_samples_off_the_ellipse(monkeypatch, 100)
+    result = montecarlo(head_on(8.0, 10.0, 20.0, 5.0), samples=5_000, seed=3)
+    assert result.details["non_elliptic"] == 100
+    assert result.details["samples"] == 5_000
+    assert result.value == result.details["hits"] / 5_000
+    assert result.diagnostics[-1] == (
+        "100 of the 5000 samples (2%) are not elliptic orbits (eccentricity "
+        "of 1 or more, or a mean motion not above 0): counted as misses"
+    )
 
 
 def test_unknown_covariance_is_rejected() -> None:

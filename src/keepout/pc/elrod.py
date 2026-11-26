@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING, Final
 
 import numpy as np
 
-from keepout._validation import require_at_least
+from keepout._validation import require_count
 from keepout.pc._plane import PlaneGaussian, plane_gaussian_of
 from keepout.pc.result import PcResult
 
@@ -37,13 +37,13 @@ if TYPE_CHECKING:
     from keepout._types import FloatArray
     from keepout.encounter import EncounterPlane
 
-__all__ = ["ELROD_RTOL", "MAX_ORDER", "START_ORDER", "elrod"]
+__all__ = ["ELROD_RTOL", "elrod"]
 
-START_ORDER: Final = 63
+_START_ORDER: Final = 63
 """Smallest order tried in adaptive mode: ``2^6 - 1``, so the nested orders
 ``n -> 2n + 1`` stay of the form ``2^j - 1``."""
 
-MAX_ORDER: Final = 65535
+_MAX_ORDER: Final = 65535
 """Largest order tried in adaptive mode (``2^16 - 1``)."""
 
 ELROD_RTOL: Final = 1e-10
@@ -87,8 +87,8 @@ def _resolving_order(gaussian: PlaneGaussian) -> int:
     """Order whose node spacing near the centre (~ pi R / (n + 1)) is below
     sigma_u / 2, of the form ``2^j - 1``."""
     needed = 2.0 * math.pi * gaussian.hard_body_radius / gaussian.sigma_u
-    if needed <= START_ORDER + 1:
-        return START_ORDER
+    if needed <= _START_ORDER + 1:
+        return _START_ORDER
     return (1 << math.ceil(math.log2(needed))) - 1
 
 
@@ -105,8 +105,8 @@ def elrod(
         Combined hard-body radius [m].
     order
         Number of quadrature nodes. ``None`` (default) adapts the order
-        along ``n -> 2n + 1`` from :data:`START_ORDER` up to
-        :data:`MAX_ORDER`; an integer fixes it (CARA uses 64).
+        along ``n -> 2n + 1`` from 63 (or the order that resolves the
+        covariance) up to 65535; an integer fixes it (CARA uses 64).
 
     Returns
     -------
@@ -116,7 +116,8 @@ def elrod(
     Raises
     ------
     ValueError
-        If ``hard_body_radius`` is not finite and positive, or ``order`` < 1.
+        If ``hard_body_radius`` is not finite and positive, or ``order`` is
+        not an integer of at least 1.
     GeometryError
         If the miss vector is not finite.
     CovarianceError
@@ -124,7 +125,7 @@ def elrod(
         has no positive eigenvalue.
     """
     if order is not None:
-        require_at_least(order, 1, "order")
+        require_count(order, 1, "order")
     gaussian = plane_gaussian_of(plane, hard_body_radius, "elrod")
     diagnostics = list(gaussian.diagnostics)
     resolving = _resolving_order(gaussian)
@@ -136,11 +137,11 @@ def elrod(
             )
         value = _rule_value(gaussian, _all_terms(gaussian, order))
     else:
-        # Start below MAX_ORDER so that at least two orders are compared.
-        order = min(resolving, MAX_ORDER // 2)
+        # Start below _MAX_ORDER so that at least two orders are compared.
+        order = min(resolving, _MAX_ORDER // 2)
         terms = _all_terms(gaussian, order)
         value = _rule_value(gaussian, terms)
-        while order < MAX_ORDER:
+        while order < _MAX_ORDER:
             terms = _refined(gaussian, terms)
             order = terms.size
             previous, value = value, _rule_value(gaussian, terms)

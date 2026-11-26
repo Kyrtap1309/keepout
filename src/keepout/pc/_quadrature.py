@@ -97,18 +97,14 @@ def clenshaw_curtis(order: int) -> tuple[FloatArray, FloatArray]:
 def _nested_integral(
     rate: Rate, start: float, end: float, rtol: float
 ) -> tuple[float, float]:
-    """Integral of ``rate`` over ``[start, end]`` by nested Clenshaw-Curtis rules.
+    """Integral of ``rate`` over ``[start, end]`` by nested Clenshaw-Curtis
+    rules, and the difference of the last two (infinite if
+    :data:`CC_MAX_ORDER` allows a single rule).
 
     The order doubles from :data:`CC_START_ORDER` until two rules agree to
     ``rtol``, their difference stops halving below :data:`STAGNATION_RTOL`
     (the rate's noise floor), or :data:`CC_MAX_ORDER` is reached. Each doubling
     evaluates the rate only at the new nodes.
-
-    Returns
-    -------
-    tuple
-        The integral and the difference of the last two rules (infinite if
-        :data:`CC_MAX_ORDER` allows a single rule).
     """
     half, middle = 0.5 * (end - start), 0.5 * (end + start)
 

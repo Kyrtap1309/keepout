@@ -1,15 +1,8 @@
 """Exception hierarchy for keepout."""
 
-from typing import TYPE_CHECKING
+from typing import Self
 
-if TYPE_CHECKING:
-    # typing.override from Python 3.12; keepout._types would load NumPy.
-    from typing_extensions import override as _override
-else:
-
-    def _override(method):
-        return method
-
+from keepout._typing import override
 
 __all__ = [
     "AuthError",
@@ -43,7 +36,36 @@ __all__ = [
 
 
 class KeepoutError(Exception):
-    """Base class for all keepout errors."""
+    """Base class for all keepout errors.
+
+    An error pickles by the arguments it was made with, whatever its
+    subclass's ``__init__`` takes, so it survives the trip back from a
+    worker process.
+    """
+
+    _arguments: tuple[tuple[object, ...], dict[str, object]]
+
+    def __new__(cls, *args: object, **kwargs: object) -> Self:
+        """The error, with the arguments it is made with kept for pickling."""
+        error = super().__new__(cls, *args)
+        error._arguments = (args, kwargs)
+        return error
+
+    @override
+    def __reduce__(
+        self,
+    ) -> tuple[
+        object, tuple[type[Self], tuple[object, ...], dict[str, object]], object
+    ]:
+        args, kwargs = self._arguments
+        return _rebuild, (type(self), args, kwargs), self.__dict__
+
+
+def _rebuild(
+    error: type[KeepoutError], args: tuple[object, ...], kwargs: dict[str, object]
+) -> KeepoutError:
+    """An error made again from its arguments (see :class:`KeepoutError`)."""
+    return error(*args, **kwargs)
 
 
 class SourceUnavailable(KeepoutError):
@@ -247,7 +269,7 @@ class HardBodyRadiusError(KeepoutError, ValueError):
         self.detail = detail
         self.hint = hint
 
-    @_override
+    @override
     def __str__(self) -> str:
         return f"{self.detail}: {self.hint}"
 

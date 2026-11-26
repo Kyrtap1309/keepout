@@ -15,10 +15,9 @@ Every conversion accepts complex input, so :func:`complex_step` gives
 derivatives accurate to machine precision.
 """
 
-# The conversions are generic over a constrained TypeVar (real or complex
-# arrays). mypy checks each constraint in turn; pyright cannot follow NumPy's
-# overloads through one (it types ``chi * chi`` of float64 arrays as
-# complex), so the lines it misreads carry a pyright ignore.
+# The public conversions are generic over a constrained TypeVar (a real or a
+# complex array in, the same kind out); inside, arrays are InexactArray, and
+# the result is narrowed back to the TypeVar where it is returned.
 
 from __future__ import annotations
 
@@ -28,20 +27,20 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Final,
-    Generic,
     Literal,
     NamedTuple,
     TypeAlias,
     TypeVar,
+    cast,
 )
 
 import numpy as np
 import numpy.typing as npt
 
 from keepout._linalg import take
-from keepout._types import ComplexArray, FloatArray, IndexArray
+from keepout._types import ComplexArray, FloatArray, IndexArray, InexactArray
 from keepout.errors import GeometryError
-from keepout.orbits import EARTH_MU
+from keepout.orbits import EARTH_MU, eccentricity_vector
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -113,24 +112,26 @@ def retrograde_factor(r: npt.ArrayLike, v: npt.ArrayLike) -> RetrogradeFactor:
     return 1 if h[2] >= 0.0 else -1
 
 
-def _basis(chi: _Array, psi: _Array, fr: RetrogradeFactor) -> tuple[_Array, _Array]:
+def _basis(
+    chi: InexactArray, psi: InexactArray, fr: RetrogradeFactor
+) -> tuple[InexactArray, InexactArray]:
     """Unit vectors ``f`` and ``g`` of the equinoctial frame, shape ``(..., 3)``."""
     d = 1.0 + chi * chi + psi * psi
     f = np.stack([1.0 - chi * chi + psi * psi, 2.0 * chi * psi, -2.0 * fr * chi], -1)
     g = np.stack(
         [2.0 * fr * chi * psi, fr * (1.0 + chi * chi - psi * psi), 2.0 * psi], -1
     )
-    return f / d[..., None], g / d[..., None]  # pyright: ignore[reportReturnType]
+    return f / d[..., None], g / d[..., None]
 
 
-def _atan2(y: _Array, x: _Array) -> _Array:
+def _atan2(y: InexactArray, x: InexactArray) -> InexactArray:
     """``arctan2`` that also carries a complex-step derivative."""
     if not (np.iscomplexobj(y) or np.iscomplexobj(x)):
-        real: _Array = np.arctan2(y, x)  # pyright: ignore[reportAssignmentType]
+        real: InexactArray = np.arctan2(y, x)
         return real
-    y, x = np.asarray(y, complex), np.asarray(x, complex)  # pyright: ignore[reportAssignmentType]
+    y, x = np.asarray(y, complex), np.asarray(x, complex)
     angle = np.arctan2(y.real, x.real)
-    result: _Array = angle + 1j * (x.real * y.imag - y.real * x.imag) / (  # pyright: ignore[reportAssignmentType]
+    result: InexactArray = angle + 1j * (x.real * y.imag - y.real * x.imag) / (
         y.real**2 + x.real**2
     )
     return result
@@ -164,7 +165,7 @@ def to_equinoctial(state: _Array, fr: RetrogradeFactor, mu: float = EARTH_MU) ->
         that puts it on the singularity (``fr = -1`` at ``i = 0``, ``fr = +1``
         at ``i = 180 deg``).
     """
-    x = np.asarray(state)
+    x: InexactArray = np.asarray(state)
     r, v = x[..., :3], x[..., 3:]
     rn = np.sqrt(np.sum(r * r, -1))
     v2 = np.sum(v * v, -1)
@@ -191,18 +192,17 @@ def to_equinoctial(state: _Array, fr: RetrogradeFactor, mu: float = EARTH_MU) ->
     chi = w[..., 0] / denominator
     psi = -w[..., 1] / denominator
     f, g = _basis(chi, psi, fr)
-    eccentricity = (
-        (v2 - mu / rn)[..., None] * r - np.sum(r * v, -1)[..., None] * v
-    ) / mu
+    eccentricity = eccentricity_vector(r, v, mu)
     af, ag = np.sum(eccentricity * f, -1), np.sum(eccentricity * g, -1)
     big_x, big_y = np.sum(r * f, -1), np.sum(r * g, -1)
-    root: _Array = np.sqrt(1.0 - af * af - ag * ag)  # pyright: ignore[reportAssignmentType]
+    root = np.sqrt(1.0 - af * af - ag * ag)
     shape = _Shape.of(af, ag, root)
     sin_f = ag + (shape.c_ag * big_y - shape.cross * big_x) / (a * root)
     cos_f = af + (shape.c_af * big_x - shape.cross * big_y) / (a * root)
     eccentric_longitude = _atan2(sin_f, cos_f)
     mean_longitude = eccentric_longitude + ag * cos_f - af * sin_f
-    return np.stack([np.sqrt(mu / a**3), af, ag, chi, psi, mean_longitude], -1)  # pyright: ignore[reportReturnType]
+    elements = np.stack([np.sqrt(mu / a**3), af, ag, chi, psi, mean_longitude], -1)
+    return cast("_Array", elements)
 
 
 def to_cartesian(
@@ -230,12 +230,13 @@ def to_cartesian(
     GeometryError
         If Kepler's equation does not converge (e.g. NaN elements).
     """
-    array = np.asarray(elements)
+    array: InexactArray = np.asarray(elements)
     n, af, ag, chi, psi, lam = (array[..., k] for k in range(6))
-    a = semi_major_axis(n, mu)  # pyright: ignore[reportArgumentType]
+    a = _semi_major_axis(n, mu)
     shape = _Shape.of(af, ag)
-    f, g = _basis(chi, psi, fr)  # pyright: ignore[reportArgumentType]
-    return _state(n, a, af, ag, shape, _eccentric_longitude(lam, af, ag), f, g)  # pyright: ignore[reportArgumentType]
+    f, g = _basis(chi, psi, fr)
+    state = _state(n, a, af, ag, shape, _eccentric_longitude(lam, af, ag), f, g)
+    return cast("_Array", state)
 
 
 def semi_major_axis(n: _Number, mu: float = EARTH_MU) -> _Number:
@@ -253,27 +254,34 @@ def semi_major_axis(n: _Number, mu: float = EARTH_MU) -> _Number:
     float or numpy.ndarray
         The semi-major axis [m].
     """
-    a: _Number = (mu / (n * n)) ** (1.0 / 3.0)  # pyright: ignore[reportAssignmentType]
+    return cast("_Number", _semi_major_axis(n, mu))
+
+
+def _semi_major_axis(n: InexactArray | float, mu: float) -> InexactArray:
+    """:func:`semi_major_axis`, of any real or complex mean motion."""
+    a: InexactArray = (mu / (n * n)) ** (1.0 / 3.0)
     return a
 
 
-class _Shape(NamedTuple, Generic[_Array]):
+class _Shape(NamedTuple):
     """Coefficients of the in-plane state that depend on ``af`` and ``ag`` only."""
 
-    c_ag: _Array
+    c_ag: InexactArray
     """``1 - ag^2 b``, with ``b = 1 / (1 + sqrt(1 - af^2 - ag^2))``."""
-    c_af: _Array
+    c_af: InexactArray
     """``1 - af^2 b``."""
-    cross: _Array
+    cross: InexactArray
     """``af ag b``."""
 
     @classmethod
-    def of(cls, af: _Array, ag: _Array, root: _Array | None = None) -> _Shape[_Array]:
+    def of(
+        cls, af: InexactArray, ag: InexactArray, root: InexactArray | None = None
+    ) -> _Shape:
         """The coefficients; ``root = sqrt(1 - af^2 - ag^2)`` if already known."""
         if root is None:
-            root = np.sqrt(1.0 - af * af - ag * ag)  # pyright: ignore[reportAssignmentType]
-        b = 1.0 / (1.0 + root)  # pyright: ignore[reportOperatorIssue]
-        return cls(1.0 - ag * ag * b, 1.0 - af * af * b, af * ag * b)  # pyright: ignore[reportArgumentType]
+            root = np.sqrt(1.0 - af * af - ag * ag)
+        b = 1.0 / (1.0 + root)
+        return cls(1.0 - ag * ag * b, 1.0 - af * af * b, af * ag * b)
 
 
 class _Apse(NamedTuple):
@@ -285,14 +293,15 @@ class _Apse(NamedTuple):
     """``varpi = atan2(ag, af)`` of the real parts [rad]."""
 
     @classmethod
-    def of(cls, af: _Array, ag: _Array) -> _Apse:
+    def of(cls, af: InexactArray, ag: InexactArray) -> _Apse:
+        """The eccentricity and longitude of perigee of ``(af, ag)``."""
         real_af, real_ag = np.real(af), np.real(ag)
         return cls(np.hypot(real_af, real_ag), np.arctan2(real_ag, real_af))
 
 
 def _eccentric_longitude(
-    lam: _Array, af: _Array, ag: _Array, apse: _Apse | None = None
-) -> _Array:
+    lam: InexactArray, af: InexactArray, ag: InexactArray, apse: _Apse | None = None
+) -> InexactArray:
     """The eccentric longitude ``F``: the solution of Kepler's equation.
 
     ``apse`` is ``_Apse.of(af, ag)`` if already known.
@@ -312,7 +321,7 @@ def _eccentric_longitude(
     # converges for every e < 1 (Danby 1987).
     if apse is None:
         apse = _Apse.of(af, ag)
-    eccentric_longitude = lam + 0.85 * apse.eccentricity * np.sign(
+    eccentric_longitude: InexactArray = lam + 0.85 * apse.eccentricity * np.sign(
         np.sin(np.real(lam) - apse.perigee_longitude)
     )
     # Promote to complex when the elements are (a complex-step derivative).
@@ -335,15 +344,15 @@ def _eccentric_longitude(
 
 
 def _state(
-    n: _Array,
-    a: _Array,
-    af: _Array,
-    ag: _Array,
-    shape: _Shape[_Array],
-    eccentric_longitude: _Array,
-    f: _Array,
-    g: _Array,
-) -> _Array:
+    n: InexactArray,
+    a: InexactArray,
+    af: InexactArray,
+    ag: InexactArray,
+    shape: _Shape,
+    eccentric_longitude: InexactArray,
+    f: InexactArray,
+    g: InexactArray,
+) -> InexactArray:
     """Cartesian state from the eccentric longitude and the orbit's constants."""
     cos_f, sin_f = np.cos(eccentric_longitude), np.sin(eccentric_longitude)
     big_x = a * (shape.c_ag * cos_f + shape.cross * sin_f - af)
@@ -354,7 +363,8 @@ def _state(
     big_yd = rate * (shape.c_af * cos_f - shape.cross * sin_f)
     position = big_x[..., None] * f + big_y[..., None] * g
     velocity = big_xd[..., None] * f + big_yd[..., None] * g
-    return np.concatenate([position, velocity], -1)  # pyright: ignore[reportReturnType]
+    state: InexactArray = np.concatenate([position, velocity], -1)
+    return state
 
 
 @dataclass(frozen=True, eq=False, slots=True)
@@ -371,15 +381,9 @@ class Orbits:
 
     elements: FloatArray
     """Real equinoctial elements at TCA, shape ``(m, 6)``."""
-    n: FloatArray
-    """Mean motion [rad/s]."""
-    af: FloatArray
-    """Equinoctial ``af``."""
-    ag: FloatArray
-    """Equinoctial ``ag``."""
     a: FloatArray
     """Semi-major axis [m]."""
-    shape: _Shape[FloatArray]
+    shape: _Shape
     """Coefficients of the in-plane state."""
     apse: _Apse
     """Eccentricity and longitude of perigee, for the Kepler start."""
@@ -414,15 +418,27 @@ class Orbits:
         f, g = _basis(chi, psi, fr)
         return cls(
             elements,
-            n,
-            af,
-            ag,
             semi_major_axis(n, mu),
             _Shape.of(af, ag),
             _Apse.of(af, ag),
-            f,
-            g,
+            np.asarray(f, dtype=np.float64),
+            np.asarray(g, dtype=np.float64),
         )
+
+    @property
+    def n(self) -> FloatArray:
+        """Mean motion [rad/s] (a view of :attr:`elements`)."""
+        return self.elements[:, 0]
+
+    @property
+    def af(self) -> FloatArray:
+        """Equinoctial ``af`` (a view of :attr:`elements`)."""
+        return self.elements[:, 1]
+
+    @property
+    def ag(self) -> FloatArray:
+        """Equinoctial ``ag`` (a view of :attr:`elements`)."""
+        return self.elements[:, 2]
 
     def subset(self, rows: slice | IndexArray) -> Orbits:
         """The orbits ``rows``, with their constants taken, not recomputed.
@@ -439,9 +455,6 @@ class Orbits:
         """
         return Orbits(
             self.elements[rows],
-            self.n[rows],
-            self.af[rows],
-            self.ag[rows],
             self.a[rows],
             take(self.shape, rows),
             take(self.apse, rows),
@@ -469,7 +482,7 @@ class Orbits:
         """
         n, af, ag = self.n[rows], self.af[rows], self.ag[rows]
         lam = self.elements[rows, 5] + n * np.asarray(t)
-        state: FloatArray = _state(
+        state = _state(
             n,
             self.a[rows],
             af,
@@ -479,7 +492,7 @@ class Orbits:
             self.f[rows],
             self.g[rows],
         )
-        return state
+        return cast("FloatArray", state)
 
 
 def propagate(elements: _Array, dt: npt.ArrayLike) -> _Array:
@@ -499,7 +512,7 @@ def propagate(elements: _Array, dt: npt.ArrayLike) -> _Array:
     """
     propagated = np.array(elements, dtype=np.result_type(np.asarray(elements), float))
     propagated[..., 5] = propagated[..., 5] + propagated[..., 0] * np.asarray(dt)
-    return propagated  # pyright: ignore[reportReturnType]
+    return cast("_Array", propagated)
 
 
 def wrap_angle(angle: _Real) -> _Real:

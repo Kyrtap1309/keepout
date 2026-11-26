@@ -8,6 +8,7 @@ as a float, for a dataclass to store.
 from __future__ import annotations
 
 import math
+import operator
 from typing import TYPE_CHECKING, TypeVar
 
 if TYPE_CHECKING:
@@ -22,6 +23,7 @@ __all__ = [
     "positive_float",
     "require_at_least",
     "require_choice",
+    "require_count",
     "require_non_negative",
     "require_open_probability",
     "require_positive",
@@ -101,6 +103,22 @@ def require_at_least(value: int, minimum: int, name: str) -> None:
     """
     if value < minimum:
         raise ValueError(f"{name} must be at least {minimum}, got {value}")
+
+
+def require_count(value: int, minimum: int, name: str) -> None:
+    """A check that ``value`` is an integer (any with ``__index__``, e.g. a
+    NumPy one) of at least ``minimum`` (``ValueError`` if not).
+
+    Raises
+    ------
+    ValueError
+        If ``value`` is not an integer or is below ``minimum``.
+    """
+    try:
+        count = operator.index(value)
+    except TypeError:
+        raise ValueError(f"{name} must be an integer, got {value!r}") from None
+    require_at_least(count, minimum, name)
 
 
 def require_single_time(time: Time, name: str) -> None:

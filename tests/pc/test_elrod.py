@@ -2,7 +2,7 @@ import pytest
 from builders import TYPICAL_HEAD_ON, approx, head_on
 from reference_pc import isotropic_pc, principal_axes_pc
 
-from keepout.pc.elrod import MAX_ORDER, START_ORDER, elrod
+from keepout.pc.elrod import _MAX_ORDER, _START_ORDER, elrod
 
 CARA_ORDER = 64
 
@@ -16,7 +16,7 @@ def test_adaptive_order_resolves_a_thin_covariance() -> None:
     reference = principal_axes_pc(5.0, 0.0, 100.0, 0.3, 15.0)
     assert adaptive.value == approx(reference, rel=1e-8)
     assert fixed.value != approx(reference, rel=1e-8)
-    assert adaptive.details["order"] > START_ORDER
+    assert adaptive.details["order"] > _START_ORDER
     assert fixed.details["order"] == CARA_ORDER
 
 
@@ -28,7 +28,7 @@ def test_adaptive_orders_are_nested() -> None:
     plane = head_on(5.0, 100.0, 0.3, 15.0).plane
     adaptive = elrod(plane, 15.0)
     order = int(adaptive.details["order"])
-    assert order > START_ORDER  # at least one refinement
+    assert order > _START_ORDER  # at least one refinement
     assert adaptive.value == elrod(plane, 15.0, order=order).value
 
 
@@ -52,9 +52,15 @@ def test_non_convergence_at_the_order_cap_is_reported() -> None:
     # differ by more than ELROD_RTOL, so the cap is reached and reported.
     conjunction = head_on(999.0, 1e-3, 1e-3, 1000.0)
     result = elrod(conjunction.plane, 1000.0)
-    assert result.details["order"] == MAX_ORDER
+    assert result.details["order"] == _MAX_ORDER
     assert any("did not converge" in d for d in result.diagnostics)
     assert result.value == approx(isotropic_pc(999.0, 0.1, 1000.0), rel=1e-8)
+
+
+@pytest.mark.parametrize("order", [63.5, 64.0])
+def test_order_must_be_an_integer(order: float) -> None:
+    with pytest.raises(ValueError, match="order must be an integer"):
+        elrod(TYPICAL_HEAD_ON.plane, 5.0, order=order)  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize("order", [0, -64])

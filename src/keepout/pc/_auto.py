@@ -10,8 +10,8 @@ import numpy as np
 from keepout.errors import GeometryError, PcConvergenceError
 from keepout.orbits import orbital_period
 from keepout.pc._duration import DURATION_LIMIT, encounter_duration, long_encounter
-from keepout.pc._encounters import Encounters, UnusableOrbit
-from keepout.pc._plane import MissingCovariance
+from keepout.pc._encounters import Encounters
+from keepout.pc._errors import MissingCovariance, UnusableOrbit
 from keepout.pc.foster import foster
 from keepout.pc.hall3d import hall3d_over_scan
 from keepout.pc.maxpc import alfano, frisbee

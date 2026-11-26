@@ -13,12 +13,13 @@ traceback.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Annotated, Any, Final, TypeVar, cast
+from typing import Annotated, Any, Final, cast
 
 import typer
 from typer.core import TyperCommand
 
 import keepout
+from keepout._typing import override
 from keepout.cli.assess import assess_command
 from keepout.cli.dashboard import dashboard_command
 from keepout.cli.fetch import fetch_cara, fetch_catalog, fetch_cdm, fetch_kelvins
@@ -31,18 +32,6 @@ from keepout.cli.validate import validate_command
 from keepout.cli.worker import worker_command
 
 __all__ = ["app", "fetch_app", "jobs_app", "run", "store_app"]
-
-if TYPE_CHECKING:
-    from typing_extensions import override
-else:
-    # Not keepout._types.override: it loads NumPy, which --help need not.
-    _Method = TypeVar("_Method")
-
-    def override(method: _Method) -> _Method:
-        """The marker of a method overriding its base class's (checked
-        statically)."""
-        return method
-
 
 # The help is Rich markup: a square bracket in it is escaped (\[), and an
 # epilog keeps its line breaks.

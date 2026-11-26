@@ -60,7 +60,9 @@ def encounter_duration(conjunction: Conjunction) -> float:
     Parameters
     ----------
     conjunction
-        The conjunction at TCA; both covariances must be known.
+        The conjunction at TCA, with an encounter plane. With a covariance
+        unknown the known one alone is used, so the duration is then a lower
+        bound.
 
     Returns
     -------

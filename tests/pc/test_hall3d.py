@@ -50,8 +50,8 @@ from keepout.errors import CovarianceError, GeometryError, PcConvergenceError
 from keepout.orbits import orbital_period
 from keepout.pc import _overlap as overlap_module
 from keepout.pc import foster, hall3d
-from keepout.pc._encounters import Encounters, UnusableOrbit
-from keepout.pc._plane import MissingCovariance
+from keepout.pc._encounters import Encounters
+from keepout.pc._errors import MissingCovariance, UnusableOrbit
 
 # The package exports the function hall3d under the module's name.
 hall3d_module = importlib.import_module("keepout.pc.hall3d")
@@ -162,7 +162,7 @@ def test_zero_relative_velocity_is_noted_as_an_upper_bound() -> None:
 def test_zero_relative_velocity_is_not_a_long_encounter() -> None:
     # The straight-line duration is undefined without a relative velocity:
     # the zero-velocity note above stands in for the long-encounter one.
-    assert not hall3d_module.is_long(side_by_side())
+    assert not hall3d_module._is_long(side_by_side())
 
 
 @pytest.mark.validation
@@ -363,7 +363,7 @@ def test_unmet_rtol_is_reported(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_small_rtol_shortfall_is_not_reported(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Orders 32 and 64 agree to far better than QUIET_DISAGREEMENT, not to 1e-15.
+    # Orders 32 and 64 agree to far better than _QUIET_DISAGREEMENT, not to 1e-15.
     time_integral_orders(monkeypatch, largest=64)
     result = hall3d(TYPICAL_HEAD_ON, rtol=1e-15)
     assert result.diagnostics == ()

@@ -278,7 +278,7 @@ layers = [
     "keepout._workers",
     "keepout._linalg",
     "keepout._types | keepout._validation | keepout._methods | keepout._defaults | keepout._text | keepout._environment | keepout.errors",
-    "keepout.units",
+    "keepout.units | keepout._typing",
 ]
 
 [[tool.importlinter.contracts]]

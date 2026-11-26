@@ -150,24 +150,26 @@ def frisbee(plane: EncounterPlane, hard_body_radius: float) -> PcResult:
     ValueError
         If ``hard_body_radius`` is not finite and positive, or the plane does
         not have exactly one unknown covariance.
+    GeometryError
+        If the miss vector is not finite.
     CovarianceError
-        If the known covariance has no positive eigenvalue on the plane.
+        If the known covariance is not finite on the plane.
     """
     if len(plane.unknown_covariance) != 1:
         raise ValueError(
             "frisbee needs exactly one unknown covariance; unknown: "
             f"{plane.unknown_covariance or 'none'}"
         )
+    note = (
+        f"maximum Pc over the unknown {plane.unknown_covariance[0]} covariance "
+        "(Frisbee 2015): an upper bound, not an estimate"
+    )
+    if not np.any(plane.covariance) and np.all(np.isfinite(plane.miss_vector)):
+        return _frisbee_known_exactly(plane, hard_body_radius, note)
     gaussian = plane_gaussian_of(plane, hard_body_radius, None)
     k2 = gaussian.mahalanobis2
     miss = plane.miss_distance
-    diagnostics = [
-        (
-            f"maximum Pc over the unknown {plane.unknown_covariance[0]} covariance "
-            "(Frisbee 2015): an upper bound, not an estimate"
-        ),
-        *gaussian.diagnostics,
-    ]
+    diagnostics = [note, *gaussian.diagnostics]
     analytic = miss * miss * (k2 - 1.0) / k2 if k2 > 1.0 else 0.0
     pc_zero = gaussian_pc(gaussian).value
     # A zero miss centres the hard body on the Gaussian: any added variance
@@ -203,6 +205,37 @@ def frisbee(plane: EncounterPlane, hard_body_radius: float) -> PcResult:
     return PcResult.clamped(
         value, "frisbee", tuple(diagnostics), details, kind="upper_bound"
     )
+
+
+def _frisbee_known_exactly(
+    plane: EncounterPlane, hard_body_radius: float, note: str
+) -> PcResult:
+    """:func:`frisbee` when the known covariance is zero on the plane.
+
+    The known object is then exact and the added variance alone spreads the
+    miss: the covariances searched are the line-like ones along it, whose
+    maximum is Alfano's (:func:`alfano`). Frisbee's analytic ``s`` is
+    ``|m|^2`` (``K`` is infinite).
+
+    Raises
+    ------
+    ValueError
+        If ``hard_body_radius`` is not finite and positive.
+    """
+    require_positive(hard_body_radius, "hard_body_radius")
+    miss = plane.miss_distance
+    value, sigma, limit = _line_maximum(miss, hard_body_radius)
+    exact = (
+        "the known covariance is zero (an exact state): the maximum is over "
+        "line-like covariances along the miss, Alfano's (2005)"
+    )
+    details = {
+        "added_variance_m2": sigma * sigma,
+        "mahalanobis": math.inf if miss > 0.0 else 0.0,
+        "pc_analytic": value if miss <= 0.0 else _line_pc(miss, hard_body_radius, miss),
+    }
+    notes = (note, exact) if limit is None else (note, exact, limit)
+    return PcResult.clamped(value, "frisbee", notes, details, kind="upper_bound")
 
 
 def dilution(plane: EncounterPlane, hard_body_radius: float) -> PcResult:
@@ -245,7 +278,7 @@ def dilution(plane: EncounterPlane, hard_body_radius: float) -> PcResult:
             (note, inside),
             details,
             kind="upper_bound",
-            diluted=True,
+            diluted=_diluted(1.0, nominal),
         )
     seed_scale = max(gaussian.mahalanobis2 / 2.0, SEED_SCALE_FLOOR)
 
@@ -254,11 +287,20 @@ def dilution(plane: EncounterPlane, hard_body_radius: float) -> PcResult:
 
     seed = _prefer((1.0, nominal), (seed_scale, pc(seed_scale)))
     scale, value = _prefer(seed, _search_log_max(pc, math.log10(seed_scale)))
-    diluted = scale < 1.0 and value > nominal * (1.0 + DILUTION_TOLERANCE)
     details = {"pc_nominal": nominal, "scale_factor": scale}
     return PcResult.clamped(
-        value, "dilution", (note,), details, kind="upper_bound", diluted=diluted
+        value,
+        "dilution",
+        (note,),
+        details,
+        kind="upper_bound",
+        diluted=scale < 1.0 and _diluted(value, nominal),
     )
+
+
+def _diluted(maximum: float, nominal: float) -> bool:
+    """Whether ``maximum`` beats ``nominal`` by more than :data:`DILUTION_TOLERANCE`."""
+    return maximum > nominal * (1.0 + DILUTION_TOLERANCE)
 
 
 def alfano(plane: EncounterPlane, hard_body_radius: float) -> PcResult:
@@ -285,29 +327,35 @@ def alfano(plane: EncounterPlane, hard_body_radius: float) -> PcResult:
         If ``hard_body_radius`` is not finite and positive.
     """
     require_positive(hard_body_radius, "hard_body_radius")
-    miss, radius = plane.miss_distance, hard_body_radius
     note = (
         "maximum Pc over every covariance for this miss distance (Alfano 2005): "
         "an upper bound that uses no covariance information"
     )
+    value, sigma, limit = _line_maximum(plane.miss_distance, hard_body_radius)
+    notes = (note,) if limit is None else (note, limit)
+    return PcResult.clamped(
+        value, "alfano", notes, {"sigma_m": sigma}, kind="upper_bound"
+    )
+
+
+def _line_maximum(miss: float, radius: float) -> tuple[float, float, str | None]:
+    """Alfano's maximum Pc over line-like covariances along the miss: the Pc,
+    the maximising standard deviation and, inside or on the edge of the hard
+    body (only a vanishing covariance reaches the supremum), why."""
     if miss < radius:
-        inside = _INSIDE.format(miss=miss, radius=radius)
-        return PcResult(
-            1.0, "alfano", (note, inside), {"sigma_m": 0.0}, kind="upper_bound"
-        )
+        return 1.0, 0.0, _INSIDE.format(miss=miss, radius=radius)
     if miss == radius:  # ln((d+R)/(d-R)) diverges: sigma -> 0, Pc -> 1/2
-        edge = _EDGE.format(miss=miss)
-        return PcResult(
-            0.5, "alfano", (note, edge), {"sigma_m": 0.0}, kind="upper_bound"
-        )
+        return 0.5, 0.0, _EDGE.format(miss=miss)
     # log1p(2R/(d-R)) = ln((d+R)/(d-R)), accurate when d >> R.
     sigma = math.sqrt(2.0 * miss * radius / math.log1p(2.0 * radius / (miss - radius)))
+    return _line_pc(miss, radius, sigma), sigma, None
+
+
+def _line_pc(miss: float, radius: float, sigma: float) -> float:
+    """Pc of a line-like covariance of standard deviation ``sigma`` along the
+    miss: all its mass is on the miss line, so it is the 1-D mass of
+    ``N(0, sigma^2)`` over the chord ``[d - R, d + R]``."""
     scale = math.sqrt(2.0) * sigma
-    # A line-like covariance has all its mass on the miss line, so Pc is the
-    # 1-D mass of N(0, sigma^2) over the chord [d - R, d + R].
-    value = 0.5 * (
+    return 0.5 * (
         math.erfc((miss - radius) / scale) - math.erfc((miss + radius) / scale)
-    )
-    return PcResult.clamped(
-        value, "alfano", (note,), {"sigma_m": sigma}, kind="upper_bound"
     )

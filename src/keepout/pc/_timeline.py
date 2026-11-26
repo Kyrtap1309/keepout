@@ -230,20 +230,19 @@ def _refine(
     """
     significant = values > RATE_FLOOR * float(values.max())
     ratios = np.diff(times) / fine[:-1] * (1.0 - _ROUNDING_SLACK)
-    gaps = [
-        (k, math.ceil(float(ratios[k])) - 1)
-        for k in range(times.size - 1)
-        if (significant[k] or significant[k + 1]) and ratios[k] > 1.0
-    ]
-    total = sum(count for _, count in gaps)
-    scale = max(1.0, total / MAX_REFINED_POINTS)
-    added = [
-        np.linspace(times[k], times[k + 1], math.floor(count / scale) + 2)[1:-1]
-        for k, count in gaps
-    ]
-    if not added:
+    gaps = np.flatnonzero((significant[:-1] | significant[1:]) & (ratios > 1.0))
+    counts = np.ceil(ratios[gaps]) - 1.0
+    scale = max(1.0, float(counts.sum()) / MAX_REFINED_POINTS)
+    inner = np.floor(counts / scale).astype(np.intp)
+    if not inner.any():
         return times, values
-    extra = np.concatenate(added)
+    # Each gap's inner points of np.linspace(start, end, n + 2), n = inner,
+    # computed as it does: start + j * ((end - start) / (n + 1)).
+    owner = np.repeat(gaps, inner)
+    divisions = np.repeat(inner + 1, inner)
+    j = np.arange(1, owner.size + 1) - np.repeat(np.cumsum(inner) - inner, inner)
+    start = times[owner]
+    extra = j * ((times[owner + 1] - start) / divisions) + start
     merged = np.concatenate([times, extra])
     order = np.argsort(merged, kind="stable")
     new_values = rate(extra)
@@ -253,13 +252,9 @@ def _refine(
 def _detect(
     rate: Rate, window: tuple[float, float], screen: Screen
 ) -> tuple[FloatArray, FloatArray, FloatArray]:
-    """The rate on the detection grid of ``window``.
-
-    Returns
-    -------
-    tuple
-        Times, rates and the refinement spacing of each node (infinite where
-        the next node is across a gap the screen ruled negligible).
+    """Times, rates and refinement spacings (infinite where the next node is
+    across a gap the screen ruled negligible) of the detection grid of
+    ``window``.
 
     Raises
     ------

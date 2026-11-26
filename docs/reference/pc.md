@@ -49,12 +49,8 @@ Each method's module explains the method, its defaults and its tolerances.
     options:
       heading_level: 3
       members:
-        - BREAKPOINT_GAP
         - FOSTER_RTOL
         - MIN_RTOL
-        - QUAD_LIMIT
-        - STEP_SIGMAS
-        - TAIL_SIGMAS
         - gaussian_pc
 
 ::: keepout.pc.elrod
@@ -62,28 +58,21 @@ Each method's module explains the method, its defaults and its tolerances.
       heading_level: 3
       members:
         - ELROD_RTOL
-        - MAX_ORDER
-        - START_ORDER
 
 ::: keepout.pc.hall3d
     options:
       heading_level: 3
       members:
         - HALL_RTOL
-        - QUIET_DISAGREEMENT
         - hall3d_over_scan
-        - is_long
 
 ::: keepout.pc.montecarlo
     options:
       heading_level: 3
       members:
-        - MC_BATCH
         - MC_CONFIDENCE
         - MC_MAX_SAMPLES
         - MC_RTOL
-        - NEWTON_STEPS
-        - SPEED_BOUND_FACTOR
         - montecarlo_over_scan
 
 ::: keepout.pc.maxpc

@@ -1,11 +1,14 @@
-from collections.abc import Sequence
-
 import astropy.units as u
 import numpy as np
 import pytest
-from builders import DIAGONAL_COVARIANCE, EPOCH, known, object_state
+from builders import (
+    DIAGONAL_COVARIANCE,
+    EPOCH,
+    counting_itrf_batches,
+    known,
+    object_state,
+)
 
-from keepout import frames
 from keepout.covariance import Covariance
 from keepout.errors import CovarianceError, GeometryError
 from keepout.objects import ObjectState, ReportedObject, gcrf_object_states
@@ -80,14 +83,7 @@ def test_reported_objects_become_gcrf_object_states() -> None:
 
 
 def test_itrf_states_are_converted_together(monkeypatch: pytest.MonkeyPatch) -> None:
-    batches: list[int] = []
-    convert = frames._itrf_to_gcrf
-
-    def counting(states: Sequence[StateVector]) -> list[StateVector]:
-        batches.append(len(states))
-        return convert(states)
-
-    monkeypatch.setattr(frames, "_itrf_to_gcrf", counting)
+    batches = counting_itrf_batches(monkeypatch)
     gcrf_object_states([ReportedObject(name, ITRF_STATE, None) for name in ("A", "B")])
     assert batches == [2]
 

@@ -17,6 +17,7 @@ from builders import (
     head_on,
     known,
     object_state,
+    planar,
     shifted_back,
     unbound_crossing,
     without_covariance,
@@ -30,7 +31,7 @@ from faults import (
 from pc_builders import side_by_side
 
 from keepout.conjunction import Conjunction
-from keepout.covariance import make_covariance
+from keepout.covariance import Covariance, make_covariance
 from keepout.errors import CovarianceError, GeometryError, PcConvergenceError
 from keepout.objects import ObjectState
 from keepout.orbits import orbital_period
@@ -58,7 +59,7 @@ from keepout.pc.api import (
     MethodChoice,
     encounter_duration,
 )
-from keepout.pc.montecarlo import MC_BATCH, montecarlo
+from keepout.pc.montecarlo import _MC_BATCH, montecarlo
 from keepout.pc.result import Method
 from keepout.state import StateVector
 
@@ -423,6 +424,19 @@ def test_auto_uses_frisbee_when_one_covariance_is_unknown() -> None:
     assert "upper bound" in result.diagnostics[1]
 
 
+def test_auto_bounds_a_perfectly_known_object_against_an_unknown_one() -> None:
+    # The primary's covariance is all zero (exact), the secondary's unknown:
+    # the maximum Pc is Alfano's for the 25 sqrt(2) m miss and 20 m body.
+    base = planar([25.0, 25.0], np.zeros((2, 2)), 20.0)
+    exact = ObjectState(
+        "PRI", base.primary.state, Covariance(np.zeros((6, 6)), "GCRF", EPOCH)
+    )
+    conjunction = Conjunction(exact, without_covariance(base.secondary), 20.0)
+    result = compute_pc(conjunction)
+    assert result.method == "frisbee"
+    assert result.value == approx(0.274133, rel=1e-5)
+
+
 def test_auto_uses_alfano_when_both_covariances_are_unknown() -> None:
     conjunction = both_unknown(FAR_HEAD_ON)
     result = compute_pc(conjunction)
@@ -564,7 +578,7 @@ def test_the_resolved_fallback_reproduces_autos_result(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     overlap_failing_while_integrating(monkeypatch)
-    auto_monte_carlo_budget(monkeypatch, MC_BATCH)
+    auto_monte_carlo_budget(monkeypatch, _MC_BATCH)
     result = AUTO(SLOW_ALONG_TRACK)
     resolved = AUTO.resolved(result)
     assert resolved.method == "montecarlo"
@@ -628,7 +642,7 @@ def test_fallback_matches_an_explicit_monte_carlo(
     # the scan: Hall refuses the result, and Monte Carlo, which reuses the
     # scan, must still run as if alone (the failures it checks are the scan's).
     overlap_failing_while_integrating(monkeypatch)
-    auto_monte_carlo_budget(monkeypatch, MC_BATCH)
+    auto_monte_carlo_budget(monkeypatch, _MC_BATCH)
     conjunction = SLOW_ALONG_TRACK
     result = compute_pc(conjunction)
     assert result.method == "montecarlo"
@@ -637,7 +651,7 @@ def test_fallback_matches_an_explicit_monte_carlo(
         and note.endswith("Monte Carlo used instead (seed 0, at most 50,000 samples)")
         for note in result.diagnostics
     )
-    alone = montecarlo(conjunction, max_samples=MC_BATCH, seed=AUTO_MC_SEED)
+    alone = montecarlo(conjunction, max_samples=_MC_BATCH, seed=AUTO_MC_SEED)
     assert result.value == alone.value
     # compute_pc adds its own details to the method's.
     assert result.details == {

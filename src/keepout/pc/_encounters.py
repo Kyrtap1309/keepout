@@ -7,13 +7,12 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from functools import partial
-from typing import TYPE_CHECKING, Final, Self
+from typing import TYPE_CHECKING, Final
 
-from keepout._types import override
 from keepout.errors import GeometryError, PcConvergenceError
 from keepout.pc._duration import straight_line_half_window
+from keepout.pc._errors import MissingCovariance, UnusableOrbit
 from keepout.pc._orbit import OrbitUncertainty
-from keepout.pc._plane import require_known_covariance
 from keepout.pc._rate import CollisionRate
 from keepout.pc._screen import screen
 from keepout.pc._timeline import RateScan, locate, locate_auto
@@ -22,12 +21,13 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from keepout.conjunction import Conjunction
+    from keepout.covariance import Covariance
     from keepout.encounter import Role
+    from keepout.state import StateVector
 
 __all__ = [
     "FALLBACK_TOLERANCE",
     "Encounters",
-    "UnusableOrbit",
     "check_fallbacks",
     "collision_rate",
     "encounter_scan",
@@ -56,21 +56,16 @@ class Encounters:
         Its scan over the window.
     window_given
         Whether the window was passed rather than sized automatically.
-    scan_fallback_count
-        How many of ``rate.fallbacks`` the scan gave: the rate collects later
-        failures too (at Hall's quadrature nodes).
+    scan_fallbacks
+        Times [s] and rates where the peak-overlap iteration failed during
+        the scan (``rate.fallbacks`` also collects later failures, at Hall's
+        quadrature nodes).
     """
 
     rate: CollisionRate
     scan: RateScan
     window_given: bool
-    scan_fallback_count: int
-
-    @property
-    def scan_fallbacks(self) -> list[tuple[float, float]]:
-        """Times [s] and rates where the peak-overlap iteration failed
-        during the scan."""
-        return self.rate.fallbacks[: self.scan_fallback_count]
+    scan_fallbacks: tuple[tuple[float, float], ...]
 
     @classmethod
     def locate(
@@ -98,33 +93,7 @@ class Encounters:
         """
         rate = collision_rate(conjunction)
         scan = encounter_scan(conjunction, rate, window)
-        return cls(rate, scan, window is not None, len(rate.fallbacks))
-
-
-class UnusableOrbit(GeometryError):
-    """An object's orbit has no equinoctial elements (not elliptic,
-    rectilinear, or on the elements' singularity), so the 3D-Nc rate is
-    undefined.
-
-    Parameters
-    ----------
-    role
-        The object.
-    reason
-        Why, as :func:`~keepout.equinoctial.to_equinoctial` says; it is the
-        message.
-    """
-
-    role: Role
-
-    def __init__(self, role: Role, reason: str) -> None:
-        super().__init__(reason)
-        self.role = role
-
-    @override
-    def __reduce__(self) -> tuple[type[Self], tuple[object, ...]]:
-        # Unpickled (from a worker process) by its arguments, not the message.
-        return type(self), (self.role, str(self))
+        return cls(rate, scan, window is not None, tuple(rate.fallbacks))
 
 
 def collision_rate(conjunction: Conjunction) -> CollisionRate:
@@ -141,25 +110,26 @@ def collision_rate(conjunction: Conjunction) -> CollisionRate:
     UnusableOrbit
         If an orbit has no equinoctial elements.
     """
-    require_known_covariance(conjunction.unknown_covariance)
+    primary, secondary = conjunction.primary, conjunction.secondary
+    if primary.covariance is None or secondary.covariance is None:
+        raise MissingCovariance(conjunction.unknown_covariance)
     return CollisionRate(
-        _orbit(conjunction, "primary"),
-        _orbit(conjunction, "secondary"),
+        _orbit(primary.state, primary.covariance, "primary"),
+        _orbit(secondary.state, secondary.covariance, "secondary"),
         conjunction.combined_hard_body_radius,
     )
 
 
-def _orbit(conjunction: Conjunction, role: Role) -> OrbitUncertainty:
-    """The orbit uncertainty of one object of a conjunction.
+def _orbit(state: StateVector, covariance: Covariance, role: Role) -> OrbitUncertainty:
+    """One object's orbit uncertainty.
 
     Raises
     ------
     UnusableOrbit
         If the orbit has no equinoctial elements.
     """
-    item = conjunction.object_of(role)
     try:
-        return OrbitUncertainty.of(item)
+        return OrbitUncertainty.of(state, covariance)
     except GeometryError as error:
         raise UnusableOrbit(role, str(error)) from error
 

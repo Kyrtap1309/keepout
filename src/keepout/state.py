@@ -147,7 +147,13 @@ def relative_motion(primary: StateVector, secondary: StateVector) -> RelativeMot
     -------
     RelativeMotion
         The relative position [m] and velocity [m/s], in the frame of the states.
+
+    Raises
+    ------
+    GeometryError
+        If the states are in different frames.
     """
+    require_frame(secondary, primary.frame, "relative_motion")
     position: FloatArray = secondary.r - primary.r
     velocity: FloatArray = secondary.v - primary.v
     return RelativeMotion(position, velocity)

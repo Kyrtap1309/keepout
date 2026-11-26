@@ -26,12 +26,8 @@ if TYPE_CHECKING:
     from keepout.encounter import EncounterPlane
 
 __all__ = [
-    "BREAKPOINT_GAP",
     "FOSTER_RTOL",
     "MIN_RTOL",
-    "QUAD_LIMIT",
-    "STEP_SIGMAS",
-    "TAIL_SIGMAS",
     "foster",
     "gaussian_pc",
 ]
@@ -42,18 +38,18 @@ FOSTER_RTOL: Final = 1e-10
 MIN_RTOL: Final = 50.0 * sys.float_info.epsilon
 """Smallest relative tolerance QUADPACK accepts."""
 
-STEP_SIGMAS: Final = 10.0
+_STEP_SIGMAS: Final = 10.0
 """Half-width, in narrow-axis standard deviations, of the chord-mass step
 around ``h = |miss_v|`` whose ends are given to the quadrature as breakpoints."""
 
-BREAKPOINT_GAP: Final = 1e-6
+_BREAKPOINT_GAP: Final = 1e-6
 """Breakpoints closer than this fraction of the band to its ends are dropped."""
 
-TAIL_SIGMAS: Final = 12.0
+_TAIL_SIGMAS: Final = 12.0
 """Half-width, in standard deviations, of the band along the wide axis that
 is integrated; outside it the density is below exp(-72) of its peak."""
 
-QUAD_LIMIT: Final = 200
+_QUAD_LIMIT: Final = 200
 """Largest number of QUADPACK subintervals."""
 
 
@@ -64,8 +60,8 @@ def _band(gaussian: PlaneGaussian) -> tuple[float, float] | None:
     Returns ``None`` if the band misses the circle (Pc underflows to 0).
     """
     radius = gaussian.hard_body_radius
-    low = max(gaussian.miss_u - TAIL_SIGMAS * gaussian.sigma_u, -radius)
-    high = min(gaussian.miss_u + TAIL_SIGMAS * gaussian.sigma_u, radius)
+    low = max(gaussian.miss_u - _TAIL_SIGMAS * gaussian.sigma_u, -radius)
+    high = min(gaussian.miss_u + _TAIL_SIGMAS * gaussian.sigma_u, radius)
     if low >= high:
         return None
     return math.asin(low / radius), math.asin(high / radius)
@@ -80,7 +76,7 @@ def _chord_steps(gaussian: PlaneGaussian, low: float, high: float) -> list[float
     """
     radius = gaussian.hard_body_radius
     points: set[float] = set()
-    for k in (-STEP_SIGMAS, 0.0, STEP_SIGMAS):
+    for k in (-_STEP_SIGMAS, 0.0, _STEP_SIGMAS):
         half_chord = abs(gaussian.miss_v) + k * gaussian.sigma_v
         if 0.0 < half_chord < radius:
             angle = math.acos(half_chord / radius)
@@ -89,7 +85,7 @@ def _chord_steps(gaussian: PlaneGaussian, low: float, high: float) -> list[float
     # tiny ``miss_v``, or ``h = 10 sigma_v`` with ``10 sigma_v ~ R``) leaves
     # QUADPACK a sliver interval, which it reports as bad integrand behaviour;
     # the step it marks is then at the end itself, so it is dropped.
-    gap = BREAKPOINT_GAP * (high - low)
+    gap = _BREAKPOINT_GAP * (high - low)
     return [p for p in sorted(points) if p - low > gap and high - p > gap]
 
 
@@ -171,7 +167,7 @@ def gaussian_pc(gaussian: PlaneGaussian, *, rtol: float = FOSTER_RTOL) -> PcResu
         points=_chord_steps(gaussian, low, high) or None,
         epsabs=0.0,
         epsrel=rtol,
-        limit=QUAD_LIMIT,
+        limit=_QUAD_LIMIT,
         full_output=1,
     )
     if message:

@@ -34,7 +34,7 @@ from keepout._workers import process_pool, resolve_workers
 from keepout.equinoctial import Orbits
 from keepout.orbits import EARTH_MU
 from keepout.pc._encounters import Encounters, check_fallbacks
-from keepout.pc._plane import require_known_covariance
+from keepout.pc._errors import require_known_covariance
 from keepout.pc._timeline import RateScan, negligible_note
 from keepout.pc.result import PcResult
 
@@ -44,14 +44,12 @@ if TYPE_CHECKING:
 
     from keepout._types import BoolArray, FloatArray, IndexArray
     from keepout.conjunction import Conjunction
+    from keepout.pc._orbit import OrbitUncertainty
 
 __all__ = [
-    "MC_BATCH",
     "MC_CONFIDENCE",
     "MC_MAX_SAMPLES",
     "MC_RTOL",
-    "NEWTON_STEPS",
-    "SPEED_BOUND_FACTOR",
     "montecarlo",
     "montecarlo_over_scan",
 ]
@@ -65,18 +63,18 @@ MC_MAX_SAMPLES: Final = 10_000_000
 MC_CONFIDENCE: Final = 0.99
 """Default confidence level of the Clopper-Pearson interval."""
 
-MC_BATCH: Final = 50_000
+_MC_BATCH: Final = 50_000
 """Samples per batch: memory stays O(batch) whatever the sample count. Each
 batch draws from its own stream of the seed (:class:`numpy.random.SeedSequence`
 spawned), so a seed gives the same result in any number of processes."""
 
-NEWTON_STEPS: Final = 12
+_NEWTON_STEPS: Final = 12
 """Newton iterations refining a closest approach between two grid points.
 
 The distance is tested at every iterate, so the count bounds the work rather
 than setting a convergence tolerance."""
 
-SPEED_BOUND_FACTOR: Final = 1.5
+_SPEED_BOUND_FACTOR: Final = 1.5
 """Factor on the larger grid-point relative speed bounding the speed in between."""
 
 
@@ -143,11 +141,11 @@ class _SamplePairs(NamedTuple):
         pairs = self.subset(rows)
         t = np.full(rows.size, 0.5 * (start + end))
         below: BoolArray = np.zeros(rows.size, dtype=bool)
-        for _ in range(NEWTON_STEPS):
+        for _ in range(_NEWTON_STEPS):
             r, v, a = pairs.relative(t)
             below |= np.linalg.norm(r, axis=1) < hard_body_radius
-            f = np.einsum("ij,ij->i", r, v)
-            slope = np.einsum("ij,ij->i", v, v) + np.einsum("ij,ij->i", r, a)
+            f = np.vecdot(r, v)
+            slope = np.vecdot(v, v) + np.vecdot(r, a)
             step = np.where(
                 slope > 0.0,
                 -f / np.where(slope > 0.0, slope, 1.0),
@@ -188,13 +186,13 @@ def _entries_between(
     Only samples whose distance may drop below it in between are
     refined. The distance in between is at least half of the two distances'
     sum less the distance covered over the gap at the bounding speed,
-    :data:`SPEED_BOUND_FACTOR` times the larger of the two speeds.
+    ``_SPEED_BOUND_FACTOR`` times the larger of the two speeds.
     """
     gap = later.t - earlier.t
     bound = 0.5 * (
         earlier.distance
         + later.distance
-        - SPEED_BOUND_FACTOR * np.maximum(earlier.speed, later.speed) * gap
+        - _SPEED_BOUND_FACTOR * np.maximum(earlier.speed, later.speed) * gap
     )
     rows = np.flatnonzero((bound < hard_body_radius) & candidates)
     if not rows.size:
@@ -202,44 +200,36 @@ def _entries_between(
     return rows[batch.closest_below(rows, earlier.t, later.t, hard_body_radius)]
 
 
-def _collisions(
-    batch: _SamplePairs, scan: RateScan, hard_body_radius: float
-) -> tuple[int, int]:
-    """Collisions (entries) and samples already inside at the window start."""
-    r, _ = batch.motion(scan.times[0])
-    inside = np.linalg.norm(r, axis=1) < hard_body_radius
-    hit = np.zeros_like(inside)
-    for first, last in scan.index_ranges:
-        # A segment has at least two grid points (it is padded by one step).
-        points = _grid(batch, scan.times[first : last + 1])
-        for earlier, later in itertools.pairwise(points):
-            # Marking the earlier point again is harmless and covers the
-            # segment's first point.
-            hit |= (earlier.distance < hard_body_radius) | (
-                later.distance < hard_body_radius
-            )
-            hit[_entries_between(batch, earlier, later, hard_body_radius, ~hit)] = True
-    return int(np.count_nonzero(hit & ~inside)), int(np.count_nonzero(inside))
-
-
 def _percent(fraction: float) -> str:
     """``fraction`` as a percentage with its significant digits (99.5%)."""
     return f"{100.0 * fraction:.10g}%"
 
 
-def _details(
-    scan: RateScan,
-    confidence: float,
-    samples: int,
-    hits: int,
-    inside: int,
-) -> dict[str, float]:
+class _Counts(NamedTuple):
+    """Sample counts of a batch, or of a run."""
+
+    samples: int
+    hits: int
+    """Collisions: entries into the hard body in the window."""
+    inside: int
+    """Samples already inside the hard body at the window start."""
+    non_elliptic: int
+    """Samples off the ellipse (counted as misses)."""
+
+    def plus(self, other: _Counts) -> _Counts:
+        """Both counts summed."""
+        return _Counts(*(a + b for a, b in zip(self, other, strict=True)))
+
+
+def _details(scan: RateScan, confidence: float, counts: _Counts) -> dict[str, float]:
     """The ``details`` of a Monte Carlo result."""
+    samples = counts.samples
     return {
         "confidence": confidence,
         "samples": float(samples),
-        "hits": float(hits),
-        "inside_at_start": inside / samples if samples else 0.0,
+        "hits": float(counts.hits),
+        "inside_at_start": counts.inside / samples if samples else 0.0,
+        "non_elliptic": float(counts.non_elliptic),
         "window_start_s": scan.window[0],
         "window_end_s": scan.window[1],
     }
@@ -251,7 +241,7 @@ def _no_encounter(scan: RateScan, confidence: float) -> PcResult:
         f"no encounter: {negligible_note(scan)}, so no sample can collide there; "
         "no samples were drawn"
     )
-    details = _details(scan, confidence, 0, 0, 0)
+    details = _details(scan, confidence, _Counts(0, 0, 0, 0))
     return PcResult(0.0, "montecarlo", (note,), details, interval=(0.0, 0.0))
 
 
@@ -290,7 +280,7 @@ def montecarlo(
         Seed of the random generator; results are reproducible with a seed,
         whatever ``workers``.
     workers
-        Number of processes to sample in, a batch of :data:`MC_BATCH` samples
+        Number of processes to sample in, a batch of 50,000 samples
         each at a time; 1 samples in this process, ``None`` uses one per
         CPU, at most 4. Processes pay off from two batches (a batch takes
         seconds); a script calling with more than 1 needs an
@@ -302,10 +292,11 @@ def montecarlo(
         ``value`` = collisions / samples, with the Clopper-Pearson
         ``interval``. ``details``: ``"confidence"`` (the interval's level),
         ``"samples"``, ``"hits"``, ``"inside_at_start"`` (fraction of samples
-        overlapping at the window start, not counted), ``"window_start_s"``,
-        ``"window_end_s"``. If the rate scan finds no encounter in the
-        window, no sample is drawn: ``value``, ``"samples"`` and the interval
-        are 0, with a diagnostic.
+        overlapping at the window start, not counted), ``"non_elliptic"``
+        (samples whose elements are no ellipse, counted as misses, with a
+        diagnostic), ``"window_start_s"``, ``"window_end_s"``. If the rate
+        scan finds no encounter in the window, no sample is drawn:
+        ``value``, ``"samples"`` and the interval are 0, with a diagnostic.
 
     Raises
     ------
@@ -342,48 +333,90 @@ def montecarlo(
     )
 
 
-def _batch_collisions(
-    conjunction: Conjunction,
-    encounters: Encounters,
-    stream: np.random.SeedSequence,
-    count: int,
-) -> tuple[int, int]:
-    """Collisions and samples inside at the start, of ``count`` samples drawn
-    from ``stream``; at module level, for the processes of a pool."""
-    rng = np.random.default_rng(stream)
-    rate = encounters.rate
-    batch = _SamplePairs(
-        Orbits.from_elements(rate.primary.sample(rng, count), rate.primary.fr),
-        Orbits.from_elements(rate.secondary.sample(rng, count), rate.secondary.fr),
-    )
-    return _collisions(batch, encounters.scan, conjunction.combined_hard_body_radius)
+def _elliptic(elements: FloatArray) -> BoolArray:
+    """Whether each element sample ``(m, 6)`` is an ellipse: ``n > 0`` and
+    ``|(af, ag)| < 1``."""
+    af, ag = elements[:, 1], elements[:, 2]
+    elliptic: BoolArray = (elements[:, 0] > 0.0) & (1.0 - af * af - ag * ag > 0.0)
+    return elliptic
+
+
+@dataclass(frozen=True, eq=False, slots=True)
+class _Sampler:
+    """What a batch of samples needs, and all a pool's process is sent: both
+    orbits, the scan grid with its encounter segments and the hard-body
+    radius."""
+
+    primary: OrbitUncertainty
+    secondary: OrbitUncertainty
+    times: FloatArray
+    index_ranges: tuple[tuple[int, int], ...]
+    hard_body_radius: float
+
+    def batch(self, stream: np.random.SeedSequence, count: int) -> _Counts:
+        """The counts of ``count`` samples drawn from ``stream``.
+
+        A sample pair off the ellipse (the Gaussian in the elements has tails
+        there) cannot be propagated: it is a miss.
+        """
+        rng = np.random.default_rng(stream)
+        primary = self.primary.sample(rng, count)
+        secondary = self.secondary.sample(rng, count)
+        elliptic = _elliptic(primary) & _elliptic(secondary)
+        pairs = _SamplePairs(
+            Orbits.from_elements(primary[elliptic], self.primary.fr),
+            Orbits.from_elements(secondary[elliptic], self.secondary.fr),
+        )
+        hits, inside = self._collisions(pairs)
+        return _Counts(count, hits, inside, count - int(np.count_nonzero(elliptic)))
+
+    def _collisions(self, pairs: _SamplePairs) -> tuple[int, int]:
+        """Collisions (entries) and samples already inside at the window start."""
+        radius = self.hard_body_radius
+        r, _ = pairs.motion(self.times[0])
+        inside = np.linalg.norm(r, axis=1) < radius
+        hit = np.zeros_like(inside)
+        for first, last in self.index_ranges:
+            # A segment has at least two grid points (it is padded by one step).
+            points = _grid(pairs, self.times[first : last + 1])
+            for earlier, later in itertools.pairwise(points):
+                # Marking the earlier point again is harmless and covers the
+                # segment's first point.
+                hit |= (earlier.distance < radius) | (later.distance < radius)
+                hit[_entries_between(pairs, earlier, later, radius, ~hit)] = True
+        return int(np.count_nonzero(hit & ~inside)), int(np.count_nonzero(inside))
+
+
+def _batch_counts(
+    sampler: _Sampler, stream: np.random.SeedSequence, count: int
+) -> _Counts:
+    """:meth:`_Sampler.batch`, at module level for the processes of a pool."""
+    return sampler.batch(stream, count)
 
 
 def _batch_results(
-    conjunction: Conjunction,
-    encounters: Encounters,
+    sampler: _Sampler,
     counts: list[int],
     seed: int | None,
     pool: Executor | None,
     wave: int,
-) -> Iterator[tuple[int, int, int]]:
-    """Each batch's size, collisions and samples inside at the start, in
-    order; with a pool, ``wave`` batches are sampled at a time, so a caller
-    that stops early wastes fewer than ``wave``."""
+) -> Iterator[_Counts]:
+    """Each batch's counts, in order; with a pool, ``wave`` batches are
+    sampled at a time, so a caller that stops early wastes fewer than
+    ``wave``."""
     streams = np.random.SeedSequence(seed).spawn(len(counts))
     batches = list(zip(counts, streams, strict=True))
     for first in range(0, len(batches), wave):
         jobs = batches[first : first + wave]
         if pool is None:
             for count, stream in jobs:
-                yield count, *_batch_collisions(conjunction, encounters, stream, count)
+                yield sampler.batch(stream, count)
             continue
         futures = [
-            pool.submit(_batch_collisions, conjunction, encounters, stream, count)
-            for count, stream in jobs
+            pool.submit(_batch_counts, sampler, stream, count) for count, stream in jobs
         ]
-        for (count, _), future in zip(jobs, futures, strict=True):
-            yield count, *future.result()
+        for future in futures:
+            yield future.result()
 
 
 def montecarlo_over_scan(
@@ -431,22 +464,30 @@ def montecarlo_over_scan(
     from scipy import stats
 
     budget = samples if samples is not None else max_samples
-    full, rest = divmod(budget, MC_BATCH)
-    counts = [MC_BATCH] * full + ([rest] if rest else [])
+    full, rest = divmod(budget, _MC_BATCH)
+    counts = [_MC_BATCH] * full + ([rest] if rest else [])
     processes = min(workers, len(counts))
-    hits = inside = done = 0
+    rate = encounters.rate
+    sampler = _Sampler(
+        rate.primary,
+        rate.secondary,
+        scan.times,
+        scan.index_ranges,
+        conjunction.combined_hard_body_radius,
+    )
+    total = _Counts(0, 0, 0, 0)
     low, high = 0.0, 1.0
     converged = False
     with process_pool(processes) if processes > 1 else contextlib.nullcontext() as pool:
-        for count, new_hits, new_inside in _batch_results(
-            conjunction, encounters, counts, seed, pool, processes
-        ):
-            hits, inside, done = hits + new_hits, inside + new_inside, done + count
+        for batch in _batch_results(sampler, counts, seed, pool, processes):
+            total = total.plus(batch)
+            hits, done = total.hits, total.samples
             interval = stats.binomtest(hits, done).proportion_ci(confidence, "exact")
             low, high = float(interval.low), float(interval.high)
             converged = _converged(hits, done, low, high, rtol)
             if samples is None and converged:
                 break
+    hits, done = total.hits, total.samples
     diagnostics: list[str] = []
     if samples is None and not converged:
         diagnostics.append(
@@ -454,12 +495,19 @@ def montecarlo_over_scan(
             f"{_percent(confidence)} interval [{low:.3g}, {high:.3g}] is wider than "
             f"rtol = {rtol:g}"
         )
-    if inside:
+    if total.inside:
         diagnostics.append(
-            f"{inside / done:.3g} of the samples already overlap at the window "
+            f"{total.inside / done:.3g} of the samples already overlap at the window "
             "start; only entries into the hard body count"
         )
-    details = _details(scan, confidence, done, hits, inside)
+    if total.non_elliptic:
+        diagnostics.append(
+            f"{total.non_elliptic} of the {done} samples "
+            f"({_percent(total.non_elliptic / done)}) are not elliptic orbits "
+            "(eccentricity of 1 or more, or a mean motion not above 0): counted "
+            "as misses"
+        )
+    details = _details(scan, confidence, total)
     return PcResult(
         hits / done, "montecarlo", tuple(diagnostics), details, interval=(low, high)
     )

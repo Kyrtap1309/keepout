@@ -153,67 +153,49 @@ METHODS: Final[Mapping[Method, MethodSpec]] = MappingProxyType(
 
 
 class FosterOptions(TypedDict, total=False):
-    """The options of :func:`~keepout.pc.foster`; every key is optional."""
+    """The options of :func:`~keepout.pc.foster`, as its parameters describe
+    them, with their defaults; every key is optional."""
 
     rtol: float
-    """Relative tolerance of the quadrature (:func:`scipy.integrate.quad`);
-    default :data:`~keepout.pc.foster.FOSTER_RTOL` (1e-10), at least
-    :data:`~keepout.pc.foster.MIN_RTOL`."""
+    """Relative tolerance of the quadrature."""
 
 
 class ElrodOptions(TypedDict, total=False):
-    """The options of :func:`~keepout.pc.elrod`; every key is optional."""
+    """The options of :func:`~keepout.pc.elrod`, as its parameters describe
+    them, with their defaults; every key is optional."""
 
     order: int | None
-    """Number of Gauss-Chebyshev nodes, at least 1. ``None`` (default)
-    adapts the order from :data:`~keepout.pc.elrod.START_ORDER` up to
-    :data:`~keepout.pc.elrod.MAX_ORDER` until the Pc converges; CARA uses
-    64."""
+    """Number of Gauss-Chebyshev nodes; ``None`` adapts it."""
 
 
 class Hall3dOptions(TypedDict, total=False):
-    """The options of :func:`~keepout.pc.hall3d`; every key is optional."""
+    """The options of :func:`~keepout.pc.hall3d`, as its parameters describe
+    them, with their defaults; every key is optional."""
 
     window: tuple[float, float] | None
-    """Integration window ``(start, end)``, in seconds from the
-    conjunction's TCA (negative before it), finite with ``start < end``.
-    ``None`` (default) grows a window about TCA and the straight-line closest
-    approach until the collision rate at its edges is negligible, up to one
-    orbital period (the shorter of the two objects') wide."""
+    """Integration window ``(start, end)`` [s from TCA]; ``None`` sizes it."""
     rtol: float
-    """Relative tolerance of the time integral of the collision rate;
-    default :data:`~keepout.pc.hall3d.HALL_RTOL` (1e-6)."""
+    """Relative tolerance of the time integral."""
 
 
 class MonteCarloOptions(TypedDict, total=False):
-    """The options of :func:`~keepout.pc.montecarlo`; every key is optional."""
+    """The options of :func:`~keepout.pc.montecarlo`, as its parameters
+    describe them, with their defaults; every key is optional."""
 
     window: tuple[float, float] | None
-    """Window ``(start, end)`` the samples are propagated over, in seconds
-    from the conjunction's TCA (negative before it), finite with
-    ``start < end``. ``None`` (default) sizes it as Hall's method does (see
-    :attr:`Hall3dOptions.window`)."""
+    """Window ``(start, end)`` [s from TCA]; ``None`` sizes it."""
     samples: int | None
-    """Exact number of samples, at least 1. ``None`` (default) samples in
-    batches until the confidence interval's half-width is at most ``rtol``
-    times the estimate, or ``max_samples`` is reached."""
+    """Exact number of samples; ``None`` stops on ``rtol``."""
     rtol: float
-    """Target relative half-width of the confidence interval, when
-    ``samples`` is ``None``; default :data:`~keepout.pc.montecarlo.MC_RTOL`
-    (0.1)."""
+    """Target relative half-width of the confidence interval."""
     max_samples: int
-    """Most samples drawn when stopping on ``rtol``; default
-    :data:`~keepout.pc.montecarlo.MC_MAX_SAMPLES` (10 million)."""
+    """Budget of samples when stopping on ``rtol``."""
     confidence: float
-    """Confidence level of the Clopper-Pearson interval, in (0, 1); default
-    :data:`~keepout.pc.montecarlo.MC_CONFIDENCE` (0.99)."""
+    """Confidence level of the Clopper-Pearson interval."""
     seed: int | None
-    """Seed of the random generator: the same seed gives the same result,
-    whatever ``workers``. ``None`` (default): a fresh seed each call."""
+    """Seed of the random generator."""
     workers: int | None
-    """Number of processes to sample in: 1 (default) samples in this
-    process, ``None`` uses one per CPU, at most 4. A script that asks for
-    more than 1 needs an ``if __name__ == "__main__":`` guard."""
+    """Number of processes to sample in."""
 
 
 @overload

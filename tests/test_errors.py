@@ -16,9 +16,11 @@ from keepout.errors import (
     OmmParseError,
     RateLimited,
     SourceUnavailable,
+    StoreError,
     UnsupportedElements,
     UnsupportedFrame,
 )
+from keepout.pc._errors import MissingCovariance, UnusableOrbit
 
 ERRORS = [
     value
@@ -28,6 +30,30 @@ ERRORS = [
     and value.__module__ == errors.__name__
 ]
 """Every exception class defined in ``keepout.errors`` but the base."""
+
+SPECIAL_ERRORS: dict[type[KeepoutError], KeepoutError] = {
+    CcsdsParseError: CcsdsParseError("bad", record=3, line=4, keyword="X", path="p"),
+    CdmParseError: CdmParseError("bad", record=3, line=4, keyword="X", path="p"),
+    OmmParseError: OmmParseError("bad", record=3, line=4, keyword="X", path="p"),
+    HardBodyRadiusError: HardBodyRadiusError("no HBR", "pass --hbr"),
+    HttpStatusError: HttpStatusError("forbidden", url="u", status=403, retry_after=9.0),
+    RateLimited: RateLimited("slow down", retry_after=40.0),
+    StoreError: StoreError("stored twice", message_id="M1"),
+    MissingCovariance: MissingCovariance(("primary", "secondary"), "foster"),
+    UnusableOrbit: UnusableOrbit("secondary", "the state is unbound"),
+}
+"""An instance of each error whose constructor takes more than a message."""
+
+KEEPOUT_ERRORS: list[type[KeepoutError]] = [
+    KeepoutError,
+    *(error for error in ERRORS if issubclass(error, KeepoutError)),
+    MissingCovariance,
+    UnusableOrbit,
+]
+"""Every keepout error: those of ``keepout.errors`` and the Pc methods'."""
+
+PICKLED = [SPECIAL_ERRORS.get(error) or error("went wrong") for error in KEEPOUT_ERRORS]
+"""An instance of every keepout error, as a worker process would send it."""
 
 
 def test_the_error_module_exports_every_error_it_defines() -> None:
@@ -138,3 +164,11 @@ def test_account_and_limit_errors_are_source_errors() -> None:
     assert str(error) == "try again in 40 min"
     assert error.retry_after == 2400.0
     assert RateLimited("refused").retry_after is None
+
+
+@pytest.mark.parametrize("error", PICKLED, ids=lambda error: type(error).__name__)
+def test_every_error_survives_a_pickle_round_trip(error: KeepoutError) -> None:
+    copy = pickle.loads(pickle.dumps(error))
+    assert type(copy) is type(error)
+    assert str(copy) == str(error)
+    assert vars(copy) == vars(error)

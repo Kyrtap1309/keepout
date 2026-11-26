@@ -1,12 +1,10 @@
-from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
 import pytest
 from astropy.time import Time
-from builders import known
+from builders import counting_itrf_batches, known
 
-from keepout import frames
 from keepout.errors import CaraFormatError
 from keepout.frames import to_gcrf
 from keepout.sources.cara_legacy import load_legacy_objects
@@ -97,14 +95,7 @@ def test_eme2000_states_are_converted_to_gcrf(tmp_path: Path) -> None:
 def test_itrf_objects_are_converted_together(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    batches: list[int] = []
-    convert = frames._itrf_to_gcrf
-
-    def counting(states: Sequence[StateVector]) -> list[StateVector]:
-        batches.append(len(states))
-        return convert(states)
-
-    monkeypatch.setattr(frames, "_itrf_to_gcrf", counting)
+    batches = counting_itrf_batches(monkeypatch)
     primary, secondary = load_legacy_objects(write(tmp_path, legacy_cdm("ITRF")))
     assert batches == [2]
     assert primary.state.frame == secondary.state.frame == "GCRF"

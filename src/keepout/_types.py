@@ -1,6 +1,6 @@
 """Type aliases shared by the package (NumPy arrays, JSON values), with
 :func:`read_only` for those arrays, :class:`OrderedEnum` and
-:func:`override`.
+:func:`~keepout._typing.override` (re-exported).
 
 Argument checks are in :mod:`keepout._validation`, vector and matrix
 helpers in :mod:`keepout._linalg`."""
@@ -9,28 +9,19 @@ from __future__ import annotations
 
 import enum
 import functools
-from typing import TYPE_CHECKING, TypeAlias, TypeVar
+from typing import Any, TypeAlias
 
 import numpy as np
 import numpy.typing as npt
 
-if TYPE_CHECKING:
-    # typing.override from Python 3.12, for the type checkers only, so
-    # typing_extensions stays out of the dependencies.
-    from typing_extensions import override
-else:
-    _Function = TypeVar("_Function")
-
-    def override(method: _Function) -> _Function:
-        """The marker of a method overriding its base class's (checked statically)."""
-        return method
-
+from keepout._typing import override
 
 __all__ = [
     "BoolArray",
     "ComplexArray",
     "FloatArray",
     "IndexArray",
+    "InexactArray",
     "JsonValue",
     "OrderedEnum",
     "override",
@@ -42,6 +33,10 @@ FloatArray: TypeAlias = npt.NDArray[np.float64]
 
 ComplexArray: TypeAlias = npt.NDArray[np.complex128]
 """A complex128 NumPy array."""
+
+InexactArray: TypeAlias = npt.NDArray[np.inexact[Any]]
+"""A real or complex array: complex where it carries a complex-step
+derivative (see :func:`keepout.equinoctial.complex_step`)."""
 
 BoolArray: TypeAlias = npt.NDArray[np.bool_]
 """A boolean NumPy mask."""

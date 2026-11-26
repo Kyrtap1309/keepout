@@ -41,9 +41,9 @@ _MIN_SIGMA: Final = 1e-12
 degenerate axis would otherwise ask for infinitely many nodes)."""
 
 
+# Gauss-Legendre nodes and weights of a theta panel on [-1, 1].
 _PANEL_NODES, _PANEL_WEIGHTS = np.polynomial.legendre.leggauss(PANEL_ORDER)
 read_only(_PANEL_NODES, _PANEL_WEIGHTS)
-"""Gauss-Legendre nodes and weights of a theta panel on ``[-1, 1]``."""
 
 
 class SphereGrid(NamedTuple):

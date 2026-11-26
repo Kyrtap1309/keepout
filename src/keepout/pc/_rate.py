@@ -55,11 +55,6 @@ class CollisionRate:
     primary: OrbitUncertainty
     secondary: OrbitUncertainty
     hard_body_radius: float
-    floor_variance: float = field(init=False)
-    """Smallest position variance [m^2] used when inverting a covariance:
-    :data:`~keepout.pc._plane.SIGMA_FLOOR` of the hard-body radius, squared (as in
-    2-D Pc and CARA's ``Fclip``), so a perfectly known object has a
-    finite, tiny extent."""
     evaluations: int = field(default=0, init=False)
     """Times the rate was evaluated at."""
     smallest_floored_variance: float = field(default=math.inf, init=False)
@@ -70,8 +65,13 @@ class CollisionRate:
     """Times [s] and rates where the peak-overlap iteration failed, in the
     order evaluated."""
 
-    def __post_init__(self) -> None:
-        self.floor_variance = (SIGMA_FLOOR * self.hard_body_radius) ** 2
+    @property
+    def floor_variance(self) -> float:
+        """Smallest position variance [m^2] used when inverting a covariance:
+        :data:`~keepout.pc._plane.SIGMA_FLOOR` of the hard-body radius, squared
+        (as in 2-D Pc and CARA's ``Fclip``), so a perfectly known object has a
+        finite, tiny extent."""
+        return (SIGMA_FLOOR * self.hard_body_radius) ** 2
 
     @property
     def combined_position_covariance(self) -> FloatArray:

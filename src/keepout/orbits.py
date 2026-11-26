@@ -8,9 +8,15 @@ from typing import TYPE_CHECKING, Final
 import numpy as np
 
 if TYPE_CHECKING:
+    from keepout._types import InexactArray
     from keepout.state import StateVector
 
-__all__ = ["EARTH_MU", "orbital_period", "perigee_radius"]
+__all__ = [
+    "EARTH_MU",
+    "eccentricity_vector",
+    "orbital_period",
+    "perigee_radius",
+]
 
 EARTH_MU: Final = 3.986004418e14
 """Earth's gravitational parameter [m^3/s^2] (WGS 84)."""
@@ -22,6 +28,36 @@ def _semi_major_axis(state: StateVector) -> float | None:
     if energy >= 0.0:
         return None
     return -EARTH_MU / (2.0 * energy)
+
+
+def eccentricity_vector(
+    r: InexactArray, v: InexactArray, mu: float = EARTH_MU
+) -> InexactArray:
+    """Eccentricity vectors ``((v^2 - mu/|r|) r - (r . v) v) / mu`` of states.
+
+    This form keeps its precision near a circle. Complex input carries a
+    complex-step derivative.
+
+    Parameters
+    ----------
+    r
+        Positions [m], shape ``(..., 3)``.
+    v
+        Velocities [m/s], same shape.
+    mu
+        Gravitational parameter [m^3/s^2].
+
+    Returns
+    -------
+    numpy.ndarray
+        The eccentricity vectors, shape ``(..., 3)``.
+    """
+    radius = np.sqrt(np.sum(r * r, -1))
+    speed2 = np.sum(v * v, -1)
+    vector: InexactArray = (
+        (speed2 - mu / radius)[..., None] * r - np.sum(r * v, -1)[..., None] * v
+    ) / mu
+    return vector
 
 
 def orbital_period(state: StateVector) -> float | None:
@@ -59,8 +95,5 @@ def perigee_radius(state: StateVector) -> float | None:
     semi_major_axis = _semi_major_axis(state)
     if semi_major_axis is None:
         return None
-    r, v = state.r, state.v
-    # The eccentricity vector, which keeps its precision near a circle.
-    radius = float(np.linalg.norm(r))
-    eccentricity_vector = ((v @ v - EARTH_MU / radius) * r - (r @ v) * v) / EARTH_MU
-    return semi_major_axis * (1.0 - float(np.linalg.norm(eccentricity_vector)))
+    eccentricity = float(np.linalg.norm(eccentricity_vector(state.r, state.v)))
+    return semi_major_axis * (1.0 - eccentricity)

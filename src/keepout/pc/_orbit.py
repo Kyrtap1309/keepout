@@ -16,8 +16,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from keepout._linalg import from_eigen, symmetric_part
-from keepout.covariance import to_correlation
+from keepout._linalg import from_eigen, symmetric_part, to_correlation
 from keepout.equinoctial import (
     RetrogradeFactor,
     complex_step,
@@ -28,12 +27,12 @@ from keepout.equinoctial import (
     to_equinoctial,
     wrap_angle,
 )
-from keepout.errors import CovarianceError
 from keepout.orbits import EARTH_MU
 
 if TYPE_CHECKING:
     from keepout._types import FloatArray
-    from keepout.objects import ObjectState
+    from keepout.covariance import Covariance
+    from keepout.state import StateVector
 
 
 @dataclass(frozen=True, eq=False)
@@ -59,28 +58,21 @@ class OrbitUncertainty:
     position_covariance: FloatArray
 
     @classmethod
-    def of(cls, item: ObjectState) -> OrbitUncertainty:
-        """The orbit of an object with a known covariance.
+    def of(cls, state: StateVector, covariance: Covariance) -> OrbitUncertainty:
+        """The orbit of a GCRF state with its covariance.
 
         Raises
         ------
-        CovarianceError
-            If the object's covariance is unknown.
         GeometryError
             If the orbit is not elliptic.
         """
-        if item.covariance is None:
-            raise CovarianceError(
-                f"covariance of {item.object_id} is unknown (use method 'auto', "
-                "'frisbee' or 'alfano' for a maximum Pc)"
-            )
-        state = np.concatenate([item.state.r, item.state.v])
-        fr = retrograde_factor(item.state.r, item.state.v)
-        elements, to_elements = complex_step(lambda x: to_equinoctial(x, fr), state)
-        covariance = symmetric_part(
-            to_elements @ item.covariance.matrix @ to_elements.T
+        cartesian = np.concatenate([state.r, state.v])
+        fr = retrograde_factor(state.r, state.v)
+        elements, to_elements = complex_step(lambda x: to_equinoctial(x, fr), cartesian)
+        element_covariance = symmetric_part(
+            to_elements @ covariance.matrix @ to_elements.T
         )
-        return cls(elements, covariance, fr, item.covariance.position)
+        return cls(elements, element_covariance, fr, covariance.position)
 
     def expansions(
         self, centres: FloatArray, t: FloatArray
@@ -111,7 +103,7 @@ class OrbitUncertainty:
         )
         offset = self.elements - centres
         offset[:, 5] = wrap_angle(offset[:, 5])
-        mean: FloatArray = state + (jacobian @ offset[..., None])[..., 0]
+        mean: FloatArray = state + np.matvec(jacobian, offset)
         covariance = jacobian @ self.covariance @ jacobian.transpose(0, 2, 1)
         return mean, symmetric_part(covariance)
 

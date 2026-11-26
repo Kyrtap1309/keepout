@@ -252,9 +252,26 @@ def time_integral_orders(
     monkeypatch.setattr(quadrature_module, "CC_MAX_ORDER", largest)
 
 
+def monte_carlo_samples_off_the_ellipse(
+    monkeypatch: pytest.MonkeyPatch, count: int
+) -> None:
+    """The first ``count`` element samples each object draws per Monte Carlo
+    batch have ``af = 1.5``: an eccentricity above 1, no ellipse."""
+    real = OrbitUncertainty.sample
+
+    def sample(
+        self: OrbitUncertainty, rng: np.random.Generator, size: int
+    ) -> FloatArray:
+        drawn = real(self, rng, size)
+        drawn[:count, 1] = 1.5
+        return drawn
+
+    monkeypatch.setattr(OrbitUncertainty, "sample", sample)
+
+
 def monte_carlo_batches(monkeypatch: pytest.MonkeyPatch, size: int) -> None:
     """Monte Carlo runs its samples in batches of ``size``."""
-    monkeypatch.setattr(montecarlo_module, "MC_BATCH", size)
+    monkeypatch.setattr(montecarlo_module, "_MC_BATCH", size)
 
 
 Runner = Callable[..., PcResult]

@@ -23,6 +23,7 @@ from scipy.spatial.transform import Rotation
 from sqlalchemy import create_engine
 
 import keepout.cdm
+import keepout.frames
 from keepout._types import FloatArray, override
 from keepout.cdm import Cdm, CovarianceMethod, Maneuverable, ObjectMetadata, make_cdm
 from keepout.conjunction import Conjunction
@@ -443,6 +444,22 @@ def counting_parses(monkeypatch: pytest.MonkeyPatch) -> list[Cdm]:
 
     monkeypatch.setattr(keepout.cdm, "loads", counted)
     return parsed
+
+
+def counting_itrf_batches(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """The number of states of each ITRF -> GCRF astropy transformation from
+    now on, in order."""
+    batches: list[int] = []
+    convert = keepout.frames._itrf_to_gcrf
+
+    def counted(
+        epochs: Time, r: FloatArray, v: FloatArray
+    ) -> tuple[FloatArray, FloatArray]:
+        batches.append(r.shape[0])
+        return convert(epochs, r, v)
+
+    monkeypatch.setattr(keepout.frames, "_itrf_to_gcrf", counted)
+    return batches
 
 
 class Imports(NamedTuple):

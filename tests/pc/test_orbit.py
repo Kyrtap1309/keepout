@@ -5,10 +5,15 @@ from builders import LEO_R, LEO_V, approx, known, object_state
 from keepout._linalg import symmetric_part
 from keepout._types import FloatArray
 from keepout.equinoctial import complex_step, propagate, to_cartesian, wrap_angle
-from keepout.errors import CovarianceError
 from keepout.objects import ObjectState
 from keepout.orbits import orbital_period
 from keepout.pc._orbit import OrbitUncertainty
+
+
+def orbit_of(item: ObjectState) -> OrbitUncertainty:
+    """The orbit uncertainty of an object whose covariance is known."""
+    return OrbitUncertainty.of(item.state, known(item.covariance))
+
 
 # Circular LEO along +y: 60 km along-track sigma, 30 m radial and cross-track.
 ALONG_TRACK = object_state(LEO_R, LEO_V, np.diag([30.0**2, 60e3**2, 30.0**2]))
@@ -38,7 +43,7 @@ def test_samples_stay_on_the_curved_orbit() -> None:
     # A Cartesian Gaussian moves a 60 km along-track sample along the tangent,
     # (60 km)^2 / (2 * 7000 km) = 257 m above the orbit; in equinoctial
     # elements it stays on the orbit and the radius keeps its 30 m sigma.
-    orbit = OrbitUncertainty.of(ALONG_TRACK)
+    orbit = orbit_of(ALONG_TRACK)
     states = cartesian(orbit, orbit.sample(np.random.default_rng(1), 20_000), 0.0)
     radius = np.linalg.norm(states[:, :3], axis=1) - np.linalg.norm(LEO_R)
     along = states[:, 1]
@@ -49,7 +54,7 @@ def test_samples_stay_on_the_curved_orbit() -> None:
 
 
 def test_mean_centred_expansion_is_the_mean_orbit() -> None:
-    orbit = OrbitUncertainty.of(ALONG_TRACK)
+    orbit = orbit_of(ALONG_TRACK)
     (mean,), (covariance,) = orbit.mean_expansions(np.array([0.0]))
     np.testing.assert_allclose(mean[:3], LEO_R, atol=1e-6)
     np.testing.assert_allclose(mean[3:], LEO_V, atol=1e-9)
@@ -59,19 +64,14 @@ def test_mean_centred_expansion_is_the_mean_orbit() -> None:
 
 
 def test_centre_at_inverts_the_motion() -> None:
-    orbit = OrbitUncertainty.of(ALONG_TRACK)
+    orbit = orbit_of(ALONG_TRACK)
     later = cartesian(orbit, orbit.elements, 120.0)
     np.testing.assert_allclose(orbit.centre_at(later, 120.0), orbit.elements, atol=1e-9)
     assert orbit.period == approx(orbital_period(ALONG_TRACK.state), rel=1e-12)
 
 
-def test_an_unknown_covariance_has_no_orbit_uncertainty() -> None:
-    with pytest.raises(CovarianceError, match="covariance of X is unknown"):
-        OrbitUncertainty.of(ObjectState("X", ALONG_TRACK.state, None))
-
-
 def test_batched_expansions_match_one_at_a_time() -> None:
-    orbit = OrbitUncertainty.of(
+    orbit = orbit_of(
         object_state(LEO_R, LEO_V, np.diag([100.0, 900.0, 25.0]), velocity_sigma=0.1)
     )
     rng = np.random.default_rng(7)
@@ -94,9 +94,9 @@ def test_batched_expansions_match_one_at_a_time() -> None:
 def test_samples_do_not_depend_on_the_eigenvector_signs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    expected = OrbitUncertainty.of(ALONG_TRACK).sample(np.random.default_rng(3), 50)
+    expected = orbit_of(ALONG_TRACK).sample(np.random.default_rng(3), 50)
     # A fresh orbit: the factor of the covariance is computed once per orbit.
-    orbit = OrbitUncertainty.of(ALONG_TRACK)
+    orbit = orbit_of(ALONG_TRACK)
     eigh = np.linalg.eigh
     calls: list[FloatArray] = []
 
@@ -113,7 +113,7 @@ def test_samples_do_not_depend_on_the_eigenvector_signs(
 
 
 def test_the_covariance_is_factored_once(monkeypatch: pytest.MonkeyPatch) -> None:
-    orbit = OrbitUncertainty.of(ALONG_TRACK)
+    orbit = orbit_of(ALONG_TRACK)
     orbit.sample(np.random.default_rng(1), 10)
     monkeypatch.setattr(np.linalg, "eigh", None)  # any further factoring fails
     assert orbit.sample(np.random.default_rng(1), 10).shape == (10, 6)
