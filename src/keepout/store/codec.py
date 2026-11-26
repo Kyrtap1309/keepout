@@ -18,9 +18,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import TYPE_CHECKING, Final, TypeVar, cast
+from typing import TYPE_CHECKING, Final, TypeVar, cast, get_args
 
 import keepout
+from keepout._methods import Method
 from keepout._validation import is_number, require_choice
 from keepout.errors import StoreError
 from keepout.risk.observation import PC_KINDS, PcObservation
@@ -64,6 +65,8 @@ OBSERVATION_KEYS: Final = frozenset(
 """The keys of an observation's JSON; all required."""
 
 _WHERE: Final = "cached observation: "
+
+_METHODS: Final[tuple[Method, ...]] = get_args(Method)
 
 _T = TypeVar("_T")
 
@@ -110,6 +113,18 @@ def _number(data: Mapping[str, object], key: str) -> float | None:
     if not is_number(value):
         raise StoreError(f"{_WHERE}{key} must be a number, got {value!r}")
     return float(value)
+
+
+def _method(text: str | None) -> Method | None:
+    """A stored method name as a :data:`~keepout.pc.Method` (``ValueError``
+    if it is none).
+
+    Raises
+    ------
+    ValueError
+        If ``text`` names no method.
+    """
+    return None if text is None else require_choice(text, _METHODS, "method")
 
 
 def _text(data: Mapping[str, object], key: str) -> str | None:
@@ -189,7 +204,7 @@ def observation_from_json(data: Mapping[str, object]) -> PcObservation:
             reported_pc=_number(data, "reported_pc"),
             diagnostics=tuple(diagnostics),
             assumed_covariance=assumed,
-            method=_text(data, "method"),
+            method=_method(_text(data, "method")),
         )
     except ValueError as exc:
         raise StoreError(f"{_WHERE}{exc}") from exc

@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Final, NamedTuple
 import numpy as np
 import numpy.typing as npt
 
+from keepout._linalg import dot
 from keepout._types import BoolArray, FloatArray, IndexArray, read_only
 from keepout._validation import (
     require_at_least,
@@ -53,7 +54,6 @@ from keepout.screening._sieve import (
     PERTURBATION,
     SPEED_BOUND_MARGIN,
     chord_sieve,
-    dot,
     floored_lowest,
     speed_bounds,
     speed_sieve,

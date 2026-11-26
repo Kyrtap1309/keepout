@@ -224,7 +224,7 @@ confirmed it current.
 | `baseline` | object | the event without a burn: `pc`, `range_at_tca_m`, `method`, `meets_target`, `notes` (empty: the baseline's own are in the plan's `notes`) |
 | `notes` | array of strings | the plan's notes |
 | `options` | array of objects | one per burn (below); empty with no burn on the grid |
-| `refusal` | string or `null` | why no burn can be recommended, the text's last line, when the command exits with status 4; `null` otherwise |
+| `refusal` | string or `null` | why no burn can be recommended, the text's last line, when the command exits with status 4; `null` otherwise, also when `baseline.meets_target` is `true`: no burn is needed then, and the text's last line says so |
 
 Each option has the five keys of `baseline` and these; its `notes` are
 what its own Pc says that the plan's do not, such as Monte Carlo standing

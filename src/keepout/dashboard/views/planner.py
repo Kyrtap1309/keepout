@@ -34,9 +34,10 @@ from keepout.dashboard.widgets import (
     state,
 )
 from keepout.errors import KeepoutError
-from keepout.figures import PROVENANCE_LABELS, RISK_LABELS, grid_figure
+from keepout.figures import PROVENANCE_LABELS, grid_figure
 from keepout.maneuver import BurnDirection
 from keepout.maneuver.wording import (
+    NO_BURN_NEEDED,
     conflict_line,
     event_line,
     gap_lines,
@@ -360,7 +361,7 @@ def _approach_rows(approaches: Sequence[tuple[str, NewApproach]]) -> None:
                 "range [m]": item.approach.range_at_tca,
                 "assumed Pc": item.pc,
                 "provenance": PROVENANCE_LABELS[Provenance.GP_AGE_MODEL],
-                "risk": RISK_LABELS[item.level],
+                "risk": item.level.key,
             }
             for kind, item in approaches
         ],
@@ -388,7 +389,8 @@ def _rescreens(outcome: ManeuverOutcome) -> None:
         if result is None:
             continue
         st.markdown(rescreen_head(burn.direction, result, literal(label)))
-        st.markdown(event_line(result, literal(secondary)))
+        tolerance = outcome.event.tca_tolerance
+        st.markdown(event_line(result, literal(secondary), tolerance))
         if result.conflict:
             st.error(conflict_line(result))
         else:
@@ -412,7 +414,10 @@ def _plan(outcome: ManeuverOutcome) -> None:
         f"{pc_text(outcome.baseline.pc)} ({outcome.baseline.method})."
     )
     provenance_badge(covariance_provenance(latest))
-    if outcome.verdict.recommendable:
+    verdict = outcome.verdict
+    if verdict.no_burn_needed:
+        st.success(NO_BURN_NEEDED)
+    elif verdict.recommendable:
         st.success("A burn can be recommended: it meets the target Pc.")
     else:
         st.warning(f"{refusal(outcome)}.")

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Final
 
 import numpy as np
 
+from keepout._linalg import dot
 from keepout.orbits import EARTH_MU
 
 if TYPE_CHECKING:
@@ -20,7 +21,6 @@ __all__ = [
     "PERTURBATION",
     "SPEED_BOUND_MARGIN",
     "chord_sieve",
-    "dot",
     "floored_lowest",
     "speed_bounds",
     "speed_sieve",
@@ -46,15 +46,6 @@ MIN_RADIUS: Final = 6_356_752.0
 """Lowest distance from the Earth's centre assumed for a state without an
 error [m]: the Earth's polar radius (WGS 84). SGP4 reports error 6 below
 6378.135 km."""
-
-
-def dot(a: FloatArray, b: FloatArray) -> FloatArray:
-    """Dot products along the last axis, element by element: the same bits
-    whatever the shape of the arrays (a reduction might not)."""
-    product: FloatArray = a[..., 0] * b[..., 0]
-    product += a[..., 1] * b[..., 1]
-    product += a[..., 2] * b[..., 2]
-    return product
 
 
 def floored_lowest(bounds: RadiusBounds) -> FloatArray:

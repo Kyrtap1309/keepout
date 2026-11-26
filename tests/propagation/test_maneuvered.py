@@ -9,6 +9,7 @@ import pytest
 from astropy.time import Time
 from screening_data import FIXTURE_START, fixture_by_number
 
+import keepout.propagation.maneuvered as maneuvered_module
 from keepout._types import FloatArray
 from keepout.errors import PropagationError
 from keepout.frames import frame_to_gcrf, teme_to_gcrf
@@ -282,7 +283,9 @@ def test_radius_bounds_fall_back_to_the_difference_where_the_base_fails() -> Non
     base = Sgp4Propagator([BY_NUMBER[FAILING]])
     propagator = maneuvered(1.0, base=base, horizon=2 * DAY)
     bounds = propagator.radius_bounds(START, 2 * DAY)
-    widening = propagator._largest_difference(0.0, 2 * DAY)
+    difference = propagator._difference
+    assert difference is not None
+    widening = maneuvered_module._largest_difference(difference, 0.0, 2 * DAY)
     nominal = base.radius_bounds(START, 2 * DAY)
     assert bounds.lowest[0] == max(nominal.lowest[0] - widening, 0.0)
     assert bounds.highest[0] == nominal.highest[0] + widening

@@ -1,6 +1,6 @@
 import dataclasses
 import json
-from typing import Any
+from typing import Any, get_args
 
 import pytest
 from hypothesis import given
@@ -8,7 +8,7 @@ from hypothesis import strategies as st
 
 import keepout
 from keepout.errors import StoreError
-from keepout.pc import PcResult, computation
+from keepout.pc import Method, PcResult, computation
 from keepout.risk import PcObservation, Thresholds
 from keepout.risk.observation import PC_KINDS
 from keepout.settings import Settings
@@ -33,7 +33,7 @@ def observations(draw: st.DrawFn) -> PcObservation:
         "reported_pc": draw(st.none() | _PROBABILITY),
         "diagnostics": tuple(draw(st.lists(st.text(max_size=20), max_size=3))),
         "assumed_covariance": draw(st.booleans()),
-        "method": draw(st.none() | _TEXT),
+        "method": draw(st.none() | st.sampled_from(get_args(Method))),
     }
     if draw(st.booleans()):
         return PcObservation(error=draw(_TEXT), **common)
@@ -127,3 +127,9 @@ def test_a_radius_keys_the_same_as_an_integer_or_a_float() -> None:
         result_key(Settings(combined_hard_body_radius=radius)) for radius in (20, 20.0)
     }
     assert len(keys) == 1
+
+
+def test_an_unknown_method_is_a_store_error() -> None:
+    data = observation_to_json(PcObservation(DAY, "keepout (foster)", pc=1e-5))
+    with pytest.raises(StoreError, match="method"):
+        observation_from_json({**data, "method": "nope"})

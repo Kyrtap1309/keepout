@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Final, Literal, TypeAlias
 
 from keepout._validation import require_choice, require_probability
-from keepout.pc.result import RESULT_KINDS, PcResult, ResultKind
+from keepout.pc.result import RESULT_KINDS, Method, PcResult, ResultKind
 
 __all__ = ["PC_FLOOR", "PC_KINDS", "PcKind", "PcObservation"]
 
@@ -86,7 +86,7 @@ class PcObservation:
     diagnostics: tuple[str, ...] = ()
     result: PcResult | None = None
     assumed_covariance: bool = False
-    method: str | None = None
+    method: Method | None = None
 
     def __post_init__(self) -> None:
         if not math.isfinite(self.time_to_tca):

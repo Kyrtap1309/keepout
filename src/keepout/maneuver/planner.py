@@ -19,7 +19,7 @@ import numpy as np
 
 from keepout._defaults import DECISION_POINT, MIN_BURN_LEAD, TARGET_PC
 from keepout._text import before_tca, plural
-from keepout._types import FloatArray, read_only
+from keepout._types import FloatArray, freeze_grid
 from keepout._validation import (
     require_at_least,
     require_non_negative,
@@ -329,21 +329,7 @@ class ManeuverPlan(ManeuverContext):
 
     def __post_init__(self) -> None:
         ManeuverContext.__post_init__(self)
-        leads = np.array(self.burn_leads, dtype=np.float64)
-        changes = np.array(self.delta_v, dtype=np.float64)
-        pc = np.array(self.pc, dtype=np.float64)
-        ranges = np.array(self.range_at_tca, dtype=np.float64)
-        shape = (*leads.shape, *changes.shape)
-        if pc.shape != shape or ranges.shape != shape:
-            raise ValueError(
-                f"pc and range_at_tca must have shape {shape}, got {pc.shape} "
-                f"and {ranges.shape}"
-            )
-        read_only(leads, changes, pc, ranges)
-        object.__setattr__(self, "burn_leads", leads)
-        object.__setattr__(self, "delta_v", changes)
-        object.__setattr__(self, "pc", pc)
-        object.__setattr__(self, "range_at_tca", ranges)
+        freeze_grid(self, ("burn_leads", "delta_v"), ("pc", "range_at_tca"))
 
     @property
     def options(self) -> tuple[ManeuverOption, ...]:
@@ -720,9 +706,10 @@ def _prepare(
     combined_hard_body_radius: float | None,
     thresholds: Thresholds,
     grid: BurnGrid | None = None,
-) -> tuple[ManeuverContext, PcResult]:
-    """:func:`prepare_maneuver`, with the baseline's own result; with a
-    ``grid``, also the check that its burn window is still open.
+) -> tuple[ManeuverContext, PcResult, float, _Forces]:
+    """:func:`prepare_maneuver`, with the baseline's own result, the
+    primary's orbital period and the forces; with a ``grid``, also the check
+    that its burn window is still open.
 
     Raises
     ------
@@ -756,8 +743,8 @@ def _prepare(
             f"of {labels}"
         )
     # Both check the event before its Pc, which can take a minute, is computed.
-    _period(event, conjunction)
-    _forces(event)
+    period = _period(event, conjunction)
+    forces = _forces(event)
     result = compute(conjunction)
     context = ManeuverContext(
         event=event,
@@ -775,7 +762,7 @@ def _prepare(
         confirmation=compute.resolved(result),
         notes=_notes(result, cdm, conjunction),
     )
-    return context, result
+    return context, result, period, forces
 
 
 def prepare_maneuver(
@@ -828,7 +815,7 @@ def prepare_maneuver(
         If the CDM's conjunction or its Pc cannot be computed, e.g.
         :class:`~keepout.errors.HardBodyRadiusError` for a missing radius.
     """
-    context, _ = _prepare(
+    context, _, _, _ = _prepare(
         event,
         target_pc=target_pc,
         compute=compute,
@@ -921,7 +908,7 @@ def plan_maneuver(
     # retrograde -0.0063 m/s 8.4e-06
     ```
     """
-    context, result = _prepare(
+    context, result, period, forces = _prepare(
         event,
         target_pc=target_pc,
         compute=compute,
@@ -931,8 +918,6 @@ def plan_maneuver(
         grid=grid,
     )
     conjunction = context.conjunction
-    period = _period(event, conjunction)
-    forces = _forces(event)
     leads = _burn_leads(event, grid, period)
     delta_v = grid.delta_v
     effects = _effects(event, conjunction.primary.state, leads, delta_v, forces.primary)

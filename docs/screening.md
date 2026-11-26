@@ -267,10 +267,12 @@ memory of a process, and `adjust_primaries` replaces the primaries'
 propagator (the [re-screen](maneuver.md#re-screen) of a manoeuvre uses
 it).
 
-1. **Element sets.** Of several element sets of one object, the newest is
-   screened; the others are skipped. An element set is also skipped when it
-   is too old or too new for the window (below), when SGP4 cannot be
-   initialised with it, or, for a primary, when the volume rule refuses it.
+1. **Element sets.** Of several element sets of one object, the newest
+   that is not too old or too new for the window (below) is screened; the
+   others are skipped. An object whose newest set is days ahead of the
+   window is thus screened with an older one. An element set is also skipped
+   when SGP4 cannot be initialised with it, or, for a primary, when the
+   volume rule refuses it.
 2. **Pairs.** Each primary is paired with every catalog object except
    itself (a primary may be in the catalog). The apogee/perigee filter
    drops the pairs whose distances from the Earth's centre never come
@@ -292,7 +294,7 @@ human-readable detail.
 
 | `SkipReason` | When |
 |---|---|
-| `DUPLICATE` | another element set of the same catalog number has a newer epoch |
+| `DUPLICATE` | another element set of the same catalog number is screened, or, when none can be, has a newer epoch |
 | `STALE` | the window ends more than `max_age` (30 days) after the element epoch |
 | `FUTURE_EPOCH` | the window starts more than `max_lead` (3 days) before the element epoch |
 | `UNSUPPORTED` | SGP4 cannot be initialised with the elements (e.g. a catalog number above 339 999) |

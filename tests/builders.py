@@ -19,6 +19,7 @@ from astropy.time import Time
 from hypothesis import assume
 from hypothesis import strategies as st
 from hypothesis.extra.numpy import arrays
+from scipy.interpolate import CubicHermiteSpline
 from scipy.spatial.transform import Rotation
 from sqlalchemy import create_engine
 
@@ -330,7 +331,7 @@ class DifferenceWidened(ManeuveredPropagator):
 
     @override
     def _burned_radius(
-        self, first: float, last: float, lowest: float
+        self, difference: CubicHermiteSpline, first: float, last: float, lowest: float
     ) -> tuple[float, float] | None:
         return None
 

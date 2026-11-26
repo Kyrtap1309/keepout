@@ -20,7 +20,6 @@ from keepout.figures import (
     LOWEST_LOG_PC,
     NO_PC,
     RISK_COLOURS,
-    RISK_LABELS,
     SEQUENTIAL,
     SERIES,
     SIGMAS,
@@ -61,12 +60,11 @@ def _decision_side(
     return "top left" if further > nearer else "top right"
 
 
-def _fit_trace(fit: tuple[FloatArray, FloatArray]) -> go.Scatter:
+def _fit_trace(fig: TrendFigure) -> go.Scatter:
     """The line joining an event's Pc."""
-    hours, values = fit
     return go.Scatter(
-        x=hours,
-        y=values,
+        x=fig.hours_to_tca,
+        y=fig.pc,
         mode="lines",
         name="trend",
         line={"color": FIT_COLOUR, "width": 1},
@@ -84,7 +82,7 @@ def _point_traces(fig: TrendFigure) -> list[go.Scatter]:
         groups[key].append(index)
     traces: list[go.Scatter] = []
     for (level, floored, bound), indices in groups.items():
-        name = RISK_LABELS[level]
+        name = level.key
         if floored:
             name += " (below floor)"
         elif bound:
@@ -121,8 +119,8 @@ def trend(fig: TrendFigure, *, decision_point_hours: float | None = None) -> go.
     that it stays over the plot.
     """
     drawing = go.Figure()
-    if fig.fit is not None:
-        drawing.add_trace(_fit_trace(fig.fit))
+    if len(fig.pc) >= 2:
+        drawing.add_trace(_fit_trace(fig))
     for trace in _point_traces(fig):
         drawing.add_trace(trace)
     for value, level in reversed(fig.thresholds):

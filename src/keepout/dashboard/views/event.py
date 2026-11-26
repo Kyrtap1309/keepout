@@ -46,7 +46,7 @@ from keepout.dashboard.widgets import (
 )
 from keepout.errors import GeometryError, HardBodyRadiusError, KeepoutError
 from keepout.events import missing_hard_body_radius, time_to_tca
-from keepout.figures import PROVENANCE_LABELS, RISK_LABELS
+from keepout.figures import PROVENANCE_LABELS
 from keepout.risk import provenance
 from keepout.units import HOUR
 
@@ -158,7 +158,7 @@ def _trend(ctx: DashboardContext, data: EventView) -> None:
     if data.detail.missing:
         _not_computed(ctx, data)
     _jobs(ctx, data)
-    figure = trend_of(data, ctx.settings)
+    figure = trend_of(data)
     if figure is None:
         return
     if not figure.labels:
@@ -178,7 +178,7 @@ def _trend(ctx: DashboardContext, data: EventView) -> None:
             "CDM": list(figure.labels),
             "hours to TCA": figure.hours_to_tca.tolist(),
             "Pc": figure.pc.tolist(),
-            "risk": [RISK_LABELS[level] for level in figure.levels],
+            "risk": [level.key for level in figure.levels],
             "provenance": origins,
         },
         column_config={

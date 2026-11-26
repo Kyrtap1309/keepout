@@ -144,7 +144,8 @@ Pc; the Pc the store has are shown meanwhile.
 
 The plan of the event's latest CDM, as
 [`keepout maneuver --event ID`](cli.md#stored-events) shows it: whether a
-burn can be recommended, the smallest burn each way against the baseline,
+burn can be recommended (or that none is needed, when the baseline
+already meets the target), the smallest burn each way against the baseline,
 the heatmap of the Pc over burn time and Δv with its cells as a table,
 and what the re-screen of each burn found, with a table of the new or
 closer approaches: each with its risk level in words and its assumed Pc.

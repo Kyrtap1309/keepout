@@ -339,7 +339,10 @@ The exit status is 4 when no burn can be recommended:
   back above the target away from its TCA (found by the re-screen).
 
 The last line then says which. One burn that does neither is enough for
-status 0, and the others are shown with what they bring.
+status 0, and the others are shown with what they bring. When the event
+without a burn already meets the target, the last line is "No burn needed:
+the baseline Pc already meets the target." and the status is 0; the burns
+on the grid are still shown.
 
 ### Stored events
 

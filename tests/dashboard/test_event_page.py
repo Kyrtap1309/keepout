@@ -25,7 +25,7 @@ from keepout.cdm import Cdm, CovarianceMethod, ObjectMetadata, make_cdm
 from keepout.conjunction import Conjunction
 from keepout.covariance import Covariance
 from keepout.dashboard.text import AFTER_TCA, literal
-from keepout.figures import PROVENANCE_LABELS, RISK_LABELS
+from keepout.figures import PROVENANCE_LABELS
 from keepout.objects import ObjectState
 from keepout.risk import DEFAULT_DECISION_CONFIG, Provenance, RiskLevel
 from keepout.settings import Settings, load_settings
@@ -372,7 +372,7 @@ def test_trend_of_a_changing_pc(app_test: OpenApp, own_store: Path) -> None:
     assert list(table["Pc"]) == pytest.approx(sorted(pc))
     assert set(table["provenance"]) == {PROVENANCE_LABELS[Provenance.CDM_COVARIANCE]}
     # The latest Pc is red, in colour and words.
-    assert _cdm_rows(app)["T2"][5] == RISK_LABELS[RiskLevel.RED]
+    assert _cdm_rows(app)["T2"][5] == RiskLevel.RED.key
 
 
 def test_max_pc_event_has_no_ellipse(app_test: OpenApp, own_store: Path) -> None:

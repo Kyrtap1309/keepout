@@ -119,6 +119,9 @@ def test_decode_file_caps_gzip_data_once_decompressed(family: Family) -> None:
         (gzip.compress(b"A = 1\n")[:-4], "invalid gzip data: truncated"),
         (gzip.compress(b"A = 1\n") + b"junk", "invalid gzip data: trailing bytes"),
     ],
+    # gzip writes the time into its header: ids from the bytes would differ
+    # between xdist workers.
+    ids=["not-gzip", "truncated", "trailing-bytes"],
 )
 def test_decode_file_with_a_cap_refuses_broken_gzip(data: bytes, match: str) -> None:
     with pytest.raises(FAMILY_A.parse_error, match=match):

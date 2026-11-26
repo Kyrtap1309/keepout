@@ -24,11 +24,9 @@ from keepout.dashboard.routes import CONTEXT_KEY, cancel_job_key
 from keepout.dashboard.text import NOT_COMPUTED, literal, unrated
 from keepout.errors import KeepoutError
 from keepout.figures import (
-    ACTION_LABELS,
     PROVENANCE_HELP,
     PROVENANCE_LABELS,
     RISK_COLOURS,
-    RISK_LABELS,
 )
 from keepout.risk import Provenance
 
@@ -162,9 +160,9 @@ def risk_chip(
     else:
         fill = RISK_COLOURS[level]
         style = f"{_CHIP_STYLE}background:{fill};color:{ink(fill)};"
-        text = RISK_LABELS[level]
+        text = level.key
         if action is not None:
-            text += f" · {ACTION_LABELS[action]}"
+            text += f" · {action.label}"
     st.markdown(
         f'<span style="{style}">{html.escape(text)}</span>', unsafe_allow_html=True
     )

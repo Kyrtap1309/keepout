@@ -12,10 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-import numpy as np
-
 from keepout._defaults import TARGET_PC
-from keepout._types import FloatArray, read_only
+from keepout._types import FloatArray, freeze_grid
 from keepout.maneuver.planner import (
     DEFAULT_BURN_GRID,
     BurnDirection,
@@ -27,7 +25,7 @@ from keepout.maneuver.planner import (
     plan_maneuver,
     prepare_maneuver,
 )
-from keepout.maneuver.rescreen import BurnVerdict, RescreenResult, judge, rescreen
+from keepout.maneuver.rescreen import RescreenResult, rescreen
 from keepout.pc import AUTO, PcComputation
 from keepout.risk import DEFAULT_THRESHOLDS, Thresholds
 
@@ -38,7 +36,14 @@ if TYPE_CHECKING:
     from keepout.events import ConjunctionEvent
     from keepout.omm import Omm
 
-__all__ = ["ManeuverGrid", "ManeuverOutcome", "PlannedBurn", "plan_event"]
+__all__ = [
+    "BurnVerdict",
+    "ManeuverGrid",
+    "ManeuverOutcome",
+    "PlannedBurn",
+    "judge",
+    "plan_event",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +67,85 @@ class PlannedBurn:
         return self.option.direction
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class BurnVerdict:
+    """Whether one of the burns of an event can be recommended, and if not,
+    why: see :func:`judge`.
+
+    Parameters
+    ----------
+    burns
+        Number of burns judged.
+    missed_target
+        Whether a burn misses the plan's target.
+    brings_red
+        Whether, with no clean burn, a burn brings an approach at red.
+    brings_pair_back
+        Whether, with no clean burn, a burn brings the event's pair back
+        above the target.
+    no_burn_needed
+        Whether the event without a burn already meets the target: no burn is
+        recommended then, whatever the burns.
+    """
+
+    burns: int
+    missed_target: bool
+    brings_red: bool
+    brings_pair_back: bool
+    no_burn_needed: bool = False
+
+    @property
+    def recommendable(self) -> bool:
+        """Whether a burn can be recommended: one is needed, and one fits."""
+        return (
+            not self.no_burn_needed
+            and self.burns > 0
+            and not (self.missed_target or self.brings_red or self.brings_pair_back)
+        )
+
+
+def judge(
+    burns: Sequence[PlannedBurn], *, baseline: ManeuverOption | None = None
+) -> BurnVerdict:
+    """Whether a burn of an event can be recommended: none is needed if the
+    baseline meets the target; otherwise there must be one, every burn must
+    meet the target, and one of them must be clean or not re-screened, as
+    nothing is known against it then.
+
+    Parameters
+    ----------
+    burns
+        The burns, each with its re-screen if there was one.
+    baseline
+        The event without a burn; ``None`` judges the burns alone.
+
+    Returns
+    -------
+    BurnVerdict
+        The verdict; what a clean or unscreened burn leaves out is not held
+        against the others.
+    """
+    needed = baseline is None or not baseline.meets_target
+    missed = not all(burn.option.meets_target for burn in burns)
+    results = [burn.rescreen for burn in burns]
+    if missed or any(result is None or result.clean for result in results):
+        return BurnVerdict(
+            burns=len(burns),
+            missed_target=missed,
+            brings_red=False,
+            brings_pair_back=False,
+            no_burn_needed=not needed,
+        )
+    screened = [result for result in results if result is not None]
+    return BurnVerdict(
+        burns=len(burns),
+        missed_target=False,
+        brings_red=any(result.conflict for result in screened),
+        brings_pair_back=any(result.event_returns for result in screened),
+        no_burn_needed=not needed,
+    )
+
+
 @dataclass(frozen=True, eq=False, slots=True, kw_only=True)
 class ManeuverGrid:
     """The Pc grid of a :class:`~keepout.maneuver.ManeuverPlan`, without its
@@ -70,11 +154,13 @@ class ManeuverGrid:
     Parameters
     ----------
     burn_leads
-        Times of the burns before TCA [s], shape ``(B,)``.
+        Times of the burns before TCA [s], shape ``(B,)``, descending.
     delta_v
-        Signed Δv along the velocity [m/s], shape ``(D,)``.
+        Signed Δv along the velocity [m/s], shape ``(D,)``, ascending, without
+        0.
     pc
-        Foster's Pc of each cell, shape ``(B, D)``; NaN where it has none.
+        Foster's Pc of each cell, shape ``(B, D)``. NaN where it or the burn
+        failed, or where the cell has no closest approach it can trust.
     range_at_tca
         Range at each cell's new closest approach [m], shape ``(B, D)``; NaN
         where the cell has none.
@@ -91,21 +177,7 @@ class ManeuverGrid:
     range_at_tca: FloatArray
 
     def __post_init__(self) -> None:
-        leads = np.array(self.burn_leads, dtype=np.float64)
-        changes = np.array(self.delta_v, dtype=np.float64)
-        pc = np.array(self.pc, dtype=np.float64)
-        ranges = np.array(self.range_at_tca, dtype=np.float64)
-        shape = (*leads.shape, *changes.shape)
-        if pc.shape != shape or ranges.shape != shape:
-            raise ValueError(
-                f"pc and range_at_tca must have shape {shape}, got {pc.shape} "
-                f"and {ranges.shape}"
-            )
-        read_only(leads, changes, pc, ranges)
-        object.__setattr__(self, "burn_leads", leads)
-        object.__setattr__(self, "delta_v", changes)
-        object.__setattr__(self, "pc", pc)
-        object.__setattr__(self, "range_at_tca", ranges)
+        freeze_grid(self, ("burn_leads", "delta_v"), ("pc", "range_at_tca"))
 
     @classmethod
     def of(cls, plan: ManeuverPlan) -> ManeuverGrid:
@@ -174,8 +246,8 @@ class ManeuverOutcome:
 
     @property
     def verdict(self) -> BurnVerdict:
-        """Whether a burn can be recommended, by :func:`~keepout.maneuver.judge`."""
-        return judge([(burn.option, burn.rescreen) for burn in self.burns])
+        """Whether a burn can be recommended, by :func:`judge`."""
+        return judge(self.burns, baseline=self.baseline)
 
     @classmethod
     def of(

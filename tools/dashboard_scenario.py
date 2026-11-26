@@ -20,7 +20,6 @@ from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import ViewportSize, expect
 
 from keepout._text import utc
-from keepout.figures.palette import RISK_LABELS
 from keepout.risk import RiskLevel
 
 if TYPE_CHECKING:
@@ -32,7 +31,7 @@ if TYPE_CHECKING:
 AS_OF_TEXT: Final = f"Data as of {utc(DEMO_AS_OF)} UTC (fixed)"
 """How every page of the demo gives the time its data are seen at."""
 
-RED: Final = re.compile(f"^{re.escape(RISK_LABELS[RiskLevel.RED])} · ")
+RED: Final = re.compile(f"^{re.escape(RiskLevel.RED.key)} · ")
 """A red risk chip: its level, then its action."""
 
 VIEWPORT: Final = ViewportSize(width=1280, height=800)

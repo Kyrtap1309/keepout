@@ -479,9 +479,8 @@ def trend_plot(figure: TrendFigure, title: str) -> Figure:
     days = figure.hours_to_tca * HOUR / DAY
     drawing = Figure(figsize=(8.5, 3.6))
     axes = drawing.subplots()
-    if figure.fit is not None:
-        hours, values = figure.fit
-        axes.plot(hours * HOUR / DAY, values, color=FIT_COLOUR, linewidth=1.0, zorder=1)
+    if len(figure.pc) >= 2:
+        axes.plot(days, figure.pc, color=FIT_COLOUR, linewidth=1.0, zorder=1)
     for day, value, level, floored in zip(
         days, figure.pc, figure.levels, figure.below_floor, strict=True
     ):
@@ -573,7 +572,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         event = by_id[event_id]
         assessment = assess_with_settings(event.observations())
         plot(
-            trend_figure(assessment, THRESHOLDS),
+            trend_figure(assessment),
             plot_title(event, assessment),
             path,
         )

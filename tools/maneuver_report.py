@@ -90,6 +90,7 @@ from keepout.maneuver import (
     ManeuverOption,
     ManeuverPlan,
     NewApproach,
+    PlannedBurn,
     RescreenResult,
     judge,
     plan_maneuver,
@@ -1146,7 +1147,8 @@ def demonstration_summary(
         "plan": None if plan is None else plan_summary(plan),
         "rescreens": [rescreen_summary(result) for result in results],
         "recommendable": judge(
-            [(result.option, result) for result in results]
+            [PlannedBurn(result.option, result) for result in results],
+            baseline=None if plan is None else plan.baseline,
         ).recommendable,
     }
 

@@ -22,8 +22,8 @@ from streamlit.testing.v1.element_tree import PageLink
 import keepout.cdm
 from keepout._text import ASSUMED_COVARIANCES
 from keepout.errors import KeepoutError
-from keepout.figures import RISK_LABELS
 from keepout.maneuver import ManeuverOutcome, NewApproach, RescreenResult
+from keepout.maneuver.wording import NO_BURN_NEEDED
 from keepout.risk import RiskLevel
 from keepout.screening import CloseApproach
 from keepout.settings import Settings, load_settings
@@ -186,7 +186,9 @@ def test_cached_plan_shown(store: Path, planned: Planned) -> None:
     assert set(cells["direction"]) == {"prograde", "retrograde"}
     assert {"hours before TCA", "|Δv| [m/s]", "Pc"} <= set(cells.columns)
     text = shown(app)
-    assert "A burn can be recommended" in text
+    # Green at the CDM's radii: the burns are shown, none is recommended.
+    assert NO_BURN_NEEDED in text
+    assert "A burn can be recommended" not in text
     assert "Not re-screened: no catalog stored" in text
     assert "assumed (GP age model)" in text
     assert "target Pc 1.00e-05" in text
@@ -330,7 +332,7 @@ def test_back_to_the_operators_settings(store: Path, planned: Planned) -> None:
     app.button(key=f"planner-own-{event_id}").click().run()
     assert not app.exception
     assert not app.warning
-    assert "A burn can be recommended" in shown(app)
+    assert NO_BURN_NEEDED in shown(app)
     # The form starts from them again.
     assert app.text_input(key=f"planner-target-{event_id}").value == repr(1e-5)
     assert app.number_input(key=f"planner-hbr-{event_id}").value is None
@@ -432,8 +434,8 @@ def test_a_rescreen_with_a_conflict(store: Path, planned: Planned) -> None:
     assert table["approach"].tolist() == ["new", "closer"]
     assert table["secondary"].tolist() == [40001, 40002]
     assert table["risk"].tolist() == [
-        RISK_LABELS[RiskLevel.RED],
-        RISK_LABELS[RiskLevel.YELLOW],
+        RiskLevel.RED.key,
+        RiskLevel.YELLOW.key,
     ]
     assert table["assumed Pc"].tolist() == [2e-4, 3e-6]
     assert set(table["provenance"]) == {"assumed (GP age model)"}
@@ -511,7 +513,7 @@ def test_a_rescreened_plan_shows_the_rescreen(
     tables = [frame.value for frame in app.dataframe if "risk" in frame.value]
     assert tables
     for table in tables:
-        assert set(table["risk"]) <= set(RISK_LABELS.values())
+        assert set(table["risk"]) <= {level.key for level in RiskLevel}
         assert set(table["provenance"]) == {"assumed (GP age model)"}
     assert ":orange-badge[assumed (GP age model)]" in text
 

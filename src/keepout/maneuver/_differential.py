@@ -20,7 +20,7 @@ import numpy as np
 import numpy.typing as npt
 
 from keepout._linalg import as_axis
-from keepout._types import BoolArray, FloatArray, read_only
+from keepout._types import BoolArray, FloatArray, freeze_grid, read_only
 from keepout._validation import require_positive
 from keepout.errors import PropagationError
 from keepout.propagation.cowell import integrate
@@ -70,20 +70,7 @@ class BurnEffects:
     dv: FloatArray
 
     def __post_init__(self) -> None:
-        leads = np.array(self.burn_leads, dtype=np.float64)
-        changes = np.array(self.delta_v, dtype=np.float64)
-        dr = np.array(self.dr, dtype=np.float64)
-        dv = np.array(self.dv, dtype=np.float64)
-        shape = (*leads.shape, *changes.shape, 3)
-        if dr.shape != shape or dv.shape != shape:
-            raise ValueError(
-                f"dr and dv must have shape {shape}, got {dr.shape} and {dv.shape}"
-            )
-        read_only(leads, changes, dr, dv)
-        object.__setattr__(self, "burn_leads", leads)
-        object.__setattr__(self, "delta_v", changes)
-        object.__setattr__(self, "dr", dr)
-        object.__setattr__(self, "dv", dv)
+        freeze_grid(self, ("burn_leads", "delta_v"), ("dr", "dv"), (3,))
 
     @property
     def failed(self) -> BoolArray:

@@ -17,7 +17,8 @@ from keepout.cdm import kvn
 from keepout.dashboard import text
 from keepout.dashboard.text import literal
 from keepout.dashboard.upload import MAX_FILE_BYTES
-from keepout.figures import PROVENANCE_LABELS, RISK_LABELS
+from keepout.figures import PROVENANCE_LABELS
+from keepout.risk import RiskLevel
 from keepout.settings import load_settings
 from keepout.store import CdmInput, EventSummary, JobKind, JobQueue, open_store
 from keepout.units import elapsed_seconds
@@ -86,7 +87,7 @@ def test_events_list_shows_rows(app_test: OpenApp, seed_db: Path) -> None:
         assert summary.assessment is not None
         level = summary.assessment.level
         assert level is not None
-        assert risk.startswith(RISK_LABELS[level])
+        assert risk.startswith(level.key)
         assert cdms == str(summary.cdm_count)
         assert plan == "Planner"
     assert [caption.value for caption in app.caption] == ["Events 1 to 7 of 7"]
@@ -94,7 +95,7 @@ def test_events_list_shows_rows(app_test: OpenApp, seed_db: Path) -> None:
 
 def test_risk_shown_as_text(app_test: OpenApp) -> None:
     app = app_test()
-    labels = {*RISK_LABELS.values(), "not computed"}
+    labels = {*(level.key for level in RiskLevel), "not computed"}
     risks = [row[6].split(" · ")[0] for row in _rows(app)]
     assert risks
     assert set(risks) <= labels

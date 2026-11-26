@@ -18,6 +18,7 @@ import functools
 import importlib
 import re
 from collections.abc import Callable, Sequence
+from types import SimpleNamespace
 from typing import Any, Final
 
 import astropy.units as u
@@ -35,6 +36,7 @@ from keepout.maneuver import (
     ManeuverOption,
     ManeuverPlan,
     NewApproach,
+    PlannedBurn,
     RescreenResult,
     judge,
     plan_maneuver,
@@ -54,6 +56,7 @@ from keepout.screening import (
     SkipReason,
     screen,
 )
+from keepout.screening.pipeline import PreparedCatalog
 from keepout.screening.tca import SEARCH_REACH
 from keepout.synthetic import Fleet, FleetSatellite, SyntheticCovarianceModel
 from keepout.synthetic.operator import DEFAULT_MODEL, run
@@ -224,6 +227,25 @@ def fingerprint(result: RescreenResult) -> list[object]:
     ]
 
 
+def screen_with(
+    monkeypatch: pytest.MonkeyPatch, screening: Callable[..., ScreeningResult | None]
+) -> None:
+    """``rescreen``'s screenings made by ``screening``, called with the
+    prepared catalog and the arguments of
+    :meth:`~keepout.screening.pipeline.PreparedCatalog.screen`."""
+    module = importlib.import_module("keepout.maneuver.rescreen")
+    real = module.prepare_catalog
+
+    def prepare(*args: Any, **kwargs: Any) -> SimpleNamespace:
+        prepared = real(*args, **kwargs)
+        return SimpleNamespace(
+            by_number=prepared.by_number,
+            screen=functools.partial(screening, prepared),
+        )
+
+    monkeypatch.setattr(module, "prepare_catalog", prepare)
+
+
 @pytest.fixture
 def no_screening(monkeypatch: pytest.MonkeyPatch) -> None:
     """Fail a test that screens or integrates anything."""
@@ -232,7 +254,7 @@ def no_screening(monkeypatch: pytest.MonkeyPatch) -> None:
         raise AssertionError("screened or integrated before the check")
 
     module = importlib.import_module("keepout.maneuver.rescreen")
-    monkeypatch.setattr(module, "screen", refuse)
+    screen_with(monkeypatch, refuse)
     monkeypatch.setattr(module, "ManeuveredPropagator", refuse)
     monkeypatch.setattr(ManeuveredPropagator, "__init__", refuse)
 
@@ -563,15 +585,14 @@ def counted_screen(
 ) -> list[ScreeningResult]:
     """The screenings of ``rescreen``, as they run; ``second`` changes the
     result of the second."""
-    module = importlib.import_module("keepout.maneuver.rescreen")
     calls: list[ScreeningResult] = []
 
-    def spy(*args: Any, **kwargs: Any) -> ScreeningResult:
-        result = screen(*args, **kwargs)
+    def spy(prepared: PreparedCatalog, *args: Any, **kwargs: Any) -> ScreeningResult:
+        result = prepared.screen(*args, **kwargs)
         calls.append(result)
         return second(result) if len(calls) == 2 else result
 
-    monkeypatch.setattr(module, "screen", spy)
+    screen_with(monkeypatch, spy)
     return calls
 
 
@@ -632,6 +653,17 @@ def test_event_range_none_when_outside_the_volume() -> None:
     result = rescreened(CROSSING, -0.1)
     assert result.event_range is None
     assert CROSSED not in by_secondary(result)
+
+
+def test_the_events_own_approach_brought_into_the_volume_is_not_new() -> None:
+    # 1029 m without the burn, outside a 1000 m sphere; 957 m after +2 mm/s.
+    plan = plan_of(CROSSING)
+    pair = [BY_NUMBER[CROSSING], BY_NUMBER[CROSSED]]
+    volume = ScreeningVolume.sphere(1000.0)
+    result = rescreen(plan, burn(plan, 0.002), pair, volume=volume)
+    assert result.event_range == pytest.approx(957.0, abs=1.0)
+    assert result.new_approaches == ()
+    assert result.closer_approaches == ()
 
 
 def test_event_range_follows_the_burn() -> None:
@@ -917,7 +949,9 @@ def test_no_burn_cannot_be_recommended() -> None:
 def test_a_burn_missing_the_target_cannot_be_recommended() -> None:
     plan = plan_of(CROSSING)
     missing = dataclasses.replace(burn(plan, -0.03), meets_target=False)
-    verdict = judge([(missing, None), (burn(plan, 0.03), judged())])
+    verdict = judge(
+        [PlannedBurn(missing, None), PlannedBurn(burn(plan, 0.03), judged())]
+    )
     assert verdict.missed_target
     assert not verdict.recommendable
 
@@ -927,7 +961,10 @@ def test_one_clean_or_unscreened_burn_is_enough(other: str | None) -> None:
     plan = plan_of(CROSSING)
     second = None if other is None else judged()
     verdict = judge(
-        [(burn(plan, -0.03), judged(red=True, back=True)), (burn(plan, 0.03), second)]
+        [
+            PlannedBurn(burn(plan, -0.03), judged(red=True, back=True)),
+            PlannedBurn(burn(plan, 0.03), second),
+        ]
     )
     assert verdict.recommendable
     assert not verdict.brings_red
@@ -938,8 +975,8 @@ def test_every_burn_with_a_red_approach_or_a_return_cannot_be_recommended() -> N
     plan = plan_of(CROSSING)
     verdict = judge(
         [
-            (burn(plan, -0.03), judged(red=True)),
-            (burn(plan, 0.03), judged(back=True)),
+            PlannedBurn(burn(plan, -0.03), judged(red=True)),
+            PlannedBurn(burn(plan, 0.03), judged(back=True)),
         ]
     )
     assert (verdict.burns, verdict.brings_red, verdict.brings_pair_back) == (

@@ -321,6 +321,24 @@ No burn on the grid meets the target Pc 1.00e-05 (exit status 4).
     assert json.loads(as_json.stdout)["options"] == []
 
 
+def test_a_baseline_meeting_the_target_needs_no_burn_and_exits_zero(
+    tmp_path: Path,
+) -> None:
+    # Green at the CDM's own hard-body radii: 1029 m is far for them.
+    args = (crossing(tmp_path),)
+    result = keepout("maneuver", *args)
+    assert result.exit_code == ExitCode.OK
+    lines = result.stdout.splitlines()
+    (baseline,) = [line for line in lines if line.startswith("no burn")]
+    assert baseline.split()[-1] == "met"
+    assert lines[-1] == "No burn needed: the baseline Pc already meets the target."
+    as_json = keepout("maneuver", *args, "--json")
+    assert as_json.exit_code == ExitCode.OK
+    payload = json.loads(as_json.stdout)
+    assert payload["baseline"]["meets_target"] is True
+    assert payload["refusal"] is None
+
+
 def test_json_names_the_refusal_on_exit_4(tmp_path: Path) -> None:
     result = keepout("maneuver", crossing(tmp_path), "--hbr", "500000", "--json")
     payload = json.loads(result.stdout)

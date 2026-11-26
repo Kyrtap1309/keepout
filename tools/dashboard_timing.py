@@ -262,7 +262,7 @@ def _event_page(path: Path, event_id: str) -> None:
     from keepout.dashboard import event_data as data
 
     view = data.read_event(path, event_id, _SETTINGS)
-    trend = None if view is None else data.trend_of(view, _SETTINGS)
+    trend = None if view is None else data.trend_of(view)
     if view is None or trend is None:
         raise ValueError(f"event {event_id} is not stored with every Pc")
     data.trend_plot(trend)

@@ -3,8 +3,8 @@
 
 :func:`integrate` carries N states through one ``solve_ivp`` (DOP853), so they
 share their steps: the fast way to integrate many states of one force model.
-:class:`CowellPropagator` integrates each object alone, once, and keeps a
-spline, because a batch's steps depend on the other objects and an
+:class:`CowellPropagator` integrates each object alone, once, and keeps the
+solver's dense output, because a batch's steps depend on the other objects and an
 integration's steps on where it ends, and the interface wants a state that
 depends on its object and its time only.
 """
@@ -21,7 +21,6 @@ from keepout._linalg import as_axis
 from keepout._types import FloatArray, override
 from keepout._validation import (
     require_non_negative,
-    require_positive,
     require_single_time,
 )
 from keepout.errors import PropagationError
@@ -39,7 +38,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from astropy.time import Time
-    from scipy.interpolate import CubicHermiteSpline
+    from scipy.integrate import OdeSolution
 
 __all__ = ["SPAN_SLACK", "CowellPropagator", "integrate"]
 
@@ -96,14 +95,24 @@ def _stops_array(stops: npt.ArrayLike) -> FloatArray:
     return array
 
 
+_RTOL: Final = 1e-11
+"""Relative tolerance of the solver unless told otherwise."""
+
+_ATOL_POSITION: Final = 1e-4
+"""Absolute tolerance of the positions [m] unless told otherwise."""
+
+_ATOL_VELOCITY: Final = 1e-7
+"""Absolute tolerance of the velocities [m/s] unless told otherwise."""
+
+
 def integrate(
     force: ForceModel,
     states: FloatArray,
     stops: FloatArray,
     *,
-    rtol: float = 1e-11,
-    atol_position: float = 1e-4,
-    atol_velocity: float = 1e-7,
+    rtol: float = _RTOL,
+    atol_position: float = _ATOL_POSITION,
+    atol_velocity: float = _ATOL_VELOCITY,
     stop_at_surface: bool = False,
 ) -> FloatArray:
     """States of N objects at some times, in one DOP853 integration.
@@ -218,52 +227,73 @@ def integrate(
 class _Arc(NamedTuple):
     """One object's integrated trajectory."""
 
-    spline: CubicHermiteSpline | None
-    """Its state through time; ``None`` if it re-entered before a second node."""
+    solution: OdeSolution | None
+    """Its state through time; ``None`` if it never had one above the surface."""
     end: float
     """Where its valid states end (exclusive): ``inf`` if it stays up, else
-    the last node before re-entry."""
+    its re-entry."""
 
 
-def _arc(force: ForceModel, state: FloatArray, nodes: FloatArray) -> _Arc:
-    """The trajectory of one object, integrated through ``nodes``."""
-    # Imported here: only an integration needs it, and it needs scipy anyway.
-    from scipy.interpolate import CubicHermiteSpline
+def _arc(
+    force: ForceModel, state: FloatArray, span: tuple[float, float], step: float
+) -> _Arc:
+    """The trajectory of one object over ``span``, reached from ``state`` at 0.
 
-    rows = integrate(force, state[None], nodes, stop_at_surface=True)[:, 0]
-    count = int(np.count_nonzero(np.isfinite(rows[:, 0])))
-    if count < 2:
+    Raises
+    ------
+    PropagationError
+        If the solver fails.
+    """
+    # Imported here: scipy.integrate takes 0.2 s to import.
+    from scipy.integrate import solve_ivp
+
+    start, stop = span
+    initial = state
+    if start != 0.0:
+        stops = np.array([start])
+        initial = integrate(force, state[None], stops, stop_at_surface=True)[0, 0]
+    if not np.all(np.isfinite(initial)) or _radii(initial)[0] < EARTH_RADIUS:
         return _Arc(None, -math.inf)
-    kept = rows[:count]
-    slopes = force.derivative(kept.ravel()).reshape(-1, 6)
-    spline = CubicHermiteSpline(nodes[:count], kept, slopes)
-    return _Arc(spline, math.inf if count == len(nodes) else float(nodes[count - 1]))
+    solution = solve_ivp(
+        lambda _, y: force.derivative(y),
+        (start, stop),
+        initial,
+        method="DOP853",
+        dense_output=True,
+        events=_Surface(),
+        rtol=_RTOL,
+        atol=np.repeat((_ATOL_POSITION, _ATOL_VELOCITY), 3),
+        max_step=step,
+    )
+    if solution.status < 0:
+        raise PropagationError(
+            f"integration failed from t = {start:.1f} s to {stop:.1f} s "
+            f"(1 object(s)): {solution.message}"
+        )
+    # A list, not None: solve_ivp was given events.
+    t_events: list[FloatArray] = solution.t_events or []
+    end = math.inf if solution.status == 0 else float(t_events[0][0])
+    return _Arc(solution.sol, end)
 
 
 class CowellPropagator:
     """States of objects integrated once, over a fixed span of time.
 
-    At construction each object is integrated alone with :func:`integrate` to
-    nodes at most ``step`` apart, from the start of the span to its end, and a
-    cubic Hermite spline is kept through them, of the positions (the
-    velocities being their slopes) and of the velocities (the accelerations
-    being theirs). :meth:`propagate` only evaluates the splines, so a state
-    depends on its object and its time alone, as
+    At construction each object is integrated alone over the span, as
+    :func:`integrate` does (DOP853, the same tolerances), and the solver's
+    dense output is kept: on each step, the interpolant of DOP853's own
+    seventh order, accurate to the solver's tolerances. :meth:`propagate` only
+    evaluates it, so a state depends on its object and its time alone, as
     :class:`~keepout.propagation.base.Propagator` requires; integrating per
     call could not give that, as ``solve_ivp``'s steps depend on where the
     integration ends.
 
-    The cubic's error goes as ``step⁴``. In LEO, at 500 km, it peaks between
-    nodes at 0.3 mm and 3e-7 m/s for the default 10 s, 22 mm at 30 s, 0.36 m
-    at 60 s; above that, it falls as the mean motion to the fourth.
-
     A span that does not start at ``epoch`` is reached by integrating to its
     start first, so an object that re-enters on the way has no valid state.
     An object that re-enters has error code
-    :data:`~keepout.propagation.base.DECAYED` and NaN states from the last
-    node before re-entry on (the spline ends there). A pickled propagator
-    holds its splines, about 1.7 MB per object for a day at 10 s, and
-    integrates nothing again.
+    :data:`~keepout.propagation.base.DECAYED` and NaN states from its re-entry
+    on. A pickled propagator holds its dense outputs, about 0.26 MB per object
+    for a day in LEO, and integrates nothing again.
 
     Parameters
     ----------
@@ -278,7 +308,8 @@ class CowellPropagator:
         First and last offset [s] from ``epoch`` that :meth:`propagate` can
         give, finite and increasing.
     step
-        Longest time between nodes [s], finite and > 0.
+        Longest step of the solver [s], > 0; ``inf``, the default, leaves the
+        steps to the tolerances.
 
     Raises
     ------
@@ -302,7 +333,7 @@ class CowellPropagator:
         forces: Sequence[ForceModel],
         span: tuple[float, float],
         *,
-        step: float = 10.0,
+        step: float = math.inf,
     ) -> None:
         require_single_time(epoch, "epoch")
         initial = _states_array(states)
@@ -314,12 +345,12 @@ class CowellPropagator:
         start, stop = span
         if not (math.isfinite(start) and math.isfinite(stop) and start < stop):
             raise ValueError(f"span must be finite and increasing, got {span}")
-        require_positive(step, "step")
-        nodes = np.linspace(start, stop, math.ceil((stop - start) / step) + 1)
+        if not step > 0.0:
+            raise ValueError(f"step must be > 0, got {step}")
         self._epoch = epoch
         self._span = (start, stop)
         self._arcs = tuple(
-            _arc(force, state, nodes)
+            _arc(force, state, (start, stop), step)
             for force, state in zip(forces, initial, strict=True)
         )
 
@@ -336,7 +367,7 @@ class CowellPropagator:
         return f"{type(self).__name__}({len(self)} objects)"
 
     def subset(self, indices: npt.ArrayLike) -> Self:
-        """A propagator of some of the objects, sharing their splines.
+        """A propagator of some of the objects, sharing their trajectories.
 
         Parameters
         ----------
@@ -399,8 +430,8 @@ class CowellPropagator:
         for index, arc in enumerate(self._arcs):
             valid = times < arc.end
             errors[index, ~valid] = DECAYED
-            if arc.spline is not None:
-                states[index, valid] = arc.spline(times[valid])
+            if arc.solution is not None and valid.any():
+                states[index, valid] = arc.solution(times[valid]).T
         return Ephemeris(
             epoch, seconds, states[..., :3], states[..., 3:], errors, self.frame
         )

@@ -141,9 +141,9 @@ def test_plots_use_the_reports_settings(
     figures: dict[int, Assessment] = {}
     plotted: dict[int, Assessment] = {}
 
-    def record(assessment: Assessment, drawn: Thresholds) -> TrendFigure:
-        assert drawn is thresholds
-        figure = trend_figure(assessment, drawn)
+    def record(assessment: Assessment) -> TrendFigure:
+        assert assessment.thresholds == thresholds
+        figure = trend_figure(assessment)
         figures[id(figure)] = assessment
         return figure
 
@@ -196,7 +196,7 @@ def test_plot_uses_figure_colours() -> None:
         PcObservation(4 * DAY, "ESA", pc=1e-5),
         PcObservation(2 * DAY, "ESA", pc=1e-3),
     ]
-    figure = trend_figure(report.assess_with_settings(items), report.THRESHOLDS)
+    figure = trend_figure(report.assess_with_settings(items))
     assert figure.levels == (RiskLevel.GREEN, RiskLevel.YELLOW, RiskLevel.RED)
     assert figure.below_floor == (True, False, False)
     (axes,) = report.trend_plot(figure, "a trend").axes

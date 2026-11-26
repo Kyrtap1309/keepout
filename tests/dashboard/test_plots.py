@@ -37,7 +37,6 @@ def _trend() -> TrendFigure:
         below_floor=(True, False, False),
         labels=("A", "B", "C"),
         thresholds=((1e-7, RiskLevel.YELLOW), (1e-4, RiskLevel.RED)),
-        fit=(hours, pc),
     )
 
 
@@ -95,7 +94,6 @@ def _decision_anchor(hours: list[float], decision: float) -> str:
         below_floor=(False,) * len(hours),
         labels=("",) * len(hours),
         thresholds=((1e-7, RiskLevel.YELLOW), (1e-4, RiskLevel.RED)),
-        fit=None,
     )
     drawn = plots.trend(figure, decision_point_hours=decision).to_dict()
     (note,) = [
@@ -124,7 +122,6 @@ def test_trend_of_one_point_has_no_line() -> None:
         below_floor=(False,),
         labels=("",),
         thresholds=((1e-7, RiskLevel.YELLOW), (1e-4, RiskLevel.RED)),
-        fit=None,
     )
     traces = _traces(plots.trend(figure).to_dict())
     assert [trace["mode"] for trace in traces] == ["markers"]

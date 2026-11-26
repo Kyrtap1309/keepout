@@ -100,3 +100,19 @@ def test_catalog_needs_its_label(event: ConjunctionEvent) -> None:
         plan_event(event, catalog=[])
     with pytest.raises(ValueError, match="catalog"):
         plan_event(event, catalog_label="nothing")
+
+
+def test_a_baseline_meeting_the_target_needs_no_burn(event: ConjunctionEvent) -> None:
+    plain = plan_event(event, grid=SMALL_GRID)
+    target = plain.baseline.pc * 2.0
+    outcome = plan_event(event, grid=SMALL_GRID, target_pc=target)
+    assert outcome.baseline.meets_target
+    assert outcome.verdict.no_burn_needed
+    assert not outcome.verdict.recommendable
+    assert outcome.grid is not None
+
+
+def test_a_baseline_missing_the_target_needs_a_burn(plan: ManeuverPlan) -> None:
+    outcome = ManeuverOutcome.of(plan, [], None, grid=ManeuverGrid.of(plan))
+    assert not outcome.baseline.meets_target
+    assert not outcome.verdict.no_burn_needed

@@ -7,9 +7,8 @@ an outcome the same way.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
-from keepout._defaults import TCA_TOLERANCE
 from keepout._text import minute, pc_text, plural, utc
 from keepout.maneuver.planner import BurnDirection
 from keepout.units import MINUTE
@@ -19,6 +18,7 @@ if TYPE_CHECKING:
     from keepout.maneuver.rescreen import RescreenResult
 
 __all__ = [
+    "NO_BURN_NEEDED",
     "conflict_line",
     "event_line",
     "gap_lines",
@@ -28,11 +28,16 @@ __all__ = [
 ]
 
 
+NO_BURN_NEEDED: Final = "No burn needed: the baseline Pc already meets the target."
+"""The verdict of an outcome whose baseline already meets the target."""
+
+
 def refusal(outcome: ManeuverOutcome) -> str:
     """Why no burn of an outcome can be recommended, by its
     :attr:`~keepout.maneuver.ManeuverOutcome.verdict`, without a full stop:
     ``No burn on the grid meets the target Pc 1.00e-05``. Only for an
-    outcome whose verdict is not recommendable."""
+    outcome whose verdict is neither recommendable nor
+    :attr:`~keepout.maneuver.BurnVerdict.no_burn_needed`."""
     verdict = outcome.verdict
     target = f"the target Pc {pc_text(outcome.target_pc)}"
     if not verdict.burns:
@@ -73,9 +78,10 @@ def rescreen_head(direction: BurnDirection, result: RescreenResult, label: str) 
     )
 
 
-def event_line(result: RescreenResult, secondary: str) -> str:
+def event_line(result: RescreenResult, secondary: str, tolerance: float) -> str:
     """What the re-screen says of the event: possibly nothing. It screens
-    element sets with SGP4, not the CDM's orbits, so it says so."""
+    element sets with SGP4, not the CDM's orbits, so it says so; ``tolerance``
+    is the event's TCA tolerance [s], which the re-screen used."""
     if not result.secondary_screened:
         return (
             f"Event secondary {secondary} was NOT screened: this re-screen says "
@@ -86,7 +92,7 @@ def event_line(result: RescreenResult, secondary: str) -> str:
     )
     if result.event_range is None:
         return (
-            f"{view}: no approach within {TCA_TOLERANCE / MINUTE:g} min of the "
+            f"{view}: no approach within {tolerance / MINUTE:g} min of the "
             "CDM's TCA after the burn."
         )
     return f"{view}: range {result.event_range:.0f} m after the burn."

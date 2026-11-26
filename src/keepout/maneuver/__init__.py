@@ -22,9 +22,11 @@ from keepout.maneuver._differential import (
     closest_approach_shift,
 )
 from keepout.maneuver.outcome import (
+    BurnVerdict,
     ManeuverGrid,
     ManeuverOutcome,
     PlannedBurn,
+    judge,
     plan_event,
 )
 from keepout.maneuver.planner import (
@@ -41,13 +43,7 @@ from keepout.maneuver.planner import (
     plan_maneuver,
     prepare_maneuver,
 )
-from keepout.maneuver.rescreen import (
-    BurnVerdict,
-    NewApproach,
-    RescreenResult,
-    judge,
-    rescreen,
-)
+from keepout.maneuver.rescreen import NewApproach, RescreenResult, rescreen
 
 __all__ = [
     "DEFAULT_BURN_GRID",

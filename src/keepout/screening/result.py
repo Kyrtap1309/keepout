@@ -216,7 +216,9 @@ class SkipReason(enum.StrEnum):
     """Why screening left an element set out."""
 
     DUPLICATE = "duplicate"
-    """Another element set of the same object, with a newer epoch, was used."""
+    """Another element set of the same object was used: the newest of those
+    close enough to the window; when there is none, this one is older than
+    the newest, left out by its epoch."""
     STALE = "stale"
     """The window ends too long after the element epoch."""
     FUTURE_EPOCH = "future epoch"

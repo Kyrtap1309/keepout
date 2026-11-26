@@ -333,12 +333,17 @@ def _show(outcome: ManeuverOutcome, *, as_json: bool) -> None:
     typer.Exit
         With status 4 if no burn can be recommended.
     """
+    from keepout.maneuver.wording import NO_BURN_NEEDED
+
     verdict = outcome.verdict
     text = _summary(outcome)
-    if not verdict.recommendable:
+    refused = _refused(outcome)
+    if verdict.no_burn_needed:
+        text.append(NO_BURN_NEEDED)
+    elif refused:
         text.append(_refusal(outcome))
     show(_payload(outcome), *text, as_json=as_json)
-    if not verdict.recommendable:
+    if refused:
         raise typer.Exit(ExitCode.NO_SAFE_BURN)
 
 
@@ -572,6 +577,12 @@ def _one_event(events: Sequence[ConjunctionEvent]) -> ConjunctionEvent:
     return events[0]
 
 
+def _refused(outcome: ManeuverOutcome) -> bool:
+    """Whether no burn can be recommended where one is needed: exit status 4."""
+    verdict = outcome.verdict
+    return not (verdict.recommendable or verdict.no_burn_needed)
+
+
 def _refusal(outcome: ManeuverOutcome) -> str:
     """The line saying why no burn can be recommended."""
     from keepout.maneuver.wording import refusal
@@ -645,7 +656,7 @@ def _payload(outcome: ManeuverOutcome) -> dict[str, JsonOut]:
         "baseline": _option_json(outcome.baseline),
         "options": [_burn_json(burn) for burn in outcome.burns],
         "notes": list(outcome.notes),
-        "refusal": None if outcome.verdict.recommendable else _refusal(outcome),
+        "refusal": _refusal(outcome) if _refused(outcome) else None,
     }
 
 
@@ -704,7 +715,10 @@ def _approach_lines(
 
 
 def _rescreen_lines(
-    direction: BurnDirection, result: RescreenResult, secondary: str, label: str
+    direction: BurnDirection,
+    result: RescreenResult,
+    event: ConjunctionEvent,
+    label: str,
 ) -> list[str]:
     """What the re-screen of a burn found, for people."""
     from keepout.maneuver.wording import (
@@ -721,7 +735,7 @@ def _rescreen_lines(
         ),
     ]
     body = [
-        event_line(result, secondary),
+        event_line(result, event.latest.object2.object_id, event.tca_tolerance),
         conflict_line(result),
         *return_lines(result),
         *approaches,
@@ -750,13 +764,12 @@ def _summary(outcome: ManeuverOutcome) -> list[RenderableType]:
             )
         ]
     else:
-        secondary = latest.object2.object_id
         rescreens = [
             line
             for burn in outcome.burns
             if burn.rescreen is not None
             for line in _rescreen_lines(
-                burn.direction, burn.rescreen, secondary, catalog_label
+                burn.direction, burn.rescreen, event, catalog_label
             )
         ]
     from keepout.maneuver.wording import gap_lines

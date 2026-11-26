@@ -9,7 +9,7 @@ plan (:class:`GridFigure`, a :class:`GridPanel` per direction),
 (:class:`EncounterFigure`) and :func:`geometry_figure` the 3-D relative
 geometry at TCA in the primary's RTN frame (:class:`GeometryFigure`).
 :mod:`~keepout.figures.palette` holds the shared colour-blind-safe colours
-and the words of risk levels, actions and what a Pc rests on
+and the words of threshold lines and of what a Pc rests on
 (:data:`PROVENANCE_LABELS`, explained by :data:`PROVENANCE_HELP`, for a
 :class:`keepout.risk.Provenance`).
 """
@@ -18,13 +18,11 @@ from keepout.figures.encounter import SIGMAS, EncounterFigure, encounter_figure
 from keepout.figures.geometry import GeometryFigure, geometry_figure
 from keepout.figures.grid import LOWEST_LOG_PC, GridFigure, GridPanel, grid_figure
 from keepout.figures.palette import (
-    ACTION_LABELS,
     FIT_COLOUR,
     NO_PC,
     PROVENANCE_HELP,
     PROVENANCE_LABELS,
     RISK_COLOURS,
-    RISK_LABELS,
     SEQUENTIAL,
     SERIES,
     TARGET_COLOUR,
@@ -33,14 +31,12 @@ from keepout.figures.palette import (
 from keepout.figures.trend import TrendFigure, trend_figure
 
 __all__ = [
-    "ACTION_LABELS",
     "FIT_COLOUR",
     "LOWEST_LOG_PC",
     "NO_PC",
     "PROVENANCE_HELP",
     "PROVENANCE_LABELS",
     "RISK_COLOURS",
-    "RISK_LABELS",
     "SEQUENTIAL",
     "SERIES",
     "SIGMAS",

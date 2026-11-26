@@ -281,7 +281,10 @@ A `ManeuverOutcome` holds everything the command shows:
 - the Pc grid (`ManeuverGrid`);
 - what the burns were re-screened against.
 
-`outcome.verdict` applies `judge` to its burns. With `burn=(lead, dv)`,
+`outcome.verdict` applies `judge` to its burns and its baseline: when the
+baseline already meets the target, the verdict is that no burn is needed
+(`no_burn_needed`), whatever the burns, and none is recommended. With
+`burn=(lead, dv)`,
 `plan_event` evaluates a burn of one's own and plans no grid, as
 `--burn-before --dv` does.
 

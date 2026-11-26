@@ -15,6 +15,7 @@ __all__ = [
     "as_vector",
     "as_vectors",
     "correlation_parts",
+    "dot",
     "from_eigen",
     "sigma_axes",
     "symmetric_part",
@@ -100,6 +101,15 @@ def as_axis(values: npt.ArrayLike, name: str) -> FloatArray:
     if not np.all(np.isfinite(array)):
         raise ValueError(f"{name} must be finite")
     return array
+
+
+def dot(a: FloatArray, b: FloatArray) -> FloatArray:
+    """Dot products of 3-vectors along the last axis, element by element: the
+    same bits whatever the shape of the arrays (a reduction might not)."""
+    product: FloatArray = a[..., 0] * b[..., 0]
+    product += a[..., 1] * b[..., 1]
+    product += a[..., 2] * b[..., 2]
+    return product
 
 
 def symmetric_part(matrix: FloatArray) -> FloatArray:

@@ -4,10 +4,12 @@
 theory) and a window, and returns a
 :class:`~keepout.screening.result.ScreeningResult`:
 
-1. **Element sets.** Of several element sets of one object, the newest is
-   screened (:func:`keepout.omm.deduplicate`). An element set is left out
-   when the window ends more than ``max_age`` after its epoch (stale) or
-   starts more than ``max_lead`` before it, when SGP4 cannot be initialised
+1. **Element sets.** An element set is left out when the window ends more
+   than ``max_age`` after its epoch (stale) or starts more than ``max_lead``
+   before it. Of the other element sets of one object, the newest is
+   screened (exact copies are one, as in :func:`keepout.omm.deduplicate`):
+   an object whose newest set is too far ahead is screened with an older
+   one. An element set is also left out when SGP4 cannot be initialised
    with it, or (a primary) when the volume rule refuses it (raises a
    :class:`~keepout.errors.KeepoutError`).
 2. **Pairs.** Every primary is paired with every catalog object, except
@@ -106,6 +108,8 @@ from keepout.units import DAY
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping, Sequence
+
+    import numpy.typing as npt
 
     from keepout._types import FloatArray, IndexArray
 
@@ -222,47 +226,16 @@ def screen(
     # 58180 2026-10-06T12:10:37.724 4902
     ```
     """
-    require_single_time(start, "start")
-    require_non_negative(duration, "duration")
-    require_non_negative(max_age, "max_age")
-    require_non_negative(max_lead, "max_lead")
-    processes = resolve_workers(workers)
-    require_at_least(max_states, 1, "max_states")
-    settings = _SearchSettings(start, float(duration), max_states)
-    unique_primaries, duplicate_primaries = _deduplicated(
-        primaries, ScreeningRole.PRIMARY
+    prepared = prepare_catalog(
+        catalog,
+        start,
+        duration,
+        workers=workers,
+        max_age=max_age,
+        max_lead=max_lead,
+        max_states=max_states,
     )
-    current_primaries, out_of_window_primaries = _within_window(
-        unique_primaries, ScreeningRole.PRIMARY, settings, max_age, max_lead
-    )
-    unique_catalog, duplicate_catalog = _deduplicated(catalog, ScreeningRole.CATALOG)
-    current_catalog, out_of_window_catalog = _within_window(
-        unique_catalog, ScreeningRole.CATALOG, settings, max_age, max_lead
-    )
-    sgp4_primaries, volumes, skipped_unusable_primaries = _primaries(
-        current_primaries, volume
-    )
-    primary_omms = sgp4_primaries.omms
-    primary_propagator = _adjusted(sgp4_primaries, adjust_primaries, settings)
-    parts = _parts(
-        primary_propagator, primary_omms, volumes, current_catalog, settings, processes
-    )
-    skipped_before_search = [
-        *duplicate_primaries,
-        *out_of_window_primaries,
-        *duplicate_catalog,
-        *out_of_window_catalog,
-        *skipped_unusable_primaries,
-    ]
-    return _merge_part_results(
-        _run(parts),
-        primary_propagator,
-        primary_omms,
-        volumes,
-        current_catalog,
-        settings,
-        skipped_before_search,
-    )
+    return prepared.screen(primaries, volume, adjust_primaries=adjust_primaries)
 
 
 @dataclass(frozen=True, slots=True)
@@ -272,6 +245,22 @@ class _SearchSettings:
     start: Time
     duration: float
     max_states: int
+
+
+@dataclass(frozen=True, eq=False, slots=True)
+class _CatalogPart:
+    """Element sets of a catalog initialised for SGP4, with their radius
+    bounds (``None`` when nothing is screened against them)."""
+
+    catalog: Sgp4Propagator
+    columns: IndexArray
+    """Position of each object of ``catalog`` in the whole catalog."""
+    unsupported: tuple[tuple[int, str], ...]
+    """Position in the whole catalog of each element set SGP4 cannot be
+    initialised with, and why."""
+    bounds: RadiusBounds | None
+    numbers: npt.NDArray[np.int64]
+    """Catalog number of each object of ``catalog``."""
 
 
 @dataclass(frozen=True, eq=False, slots=True, kw_only=True)
@@ -284,9 +273,11 @@ class _Part:
     """Element set of each of ``primaries``."""
     primary_bounds: RadiusBounds
     volumes: tuple[ScreeningVolume, ...]
-    catalog: tuple[Omm, ...]
+    catalog: tuple[Omm, ...] | _CatalogPart
+    """The part's element sets, initialised in its process, or already
+    initialised."""
     columns: IndexArray
-    """Position of each of ``catalog`` in the whole catalog."""
+    """Position of each of the element sets in the whole catalog."""
 
 
 @dataclass(frozen=True, eq=False, slots=True)
@@ -297,31 +288,190 @@ class _PartResult:
     unsupported: tuple[tuple[int, str], ...]
 
 
-def _deduplicated(
-    omms: Iterable[Omm], role: ScreeningRole
-) -> tuple[tuple[Omm, ...], list[SkippedObject]]:
-    """The newest element set of each object, and the older ones left out."""
-    unique = deduplicate(omms)
+@dataclass(frozen=True, eq=False, slots=True, kw_only=True)
+class PreparedCatalog:
+    """A catalog made ready to screen against over one window, by
+    :func:`prepare_catalog`: the element set of each object chosen and, to
+    screen in this process, initialised for SGP4 with its radius bounds.
+
+    Screening several sets of primaries against it (the primary with and
+    without a burn, in :func:`keepout.maneuver.rescreen`) does that work
+    once; each result is the one :func:`screen` gives.
+    """
+
+    settings: _SearchSettings
+    max_age: float
+    max_lead: float
+    processes: int
+    elements: tuple[Omm, ...]
+    """The element set screened of each object."""
+    skipped: tuple[SkippedObject, ...]
+    """The element sets left out before anything is initialised."""
+    initialised: _CatalogPart | None
+    """All of ``elements``, initialised, when screened in this process."""
+
+    @property
+    def by_number(self) -> dict[int, Omm]:
+        """The element set screened of each object, by catalog number."""
+        return {omm.catalog_number: omm for omm in self.elements}
+
+    def screen(
+        self,
+        primaries: Iterable[Omm],
+        volume: ScreeningVolume | VolumeRule = DEFAULT_VOLUME,
+        *,
+        adjust_primaries: Callable[[Propagator], Propagator] | None = None,
+    ) -> ScreeningResult:
+        """:func:`screen` of ``primaries`` against the catalog.
+
+        Raises
+        ------
+        ValueError
+            As :func:`screen`, for ``adjust_primaries``.
+        TypeError
+            As :func:`screen`, for the volume rule.
+        PropagationError
+            If ``adjust_primaries`` raises it.
+        """
+        settings = self.settings
+        current_primaries, duplicate_primaries, out_of_window_primaries = (
+            _screened_sets(
+                primaries, ScreeningRole.PRIMARY, settings, self.max_age, self.max_lead
+            )
+        )
+        sgp4_primaries, volumes, skipped_unusable_primaries = _primaries(
+            current_primaries, volume
+        )
+        primary_omms = sgp4_primaries.omms
+        primary_propagator = _adjusted(sgp4_primaries, adjust_primaries, settings)
+        skipped_before_search = [
+            *duplicate_primaries,
+            *out_of_window_primaries,
+            *self.skipped,
+            *skipped_unusable_primaries,
+        ]
+        return _merge_part_results(
+            _run(_parts(primary_propagator, primary_omms, volumes, self)),
+            primary_propagator,
+            primary_omms,
+            volumes,
+            self.elements,
+            settings,
+            skipped_before_search,
+        )
+
+
+def prepare_catalog(
+    catalog: Iterable[Omm],
+    start: Time,
+    duration: float = DEFAULT_DURATION,
+    *,
+    workers: int | None = 1,
+    max_age: float = MAX_AGE,
+    max_lead: float = MAX_LEAD,
+    max_states: int = CHUNK_STATES,
+) -> PreparedCatalog:
+    """A catalog made ready to screen against, as :func:`screen` takes it.
+
+    Raises
+    ------
+    ValueError
+        As :func:`screen`, for the window and the settings.
+    """
+    require_single_time(start, "start")
+    require_non_negative(duration, "duration")
+    require_non_negative(max_age, "max_age")
+    require_non_negative(max_lead, "max_lead")
+    processes = resolve_workers(workers)
+    require_at_least(max_states, 1, "max_states")
+    settings = _SearchSettings(start, float(duration), max_states)
+    current, duplicates, out_of_window = _screened_sets(
+        catalog, ScreeningRole.CATALOG, settings, max_age, max_lead
+    )
+    initialised = None
+    if processes == 1 and current:
+        initialised = _initialised(
+            current, np.arange(len(current)), settings, bounded=True
+        )
+    return PreparedCatalog(
+        settings=settings,
+        max_age=float(max_age),
+        max_lead=float(max_lead),
+        processes=processes,
+        elements=current,
+        skipped=(*duplicates, *out_of_window),
+        initialised=initialised,
+    )
+
+
+def _screened_sets(
+    omms: Iterable[Omm],
+    role: ScreeningRole,
+    settings: _SearchSettings,
+    max_age: float,
+    max_lead: float,
+) -> tuple[tuple[Omm, ...], list[SkippedObject], list[SkippedObject]]:
+    """The element set screened of each object, the newest of those whose
+    epochs are close enough to the window (the first given of a tie); the
+    other sets of the objects screened and the older sets of the others,
+    left out as duplicates; and the newest set of each of the others, left
+    out by its epoch.
+
+    Exact copies are one set (:func:`keepout.omm.deduplicate`).
+    """
+    elements = tuple(omms)
+    unique = deduplicate(elements)
+    position: dict[int, int] = {}
+    for index, omm in enumerate(elements):
+        position.setdefault(id(omm), index)
+    distinct = sorted((*unique.kept, *unique.dropped), key=lambda o: position[id(o)])
+    outside = _outside_window(distinct, role, settings, max_age, max_lead)
+    chosen: dict[int, Omm] = {}
+    for omm in distinct:
+        best = chosen.get(omm.catalog_number)
+        if id(omm) not in outside and (best is None or omm.epoch > best.epoch):
+            chosen[omm.catalog_number] = omm
     newest = unique.by_number
-    skipped: list[SkippedObject] = []
-    for omm in unique.dropped:
-        used = newest[omm.catalog_number].epoch.isot
-        detail = f"epoch {omm.epoch.isot}; the element set of epoch {used} is used"
-        skipped.append(SkippedObject(omm, role, SkipReason.DUPLICATE, detail))
-    return tuple(unique.kept), skipped
+    duplicates: list[SkippedObject] = []
+    for omm in distinct:
+        number = omm.catalog_number
+        used = chosen.get(number)
+        if used is not None and omm is not used:
+            detail = f"the element set of epoch {used.epoch.isot} is used"
+        elif used is None and omm is not newest[number]:
+            detail = (
+                f"the newest element set, of epoch {newest[number].epoch.isot}, "
+                "is left out too"
+            )
+        else:
+            continue
+        duplicates.append(
+            SkippedObject(
+                omm, role, SkipReason.DUPLICATE, f"epoch {omm.epoch.isot}; {detail}"
+            )
+        )
+    current = tuple(
+        chosen[omm.catalog_number]
+        for omm in unique.kept
+        if omm.catalog_number in chosen
+    )
+    out_of_window = [
+        outside[id(omm)] for omm in unique.kept if omm.catalog_number not in chosen
+    ]
+    return current, duplicates, out_of_window
 
 
-def _within_window(
+def _outside_window(
     omms: Sequence[Omm],
     role: ScreeningRole,
     settings: _SearchSettings,
     max_age: float,
     max_lead: float,
-) -> tuple[tuple[Omm, ...], list[SkippedObject]]:
-    """The element sets whose epochs are close enough to the window, and the
-    others left out (stale, or too far ahead)."""
+) -> dict[int, SkippedObject]:
+    """The element sets whose epochs are too far from the window (stale, or
+    too far ahead), left out, by ``id``."""
     if not omms:
-        return (), []
+        return {}
     epochs = Time(
         [omm.epoch.jd1 for omm in omms],
         [omm.epoch.jd2 for omm in omms],
@@ -329,8 +479,7 @@ def _within_window(
         scale="utc",
     )
     elapsed_at_start = (settings.start - epochs).to_value(u.s)
-    current: list[Omm] = []
-    skipped: list[SkippedObject] = []
+    outside: dict[int, SkippedObject] = {}
     for omm, elapsed in zip(omms, elapsed_at_start.tolist(), strict=True):
         age, lead = elapsed + settings.duration, -elapsed
         if age > max_age:
@@ -338,16 +487,14 @@ def _within_window(
                 f"the window ends {age / DAY:.2f} days after the epoch "
                 f"{omm.epoch.isot} (max_age {max_age / DAY:g} days)"
             )
-            skipped.append(SkippedObject(omm, role, SkipReason.STALE, detail))
+            outside[id(omm)] = SkippedObject(omm, role, SkipReason.STALE, detail)
         elif lead > max_lead:
             detail = (
                 f"the window starts {lead / DAY:.2f} days before the epoch "
                 f"{omm.epoch.isot} (max_lead {max_lead / DAY:g} days)"
             )
-            skipped.append(SkippedObject(omm, role, SkipReason.FUTURE_EPOCH, detail))
-        else:
-            current.append(omm)
-    return tuple(current), skipped
+            outside[id(omm)] = SkippedObject(omm, role, SkipReason.FUTURE_EPOCH, detail)
+    return outside
 
 
 def _primaries(
@@ -430,24 +577,31 @@ def _parts(
     primaries: Propagator,
     primary_omms: tuple[Omm, ...],
     volumes: Sequence[ScreeningVolume],
-    catalog: tuple[Omm, ...],
-    settings: _SearchSettings,
-    processes: int,
+    prepared: PreparedCatalog,
 ) -> list[_Part]:
     """The primaries with the catalog dealt into at most ``processes`` parts:
-    object ``i`` to part ``i mod count``, none for an empty catalog."""
+    object ``i`` to part ``i mod count``, none for an empty catalog; one part,
+    already initialised, in this process."""
+    settings = prepared.settings
     bounds = primaries.radius_bounds(settings.start, settings.duration)
-    count = min(processes, len(catalog))
-    return [
-        _Part(
+    catalog = prepared.elements
+
+    def part_of(items: tuple[Omm, ...] | _CatalogPart, columns: IndexArray) -> _Part:
+        return _Part(
             settings=settings,
             primaries=primaries,
             primary_omms=primary_omms,
             primary_bounds=bounds,
             volumes=tuple(volumes),
-            catalog=catalog[part::count],
-            columns=np.arange(part, len(catalog), count),
+            catalog=items,
+            columns=columns,
         )
+
+    if prepared.initialised is not None:
+        return [part_of(prepared.initialised, np.arange(len(catalog)))]
+    count = min(prepared.processes, len(catalog))
+    return [
+        part_of(catalog[part::count], np.arange(part, len(catalog), count))
         for part in range(count)
     ]
 
@@ -461,23 +615,41 @@ def _run(parts: Sequence[_Part]) -> list[_PartResult]:
         return list(pool.map(_screen_part, parts))
 
 
+def _initialised(
+    omms: Sequence[Omm],
+    columns: IndexArray,
+    settings: _SearchSettings,
+    *,
+    bounded: bool,
+) -> _CatalogPart:
+    """Element sets (at ``columns`` of the catalog) initialised for SGP4, with
+    their radius bounds over the window if ``bounded``."""
+    catalog, kept, rejected = Sgp4Propagator.from_omms(omms)
+    unsupported = tuple((int(columns[index]), str(error)) for index, error in rejected)
+    bounds = (
+        catalog.radius_bounds(settings.start, settings.duration)
+        if bounded and len(catalog) > 0
+        else None
+    )
+    numbers = np.array([omm.catalog_number for omm in catalog.omms], dtype=np.int64)
+    return _CatalogPart(catalog, columns[kept], unsupported, bounds, numbers)
+
+
 def _screen_part(part: _Part) -> _PartResult:
     """What one part finds: its catalog initialised, filtered and searched."""
-    catalog, kept, rejected = Sgp4Propagator.from_omms(part.catalog)
-    columns = part.columns[kept]
-    unsupported = tuple(
-        (int(part.columns[index]), str(error)) for index, error in rejected
-    )
     settings = part.settings
-    if len(part.primaries) == 0 or len(catalog) == 0:
-        return _PartResult(SearchResult.empty(), unsupported)
-    bounds = catalog.radius_bounds(settings.start, settings.duration)
+    prepared = part.catalog
+    if not isinstance(prepared, _CatalogPart):
+        bounded = len(part.primaries) > 0
+        prepared = _initialised(prepared, part.columns, settings, bounded=bounded)
+    catalog, columns, bounds = prepared.catalog, prepared.columns, prepared.bounds
+    if len(part.primaries) == 0 or bounds is None:
+        return _PartResult(SearchResult.empty(), prepared.unsupported)
     pairs = apogee_perigee_filter(part.primary_bounds, bounds, part.volumes)
     primary_numbers = np.array(
         [omm.catalog_number for omm in part.primary_omms], dtype=np.int64
     )
-    numbers = np.array([omm.catalog_number for omm in catalog.omms])
-    pairs &= primary_numbers[:, None] != numbers[None, :]
+    pairs &= primary_numbers[:, None] != prepared.numbers[None, :]
     search = ApproachSearch(
         part.primaries,
         catalog,
@@ -499,7 +671,7 @@ def _screen_part(part: _Part) -> _PartResult:
     }
     return _PartResult(
         SearchResult(tuple(minima), search_result.primary_failures, failures),
-        unsupported,
+        prepared.unsupported,
     )
 
 

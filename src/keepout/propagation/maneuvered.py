@@ -105,6 +105,38 @@ def _burn_difference(
     return CubicHermiteSpline(nodes, position, speed)
 
 
+def _largest_difference(
+    difference: CubicHermiteSpline, first: float, last: float
+) -> float:
+    """A bound on the difference over seconds ``first`` to ``last`` after the
+    burn, between the nodes too: on a node interval of length ``h`` a cubic
+    Hermite spline stays within ``h / 4`` times the larger slope of the larger
+    value."""
+    nodes: FloatArray = difference.x
+    low = int(np.searchsorted(nodes, first, side="right")) - 1
+    low = min(max(low, 0), len(nodes) - 2)
+    high = int(np.searchsorted(nodes, last, side="left")) + 1
+    kept = nodes[low : max(high, low + 2)]
+    values = np.linalg.norm(difference(kept), axis=1)
+    slopes = np.linalg.norm(difference(kept, 1), axis=1)
+    reach = np.maximum(values[:-1], values[1:])
+    reach += np.diff(kept) / 4.0 * np.maximum(slopes[:-1], slopes[1:])
+    return float(reach.max())
+
+
+def _bend_bounds(difference: CubicHermiteSpline) -> FloatArray:
+    """A bound on ``|d''|`` on each node interval of the spline: ``d''`` is
+    linear there, so the larger of its norms at the two ends."""
+    cubic, quadratic = difference.c[0], difference.c[1]
+    widths = np.diff(difference.x)[:, None]
+    start_bend = 2.0 * quadratic
+    end_bend = 6.0 * cubic * widths + start_bend
+    bend: FloatArray = np.maximum(
+        np.linalg.norm(start_bend, axis=1), np.linalg.norm(end_bend, axis=1)
+    )
+    return bend
+
+
 class ManeuveredPropagator:
     """The states of one object with an along-track burn, in its base's frame.
 
@@ -321,11 +353,13 @@ class ManeuveredPropagator:
         first = elapsed_seconds(self._burn_time, start)
         self._require_within_horizon(np.array([first + duration]))
         bounds = self._base.radius_bounds(start, duration)
-        if self._difference is None or first + duration <= 0.0:
+        difference = self._difference
+        if difference is None or first + duration <= 0.0:
             return bounds
-        burned = self._burned_radius(first, first + duration, float(bounds.lowest[0]))
+        last = first + duration
+        burned = self._burned_radius(difference, first, last, float(bounds.lowest[0]))
         if burned is None:
-            widening = self._largest_difference(first, first + duration)
+            widening = _largest_difference(difference, first, last)
             lowest = np.maximum(bounds.lowest - widening, 0.0)
             return RadiusBounds(lowest, bounds.highest + widening)
         return RadiusBounds(np.array([burned[0]]), np.array([burned[1]]))
@@ -344,27 +378,8 @@ class ManeuveredPropagator:
                 f"up to {times.max()} s"
             )
 
-    def _largest_difference(self, first: float, last: float) -> float:
-        """A bound on the difference over seconds ``first`` to ``last`` after
-        the burn, between the nodes too: on a node interval of length ``h`` a
-        cubic Hermite spline stays within ``h / 4`` times the larger slope of
-        the larger value."""
-        difference = self._difference
-        if difference is None or last < 0.0:
-            return 0.0
-        nodes: FloatArray = difference.x
-        low = int(np.searchsorted(nodes, first, side="right")) - 1
-        low = min(max(low, 0), len(nodes) - 2)
-        high = int(np.searchsorted(nodes, last, side="left")) + 1
-        kept = nodes[low : max(high, low + 2)]
-        values = np.linalg.norm(difference(kept), axis=1)
-        slopes = np.linalg.norm(difference(kept, 1), axis=1)
-        reach = np.maximum(values[:-1], values[1:])
-        reach += np.diff(kept) / 4.0 * np.maximum(slopes[:-1], slopes[1:])
-        return float(reach.max())
-
     def _burned_radius(
-        self, first: float, last: float, lowest: float
+        self, difference: CubicHermiteSpline, first: float, last: float, lowest: float
     ) -> tuple[float, float] | None:
         """Bounds on the radius over seconds ``first`` to ``last`` after the
         burn, the base's radius being at least ``lowest`` there; ``None`` if the
@@ -380,12 +395,11 @@ class ManeuveredPropagator:
         so its ends bound it. ``|q'|`` grows from the samples by at most
         ``|q''|`` over the half interval.
         """
-        difference = self._difference
         if lowest <= 0.0:
             return None
         begin, end = first, min(last, self._horizon)
-        nodes: FloatArray = difference.x if difference is not None else np.empty(0)
-        cuts = np.concatenate(([0.0], nodes)) if difference is not None else nodes
+        nodes: FloatArray = difference.x
+        cuts = np.concatenate(([0.0], nodes))
         edges = np.unique(
             np.concatenate(([begin, end], cuts[(cuts > begin) & (cuts < end)]))
         )
@@ -406,25 +420,17 @@ class ManeuveredPropagator:
         q_rate = states.v[0].copy()
         step = np.diff(times)
         middle = (times[:-1] + times[1:]) / 2.0
+        after = times >= 0.0
+        burned_times = np.minimum(times[after], self._horizon)
+        q[after] += difference(burned_times)
+        q_rate[after] += difference(burned_times, 1)
+        node_bend = _bend_bounds(difference)
         bend = np.zeros(len(step))  # a bound on |d''| in each sample interval
-        if difference is not None:
-            after = times >= 0.0
-            burned_times = np.minimum(times[after], self._horizon)
-            q[after] += difference(burned_times)
-            q_rate[after] += difference(burned_times, 1)
-            values, slopes = difference(nodes), difference(nodes, 1)
-            widths = np.diff(nodes)[:, None]
-            jumps = 6.0 * np.diff(values, axis=0) / widths**2
-            start_bend = jumps - (4.0 * slopes[:-1] + 2.0 * slopes[1:]) / widths
-            end_bend = (2.0 * slopes[:-1] + 4.0 * slopes[1:]) / widths - jumps
-            node_bend = np.maximum(
-                np.linalg.norm(start_bend, axis=1), np.linalg.norm(end_bend, axis=1)
-            )
-            burned = middle > 0.0
-            interval = np.clip(
-                np.searchsorted(nodes, middle[burned]) - 1, 0, len(node_bend) - 1
-            )
-            bend[burned] = node_bend[interval]
+        burned = middle > 0.0
+        interval = np.clip(
+            np.searchsorted(nodes, middle[burned]) - 1, 0, len(node_bend) - 1
+        )
+        bend[burned] = node_bend[interval]
         gravity = _ACCELERATION_MARGIN * EARTH_MU / lowest**2
         speed = np.linalg.norm(q_rate, axis=1)
         top_speed = np.maximum(speed[:-1], speed[1:]) + step / 2.0 * (gravity + bend)

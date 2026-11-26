@@ -114,16 +114,14 @@ def read_event(store_path: Path, event_id: str, settings: Settings) -> EventView
     return None if detail is None else view_of(detail, settings)
 
 
-def trend_of(view: EventView, settings: Settings) -> TrendFigure | None:
-    """The event's Pc trend with the settings' thresholds; ``None`` until it
-    is assessed.
+def trend_of(view: EventView) -> TrendFigure | None:
+    """The event's Pc trend with its assessment's thresholds; ``None`` until
+    it is assessed.
 
     Parameters
     ----------
     view
         The event.
-    settings
-        The settings whose thresholds the trend shows.
 
     Returns
     -------
@@ -132,7 +130,7 @@ def trend_of(view: EventView, settings: Settings) -> TrendFigure | None:
     """
     if view.assessment is None:
         return None
-    return trend_figure(view.assessment, settings.thresholds)
+    return trend_figure(view.assessment)
 
 
 def trend_plot(figure: TrendFigure) -> go.Figure:

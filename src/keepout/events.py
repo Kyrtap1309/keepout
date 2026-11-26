@@ -15,7 +15,7 @@ from keepout.risk.observation import PcObservation
 from keepout.units import elapsed_seconds
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
 
     from astropy.time import Time
 
@@ -132,6 +132,13 @@ def stable_event_id(message_id: str) -> str:
     return digest[:EVENT_ID_LENGTH]
 
 
+def _by_creation(reference: Cdm) -> Callable[[Cdm], tuple[float, str]]:
+    """The sort key of creation order: seconds from ``reference``'s
+    ``CREATION_DATE``, then ``MESSAGE_ID`` among equals."""
+    created = reference.creation_date
+    return lambda cdm: (elapsed_seconds(created, cdm.creation_date), cdm.message_id)
+
+
 def _pair(cdm: Cdm) -> tuple[str, str]:
     return cdm.object1.object_id, cdm.object2.object_id
 
@@ -180,15 +187,7 @@ class ConjunctionEvent:
             raise ValueError("event_id must not be empty")
         require_non_negative(self.tca_tolerance, "tca_tolerance")
         first = self.cdms[0]
-        ordered = tuple(
-            sorted(
-                self.cdms,
-                key=lambda cdm: (
-                    elapsed_seconds(first.creation_date, cdm.creation_date),
-                    cdm.message_id,
-                ),
-            )
-        )
+        ordered = tuple(sorted(self.cdms, key=_by_creation(first)))
         object.__setattr__(self, "cdms", ordered)
         counts = Counter(cdm.message_id for cdm in ordered)
         repeated = sorted(i for i, n in counts.items() if n > 1)
@@ -266,14 +265,7 @@ class ConjunctionEvent:
         """
         messages = tuple(cdms)
         if event_id is None and messages:
-            reference = messages[0].creation_date
-            first = min(
-                messages,
-                key=lambda m: (
-                    elapsed_seconds(reference, m.creation_date),
-                    m.message_id,
-                ),
-            )
+            first = min(messages, key=_by_creation(messages[0]))
             event_id = stable_event_id(first.message_id)
         return cls(event_id or "", messages, tca_tolerance)
 
@@ -548,14 +540,10 @@ def group_events(
     if not messages:
         return []
     reference = messages[0].tca
-    created = messages[0].creation_date
     bounds: list[EventBounds] = []
     members: list[list[Cdm]] = []
     by_pair: dict[tuple[str, str], list[int]] = {}
-    for cdm in sorted(
-        messages,
-        key=lambda m: (elapsed_seconds(created, m.creation_date), m.message_id),
-    ):
+    for cdm in sorted(messages, key=_by_creation(messages[0])):
         indices = by_pair.setdefault(_pair(cdm), [])
         fitting = [
             i for i in indices if bounds[i].admits(cdm, tca_tolerance=tca_tolerance)

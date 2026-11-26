@@ -44,7 +44,7 @@ def test_event_data_path(seed_db: Path) -> None:
     view = event_data.read_event(seed_db, page.items[0].event_id, settings)
     assert view is not None
     assert not view.detail.missing
-    trend = event_data.trend_of(view, settings)
+    trend = event_data.trend_of(view)
     assert trend is not None
     # Every CDM of an upcoming event is a point of its trend.
     assert trend.labels == tuple(cdm.message_id for cdm in view.detail.event.cdms)

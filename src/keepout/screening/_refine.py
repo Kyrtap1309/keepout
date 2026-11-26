@@ -11,8 +11,8 @@ from typing import TYPE_CHECKING, Final, NamedTuple
 
 import numpy as np
 
+from keepout._linalg import dot
 from keepout.propagation import NO_ERROR, ErrorArray, States
-from keepout.screening._sieve import dot
 from keepout.screening.search_result import ObjectFailure, RangeMinimum, keep_earliest
 
 if TYPE_CHECKING:

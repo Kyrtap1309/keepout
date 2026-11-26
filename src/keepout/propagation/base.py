@@ -355,7 +355,8 @@ class Propagator(Protocol):
         Returns
         -------
         Ephemeris
-            The states [m, m/s] in GCRF, one row per object and offset.
+            The states [m, m/s] in :attr:`frame`, one row per object and
+            offset.
         """
         ...
 
@@ -460,7 +461,7 @@ def pair_sampler(primary: Propagator, secondary: Propagator, start: Time) -> Sta
     Returns
     -------
     States
-        The pair's states [m, m/s] in GCRF.
+        The pair's states [m, m/s] in the propagators' frame.
     """
 
     def states(offsets: FloatArray) -> tuple[ErrorArray, FloatArray, FloatArray]:

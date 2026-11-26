@@ -1,6 +1,6 @@
 """Type aliases shared by the package (NumPy arrays, JSON values), with
-:func:`read_only` for those arrays, :class:`OrderedEnum` and
-:func:`~keepout._typing.override` (re-exported).
+:func:`read_only` and :func:`freeze_grid` for those arrays,
+:class:`OrderedEnum` and :func:`~keepout._typing.override` (re-exported).
 
 Argument checks are in :mod:`keepout._validation`, vector and matrix
 helpers in :mod:`keepout._linalg`."""
@@ -24,6 +24,7 @@ __all__ = [
     "InexactArray",
     "JsonValue",
     "OrderedEnum",
+    "freeze_grid",
     "override",
     "read_only",
 ]
@@ -74,3 +75,32 @@ def read_only(*arrays: npt.NDArray[np.generic]) -> None:
     """The ``arrays``, made read-only in place."""
     for array in arrays:
         array.flags.writeable = False
+
+
+def freeze_grid(
+    owner: object,
+    axes: tuple[str, str],
+    cells: tuple[str, ...],
+    trailing: tuple[int, ...] = (),
+) -> None:
+    """The array fields of a frozen dataclass replaced by read-only float64
+    copies: two axes of lengths ``(B, D)`` and the ``cells`` over them, of
+    shape ``(B, D, *trailing)``.
+
+    Raises
+    ------
+    ValueError
+        If a cell array has another shape.
+    """
+    copies = {
+        name: np.array(getattr(owner, name), dtype=np.float64)
+        for name in (*axes, *cells)
+    }
+    first, second = (copies[name].shape for name in axes)
+    shape = (*first, *second, *trailing)
+    if any(copies[name].shape != shape for name in cells):
+        got = " and ".join(str(copies[name].shape) for name in cells)
+        raise ValueError(f"{' and '.join(cells)} must have shape {shape}, got {got}")
+    read_only(*copies.values())
+    for name, array in copies.items():
+        object.__setattr__(owner, name, array)

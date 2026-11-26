@@ -452,12 +452,24 @@ def test_constructor_takes_no_objects() -> None:
     assert propagator.propagate(EPOCH, OFFSETS).r.shape == (0, 137, 3)
 
 
-def test_the_span_is_covered_when_the_step_does_not_divide_it() -> None:
+def test_the_end_of_the_span_is_the_integrations_own() -> None:
     span = (0.0, 1_000.0)
-    propagator = CowellPropagator(EPOCH, LEO[None], (FULL,), span, step=70.0)
+    propagator = CowellPropagator(EPOCH, LEO[None], (FULL,), span)
     exact = integrate(FULL, LEO[None], np.array([1_000.0]))[0, 0]
     last = propagator.propagate(EPOCH, 1_000.0)
-    assert np.linalg.norm(last.r[0, 0] - exact[:3]) < 1e-6
+    np.testing.assert_array_equal(last.r[0, 0], exact[:3])
+    np.testing.assert_array_equal(last.v[0, 0], exact[3:])
+
+
+def test_a_longest_step_makes_the_solver_keep_more_steps() -> None:
+    # DOP853 steps about 3 min in LEO at these tolerances.
+    span = (0.0, HOUR)
+    free = CowellPropagator(EPOCH, LEO[None], (FULL,), span)
+    held = CowellPropagator(EPOCH, LEO[None], (FULL,), span, step=10.0)
+    assert len(pickle.dumps(held)) > 5 * len(pickle.dumps(free))
+    times = np.linspace(0.0, HOUR, 50)
+    gap = held.propagate(EPOCH, times).r - free.propagate(EPOCH, times).r
+    assert np.abs(gap).max() < 1e-3
 
 
 def test_a_step_longer_than_the_span_gives_its_two_ends() -> None:
@@ -467,10 +479,11 @@ def test_a_step_longer_than_the_span_gives_its_two_ends() -> None:
     later = integrate(FULL, LEO[None], np.array([15.0, 30.0]))[:, 0]
     exact = np.concatenate((LEO[None], later))
     gap = np.linalg.norm(ephemeris.r[0] - exact[:, :3], axis=1)
-    # The ends are the nodes; between them the cubic is off by about
-    # h^4 n^4 r / 384 = 2 cm (h 30 s, n the mean motion).
+    # The ends are the integration's; in between DOP853's own interpolant is
+    # within its tolerances (0.1 mm), where a cubic between the ends was off
+    # by 2 cm.
     assert gap[[0, 2]].max() < 1e-6
-    assert gap[1] < 0.05
+    assert gap[1] < 1e-4
 
 
 def _decayed() -> tuple[CowellPropagator, Ephemeris, FloatArray]:
@@ -488,7 +501,11 @@ def test_reentered_object_has_error_code_six() -> None:
     count = np.count_nonzero(~failed)
     assert 0 < count < len(failed)
     assert failed[count:].all()
-    assert ephemeris.offsets[count] % 60.0 == 0.0  # the last node before re-entry
+    # Valid as far as an integration of the object alone reaches.
+    reached = integrate(
+        TWO_BODY, states[1:2], ephemeris.offsets[1:], stop_at_surface=True
+    )[:, 0]
+    assert count == 1 + np.count_nonzero(np.isfinite(reached[:, 0]))
     assert np.all(ephemeris.errors[1, count:] == DECAYED)
     assert DECAYED in ERROR_MESSAGES
     assert np.isnan(ephemeris.r[1, count:]).all()

@@ -1,9 +1,10 @@
 """Colours shared by the figures: risk levels, series, a ramp and marks;
-and the words of risk levels, actions and provenances.
+and the words of threshold lines and provenances.
 
 The risk colours stay apart for readers with a red-green colour vision
 deficiency (deuteranopia and protanopia), and every figure shows the level
-in words as well (:data:`RISK_LABELS`): colour is never the only cue.
+in words as well (:attr:`RiskLevel.key <keepout.risk.RiskLevel>`): colour is
+never the only cue.
 """
 
 from __future__ import annotations
@@ -11,19 +12,17 @@ from __future__ import annotations
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Final
 
-from keepout.risk import Action, Provenance, RiskLevel
+from keepout.risk import Provenance, RiskLevel
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
 __all__ = [
-    "ACTION_LABELS",
     "FIT_COLOUR",
     "NO_PC",
     "PROVENANCE_HELP",
     "PROVENANCE_LABELS",
     "RISK_COLOURS",
-    "RISK_LABELS",
     "SEQUENTIAL",
     "SERIES",
     "TARGET_COLOUR",
@@ -41,20 +40,10 @@ RISK_COLOURS: Final[Mapping[RiskLevel, str]] = MappingProxyType(
 and a dark red that stays apart from both under a deuteranopia or
 protanopia simulation."""
 
-RISK_LABELS: Final[Mapping[RiskLevel, str]] = MappingProxyType(
-    {level: level.key for level in RiskLevel}
-)
-"""Each risk level in words: ``green``, ``yellow``, ``red``."""
-
 THRESHOLD_LABELS: Final[Mapping[RiskLevel, str]] = MappingProxyType(
     {RiskLevel.YELLOW: "green below", RiskLevel.RED: "red from"}
 )
 """The words of the threshold line at which each level starts."""
-
-ACTION_LABELS: Final[Mapping[Action, str]] = MappingProxyType(
-    {action: action.label for action in Action}
-)
-"""Each action in words, as keepout prints it: ``prepare maneuver``."""
 
 PROVENANCE_LABELS: Final[Mapping[Provenance, str]] = MappingProxyType(
     {

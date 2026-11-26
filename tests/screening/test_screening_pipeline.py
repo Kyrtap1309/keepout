@@ -209,6 +209,53 @@ def test_the_newest_of_several_element_sets_is_screened() -> None:
     assert list(result.volumes) == [58199, 68377, 56156]  # as first given
 
 
+@functools.cache
+def iss_and_neighbour() -> tuple[Omm, Omm]:
+    """The ISS (25544) and 58180, which it passes twice on 6 October 2026."""
+    by_number = {omm.catalog_number: omm for omm in load(DATA / SNAPSHOT)}
+    return by_number[25544], by_number[58180]
+
+
+def test_a_newer_element_set_outside_the_window_leaves_the_older_one_screened() -> None:
+    iss, neighbour = iss_and_neighbour()
+    ahead = dataclasses.replace(neighbour, epoch=neighbour.epoch + 10 * u.day)
+    plain = screen([iss], [neighbour], START, DAY)
+    result = screen([iss], [neighbour, ahead], START, DAY)
+    assert len(plain.approaches) == 2
+    assert approaches_of(result) == approaches_of(plain)
+
+
+def test_a_newer_element_set_outside_the_window_is_a_duplicate_of_the_one_used() -> (
+    None
+):
+    iss, neighbour = iss_and_neighbour()
+    ahead = dataclasses.replace(neighbour, epoch=neighbour.epoch + 10 * u.day)
+    result = screen([iss], [ahead, neighbour], START, DAY)
+    (skipped,) = result.skipped
+    assert skipped.elements is ahead
+    assert skipped.reason is SkipReason.DUPLICATE
+    assert skipped.detail == (
+        f"epoch {ahead.epoch.isot}; the element set of epoch "
+        f"{neighbour.epoch.isot} is used"
+    )
+
+
+def test_older_element_sets_of_an_object_left_out_do_not_claim_one_is_used() -> None:
+    _, neighbour = iss_and_neighbour()
+    ahead = dataclasses.replace(neighbour, epoch=neighbour.epoch + 10 * u.day)
+    further = dataclasses.replace(neighbour, epoch=neighbour.epoch + 20 * u.day)
+    result = screen([BY_NUMBER[STALE]], [ahead, further], START, DAY)
+    catalog = [s for s in result.skipped if s.role == "catalog"]
+    assert [(s.elements, s.reason) for s in catalog] == [
+        (ahead, SkipReason.DUPLICATE),
+        (further, SkipReason.FUTURE_EPOCH),
+    ]
+    assert catalog[0].detail == (
+        f"epoch {ahead.epoch.isot}; the newest element set, of epoch "
+        f"{further.epoch.isot}, is left out too"
+    )
+
+
 def test_element_sets_too_far_from_the_window_are_left_out() -> None:
     max_age, max_lead = 7 * DAY, 0.2 * DAY
     end = START + DAY * u.s

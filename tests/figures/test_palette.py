@@ -9,19 +9,17 @@ import pytest
 
 from keepout._types import FloatArray
 from keepout.figures import (
-    ACTION_LABELS,
     FIT_COLOUR,
     NO_PC,
     PROVENANCE_HELP,
     PROVENANCE_LABELS,
     RISK_COLOURS,
-    RISK_LABELS,
     SEQUENTIAL,
     SERIES,
     TARGET_COLOUR,
     THRESHOLD_LABELS,
 )
-from keepout.risk import Action, Provenance, RiskLevel
+from keepout.risk import Provenance, RiskLevel
 
 HEX = re.compile(r"^#[0-9a-f]{6}$")
 
@@ -125,8 +123,6 @@ def test_ciede2000_matches_sharmas_reference_pair() -> None:
     ("mapping", "members"),
     [
         (RISK_COLOURS, RiskLevel),
-        (RISK_LABELS, RiskLevel),
-        (ACTION_LABELS, Action),
         (PROVENANCE_LABELS, Provenance),
         (PROVENANCE_HELP, Provenance),
     ],
@@ -155,10 +151,6 @@ def test_threshold_labels_name_where_each_level_starts() -> None:
         RiskLevel.YELLOW: "green below",
         RiskLevel.RED: "red from",
     }
-
-
-def test_risk_labels_are_the_level_names() -> None:
-    assert [RISK_LABELS[level] for level in RiskLevel] == ["green", "yellow", "red"]
 
 
 def test_provenance_labels() -> None:
