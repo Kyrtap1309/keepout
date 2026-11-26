@@ -2,7 +2,10 @@
 draw them with matplotlib: the trend of an event's Pc, the encounter plane,
 the 3-D geometry at TCA and the heatmap of a manoeuvre plan.
 
-Every trace is named, so the legend says in words what colour shows.
+Every trace is named, so the legend says in words what colour shows. A
+threshold line has the colour of the level its label names (``green
+below`` is green); a yellow point has a dark edge, to show on a light
+background.
 """
 
 from __future__ import annotations
@@ -26,6 +29,7 @@ from keepout.figures import (
     TARGET_COLOUR,
     THRESHOLD_LABELS,
 )
+from keepout.risk import RiskLevel
 
 if TYPE_CHECKING:
     from keepout._types import FloatArray
@@ -36,9 +40,18 @@ if TYPE_CHECKING:
         GridPanel,
         TrendFigure,
     )
-    from keepout.risk import RiskLevel
 
 __all__ = ["encounter", "geometry", "grid", "trend"]
+
+_MARGIN: Final = {"t": 30, "b": 40, "l": 10, "r": 10}
+"""The space around a plot [px]: room for a label above it, no more."""
+
+_EDGE: Final = "#3c3c3c"
+"""The edge of a yellow point."""
+
+_LINE_LEVEL: Final = {RiskLevel.YELLOW: RiskLevel.GREEN, RiskLevel.RED: RiskLevel.RED}
+"""The level whose colour a threshold line takes, by the level it starts:
+the one its label names (:data:`~keepout.figures.THRESHOLD_LABELS`)."""
 
 _COLOURSCALE: Final = tuple(
     (i / (len(SEQUENTIAL) - 1), colour) for i, colour in enumerate(SEQUENTIAL)
@@ -98,12 +111,20 @@ def _point_traces(fig: TrendFigure) -> list[go.Scatter]:
                     "color": RISK_COLOURS[level],
                     "size": 10,
                     "symbol": "circle-open" if floored else "circle",
-                    "line": {"color": RISK_COLOURS[level], "width": 2},
+                    "line": {"color": _edge(level, floored=floored), "width": 2},
                 },
                 hovertemplate="%{text}<br>%{x:.1f} h to TCA<br>Pc %{y:.2e}",
             )
         )
     return traces
+
+
+def _edge(level: RiskLevel, *, floored: bool) -> str:
+    """The edge of a point: its level's colour, but dark for a filled
+    yellow one."""
+    if level is RiskLevel.YELLOW and not floored:
+        return _EDGE
+    return RISK_COLOURS[level]
 
 
 def trend(fig: TrendFigure, *, decision_point_hours: float | None = None) -> go.Figure:
@@ -126,7 +147,11 @@ def trend(fig: TrendFigure, *, decision_point_hours: float | None = None) -> go.
     for value, level in reversed(fig.thresholds):
         drawing.add_hline(
             y=value,
-            line={"color": RISK_COLOURS[level], "dash": "dash", "width": 1},
+            line={
+                "color": RISK_COLOURS[_LINE_LEVEL[level]],
+                "dash": "dash",
+                "width": 1.5,
+            },
             annotation_text=f"{THRESHOLD_LABELS[level]} {value:.0e}",
             annotation_position="top left",
             # Plotly places a line's label at y itself, which a log axis
@@ -144,6 +169,7 @@ def trend(fig: TrendFigure, *, decision_point_hours: float | None = None) -> go.
         xaxis={"title": {"text": "hours to TCA"}, "autorange": "reversed"},
         yaxis={"title": {"text": "Pc"}, "type": "log", "exponentformat": "power"},
         legend={"title": {"text": "risk"}},
+        margin=_MARGIN,
     )
     return drawing
 
@@ -190,6 +216,7 @@ def encounter(fig: EncounterFigure, *, covariance: bool = True) -> go.Figure:
     drawing.update_layout(
         xaxis={"title": {"text": "x [m]"}},
         yaxis={"title": {"text": "z [m]"}, "scaleanchor": "x", "scaleratio": 1},
+        margin=_MARGIN,
     )
     return drawing
 
@@ -247,9 +274,25 @@ def geometry(fig: GeometryFigure, *, covariance: bool = True) -> go.Figure:
             "yaxis": {"title": {"text": t}},
             "zaxis": {"title": {"text": n}},
             "aspectmode": "data",
-        }
+        },
+        margin=_MARGIN,
     )
     return drawing
+
+
+def _colour_bar(fig: GridFigure) -> dict[str, object]:
+    """The colour bar: a tick per decade of Pc, and one at the target."""
+    decades = range(math.ceil(LOWEST_LOG_PC), math.floor(fig.top_log_pc) + 1)
+    # A decade too near the target would overlap its label.
+    ticks = {
+        float(d): f"{10.0**d:.0e}" for d in decades if abs(d - fig.target_log_pc) >= 0.5
+    }
+    ticks[fig.target_log_pc] = f"target {fig.target_pc:.0e}"
+    return {
+        "title": {"text": "Pc"},
+        "tickvals": list(ticks),
+        "ticktext": list(ticks.values()),
+    }
 
 
 def _heatmap(panel: GridPanel, fig: GridFigure, *, scale: bool) -> go.Heatmap:
@@ -262,7 +305,7 @@ def _heatmap(panel: GridPanel, fig: GridFigure, *, scale: bool) -> go.Heatmap:
         zmax=fig.top_log_pc,
         colorscale=_COLOURSCALE,
         showscale=scale,
-        colorbar={"title": {"text": "log10 Pc"}},
+        colorbar=_colour_bar(fig),
         name=str(panel.direction),
         hovertemplate=(
             "|Δv| %{x:.3g} m/s<br>%{y:.1f} h before TCA<br>"
@@ -335,7 +378,8 @@ def grid(fig: GridFigure) -> go.Figure:
         rows=1,
         cols=2,
         shared_yaxes=True,
-        horizontal_spacing=0.04,
+        # Room between the panels for their end ticks on a narrow page.
+        horizontal_spacing=0.12,
         subplot_titles=[str(panel.direction) for panel in fig.directions],
     )
     last = len(fig.directions)
@@ -356,8 +400,17 @@ def grid(fig: GridFigure) -> go.Figure:
             drawing.add_trace(trace, row=1, col=column)
     if any(np.isnan(panel.log_pc).any() for panel in fig.directions):
         drawing.add_trace(_no_pc_key())
-    drawing.update_xaxes(type="log", title={"text": "|Δv| [m/s]"})
+    # A tick per decade: the log axis's 2 and 5 overlap on a narrow page.
+    drawing.update_xaxes(
+        type="log", dtick=1, automargin=True, title={"text": "|Δv| [m/s]"}
+    )
     drawing.update_xaxes(autorange="reversed", row=1, col=1)
     drawing.update_yaxes(title={"text": "burn time before TCA (h)"}, row=1, col=1)
-    drawing.update_layout(plot_bgcolor=NO_PC, legend={"orientation": "h", "y": -0.2})
+    drawing.update_layout(
+        plot_bgcolor=NO_PC,
+        # Under the axis titles, however tall the ticks: at the bottom of
+        # the figure, in a margin of its own.
+        legend={"orientation": "h", "yref": "container", "y": 0, "yanchor": "bottom"},
+        margin={**_MARGIN, "t": 40, "b": 110},
+    )
     return drawing

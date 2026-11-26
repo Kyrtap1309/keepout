@@ -11,6 +11,7 @@ what-if is cached under its own key, as any settings are.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from functools import partial
 from typing import TYPE_CHECKING, Final
 
 import numpy as np
@@ -19,22 +20,25 @@ import streamlit as st
 from keepout._text import ASSUMED_COVARIANCES, minute, pc_text, utc
 from keepout._validation import require_open_probability
 from keepout.dashboard import plots
-from keepout.dashboard.routes import (
-    EVENT_PAGE,
-    EVENT_PARAM,
-    EVENTS_PAGE,
-    what_if_key,
+from keepout.dashboard.routes import WhatIf, what_if_key
+from keepout.dashboard.text import (
+    MISSING,
+    literal,
+    merged_notes,
+    risk_text,
 )
-from keepout.dashboard.text import literal
 from keepout.dashboard.widgets import (
+    back_links,
+    event_or_stop,
     job_status,
     page_context,
     provenance_badge,
+    shared_store,
     show_error,
     state,
 )
 from keepout.errors import KeepoutError
-from keepout.figures import PROVENANCE_LABELS, grid_figure
+from keepout.figures import grid_figure
 from keepout.maneuver import BurnDirection
 from keepout.maneuver.wording import (
     NO_BURN_NEEDED,
@@ -48,24 +52,24 @@ from keepout.maneuver.wording import (
     rescreen_head,
     return_lines,
 )
-from keepout.risk import Provenance, covariance_provenance
-from keepout.settings import Settings
+from keepout.risk import covariance_provenance
 from keepout.units import HOUR
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from pathlib import Path
+
+    import plotly.graph_objects as go
 
     from keepout.dashboard.context import DashboardContext
     from keepout.events import ConjunctionEvent
-    from keepout.maneuver import (
-        ManeuverOutcome,
-        NewApproach,
-    )
+    from keepout.maneuver import ManeuverGrid, ManeuverOutcome, NewApproach
+    from keepout.settings import Settings
     from keepout.store import Job
 
-# (No docstrings on the names below: Streamlit would show a bare string as
-# Markdown.)
 TITLE: Final = "Manoeuvre planner"
+
+_PC = st.column_config.TextColumn("Pc", alignment="right")
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,45 +78,29 @@ class _Planned:
     go."""
 
     event: ConjunctionEvent
+    settings: Settings
+    message_id: str
+    key: str
+    """The plan's cache key: its settings and catalog."""
     outcome: ManeuverOutcome | None
     jobs: tuple[Job, ...]
     queued: bool
     """Whether a job for the settings is queued or running."""
 
 
-def _settings(ctx: DashboardContext, event_id: str) -> Settings:
-    """The settings the page plans the event with: the operator's, or the
-    what-if chosen for the event (its target Pc and combined hard-body
-    radius on the operator's settings as they are now)."""
-    chosen = state(what_if_key(event_id), Settings)
-    if chosen is None:
-        return ctx.settings
+def _with(settings: Settings, what_if: WhatIf | None) -> Settings:
+    """The operator's settings, changed by a what-if if any (ValueError if bad)."""
+    if what_if is None:
+        return settings
     return replace(
-        ctx.settings,
-        target_pc=chosen.target_pc,
-        combined_hard_body_radius=chosen.combined_hard_body_radius,
+        settings, target_pc=what_if.target_pc, combined_hard_body_radius=what_if.hbr
     )
 
 
-def _read(ctx: DashboardContext, event_id: str, settings: Settings) -> _Planned | None:
-    """The event, its plan cached for ``settings`` (``None``: none), and
-    its jobs to show: every manoeuvre job of the event still queued or
-    running, and the latest one for ``settings`` on its latest CDM if it
-    has ended without a plan (failed or cancelled); ``None`` if there is no
-    such event. All are read in one transaction
-    (:meth:`~keepout.store.Store.plan_detail`).
-
-    Raises
-    ------
-    StoreError
-        If the store cannot be read, or the cached plan cannot be.
-    CdmParseError, EventError
-        If its stored CDMs no longer parse or make an event.
-    ValueError
-        If a settings file cannot hold ``settings``.
-    """
-    with ctx.store() as store:
-        detail = store.plan_detail(event_id, settings)
+def _read(ctx: DashboardContext, event_id: str) -> _Planned | None:
+    """The event, its plan for the page's settings and the jobs to show, in one read."""
+    settings = _with(ctx.settings, state(what_if_key(event_id), WhatIf))
+    detail = shared_store(ctx.store_path).plan_detail(event_id, settings)
     if detail is None:
         return None
     outcome = detail.outcome
@@ -122,7 +110,15 @@ def _read(ctx: DashboardContext, event_id: str, settings: Settings) -> _Planned 
     if outcome is None and current is not None and not queued:
         # Why the last job for these settings ended.
         shown.append(current)
-    return _Planned(detail.event, outcome, tuple(shown), queued)
+    return _Planned(
+        detail.event,
+        settings,
+        detail.message_id,
+        detail.key,
+        outcome,
+        tuple(shown),
+        queued,
+    )
 
 
 def _hbr_words(hbr: float | None) -> str:
@@ -139,19 +135,11 @@ def _settings_words(settings: Settings) -> str:
 
 
 def _submit(ctx: DashboardContext, event_id: str, settings: Settings) -> bool:
-    """Queue the plan of the event with ``settings``, unless it is cached or
-    queued already; if it cannot be, show why.
-
-    Returns
-    -------
-    bool
-        Whether the submission went through (the page then runs again).
-    """
+    """Queue the plan unless cached or queued; whether it went through."""
     from keepout.store import JobQueue
 
     try:
-        with ctx.store() as store:
-            JobQueue(store).submit(event_id, settings)
+        JobQueue(shared_store(ctx.store_path)).submit(event_id, settings)
     except (KeepoutError, ValueError) as exc:
         show_error(exc)
         return False
@@ -179,9 +167,7 @@ def _form_keys(event_id: str) -> tuple[str, str]:
 
 
 def _shown_settings(ctx: DashboardContext, event_id: str, shown: Settings) -> None:
-    """The settings the plan is shown for; for a what-if, the operator's
-    too and the button back to them (and the form starts from them
-    again: its widgets keep what was typed otherwise)."""
+    """The settings shown; for a what-if, the operator's and the way back."""
     if shown == ctx.settings:
         st.markdown(f"Operator's settings: {_settings_words(shown)}.")
         return
@@ -194,10 +180,7 @@ def _shown_settings(ctx: DashboardContext, event_id: str, shown: Settings) -> No
 
 
 def _what_if_form(event_id: str, shown: Settings) -> tuple[str, float | None] | None:
-    """The form of a what-if, starting from the settings the plan is shown
-    for (``shown``: the what-if in effect, if any); once submitted, the
-    target Pc typed and the combined hard-body radius (``None``: the CDMs'
-    radii)."""
+    """The what-if form, from the settings shown; what was typed once submitted."""
     target_key, hbr_key = _form_keys(event_id)
     with st.expander("What if"), st.form(f"planner-form-{event_id}"):
         target = st.text_input(
@@ -224,31 +207,26 @@ def _what_if_form(event_id: str, shown: Settings) -> tuple[str, float | None] | 
 def _apply_what_if(
     ctx: DashboardContext, event_id: str, target: str, hbr: float | None
 ) -> None:
-    """Plan the event with a what-if: keep it for the page (unless it is
-    the operator's settings), then queue its plan unless it is cached or
-    queued; an error is shown instead."""
+    """Keep a what-if for the page and queue its plan; or show the error."""
     target_pc = _target_pc(target)
     if target_pc is None:
         return
+    what_if = WhatIf(target_pc, hbr)
     try:
-        chosen = replace(
-            ctx.settings, target_pc=target_pc, combined_hard_body_radius=hbr
-        )
+        chosen = _with(ctx.settings, what_if)
     except ValueError as exc:
         show_error(exc)
         return
     if chosen == ctx.settings:
         st.session_state.pop(what_if_key(event_id), None)
     else:
-        st.session_state[what_if_key(event_id)] = chosen
+        st.session_state[what_if_key(event_id)] = what_if
     if _submit(ctx, event_id, chosen):
         st.rerun()
 
 
 def _what_if(ctx: DashboardContext, event_id: str, shown: Settings) -> None:
-    """The settings the plan is shown for, and the form that plans it for
-    another target Pc or combined hard-body radius: cached, or queued as a
-    job of its own."""
+    """The settings shown, and the form planning for another target or radius."""
     _shown_settings(ctx, event_id, shown)
     typed = _what_if_form(event_id, shown)
     if typed is not None:
@@ -262,7 +240,7 @@ def _jobs(ctx: DashboardContext, jobs: Sequence[Job]) -> None:
     st.subheader("Jobs")
     job_status(
         ctx.store_path,
-        [job.id for job in jobs],
+        jobs,
         labels={job.id: f"{_settings_words(job.settings)}." for job in jobs},
     )
 
@@ -289,47 +267,78 @@ def _burns(outcome: ManeuverOutcome) -> None:
     none."""
     st.subheader("Smallest burn each way")
     st.dataframe(
-        burn_rows(outcome),
+        [{**row, "Pc": pc_text(row["Pc"])} for row in burn_rows(outcome)],
         column_config={
             "Before TCA (h)": st.column_config.NumberColumn(format="%.1f"),
-            "Pc": st.column_config.NumberColumn(format="%.2e"),
+            "Δv (m/s)": st.column_config.NumberColumn(format="%+.4f"),
+            "Pc": _PC,
             "Range (m)": st.column_config.NumberColumn(format="%.0f"),
         },
         hide_index=True,
+        placeholder=MISSING,
     )
     for line in gap_lines(outcome):
         st.info(line)
 
 
-def _grid(outcome: ManeuverOutcome) -> None:
-    """The heatmap of the Pc grid and its cells."""
+_Cells = dict[str, list[str] | list[float] | list[float | None] | list[str | None]]
+
+
+@st.cache_data(show_spinner=False, max_entries=16)
+def _grid_view(
+    store_path: Path,  # noqa: ARG001 (the key)
+    event_id: str,  # noqa: ARG001
+    message_id: str,  # noqa: ARG001
+    key: str,  # noqa: ARG001
+    _outcome: ManeuverOutcome,
+    _cells: ManeuverGrid,
+) -> tuple[go.Figure, _Cells]:
+    """The heatmap and its cells as a table, made once per cached plan."""
+    cells = _cells
+    leads, changes = np.meshgrid(cells.burn_leads, cells.delta_v, indexing="ij")
+    pc = cells.pc.ravel()
+    ranges = cells.range_at_tca.ravel()
+    table: _Cells = {
+        "direction": [str(BurnDirection.of(dv)) for dv in changes.ravel()],
+        "hours before TCA": (leads.ravel() / HOUR).tolist(),
+        "|Δv| [m/s]": np.abs(changes.ravel()).tolist(),
+        "Pc": [pc_text(float(v)) if np.isfinite(v) else None for v in pc],
+        "range at TCA [m]": [float(v) if np.isfinite(v) else None for v in ranges],
+    }
+    return plots.grid(grid_figure(_outcome)), table
+
+
+def _grid(planned: _Planned, outcome: ManeuverOutcome, store_path: Path) -> None:
+    """The heatmap of the Pc grid, and its cells in a collapsed table."""
     if outcome.grid is None:
         return
     st.subheader("Pc over burn time and Δv")
-    figure = grid_figure(outcome)
-    st.plotly_chart(plots.grid(figure))
-    cells = outcome.grid
-    leads, changes = np.meshgrid(cells.burn_leads, cells.delta_v, indexing="ij")
-    st.dataframe(
-        {
-            "direction": [str(BurnDirection.of(dv)) for dv in changes.ravel()],
-            "hours before TCA": (leads.ravel() / HOUR).tolist(),
-            "|Δv| [m/s]": np.abs(changes.ravel()).tolist(),
-            "Pc": cells.pc.ravel().tolist(),
-            "range at TCA [m]": cells.range_at_tca.ravel().tolist(),
-        },
-        column_config={
-            "hours before TCA": st.column_config.NumberColumn(format="%.2f"),
-            "Pc": st.column_config.NumberColumn(format="%.2e"),
-            "range at TCA [m]": st.column_config.NumberColumn(format="%.1f"),
-        },
-        hide_index=True,
+    figure, cells = _grid_view(
+        store_path,
+        planned.event.event_id,
+        planned.message_id,
+        planned.key,
+        outcome,
+        outcome.grid,
     )
+    st.plotly_chart(figure)
+    with st.expander(f"Grid cells ({outcome.grid.pc.size})"):
+        st.dataframe(
+            cells,
+            column_config={
+                "hours before TCA": st.column_config.NumberColumn(format="%.2f"),
+                "|Δv| [m/s]": st.column_config.NumberColumn(format="%.4f"),
+                "Pc": _PC,
+                "range at TCA [m]": st.column_config.NumberColumn(format="%.1f"),
+            },
+            hide_index=True,
+            placeholder=MISSING,
+        )
 
 
 def _approach_rows(approaches: Sequence[tuple[ApproachKind, NewApproach]]) -> None:
-    """A data table of the approaches, a row each: its Pc with its
-    provenance, and its risk level in words."""
+    """A data table of the approaches, a row each: its assumed Pc, and its
+    risk level in words."""
     st.dataframe(
         [
             {
@@ -337,15 +346,15 @@ def _approach_rows(approaches: Sequence[tuple[ApproachKind, NewApproach]]) -> No
                 "secondary": item.approach.secondary_number,
                 "TCA (UTC)": minute(item.approach.tca),
                 "range [m]": item.approach.range_at_tca,
-                "assumed Pc": item.pc,
-                "provenance": PROVENANCE_LABELS[Provenance.GP_AGE_MODEL],
-                "risk": item.level.key,
+                "assumed Pc": pc_text(item.pc),
+                "risk": risk_text(item.level),
             }
             for kind, item in approaches
         ],
         column_config={
+            "secondary": st.column_config.NumberColumn(format="%d"),
             "range [m]": st.column_config.NumberColumn(format="%.0f"),
-            "assumed Pc": st.column_config.NumberColumn(format="%.2e"),
+            "assumed Pc": st.column_config.TextColumn(alignment="right"),
         },
         hide_index=True,
     )
@@ -382,7 +391,15 @@ def _rescreens(outcome: ManeuverOutcome) -> None:
             st.caption(ASSUMED_COVARIANCES)
 
 
-def _plan(outcome: ManeuverOutcome) -> None:
+def _notes(outcome: ManeuverOutcome) -> None:
+    """The plan's notes, each once, collapsed."""
+    notes = merged_notes(outcome.notes)
+    if notes:
+        with st.expander(f"Notes ({len(notes)})"):
+            st.markdown("\n".join(f"- {literal(note)}" for note in notes))
+
+
+def _plan(planned: _Planned, outcome: ManeuverOutcome, store_path: Path) -> None:
     """The plan: its verdict, the burns, the grid and the re-screens."""
     latest = outcome.event.latest
     st.markdown(
@@ -400,55 +417,28 @@ def _plan(outcome: ManeuverOutcome) -> None:
     else:
         st.warning(f"{refusal(outcome)}.")
     _burns(outcome)
-    _grid(outcome)
-    for note in outcome.notes:
-        st.caption(f"Note: {note}")
+    _grid(planned, outcome, store_path)
+    _notes(outcome)
     _rescreens(outcome)
-
-
-def _links(event_id: str | None) -> None:
-    """The ways back: the events list, and the event's page."""
-    st.page_link(EVENTS_PAGE, label="Events")
-    if event_id:
-        st.page_link(EVENT_PAGE, label="Event", query_params={EVENT_PARAM: event_id})
 
 
 def main() -> None:
     """The manoeuvre planner page."""
     ctx = page_context()
-    event_id = st.query_params.get(EVENT_PARAM)
-    settings = _settings(ctx, event_id) if event_id else ctx.settings
-    data: _Planned | None = None
-    error: KeepoutError | ValueError | None = None
-    if event_id:
-        try:
-            data = _read(ctx, event_id, settings)
-        except (KeepoutError, ValueError) as exc:
-            error = exc
-    if not event_id or data is None:
-        st.title(TITLE)
-        if not event_id:
-            st.info("Pick an event from the list.")
-        elif error is not None:
-            show_error(error)
-        else:
-            st.warning(f"No such event: {literal(event_id)}")
-        # A settings file that cannot hold the settings: the event is there.
-        _links(event_id if isinstance(error, ValueError) else None)
-        return
+    event_id, data = event_or_stop(TITLE, partial(_read, ctx))
     st.title(f"{TITLE}: event {event_id}")
+    back_links(event_id)
     event = data.event
     st.markdown(
         f"**{literal(event.primary_id)} / {literal(event.secondary_id)}** · TCA "
         f"{utc(event.latest.tca)} UTC"
     )
-    _links(event_id)
-    _what_if(ctx, event_id, settings)
+    _what_if(ctx, event_id, data.settings)
     _jobs(ctx, data.jobs)
     if data.outcome is None:
-        _no_plan(ctx, event_id, settings, queued=data.queued)
+        _no_plan(ctx, event_id, data.settings, queued=data.queued)
         return
-    _plan(data.outcome)
+    _plan(data, data.outcome, ctx.store_path)
 
 
 main()

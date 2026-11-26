@@ -9,7 +9,7 @@ the store has are shown; the trend and the risk wait for all of them.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING
 
 import numpy as np
 import streamlit as st
@@ -18,36 +18,38 @@ from keepout._text import pc_cell, plural, utc
 from keepout.dashboard.event_data import (
     EventView,
     encounter_plot,
+    event_view,
     geometry_of,
     geometry_plot,
     is_max_pc,
     latest_conjunction,
-    read_event,
     trend_of,
     trend_plot,
 )
-from keepout.dashboard.routes import (
-    EVENT_PARAM,
-    EVENTS_PAGE,
-    PLANNER_PAGE,
-    refresh_job_key,
+from keepout.dashboard.routes import EVENT_PARAM, PLANNER_PAGE, refresh_job_key
+from keepout.dashboard.text import (
+    MISSING,
+    NOT_COMPUTED,
+    british,
+    literal,
+    risk_text,
 )
-from keepout.dashboard.text import NOT_COMPUTED, literal
 from keepout.dashboard.widgets import (
     assessment_chip,
+    back_links,
+    event_or_stop,
     job_status,
     page_context,
     provenance_badge,
-    risk_chip,
+    read_jobs,
+    shared_store,
     show_error,
     state,
-    table_header,
-    table_row,
 )
 from keepout.errors import GeometryError, HardBodyRadiusError, KeepoutError
 from keepout.events import missing_hard_body_radius, time_to_tca
 from keepout.figures import PROVENANCE_LABELS
-from keepout.risk import provenance
+from keepout.risk import RiskLevel, provenance
 from keepout.units import HOUR
 
 if TYPE_CHECKING:
@@ -56,30 +58,9 @@ if TYPE_CHECKING:
     from keepout.cdm import Cdm
     from keepout.conjunction import Conjunction
     from keepout.dashboard.context import DashboardContext
-    from keepout.risk import PcObservation, Provenance, RiskLevel
+    from keepout.risk import Assessment, PcObservation, Provenance
 
-# (No docstring: Streamlit would show a bare string as Markdown.)
-COLUMNS: Final = (
-    ("CDM", 4),
-    ("Created (UTC)", 3),
-    ("Before TCA", 2),
-    ("Miss [m]", 2),
-    ("Pc", 2),
-    ("Provenance", 3),
-    ("Risk", 3),
-)
-
-
-def _to_list() -> None:
-    """The way back to the events list."""
-    st.page_link(EVENTS_PAGE, label="Events")
-
-
-def _to_planner(event_id: str) -> None:
-    """The way on to the event's manoeuvre planner."""
-    st.page_link(
-        PLANNER_PAGE, label="Manoeuvre planner", query_params={EVENT_PARAM: event_id}
-    )
+_METRES = st.column_config.NumberColumn(format="%.1f")
 
 
 def _provenance(observation: PcObservation, cdm: Cdm) -> Provenance:
@@ -87,9 +68,32 @@ def _provenance(observation: PcObservation, cdm: Cdm) -> Provenance:
     return provenance(observation, lambda: cdm.header.comments)
 
 
+def _to_planner(event_id: str, assessment: Assessment | None) -> None:
+    """The way on to the event's manoeuvre planner: a primary button for a
+    red event."""
+    query = {EVENT_PARAM: event_id}
+    label, icon = "Manoeuvre planner", ":material/rocket_launch:"
+    if assessment is not None and assessment.level is RiskLevel.RED:
+        if st.button(label, type="primary", icon=icon, key=f"event-plan-{event_id}"):
+            st.switch_page(PLANNER_PAGE, query_params=query)
+        return
+    st.page_link(PLANNER_PAGE, label=label, icon=icon, query_params=query)
+
+
+def _why(assessment: Assessment) -> None:
+    """The reasons for the event's risk and action."""
+    if assessment.level is None or not assessment.decision.reasons:
+        return
+    action = british(assessment.decision.action.label)
+    reasons = "\n".join(
+        f"- {literal(british(reason))}" for reason in assessment.decision.reasons
+    )
+    st.info(f"**{assessment.level.key} · {action}**, because:\n\n{reasons}")
+
+
 def _header(data: EventView) -> None:
     """The event's objects, its TCA, the latest Pc with its provenance and
-    the risk with the recommended action."""
+    the risk with the recommended action, and why."""
     event = data.detail.event
     latest = event.latest
     st.markdown(
@@ -97,18 +101,15 @@ def _header(data: EventView) -> None:
         f"{utc(latest.tca)} UTC · "
         f"{plural(len(event.cdms), 'CDM')}"
     )
-    pc, origin, risk = st.columns([2, 3, 4], vertical_alignment="center")
+    line = st.container(horizontal=True, vertical_alignment="center")
     observation = data.observations.get(latest.message_id)
-    pc.markdown(f"Latest Pc: {pc_cell(observation, missing=NOT_COMPUTED)}")
-    if observation is not None:
-        with origin:
+    with line:
+        st.markdown(f"Latest Pc: {pc_cell(observation, missing=NOT_COMPUTED)}")
+        if observation is not None:
             provenance_badge(_provenance(observation, latest))
-    assessment = data.assessment
-    with risk:
-        assessment_chip(assessment)
-    if assessment is not None:
-        for reason in assessment.decision.reasons:
-            st.caption(reason)
+        assessment_chip(data.assessment)
+    if data.assessment is not None:
+        _why(data.assessment)
 
 
 def _compute(ctx: DashboardContext, event_id: str) -> None:
@@ -117,8 +118,8 @@ def _compute(ctx: DashboardContext, event_id: str) -> None:
     from keepout.store import JobQueue
 
     try:
-        with ctx.store() as store:
-            submission = JobQueue(store).submit_refresh(event_id, ctx.settings)
+        queue = JobQueue(shared_store(ctx.store_path))
+        submission = queue.submit_refresh(event_id, ctx.settings)
     except (KeepoutError, ValueError) as exc:
         show_error(exc)
         return
@@ -147,13 +148,19 @@ def _jobs(ctx: DashboardContext, data: EventView) -> None:
     ids = list(data.detail.refresh_jobs)
     if queued is not None and queued not in ids:
         ids.append(queued)
-    if ids:
-        job_status(ctx.store_path, ids)
+    if not ids:
+        return
+    try:
+        jobs = read_jobs(ctx.store_path, ids)
+    except KeepoutError as exc:
+        show_error(exc)
+        return
+    job_status(ctx.store_path, jobs)
 
 
 def _trend(ctx: DashboardContext, data: EventView) -> None:
     """The Pc against the hours to TCA with the thresholds and the decision
-    point, and its data; or what is not computed."""
+    point (its data: the CDMs table); or what is not computed."""
     st.subheader("Pc trend")
     if data.detail.missing:
         _not_computed(ctx, data)
@@ -165,50 +172,6 @@ def _trend(ctx: DashboardContext, data: EventView) -> None:
         st.info("No Pc before TCA to draw.")
         return
     st.plotly_chart(trend_plot(figure))
-    # Assessed: every CDM has its observation.
-    cdms = {cdm.message_id: cdm for cdm in data.detail.event.cdms}
-    origins = [
-        PROVENANCE_LABELS[_provenance(data.observations[label], cdms[label])]
-        if label in cdms
-        else ""
-        for label in figure.labels
-    ]
-    st.dataframe(
-        {
-            "CDM": list(figure.labels),
-            "hours to TCA": figure.hours_to_tca.tolist(),
-            "Pc": figure.pc.tolist(),
-            "risk": [level.key for level in figure.levels],
-            "provenance": origins,
-        },
-        column_config={
-            "hours to TCA": st.column_config.NumberColumn(format="%.1f"),
-            "Pc": st.column_config.NumberColumn(format="%.2e"),
-        },
-        hide_index=True,
-    )
-
-
-def _cdm_row(data: EventView, cdm: Cdm, level: RiskLevel | None) -> None:
-    """A CDM of the event: when it was made, its miss, its Pc next to its
-    provenance and the risk ``level`` of its point on the trend ("-" until
-    the event is assessed, or if it has no point)."""
-    name, created, before, miss, pc, origin, risk = table_row(COLUMNS)
-    name.markdown(literal(cdm.message_id))
-    created.markdown(utc(cdm.creation_date))
-    before.markdown(f"{time_to_tca(cdm) / HOUR:.1f} h")
-    miss.markdown(f"{cdm.miss_distance:.1f}")
-    observation = data.observations.get(cdm.message_id)
-    pc.markdown(pc_cell(observation, missing=NOT_COMPUTED))
-    if observation is None:
-        return
-    with origin:
-        provenance_badge(_provenance(observation, cdm))
-    with risk:
-        if level is None:
-            st.markdown("-")
-        else:
-            risk_chip(level, None)
 
 
 def _levels(data: EventView) -> Mapping[str | None, RiskLevel]:
@@ -222,19 +185,44 @@ def _levels(data: EventView) -> Mapping[str | None, RiskLevel]:
     }
 
 
+def _cdm_row(data: EventView, cdm: Cdm, level: RiskLevel | None) -> dict[str, object]:
+    """A CDM of the event; its risk is its point's on the trend."""
+    observation = data.observations.get(cdm.message_id)
+    origin = None if observation is None else _provenance(observation, cdm)
+    return {
+        "CDM": cdm.message_id,
+        "Created (UTC)": utc(cdm.creation_date),
+        "Before TCA (h)": time_to_tca(cdm) / HOUR,
+        "Miss (m)": cdm.miss_distance,
+        "Pc": pc_cell(observation, missing=NOT_COMPUTED),
+        "Provenance": None if origin is None else PROVENANCE_LABELS[origin],
+        "Risk": None if level is None else risk_text(level),
+    }
+
+
 def _cdms(data: EventView) -> None:
-    """Every CDM of the event, oldest first."""
+    """Every CDM of the event, oldest first: the trend's data too."""
     st.subheader("CDMs")
-    table_header(COLUMNS)
     levels = _levels(data)
-    for cdm in data.detail.event.cdms:
-        _cdm_row(data, cdm, levels.get(cdm.message_id))
+    st.dataframe(
+        [
+            _cdm_row(data, cdm, levels.get(cdm.message_id))
+            for cdm in data.detail.event.cdms
+        ],
+        column_config={
+            # A MESSAGE_ID is long: the other columns show beside it.
+            "CDM": st.column_config.TextColumn(width="medium"),
+            "Before TCA (h)": st.column_config.NumberColumn(format="%.1f"),
+            "Miss (m)": _METRES,
+            "Pc": st.column_config.TextColumn(alignment="right"),
+        },
+        hide_index=True,
+        placeholder=MISSING,
+    )
 
 
 def _conjunction(ctx: DashboardContext, data: EventView) -> Conjunction | None:
-    """The latest CDM's conjunction with the settings' hard-body radius (or
-    the CDM's), its encounter plane checked; ``None``, with the reason
-    shown, if there is none."""
+    """The latest CDM's conjunction; ``None``, with the reason shown, if none."""
     latest = data.detail.event.latest
     try:
         conjunction = latest_conjunction(data, ctx.settings)
@@ -278,6 +266,7 @@ def _encounter(conjunction: Conjunction, *, max_pc: bool) -> None:
             "quantity": [name for name, _ in rows],
             "value": [value for _, value in rows],
         },
+        column_config={"value": _METRES},
         hide_index=True,
     )
 
@@ -297,6 +286,10 @@ def _geometry(conjunction: Conjunction, *, max_pc: bool) -> None:
             "axis": [label.split()[0] for label in figure.axes],
             "secondary at TCA [m]": list(figure.at_tca),
             "relative velocity [m/s]": list(figure.velocity),
+        },
+        column_config={
+            "secondary at TCA [m]": _METRES,
+            "relative velocity [m/s]": st.column_config.NumberColumn(format="%.3f"),
         },
         hide_index=True,
     )
@@ -318,30 +311,19 @@ def _latest_geometry(ctx: DashboardContext, data: EventView) -> None:
     _geometry(conjunction, max_pc=max_pc)
 
 
+def _read(ctx: DashboardContext, event_id: str) -> EventView | None:
+    """The event read from the store; ``None`` if there is none."""
+    return event_view(shared_store(ctx.store_path), event_id, ctx.settings)
+
+
 def main() -> None:
     """The event page."""
     ctx = page_context()
-    event_id = st.query_params.get(EVENT_PARAM)
-    data: EventView | None = None
-    error: KeepoutError | None = None
-    if event_id:
-        try:
-            data = read_event(ctx.store_path, event_id, ctx.settings)
-        except KeepoutError as exc:
-            error = exc
-    if not event_id or data is None:
-        st.title("Event")
-        if not event_id:
-            st.info("Pick an event from the list.")
-        elif error is not None:
-            show_error(error)
-        else:
-            st.warning(f"No such event: {literal(event_id)}")
-        _to_list()
-        return
+    event_id, data = event_or_stop("Event", lambda event_id: _read(ctx, event_id))
     st.title(f"Event {event_id}")
+    back_links()
     _header(data)
-    _to_planner(event_id)
+    _to_planner(event_id, data.assessment)
     _trend(ctx, data)
     _cdms(data)
     _latest_geometry(ctx, data)

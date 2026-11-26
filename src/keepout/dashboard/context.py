@@ -33,7 +33,8 @@ __all__ = [
 
 
 def open_existing(store_path: Path) -> Store:
-    """The dashboard's store, opened as every page opens it: never created.
+    """The dashboard's store, opened as the dashboard opens it: never
+    created (the pages share one, :func:`~keepout.dashboard.widgets.shared_store`).
 
     Use it as a context manager, which closes it.
 
@@ -71,17 +72,6 @@ class DashboardContext:
     as_of: Time
     as_of_fixed: bool
 
-    def store(self) -> Store:
-        """The store, opened (:func:`open_existing`); use it as a context
-        manager, which closes it.
-
-        Raises
-        ------
-        StoreError
-            If it cannot be opened.
-        """
-        return open_existing(self.store_path)
-
 
 def parse_as_of(text: str) -> Time:
     """A time given as :data:`AS_OF_VARIABLE`, read as ``keepout dashboard
@@ -100,7 +90,10 @@ def parse_as_of(text: str) -> Time:
 
 
 def context_from_env(
-    env: Mapping[str, str] = os.environ, *, now: Callable[[], Time] = Time.now
+    env: Mapping[str, str] = os.environ,
+    *,
+    now: Callable[[], Time] = Time.now,
+    read_settings: Callable[[Path], Settings] = load_settings,
 ) -> DashboardContext:
     """The dashboard's context from environment variables.
 
@@ -112,6 +105,8 @@ def context_from_env(
         is as unset.
     now
         The clock, read when :data:`AS_OF_VARIABLE` is unset.
+    read_settings
+        How the settings file is read (the app caches it).
 
     Returns
     -------
@@ -138,7 +133,7 @@ def context_from_env(
             "keepout dashboard --store FILE"
         )
     settings_file = env.get(SETTINGS_VARIABLE)
-    settings = load_settings(Path(settings_file)) if settings_file else Settings()
+    settings = read_settings(Path(settings_file)) if settings_file else Settings()
     as_of = env.get(AS_OF_VARIABLE)
     return DashboardContext(
         store_path=Path(store),

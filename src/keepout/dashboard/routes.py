@@ -7,7 +7,8 @@ Not a page: importing it runs nothing (it does not import Streamlit).
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Final
+from typing import Final, NamedTuple
+from urllib.parse import urlencode
 
 __all__ = [
     "CONTEXT_KEY",
@@ -19,7 +20,10 @@ __all__ = [
     "PLANNER_PAGE",
     "UPLOAD_KEY",
     "VIEWS",
+    "WhatIf",
     "cancel_job_key",
+    "event_url",
+    "planner_url",
     "refresh_job_key",
     "what_if_key",
 ]
@@ -52,7 +56,24 @@ PAST_KEY: Final = "events-past"
 """The key of the events list's toggle of the past events."""
 
 UPLOAD_KEY: Final = "events-upload"
-"""The key of the last upload's outcome, kept for the events page."""
+"""The key of the last upload's outcome, kept for the events page while a
+job it queued is queued or running."""
+
+
+def _url(page: Path, event_id: str) -> str:
+    """The address of a page of an event, relative to the app's (a page's
+    address is its script's name)."""
+    return f"{page.stem}?{urlencode({EVENT_PARAM: event_id})}"
+
+
+def event_url(event_id: str) -> str:
+    """The address of an event's page, relative to the app's."""
+    return _url(EVENT_PAGE, event_id)
+
+
+def planner_url(event_id: str) -> str:
+    """The address of an event's manoeuvre planner, relative to the app's."""
+    return _url(PLANNER_PAGE, event_id)
 
 
 def refresh_job_key(event_id: str) -> str:
@@ -60,9 +81,17 @@ def refresh_job_key(event_id: str) -> str:
     return f"event-refresh-{event_id}"
 
 
+class WhatIf(NamedTuple):
+    """What a what-if on the planner changes of the operator's settings."""
+
+    target_pc: float
+    """The target Pc."""
+    hbr: float | None
+    """The combined hard-body radius [m]; ``None``: the CDMs' radii."""
+
+
 def what_if_key(event_id: str) -> str:
-    """The key of an event's what-if on the planner: the settings chosen
-    for it."""
+    """The key of an event's what-if on the planner (a :class:`WhatIf`)."""
     return f"planner-chosen-{event_id}"
 
 

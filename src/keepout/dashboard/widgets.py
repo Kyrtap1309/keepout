@@ -1,27 +1,34 @@
-"""What the dashboard's pages share: the context and the session's state,
-the time the data are seen at, tables, risk chips, provenance badges,
-errors and job status.
+"""What the dashboard's pages share: the context, the session's state and the
+store, the time the data are seen at, the ways between pages, risk chips,
+provenance badges, errors and job status.
 
 Risk is shown as colour and words together: a chip filled with the level's
 colour (:data:`~keepout.figures.RISK_COLOURS`) carries its label and the
 action's, in black or white, whichever contrasts more with the fill, and
 has a grey outline. The fill, not the page, is behind the text, so the chip
 reads the same on Streamlit's light and dark themes (the dark red of
-:attr:`~keepout.risk.RiskLevel.RED` gets white text).
+:attr:`~keepout.risk.RiskLevel.RED` gets white text). A table gives the
+level a coloured mark instead (:func:`~keepout.dashboard.text.risk_text`).
 """
 
 from __future__ import annotations
 
 import html
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Final, Literal, TypeVar
+from typing import TYPE_CHECKING, Final, Literal, NoReturn, TypeVar, cast
 
 import streamlit as st
 
 from keepout._text import utc
 from keepout.dashboard.context import DashboardContext, open_existing
-from keepout.dashboard.routes import CONTEXT_KEY, cancel_job_key
-from keepout.dashboard.text import NOT_COMPUTED, literal, unrated
+from keepout.dashboard.routes import (
+    CONTEXT_KEY,
+    EVENT_PAGE,
+    EVENT_PARAM,
+    EVENTS_PAGE,
+    cancel_job_key,
+)
+from keepout.dashboard.text import NOT_COMPUTED, british, literal, unrated
 from keepout.errors import KeepoutError
 from keepout.figures import (
     PROVENANCE_HELP,
@@ -31,27 +38,27 @@ from keepout.figures import (
 from keepout.risk import Provenance
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Callable, Mapping, Sequence
     from pathlib import Path
 
-    from streamlit.delta_generator import DeltaGenerator
-
     from keepout.risk import Action, Assessment, RiskLevel
-    from keepout.store import Job
+    from keepout.store import Job, Store
 
 __all__ = [
     "JOB_REFRESH_SECONDS",
     "as_of_header",
     "assessment_chip",
+    "back_links",
+    "event_or_stop",
     "ink",
     "job_status",
     "page_context",
     "provenance_badge",
+    "read_jobs",
     "risk_chip",
+    "shared_store",
     "show_error",
     "state",
-    "table_header",
-    "table_row",
 ]
 
 JOB_REFRESH_SECONDS: Final = 2
@@ -86,20 +93,28 @@ def state(key: str, kind: type[_T]) -> _T | None:
 
 
 def page_context() -> DashboardContext:
-    """The context the app put in ``st.session_state`` for the page.
+    """The context the app put in ``st.session_state`` before it ran the
+    page."""
+    return cast("DashboardContext", st.session_state[CONTEXT_KEY])
 
-    Returns
-    -------
-    DashboardContext
-        The store, settings and time of the dashboard. If there is none (a
-        page run without the app), the page shows how to start the
-        dashboard and stops (``st.stop``).
+
+def _close(store: Store) -> None:
+    """Close a store the cache lets go of."""
+    store.close()
+
+
+@st.cache_resource(show_spinner=False, on_release=_close)
+def shared_store(store_path: Path) -> Store:
+    """The store, opened once per file for every page and session (its
+    schema checked then): its engine is safe to share between threads. Do
+    not close it.
+
+    Raises
+    ------
+    StoreError
+        If it cannot be opened; it is opened again on the next call.
     """
-    context = state(CONTEXT_KEY, DashboardContext)
-    if context is None:
-        st.error("No dashboard context: start it with keepout dashboard --store FILE")
-        st.stop()
-    return context
+    return open_existing(store_path)
 
 
 def as_of_header(ctx: DashboardContext) -> None:
@@ -110,17 +125,55 @@ def as_of_header(ctx: DashboardContext) -> None:
     st.markdown(f"Data as of {stamp} UTC{fixed}")
 
 
-def table_header(columns: Sequence[tuple[str, int]]) -> None:
-    """The titles of a table's columns, each ``(title, width)``, in bold."""
-    cells = st.columns([width for _, width in columns])
-    for cell, (title, _) in zip(cells, columns, strict=True):
-        cell.markdown(f"**{title}**")
+def back_links(event_id: str | None = None) -> None:
+    """The ways back: to the events list, and to the event's page if
+    ``event_id`` is given."""
+    links = st.container(horizontal=True)
+    links.page_link(EVENTS_PAGE, label="Events", icon=":material/arrow_back:")
+    if event_id:
+        links.page_link(
+            EVENT_PAGE,
+            label=f"Event {event_id}",
+            icon=":material/arrow_back:",
+            query_params={EVENT_PARAM: event_id},
+        )
 
 
-def table_row(columns: Sequence[tuple[str, int]]) -> list[DeltaGenerator]:
-    """The cells of a row of a table of ``columns`` (as
-    :func:`table_header`), their content centred vertically."""
-    return st.columns([width for _, width in columns], vertical_alignment="center")
+def event_or_stop(title: str, read: Callable[[str], _T | None]) -> tuple[str, _T]:
+    """The event the address names (query parameter ``event``) and what
+    ``read`` reads of it; else the page says why, under ``title``, with the
+    ways back, and stops (``st.stop``): no event named, an error reading it,
+    or no such event.
+
+    A ``ValueError`` that is not a keepout error (a settings file that cannot
+    hold the settings) is of an event that is there: the way back to it is
+    given too.
+    """
+    event_id = st.query_params.get(EVENT_PARAM)
+    error: Exception | None = None
+    found: _T | None = None
+    if event_id:
+        try:
+            found = read(event_id)
+        except (KeepoutError, ValueError) as exc:
+            error = exc
+    if not event_id or found is None:
+        _no_event(title, event_id, error)
+    return event_id, found
+
+
+def _no_event(title: str, event_id: str | None, error: Exception | None) -> NoReturn:
+    """Why the page has no event, the ways back, and a stopped page."""
+    st.title(title)
+    if not event_id:
+        st.info("Pick an event from the list.")
+    elif error is not None:
+        show_error(error)
+    else:
+        st.warning(f"No such event: {literal(event_id)}")
+    there = isinstance(error, ValueError) and not isinstance(error, KeepoutError)
+    back_links(event_id if there else None)
+    st.stop()
 
 
 def provenance_badge(p: Provenance) -> None:
@@ -162,7 +215,7 @@ def risk_chip(
         style = f"{_CHIP_STYLE}background:{fill};color:{ink(fill)};"
         text = level.key
         if action is not None:
-            text += f" · {action.label}"
+            text += f" · {british(action.label)}"
     st.markdown(
         f'<span style="{style}">{html.escape(text)}</span>', unsafe_allow_html=True
     )
@@ -180,13 +233,13 @@ def assessment_chip(assessment: Assessment | None) -> None:
         risk_chip(assessment.level, assessment.decision.action)
 
 
-def show_error(error: KeepoutError | ValueError) -> None:
+def show_error(error: Exception) -> None:
     """An error as the page shows it: its message, verbatim
     (:func:`~keepout.dashboard.text.literal`), no traceback."""
     st.error(literal(str(error)))
 
 
-def _read_jobs(store_path: Path, job_ids: Sequence[int]) -> list[Job]:
+def read_jobs(store_path: Path, job_ids: Sequence[int]) -> list[Job]:
     """The jobs ``job_ids`` as they are now, read in one transaction; one
     no longer in the store (purged) is left out.
 
@@ -197,31 +250,26 @@ def _read_jobs(store_path: Path, job_ids: Sequence[int]) -> list[Job]:
     """
     from keepout.store import JobQueue
 
-    with open_existing(store_path) as store:
-        return JobQueue(store).jobs_by_id(job_ids, missing_ok=True)
+    return JobQueue(shared_store(store_path)).jobs_by_id(job_ids, missing_ok=True)
 
 
 def _cancel(store_path: Path, job_id: int) -> None:
-    """Cancel a job; if it cannot be (it has ended meanwhile, the store
-    cannot be used), say why in a toast, which outlives the rerun that
-    follows and is not kept for another run or page."""
+    """Cancel a job; if it cannot be, say why in a toast, which outlives
+    the rerun that follows."""
     from keepout.store import JobQueue
 
     try:
-        with open_existing(store_path) as store:
-            JobQueue(store).cancel(job_id)
+        JobQueue(shared_store(store_path)).cancel(job_id)
     except KeepoutError as exc:
         st.toast(literal(str(exc)), icon=":material/error:")
 
 
 def _job_rows(store_path: Path, jobs: Sequence[Job], labels: Mapping[int, str]) -> None:
-    """A line per job: its kind and status with its label under them, a
-    Cancel button while it is active, and the error if it failed. A cancel,
-    done or refused, reruns the page, which shows the jobs as they are
-    then."""
+    """A line per job: kind, status, label, Cancel while active, error."""
     for job in jobs:
         text, button = st.columns([5, 1], vertical_alignment="center")
-        text.markdown(f"Job {job.id} ({job.kind.value}): **{job.status.value}**")
+        kind = british(job.kind.value)
+        text.markdown(f"Job {job.id} ({kind}): **{job.status.value}**")
         if job.id in labels:
             text.caption(labels[job.id])
         if job.status.is_active and button.button("Cancel", key=cancel_job_key(job.id)):
@@ -233,22 +281,11 @@ def _job_rows(store_path: Path, jobs: Sequence[Job], labels: Mapping[int, str]) 
 
 @st.fragment(run_every=JOB_REFRESH_SECONDS)
 def _live_jobs(
-    store_path: Path,
-    job_ids: Sequence[int],
-    labels: Mapping[int, str],
-    first: list[list[Job]],
+    store_path: Path, job_ids: Sequence[int], labels: Mapping[int, str]
 ) -> None:
-    """The jobs' status, read again every :data:`JOB_REFRESH_SECONDS`. Once
-    none is active, the whole page runs again, without this fragment. If
-    the store cannot be read, the error shows in place of the jobs until a
-    later read succeeds.
-
-    ``first`` holds the jobs the page has just read, which the fragment's
-    first run shows and takes out; its later runs (the fragment keeps its
-    arguments) read them again.
-    """
+    """The jobs, read on every run of the fragment until none is active."""
     try:
-        jobs = first.pop() if first else _read_jobs(store_path, job_ids)
+        jobs = read_jobs(store_path, job_ids)
     except KeepoutError as exc:
         show_error(exc)
         return
@@ -259,26 +296,25 @@ def _live_jobs(
 
 def job_status(
     store_path: Path,
-    job_ids: Sequence[int],
+    jobs: Sequence[Job],
     *,
     labels: Mapping[int, str] | None = None,
 ) -> bool:
-    """The status of jobs of the store, with a Cancel button per queued or
-    running one.
+    """The status of jobs the page has read, with a Cancel button per queued
+    or running one.
 
-    While a job is queued or running, the status is read again every
-    :data:`JOB_REFRESH_SECONDS` (an ``st.fragment``); once all have ended,
-    it is shown once and no longer polled; a job no longer in the store
-    (purged) is left out. A failed job's error is shown
-    with ``st.error``, a store error with :func:`show_error` (while
-    polling, until a later read succeeds) and a refused cancel's error in
-    a toast.
+    Ended jobs are shown as given. While one is queued or running, they are
+    read again every :data:`JOB_REFRESH_SECONDS` (an ``st.fragment``, which
+    reads them on its first run too) until all have ended; a job no longer
+    in the store (purged) is left out then. A failed job's error is shown
+    with ``st.error``, a store error while polling with :func:`show_error`
+    (until a later read succeeds) and a refused cancel's error in a toast.
 
     Parameters
     ----------
     store_path
         The store's file.
-    job_ids
+    jobs
         The jobs to show, in order.
     labels
         A line under a job's status, by job id (e.g. its settings).
@@ -286,19 +322,11 @@ def job_status(
     Returns
     -------
     bool
-        Whether a job is queued or running, as read now; ``False`` if the
-        store cannot be read.
+        Whether one of ``jobs`` is queued or running.
     """
-    if not job_ids:
-        return False
     named = dict(labels or {})
-    try:
-        jobs = _read_jobs(store_path, job_ids)
-    except KeepoutError as exc:
-        show_error(exc)
-        return False
     if any(job.status.is_active for job in jobs):
-        _live_jobs(store_path, tuple(job_ids), named, [jobs])
+        _live_jobs(store_path, tuple(job.id for job in jobs), named)
         return True
     _job_rows(store_path, jobs, named)
     return False

@@ -26,11 +26,12 @@ if TYPE_CHECKING:
     from keepout.figures import GeometryFigure, TrendFigure
     from keepout.risk import Assessment, PcObservation
     from keepout.settings import Settings
-    from keepout.store import EventDetail
+    from keepout.store import EventDetail, Store
 
 __all__ = [
     "EventView",
     "encounter_plot",
+    "event_view",
     "geometry_of",
     "geometry_plot",
     "is_max_pc",
@@ -85,13 +86,13 @@ def view_of(detail: EventDetail, settings: Settings) -> EventView:
     return EventView(detail, observations, detail.assessment(settings.thresholds))
 
 
-def read_event(store_path: Path, event_id: str, settings: Settings) -> EventView | None:
+def event_view(store: Store, event_id: str, settings: Settings) -> EventView | None:
     """An event read in one transaction, and its view.
 
     Parameters
     ----------
-    store_path
-        The store's file.
+    store
+        The store.
     event_id
         The store's id of the event.
     settings
@@ -105,13 +106,26 @@ def read_event(store_path: Path, event_id: str, settings: Settings) -> EventView
     Raises
     ------
     StoreError
+        If the store cannot be read.
+    CdmParseError, EventError
+        If its stored CDMs no longer parse or make an event.
+    """
+    detail = store.detail(event_id, settings)
+    return None if detail is None else view_of(detail, settings)
+
+
+def read_event(store_path: Path, event_id: str, settings: Settings) -> EventView | None:
+    """:func:`event_view` of the store at ``store_path``, opened for it.
+
+    Raises
+    ------
+    StoreError
         If the store cannot be opened or read.
     CdmParseError, EventError
         If its stored CDMs no longer parse or make an event.
     """
     with open_existing(store_path) as store:
-        detail = store.detail(event_id, settings)
-    return None if detail is None else view_of(detail, settings)
+        return event_view(store, event_id, settings)
 
 
 def trend_of(view: EventView) -> TrendFigure | None:

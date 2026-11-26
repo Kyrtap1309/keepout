@@ -29,7 +29,7 @@ SETTINGS = load_settings(seed.SETTINGS)
 
 
 @pytest.fixture
-def store(seed_copy: Path) -> Iterator[Store]:
+def seed_store(seed_copy: Path) -> Iterator[Store]:
     """A writable copy of the seed store, opened."""
     with open_store(seed_copy, create=False) as opened:
         yield opened
@@ -61,104 +61,108 @@ def _nothing_ingested(store: Store, result: UploadResult, before: int) -> None:
     assert _active_jobs(store) == []
 
 
-def test_upload_rejects_large_file(store: Store) -> None:
-    before = _cdm_count(store)
+def test_upload_rejects_large_file(seed_store: Store) -> None:
+    before = _cdm_count(seed_store)
     big = b"x" * (MAX_FILE_BYTES + 1)
-    result = ingest_upload(store, SETTINGS, [("new.kvn", _fresh()), ("big.kvn", big)])
+    result = ingest_upload(
+        seed_store, SETTINGS, [("new.kvn", _fresh()), ("big.kvn", big)]
+    )
     assert result.errors == (("big.kvn", f"larger than {MAX_FILE_BYTES} bytes"),)
-    _nothing_ingested(store, result, before)
+    _nothing_ingested(seed_store, result, before)
 
 
-def test_upload_takes_what_streamlit_takes(store: Store) -> None:
+def test_upload_takes_what_streamlit_takes(seed_store: Store) -> None:
     # Streamlit's uploader counts 2^20 bytes per MB: a file of 1,020,000
     # bytes passes it, so it is not refused here as too large.
     big = b"x" * 1_020_000
-    result = ingest_upload(store, SETTINGS, [("big.kvn", big)])
+    result = ingest_upload(seed_store, SETTINGS, [("big.kvn", big)])
     assert not any("larger than" in message for _, message in result.errors)
 
 
-def test_upload_rejects_a_gzip_bomb(store: Store) -> None:
-    before = _cdm_count(store)
+def test_upload_rejects_a_gzip_bomb(seed_store: Store) -> None:
+    before = _cdm_count(seed_store)
     bomb = gzip.compress(b" " * (MAX_FILE_BYTES + 1))
     assert len(bomb) < MAX_FILE_BYTES
-    result = ingest_upload(store, SETTINGS, [("bomb.kvn.gz", bomb)])
+    result = ingest_upload(seed_store, SETTINGS, [("bomb.kvn.gz", bomb)])
     assert result.errors == (
         ("bomb.kvn.gz", f"larger than {MAX_FILE_BYTES} bytes once decompressed"),
     )
-    _nothing_ingested(store, result, before)
+    _nothing_ingested(seed_store, result, before)
 
 
-def test_upload_reads_gzip(store: Store) -> None:
-    result = ingest_upload(store, SETTINGS, [("new.kvn.gz", gzip.compress(_fresh()))])
+def test_upload_reads_gzip(seed_store: Store) -> None:
+    result = ingest_upload(
+        seed_store, SETTINGS, [("new.kvn.gz", gzip.compress(_fresh()))]
+    )
     assert result.errors == ()
     assert result.report is not None
     assert len(result.report.added) == 1
 
 
-def test_upload_rejects_non_cdm(store: Store) -> None:
-    before = _cdm_count(store)
-    result = ingest_upload(store, SETTINGS, [("hello.txt", b"hello")])
+def test_upload_rejects_non_cdm(seed_store: Store) -> None:
+    before = _cdm_count(seed_store)
+    result = ingest_upload(seed_store, SETTINGS, [("hello.txt", b"hello")])
     assert [name for name, _ in result.errors] == ["hello.txt"]
     assert "expected 'KEYWORD = value'" in result.errors[0][1]
-    _nothing_ingested(store, result, before)
+    _nothing_ingested(seed_store, result, before)
 
 
-def test_upload_rejects_non_utf8(store: Store) -> None:
-    result = ingest_upload(store, SETTINGS, [("bin.kvn", b"\xff\xfe\x00")])
+def test_upload_rejects_non_utf8(seed_store: Store) -> None:
+    result = ingest_upload(seed_store, SETTINGS, [("bin.kvn", b"\xff\xfe\x00")])
     assert [name for name, _ in result.errors] == ["bin.kvn"]
     assert result.errors[0][1].startswith("not UTF-8 text: ")
 
 
-def test_upload_conflicting_message_id(store: Store) -> None:
-    before = _cdm_count(store)
+def test_upload_conflicting_message_id(seed_store: Store) -> None:
+    before = _cdm_count(seed_store)
     first = seed.seed_files()[0]
     changed = _with_miss_distance(first.read_text(encoding="utf-8"))
     result = ingest_upload(
-        store,
+        seed_store,
         SETTINGS,
         [("new.kvn", _fresh()), (first.name, changed.encode())],
     )
     assert [name for name, _ in result.errors] == [first.name]
     assert "is stored with other content" in result.errors[0][1]
-    _nothing_ingested(store, result, before)
+    _nothing_ingested(seed_store, result, before)
 
 
-def test_upload_too_many_files(store: Store) -> None:
-    before = _cdm_count(store)
+def test_upload_too_many_files(seed_store: Store) -> None:
+    before = _cdm_count(seed_store)
     files = [(f"{i}.kvn", _fresh()) for i in range(MAX_FILES + 1)]
-    result = ingest_upload(store, SETTINGS, files)
+    result = ingest_upload(seed_store, SETTINGS, files)
     assert result.errors == (
         UploadError(None, f"at most {MAX_FILES} files per upload, not {MAX_FILES + 1}"),
     )
-    _nothing_ingested(store, result, before)
+    _nothing_ingested(seed_store, result, before)
 
 
-def test_upload_ingests_and_queues_refresh(store: Store) -> None:
-    before = _cdm_count(store)
-    result = ingest_upload(store, SETTINGS, [("new.kvn", _fresh())])
+def test_upload_ingests_and_queues_refresh(seed_store: Store) -> None:
+    before = _cdm_count(seed_store)
+    result = ingest_upload(seed_store, SETTINGS, [("new.kvn", _fresh())])
     assert result.errors == ()
     assert result.report is not None
     assert len(result.report.added) == 1
-    assert _cdm_count(store) == before + 1
+    assert _cdm_count(seed_store) == before + 1
     (job_id,) = result.jobs
-    job = job_of(store, job_id)
+    job = job_of(seed_store, job_id)
     assert job.kind is JobKind.REFRESH
     assert job.event_id == result.report.events[0]
-    assert _active_jobs(store) == [job_id]
+    assert _active_jobs(seed_store) == [job_id]
 
 
 def test_upload_ingests_though_a_job_cannot_be_queued(
-    store: Store, monkeypatch: pytest.MonkeyPatch
+    seed_store: Store, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def locked(*_: object) -> None:
         raise StoreError("database is locked")
 
     monkeypatch.setattr(JobQueue, "submit_refresh", locked)
-    before = _cdm_count(store)
-    result = ingest_upload(store, SETTINGS, [("new.kvn", _fresh())])
+    before = _cdm_count(seed_store)
+    result = ingest_upload(seed_store, SETTINGS, [("new.kvn", _fresh())])
     assert result.report is not None
     assert len(result.report.added) == 1
-    assert _cdm_count(store) == before + 1
+    assert _cdm_count(seed_store) == before + 1
     (event_id,) = result.report.events
     assert result.errors == (
         UploadError(None, f"event {event_id}: database is locked"),
@@ -166,9 +170,9 @@ def test_upload_ingests_though_a_job_cannot_be_queued(
     assert result.jobs == ()
 
 
-def test_upload_of_stored_cdms_queues_nothing(store: Store) -> None:
+def test_upload_of_stored_cdms_queues_nothing(seed_store: Store) -> None:
     files = [(file.name, file.read_bytes()) for file in seed.seed_files()[:2]]
-    result = ingest_upload(store, SETTINGS, files)
+    result = ingest_upload(seed_store, SETTINGS, files)
     assert result.errors == ()
     assert result.report is not None
     assert result.report.added == ()
@@ -177,11 +181,11 @@ def test_upload_of_stored_cdms_queues_nothing(store: Store) -> None:
     assert result.jobs == ()
 
 
-def test_an_empty_upload_does_nothing(store: Store) -> None:
-    assert ingest_upload(store, SETTINGS, []) == UploadResult(None, (), ())
+def test_an_empty_upload_does_nothing(seed_store: Store) -> None:
+    assert ingest_upload(seed_store, SETTINGS, []) == UploadResult(None, (), ())
 
 
-def test_upload_blames_the_file_whose_message_id_is_named(store: Store) -> None:
+def test_upload_blames_the_file_whose_message_id_is_named(seed_store: Store) -> None:
     # A MESSAGE_ID that is part of another's is not the one an error names.
     first = seed.seed_files()[0]
     text = first.read_text(encoding="utf-8")
@@ -189,7 +193,7 @@ def test_upload_blames_the_file_whose_message_id_is_named(store: Store) -> None:
     changed = _with_miss_distance(text)
     prefix = _with_id(_fresh().decode(), stored[:-4])
     result = ingest_upload(
-        store,
+        seed_store,
         SETTINGS,
         [("prefix.kvn", prefix.encode()), (first.name, changed.encode())],
     )
@@ -231,9 +235,9 @@ FUZZ = settings(
 @FUZZ
 @given(data=st.binary(max_size=4096))
 def test_any_upload_is_ingested_or_refused_with_its_errors(
-    store: Store, data: bytes
+    seed_store: Store, data: bytes
 ) -> None:
-    _check(ingest_upload(store, SETTINGS, [("fuzz.kvn", data)]))
+    _check(ingest_upload(seed_store, SETTINGS, [("fuzz.kvn", data)]))
 
 
 SEED_LINES = seed.seed_files()[0].read_text(encoding="utf-8").splitlines()
@@ -270,13 +274,13 @@ def mutated_cdms(draw: st.DrawFn) -> bytes:
 
 @FUZZ
 @given(data=mutated_cdms())
-def test_upload_fuzz_mutated_cdm(store: Store, data: bytes) -> None:
-    _check(ingest_upload(store, SETTINGS, [("mutated.kvn", data)]))
+def test_upload_fuzz_mutated_cdm(seed_store: Store, data: bytes) -> None:
+    _check(ingest_upload(seed_store, SETTINGS, [("mutated.kvn", data)]))
 
 
-def test_mutated_cdms_reach_ingest(store: Store) -> None:
+def test_mutated_cdms_reach_ingest(seed_store: Store) -> None:
     # Without mutations, the strategy's CDM is new and ingested.
     text = _with_id("\n".join(SEED_LINES), "FUZZ-plain")
-    result = ingest_upload(store, SETTINGS, [("plain.kvn", text.encode())])
+    result = ingest_upload(seed_store, SETTINGS, [("plain.kvn", text.encode())])
     assert result.report is not None
     assert len(result.report.added) == 1

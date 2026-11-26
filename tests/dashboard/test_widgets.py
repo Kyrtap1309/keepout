@@ -43,9 +43,10 @@ def _badges() -> None:
 def _jobs(store: str, job_ids: list[int]) -> None:
     from pathlib import Path
 
-    from keepout.dashboard.widgets import job_status
+    from keepout.dashboard import widgets
 
-    job_status(Path(store), job_ids)
+    path = Path(store)
+    widgets.job_status(path, widgets.read_jobs(path, job_ids))
 
 
 @pytest.mark.parametrize(
@@ -87,7 +88,7 @@ def test_risk_chip_shows_colour_and_words() -> None:
         _chips, args=("RED", "MANEUVER"), default_timeout=TIMEOUT
     ).run()
     [chip] = [item.value for item in app.markdown]
-    assert "red · maneuver" in chip
+    assert "red · manoeuvre" in chip
     assert f"background:{RISK_COLOURS[RiskLevel.RED]}" in chip
     assert "color:#ffffff" in chip
 
@@ -115,12 +116,12 @@ def test_job_status_cancels_an_active_job(seed_copy: Path) -> None:
         _jobs, args=(str(seed_copy), [job.id]), default_timeout=TIMEOUT
     ).run()
     assert not app.exception
-    assert f"Job {job.id} (maneuver): **queued**" in app.markdown[0].value
+    assert f"Job {job.id} (manoeuvre): **queued**" in app.markdown[0].value
     app.button(key=f"cancel-job-{job.id}").click().run()
     assert not app.exception
     with open_store(seed_copy) as store:
         assert job_of(store, job.id).status == JobStatus.CANCELLED
-    assert f"Job {job.id} (maneuver): **cancelled**" in app.markdown[0].value
+    assert f"Job {job.id} (manoeuvre): **cancelled**" in app.markdown[0].value
     assert not app.button
 
 
@@ -139,7 +140,7 @@ def test_a_job_purged_while_shown_is_left_out(seed_copy: Path) -> None:
     app = AppTest.from_function(
         _jobs, args=(str(seed_copy), [job_id]), default_timeout=TIMEOUT
     ).run()
-    assert f"Job {job_id} (maneuver): **queued**" in app.markdown[0].value
+    assert f"Job {job_id} (manoeuvre): **queued**" in app.markdown[0].value
     with open_store(seed_copy) as store, store.write() as session:
         session.execute(delete(models.Job).where(models.Job.id == job_id))
     app.run()
@@ -167,7 +168,7 @@ def test_a_refused_cancel_is_a_toast(seed_copy: Path) -> None:
     app.button(key=f"cancel-job-{job_id}").click().run()
     assert not app.exception
     # The page ran again: the job as it is now, no longer polled.
-    assert f"Job {job_id} (maneuver): **cancelled**" in app.markdown[0].value
+    assert f"Job {job_id} (manoeuvre): **cancelled**" in app.markdown[0].value
     assert not app.button
     assert [item.value for item in app.toast] == [
         f"job {job_id} has already ended: cancelled"
@@ -177,7 +178,7 @@ def test_a_refused_cancel_is_a_toast(seed_copy: Path) -> None:
     app.run()
     assert not app.exception
     assert not app.toast
-    assert f"Job {job_id} (maneuver): **cancelled**" in app.markdown[0].value
+    assert f"Job {job_id} (manoeuvre): **cancelled**" in app.markdown[0].value
 
 
 def test_a_failed_job_shows_its_error(seed_copy: Path) -> None:
@@ -192,14 +193,14 @@ def test_a_failed_job_shows_its_error(seed_copy: Path) -> None:
         _jobs, args=(str(seed_copy), [job_id]), default_timeout=TIMEOUT
     ).run()
     assert not app.exception
-    assert app.markdown[0].value == f"Job {job_id} (maneuver): **failed**"
+    assert app.markdown[0].value == f"Job {job_id} (manoeuvre): **failed**"
     assert [item.value for item in app.error] == ["no burn"]
 
 
 def _fails(monkeypatch: pytest.MonkeyPatch, failures: Sequence[bool]) -> None:
     """Make the reads of jobs fail (``database is locked``) or not, in
     turn; those after ``failures`` succeed."""
-    read = widgets._read_jobs
+    read = widgets.read_jobs
     turns = iter(failures)
 
     def reads(store_path: Path, job_ids: Sequence[int]) -> list[Job]:
@@ -207,14 +208,15 @@ def _fails(monkeypatch: pytest.MonkeyPatch, failures: Sequence[bool]) -> None:
             raise StoreError("database is locked")
         return read(store_path, job_ids)
 
-    monkeypatch.setattr(widgets, "_read_jobs", reads)
+    monkeypatch.setattr(widgets, "read_jobs", reads)
 
 
-def test_a_store_error_is_shown_until_the_next_run(
+def test_a_store_error_is_shown_in_place_of_the_jobs_until_the_next_run(
     seed_copy: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # The page's read succeeds; the polling's first one fails.
     job_id = _queued_job(seed_copy)
-    _fails(monkeypatch, [True])
+    _fails(monkeypatch, [False, True])
     app = AppTest.from_function(
         _jobs, args=(str(seed_copy), [job_id]), default_timeout=TIMEOUT
     ).run()
@@ -223,16 +225,17 @@ def test_a_store_error_is_shown_until_the_next_run(
     assert not app.button
     app.run()
     assert not app.error
-    assert f"Job {job_id} (maneuver): **queued**" in app.markdown[0].value
+    assert f"Job {job_id} (manoeuvre): **queued**" in app.markdown[0].value
 
 
 def test_a_store_error_while_polling_is_shown_in_place_of_the_jobs(
     seed_copy: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # The page's read succeeds; the polling's next one (a click reruns the
-    # fragment) fails: its error shows instead of the jobs, nothing is done.
+    # The page's and the polling's reads succeed; after a click, the
+    # page's read succeeds and the polling's fails: its error shows instead
+    # of the jobs, nothing is done.
     job_id = _queued_job(seed_copy)
-    _fails(monkeypatch, [False, True])
+    _fails(monkeypatch, [False, False, False, True])
     app = AppTest.from_function(
         _jobs, args=(str(seed_copy), [job_id]), default_timeout=TIMEOUT
     ).run()
@@ -243,4 +246,20 @@ def test_a_store_error_while_polling_is_shown_in_place_of_the_jobs(
     # A later read succeeds: the job is shown again, still queued.
     app.run()
     assert not app.error
-    assert f"Job {job_id} (maneuver): **queued**" in app.markdown[0].value
+    assert f"Job {job_id} (manoeuvre): **queued**" in app.markdown[0].value
+
+
+def test_ended_jobs_are_shown_without_reading_them_again(
+    seed_copy: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    job_id = _queued_job(seed_copy)
+    with open_store(seed_copy) as store:
+        JobQueue(store).cancel(job_id)
+    # Only the helper's own read: none by the status.
+    _fails(monkeypatch, [False, True])
+    app = AppTest.from_function(
+        _jobs, args=(str(seed_copy), [job_id]), default_timeout=TIMEOUT
+    ).run()
+    assert not app.exception
+    assert not app.error
+    assert app.markdown[0].value == f"Job {job_id} (manoeuvre): **cancelled**"

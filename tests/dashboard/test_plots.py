@@ -8,6 +8,7 @@ import numpy as np
 
 from keepout._types import FloatArray
 from keepout.dashboard import plots
+from keepout.dashboard.widgets import ink
 from keepout.figures import (
     LOWEST_LOG_PC,
     RISK_COLOURS,
@@ -274,3 +275,62 @@ def test_grid_legend_names_what_only_the_second_panel_draws() -> None:
         "x2",
         "x2",
     ]
+
+
+def test_a_threshold_line_has_the_colour_of_the_level_it_names() -> None:
+    figure = plots.trend(_trend()).to_dict()
+    colours = {
+        shape["y0"]: shape["line"]["color"] for shape in figure["layout"]["shapes"]
+    }
+    # "green below 1e-07" is green, "red from 1e-04" red.
+    assert colours == {
+        1e-7: RISK_COLOURS[RiskLevel.GREEN],
+        1e-4: RISK_COLOURS[RiskLevel.RED],
+    }
+
+
+def test_a_yellow_point_has_a_dark_edge() -> None:
+    figure = plots.trend(_trend()).to_dict()
+    (yellow,) = [trace for trace in _traces(figure) if trace.get("name") == "yellow"]
+    edge = yellow["marker"]["line"]["color"]
+    assert edge != RISK_COLOURS[RiskLevel.YELLOW]
+    assert ink(edge) == "#ffffff"
+
+
+def _grid_figure() -> GridFigure:
+    values = np.array([[-3.0, -6.0], [-4.0, -14.0], [math.nan, -8.0]])
+    return GridFigure(
+        directions=(
+            _panel(BurnDirection.RETROGRADE, values),
+            _panel(BurnDirection.PROGRADE, values),
+        ),
+        target_pc=2e-5,
+        target_log_pc=math.log10(2e-5),
+        top_log_pc=-3.0,
+    )
+
+
+def test_the_colour_bar_marks_the_target() -> None:
+    drawn = plots.grid(_grid_figure()).to_dict()
+    (bar,) = [
+        trace["colorbar"]
+        for trace in _traces(drawn)
+        if trace["type"] == "heatmap" and trace["showscale"]
+    ]
+    ticks = dict(zip(bar["tickvals"], bar["ticktext"], strict=True))
+    assert ticks[math.log10(2e-5)] == "target 2e-05"
+    # A tick per decade, but the one under the target's label.
+    assert ticks[-12.0] == "1e-12"
+    assert ticks[-4.0] == "1e-04"
+    assert -5.0 not in ticks
+
+
+def test_the_heatmap_has_a_tick_per_decade_of_dv() -> None:
+    drawn = plots.grid(_grid_figure()).to_dict()
+    assert drawn["layout"]["xaxis"]["dtick"] == 1
+    assert drawn["layout"]["xaxis2"]["dtick"] == 1
+
+
+def test_a_plot_leaves_little_room_above_it() -> None:
+    assert plots.trend(_trend()).to_dict()["layout"]["margin"]["t"] <= 40
+    assert plots.grid(_grid_figure()).to_dict()["layout"]["margin"]["t"] <= 40

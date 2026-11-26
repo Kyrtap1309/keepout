@@ -1,5 +1,6 @@
 """The events list's data, without Streamlit: a page of the store's events
-as the events page reads it (``tools/dashboard_benchmark.py`` times it)."""
+as the events page reads it (``tools/dashboard_benchmark.py`` times it,
+through :func:`read_page`)."""
 
 from __future__ import annotations
 
@@ -13,29 +14,29 @@ if TYPE_CHECKING:
     from astropy.time import Time
 
     from keepout.settings import Settings
-    from keepout.store import SummaryPage
+    from keepout.store import Store, SummaryPage
 
-__all__ = ["PAGE_SIZE", "read_page"]
+__all__ = ["PAGE_SIZE", "page_of", "read_page"]
 
 PAGE_SIZE: Final = 25
 """Events on a page of the list."""
 
 
-def read_page(
-    store_path: Path,
+def page_of(
+    store: Store,
     settings: Settings,
     *,
     as_of: Time,
     include_past: bool = False,
     offset: int = 0,
 ) -> SummaryPage:
-    """The page of the list at ``offset``, read in one store opening, moved
-    back to the last page if the list has become shorter.
+    """The page of the list at ``offset``, moved back to the last page if
+    the list has become shorter.
 
     Parameters
     ----------
-    store_path
-        The store's file.
+    store
+        The store.
     settings
         The settings of the cached Pc and their thresholds.
     as_of
@@ -53,20 +54,40 @@ def read_page(
     Raises
     ------
     StoreError
+        If the store cannot be read.
+    """
+
+    def read(start: int) -> SummaryPage:
+        return store.summaries(
+            settings,
+            as_of=as_of,
+            include_past=include_past,
+            offset=start,
+            limit=PAGE_SIZE,
+        )
+
+    page = read(offset)
+    if not page.items and page.total and offset:
+        page = read((page.total - 1) // PAGE_SIZE * PAGE_SIZE)
+    return page
+
+
+def read_page(
+    store_path: Path,
+    settings: Settings,
+    *,
+    as_of: Time,
+    include_past: bool = False,
+    offset: int = 0,
+) -> SummaryPage:
+    """:func:`page_of` the store at ``store_path``, opened for it.
+
+    Raises
+    ------
+    StoreError
         If the store cannot be opened or read.
     """
     with open_existing(store_path) as store:
-
-        def read(start: int) -> SummaryPage:
-            return store.summaries(
-                settings,
-                as_of=as_of,
-                include_past=include_past,
-                offset=start,
-                limit=PAGE_SIZE,
-            )
-
-        page = read(offset)
-        if not page.items and page.total and offset:
-            page = read((page.total - 1) // PAGE_SIZE * PAGE_SIZE)
-    return page
+        return page_of(
+            store, settings, as_of=as_of, include_past=include_past, offset=offset
+        )

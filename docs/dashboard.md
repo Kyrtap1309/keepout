@@ -115,27 +115,38 @@ its CDMs, whatever the time.
 The dashboard opens on the Events list. The Event page and the planner
 show the event named in the address, e.g.
 `http://127.0.0.1:8501/event?event=3befe6f1305d`: each row of the Events
-list links to both, and they are not in the navigation.
+list links to both (a link opens in a new tab), and they are not in the
+navigation. Each has a link back to the list, and the planner one back to
+the event.
+
+Tables can be sorted by any column, and scroll sideways on a narrow
+screen. A cell without a value shows `–`; a Pc always has two exponent
+digits (`7.37e-06`). The pages spell "manoeuvre", also for keepout's
+`maneuver` action and job kind (see the [FAQ](faq.md)).
 
 ### Events list
 
-The events whose latest TCA is ahead, the soonest first. **Show past
-events** adds those whose TCA has gone by. Each row has the latest Pc
-with its [provenance](#provenance-badges) and the risk, as
-[`keepout assess`](cli.md#assess) decides it, e.g. `yellow · monitor`. An
-outlined chip says why there is none: `not computed` (the store lacks a
-Pc for the settings), `failed` (the latest Pc could not be computed) or
-`issued after TCA`.
+A table of the events whose latest TCA is ahead, the soonest first. **Show
+past events** adds those whose TCA has gone by, in a table of their own
+under **Past events**, without a link to the planner. Each row has the
+latest Pc with its [provenance](#provenance-badges) and the risk, as
+[`keepout assess`](cli.md#assess) decides it, a coloured mark with the
+level and action in words, e.g. `🟡 yellow · monitor`. Without a level it
+says why: `not computed` (the store lacks a Pc for the settings), `failed`
+(the latest Pc could not be computed) or `issued after TCA`.
 
 The page also takes CDM files: see [Uploading CDMs](#uploading-cdms).
 
 ### Event page
 
-One event, its latest Pc, its risk and the reasons for it, then:
+One event, its latest Pc, its risk as a chip of the level's colour and
+the reasons for it, and the way to its manoeuvre planner: a button for a
+red event. Then:
 
 - **Pc trend**: each CDM's Pc against the hours to TCA, with the
   thresholds and the decision point;
-- **CDMs**: every CDM with its miss distance, Pc and risk;
+- **CDMs**: every CDM with its time before TCA, miss distance, Pc,
+  provenance and the risk of its point on the trend (the trend's data);
 - **Encounter plane** of the latest CDM: the miss vector, the combined
   covariance's ellipses and the hard-body circle (see [2-D Pc](pc-2d.md));
 - **Geometry at TCA**: the secondary's motion in the primary's RTN frame,
@@ -151,9 +162,11 @@ The plan of the event's latest CDM, as
 [`keepout maneuver --event ID`](cli.md#stored-events) shows it: whether a
 burn can be recommended (or that none is needed, when the baseline
 already meets the target), the smallest burn each way against the baseline,
-the heatmap of the Pc over burn time and Δv with its cells as a table,
-and what the re-screen of each burn found, with a table of the new or
-closer approaches: each with its risk level in words and its assumed Pc.
+the heatmap of the Pc over burn time and Δv (its colour bar marks the
+target Pc) with its cells as a table under **Grid cells**, the plan's notes
+under **Notes**, each said once, and what the re-screen of each burn
+found, with a table of the new or closer approaches: each with its risk
+level in words and its assumed Pc.
 Without a stored catalog for the event
 (CDMs added with `store add`, not `screen --store`) there is no
 re-screen, and the page says so.
@@ -178,14 +191,15 @@ the badge says more.
 
 ## Uploading CDMs
 
-**Upload CDMs** on the Events list takes CDM files, KVN or XML, plain or
+**Upload CDMs** on the Events list (open it, choose the files, then **Add
+to store**) takes CDM files, KVN or XML, plain or
 gzip-compressed: at most 50 files of 1 MB each, and a gzip file may not
 decompress to more than 1 MB. All are read before any is stored: a file
 over the limits, not UTF-8 text or not a CDM, or a `MESSAGE_ID` stored
 with other content stops the whole upload, and the error names the file.
 Otherwise every CDM joins its event, as with
 [`keepout store add`](cli.md#store), and a refresh job is queued for
-each event that lacks a Pc. The page says what it stored and queued, and
+each event that lacks a Pc. The page says what it added and queued, and
 follows the jobs.
 
 The worker then computes the Pc. Each upload is kept with its file name:
@@ -201,7 +215,8 @@ Every computation the dashboard asks for is a
   settings, queues a refresh job (`refresh` in `keepout jobs list`): the
   worker computes the Pc its CDMs lack and caches them, as
   `keepout store rebuild` would.
-- **Plan manoeuvre**, on the planner, queues a `maneuver` job, as
+- **Plan manoeuvre**, on the planner, queues a `maneuver` job (shown as
+  `manoeuvre`), as
   `keepout maneuver --event ID --queue` does. **What if** queues one for
   its own settings.
 - **Cancel** cancels a queued or running job, as `keepout jobs cancel`

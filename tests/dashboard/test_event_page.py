@@ -4,7 +4,6 @@ provenance, and a refresh job for the Pc not computed."""
 
 import base64
 import json
-import re
 from pathlib import Path
 from typing import Any
 
@@ -18,16 +17,16 @@ from builders import EPOCH, LEO_R, LEO_V, cached_pc
 from dashboard_builders import OpenApp, shown, use_store, walk
 from sqlalchemy import delete
 from streamlit.testing.v1 import AppTest
-from streamlit.testing.v1.element_tree import Block, Element, PageLink
+from streamlit.testing.v1.element_tree import Element, PageLink
 
 from keepout._text import pc_text
 from keepout.cdm import Cdm, CovarianceMethod, ObjectMetadata, make_cdm
 from keepout.conjunction import Conjunction
 from keepout.covariance import Covariance
-from keepout.dashboard.text import AFTER_TCA, literal
+from keepout.dashboard.text import AFTER_TCA, literal, risk_text
 from keepout.figures import PROVENANCE_LABELS
 from keepout.objects import ObjectState
-from keepout.risk import DEFAULT_DECISION_CONFIG, Provenance, RiskLevel
+from keepout.risk import DEFAULT_DECISION_CONFIG, PC_FLOOR, Provenance, RiskLevel
 from keepout.settings import Settings, load_settings
 from keepout.state import StateVector
 from keepout.store import CdmInput, JobKind, JobQueue, models, open_store
@@ -42,31 +41,13 @@ SECTIONS = ("Pc trend", "Encounter plane", "Geometry at TCA")
 
 CALCULATED = CovarianceMethod.CALCULATED
 
-CDM_COLUMNS = 7
-"""Cells in a row of the CDMs table."""
 
-_MARKUP = re.compile(r"<[^>]*>")
-
-
-def _cell(cell: Block) -> str:
-    """What a cell of a table shows: its elements' values, a risk chip's
-    words without its markup."""
-    return " ".join(
-        _MARKUP.sub("", str(getattr(node, "value", "")))
-        for node in cell.children.values()
-    )
-
-
-def _cdm_rows(app: AppTest) -> dict[str, list[str]]:
-    """The cells of each row of the CDMs table, by ``MESSAGE_ID``: created,
-    before TCA, miss, Pc, provenance, risk."""
-    cells = [_cell(column) for column in app.columns]
-    start = cells.index("**CDM**") + CDM_COLUMNS
-    rows = [
-        cells[index : index + CDM_COLUMNS]
-        for index in range(start, len(cells) - CDM_COLUMNS + 1, CDM_COLUMNS)
-    ]
-    return {row[0]: row[1:] for row in rows}
+def _cdm_rows(app: AppTest) -> dict[str, dict[str, object]]:
+    """The rows of the CDMs table, by ``MESSAGE_ID``."""
+    (table,) = [frame.value for frame in app.dataframe if "CDM" in frame.value]
+    # A missing value is None, as the page gives it (pandas makes it NaN).
+    rows = table.astype(object).where(table.notna(), None).to_dict("records")
+    return {str(row["CDM"]): row for row in rows}
 
 
 def _charts(app: AppTest) -> list[dict[str, Any]]:
@@ -230,20 +211,23 @@ def test_event_page_sections(app_test: OpenApp, seed_db: Path) -> None:
     assert not app.exception
     assert not app.error
     assert [item.value for item in app.title] == [f"Event {event_id}"]
-    # Its link on to the event's manoeuvre planner.
-    (link,) = app.get("page_link")
-    assert isinstance(link, PageLink)
-    assert (link.proto.label, link.proto.page) == ("Manoeuvre planner", "planner")
-    assert link.proto.query_string == f"event={event_id}"
+    # Its links back to the list and on to the event's manoeuvre planner.
+    back, on = app.get("page_link")
+    assert isinstance(back, PageLink)
+    assert isinstance(on, PageLink)
+    assert back.proto.label == "Events"
+    assert (on.proto.label, on.proto.page) == ("Manoeuvre planner", "planner")
+    assert on.proto.query_string == f"event={event_id}"
     headings = [item.value for item in app.subheader]
     assert [h for h in headings if h in SECTIONS] == list(SECTIONS)
     assert len(app.get("plotly_chart")) == 3
-    # Every chart is followed by its data table.
+    # Every chart is followed by its data table (the trend's: the CDMs).
     kinds = [node.type for node in walk(app.main)]
     charts = [i for i, kind in enumerate(kinds) if kind == "plotly_chart"]
     assert len(charts) == 3
     for index in charts:
-        assert kinds[index + 1] == "dataframe"
+        after = [*kinds[index + 1 :], "plotly_chart"]
+        assert after.index("dataframe") < after.index("plotly_chart")
     assert "Data as of 2026-10-07T12:00:00 UTC (fixed)" in shown(app)
 
 
@@ -257,10 +241,7 @@ def test_event_page_badges(app_test: OpenApp, seed_db: Path) -> None:
     assert len(event.cdms) > 1
     assert list(rows) == [cdm.message_id for cdm in event.cdms]
     for row in rows.values():
-        assert row[4] == f":orange-badge[{PROVENANCE_LABELS[Provenance.GP_AGE_MODEL]}]"
-    # The trend's table names each point's provenance too.
-    trend = app.dataframe[0].value
-    assert set(trend["provenance"]) == {PROVENANCE_LABELS[Provenance.GP_AGE_MODEL]}
+        assert row["Provenance"] == PROVENANCE_LABELS[Provenance.GP_AGE_MODEL]
 
 
 def test_missing_pc_offers_compute(
@@ -283,10 +264,12 @@ def test_missing_pc_offers_compute(
     # waits for every Pc; the cached Pc are shown.
     rows = _cdm_rows(app)
     assert list(rows) == cdms
-    assert rows[first][3:] == ["not computed", "", ""]
-    badge = f":orange-badge[{PROVENANCE_LABELS[Provenance.GP_AGE_MODEL]}]"
-    for message_id, observation in zip(cdms[1:], cached[1:], strict=True):
-        assert rows[message_id][3:] == [pc_text(observation.pc), badge, "-"]
+    shown_pc = [(row["Pc"], row["Provenance"], row["Risk"]) for row in rows.values()]
+    assert shown_pc[0] == ("not computed", None, None)
+    origin = PROVENANCE_LABELS[Provenance.GP_AGE_MODEL]
+    assert shown_pc[1:] == [
+        (pc_text(observation.pc), origin, None) for observation in cached[1:]
+    ]
     # The latest Pc, as the events list shows it; no risk yet.
     assert f"Latest Pc: {pc_text(cached[-1].pc)}" in text.splitlines()
     assert "not computed</span>" in text
@@ -367,12 +350,20 @@ def test_trend_of_a_changing_pc(app_test: OpenApp, own_store: Path) -> None:
     vertical = [s for s in trend["layout"]["shapes"] if s["x0"] == s["x1"]]
     expected = DEFAULT_DECISION_CONFIG.decision_point / HOUR
     assert [s["x0"] for s in vertical] == [pytest.approx(expected)]
-    table = app.dataframe[0].value
-    assert list(table["CDM"]) == ["T0", "T1", "T2"]
-    assert list(table["Pc"]) == pytest.approx(sorted(pc))
-    assert set(table["provenance"]) == {PROVENANCE_LABELS[Provenance.CDM_COVARIANCE]}
-    # The latest Pc is red, in colour and words.
-    assert _cdm_rows(app)["T2"][5] == RiskLevel.RED.key
+    # The trend's data: the CDMs table, with each Pc the store has; the
+    # trend draws a Pc below the floor at the floor.
+    with open_store(own_store, create=False) as store:
+        cached = [item.pc for item in cached_pc(store, event_id, Settings())]
+    assert all(value is not None for value in cached)
+    assert sorted(pc) == [max(value or 0.0, PC_FLOOR) for value in cached]
+    rows = _cdm_rows(app)
+    assert list(rows) == ["T0", "T1", "T2"]
+    assert [row["Pc"] for row in rows.values()] == [pc_text(v) for v in cached]
+    assert {row["Provenance"] for row in rows.values()} == {
+        PROVENANCE_LABELS[Provenance.CDM_COVARIANCE]
+    }
+    # The latest Pc is red, in a coloured mark and words.
+    assert rows["T2"]["Risk"] == risk_text(RiskLevel.RED)
 
 
 def test_max_pc_event_has_no_ellipse(app_test: OpenApp, own_store: Path) -> None:
@@ -476,3 +467,56 @@ def test_cdm_text_shown_verbatim(app_test: OpenApp, own_store: Path) -> None:
     text = shown(app)
     assert literal(CRAFTED) in text
     assert CRAFTED not in text.replace(literal(CRAFTED), "")
+
+
+def _red(own_store: Path) -> str:
+    """An event of three CDMs whose latest Pc is red."""
+    cdms = [
+        _crossing(200.0, 72.0, "T0"),
+        _crossing(40.0, 48.0, "T1"),
+        _crossing(15.0, 24.0, "T2"),
+    ]
+    return _store(own_store, cdms, Settings())
+
+
+def test_the_reasons_for_the_risk_are_shown_as_text(
+    app_test: OpenApp, own_store: Path
+) -> None:
+    event_id = _red(own_store)
+    app = app_test("event", query={"event": event_id})
+    assert not app.exception
+    (why,) = [item.value for item in app.info]
+    head, reasons = why.split("\n\n")
+    assert head.startswith("**red · ")
+    assert "maneuver" not in head
+    assert reasons.startswith("- latest Pc ")
+    # Not a grey caption.
+    assert all("latest Pc" not in item.value for item in app.caption)
+
+
+def test_a_red_event_offers_planning_as_its_primary_action(
+    app_test: OpenApp, own_store: Path
+) -> None:
+    event_id = _red(own_store)
+    app = app_test("event", query={"event": event_id})
+    plan = app.button(key=f"event-plan-{event_id}")
+    assert plan.label == "Manoeuvre planner"
+    assert plan.proto.type == "primary"
+    assert [link.proto.page for link in app.get("page_link")] == [""]
+    plan.click().run()
+    assert not app.exception
+    assert [item.value for item in app.title] == [
+        f"Manoeuvre planner: event {event_id}"
+    ]
+
+
+def test_the_numbers_of_the_geometry_have_fixed_decimals(
+    app_test: OpenApp, own_store: Path
+) -> None:
+    event_id = _red(own_store)
+    app = app_test("event", query={"event": event_id})
+    _, encounter, geometry = (
+        json.loads(frame.proto.columns) for frame in app.dataframe
+    )
+    assert encounter["value"]["type_config"]["format"] == "%.1f"
+    assert geometry["secondary at TCA [m]"]["type_config"]["format"] == "%.1f"

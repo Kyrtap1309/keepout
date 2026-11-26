@@ -515,7 +515,8 @@ def seed_store(path: Path, *, cara: bool = False) -> Path:
     CDMs ingested and their Pc computed with :data:`SETTINGS`.
 
     The synthetic CDMs are stored with the snapshot's catalog, which they
-    were screened from; CARA's, with ``cara``, without a catalog. Its CDM
+    were screened from, labelled by its path from the repository's root;
+    CARA's, with ``cara``, without a catalog. Its CDM
     gives no ``HBR`` (only a comment does), so with the seed's settings it
     has no Pc. Each CDM's origin is its file's path from the repository's
     root.
@@ -554,7 +555,12 @@ def seed_store(path: Path, *, cara: bool = False) -> Path:
         raise FileNotFoundError(
             f"no CARA CDM in {SEED_DIR}; run keepout fetch cara, then {TOOL} --cara"
         )
-    catalog = CatalogReference.of_file(snapshot.DATA / snapshot.SNAPSHOT)
+    file = snapshot.DATA / snapshot.SNAPSHOT
+    # Labelled by its path from the repository's root, not the machine's
+    # (the Docker image's /src/...): the planner shows the label.
+    catalog = dataclasses.replace(
+        CatalogReference.of_file(file), label=file.relative_to(REPO).as_posix()
+    )
     with open_store(path) as store:
         store.ingest(synthetic, catalog=catalog)
         if extra:

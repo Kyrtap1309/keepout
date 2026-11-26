@@ -1,7 +1,7 @@
 """The dashboard's events page: the stored events a page at a time, each
 row's risk in colour and words, links to the event page, and the upload."""
 
-import re
+import json
 from pathlib import Path
 
 import dashboard_seed as seed
@@ -10,51 +10,31 @@ from astropy.time import Time
 from builders import B1_TEXT, leo_crossing, set_keyword
 from dashboard_builders import OpenApp
 from streamlit.testing.v1 import AppTest
-from streamlit.testing.v1.element_tree import Block, PageLink
 
 import keepout.cdm
+from keepout._text import pc_text
 from keepout.cdm import kvn
 from keepout.dashboard import text
 from keepout.dashboard.text import literal
 from keepout.dashboard.upload import MAX_FILE_BYTES
 from keepout.figures import PROVENANCE_LABELS
-from keepout.risk import RiskLevel
+from keepout.risk import Action, RiskLevel
 from keepout.settings import load_settings
 from keepout.store import CdmInput, EventSummary, JobKind, JobQueue, open_store
 from keepout.units import elapsed_seconds
 
-COLUMNS = 10
-"""Cells in a row of the list."""
-
-SPAN = re.compile(r"<span [^>]*>(?P<text>[^<]*)</span>")
+Row = dict[str, object]
 
 
-def _text(cell: Block) -> str:
-    """What a cell of the list shows: its elements' values, a risk chip's
-    words without its markup."""
-    values: list[str] = []
-    for node in cell.children.values():
-        value = str(getattr(node, "value", ""))
-        chip = SPAN.fullmatch(value)
-        values.append(chip["text"] if chip else value)
-    return " ".join(values)
+def _tables(app: AppTest) -> list[list[Row]]:
+    """The rows of each table of events on the page: the upcoming, then the
+    past."""
+    return [frame.value.to_dict("records") for frame in app.dataframe]
 
 
-def _rows(app: AppTest) -> list[list[str]]:
-    """The text of each cell of each row of the list, after its header."""
-    count = len(_event_links(app))
-    cells = [_text(column) for column in app.columns]
-    assert cells[:3] == ["**Event**", "**Objects**", "**TCA (UTC)**"] or not count
-    return [
-        cells[start : start + COLUMNS]
-        for start in range(COLUMNS, COLUMNS * (count + 1), COLUMNS)
-    ]
-
-
-def _event_links(app: AppTest) -> list[PageLink]:
-    """The list's links to the event page, one per row."""
-    links = [link for link in app.get("page_link") if isinstance(link, PageLink)]
-    return [link for link in links if link.proto.page == "event"]
+def _rows(app: AppTest) -> list[Row]:
+    """The rows of the page's tables of events, in order."""
+    return [row for table in _tables(app) for row in table]
 
 
 def _summaries(store_path: Path, as_of: Time) -> tuple[EventSummary, ...]:
@@ -70,39 +50,35 @@ def test_events_list_shows_rows(app_test: OpenApp, seed_db: Path) -> None:
     as_of = seed.seed_as_of()
     summaries = _summaries(seed_db, as_of)
     assert len(summaries) == 7
-    rows = _rows(app)
+    (rows,) = _tables(app)
     assert len(rows) == 7
     for row, summary in zip(rows, summaries, strict=True):
-        event, objects, tca, countdown, pc, origin, risk, cdms, _, plan = row
-        assert event == summary.event_id
-        assert objects == literal(f"{summary.object1} / {summary.object2}")
-        assert tca == str(summary.tca.utc.isot)[:19]
+        assert row["Event"] == f"event?event={summary.event_id}"
+        assert row["Objects"] == f"{summary.object1} / {summary.object2}"
+        assert row["TCA (UTC)"] == str(summary.tca.utc.isot)[:19]
         assert elapsed_seconds(as_of, summary.tca) >= 0
-        assert countdown == text.countdown(summary.tca, as_of)
+        assert row["Until TCA"] == text.countdown(summary.tca, as_of)
         assert summary.latest is not None
-        assert summary.latest.pc is not None
-        assert pc == f"{summary.latest.pc:.2e}"
+        assert row["Latest Pc"] == pc_text(summary.latest.pc)
         assert summary.provenance is not None
-        assert PROVENANCE_LABELS[summary.provenance] in origin
-        assert summary.assessment is not None
-        level = summary.assessment.level
-        assert level is not None
-        assert risk.startswith(level.key)
-        assert cdms == str(summary.cdm_count)
-        assert plan == "Planner"
+        assert row["Provenance"] == PROVENANCE_LABELS[summary.provenance]
+        assert row["Risk"] == text.assessment_text(summary.assessment)
+        assert row["CDMs"] == summary.cdm_count
+        assert row["Manoeuvre"] == f"planner?event={summary.event_id}"
     assert [caption.value for caption in app.caption] == ["Events 1 to 7 of 7"]
 
 
-def test_risk_shown_as_text(app_test: OpenApp) -> None:
-    app = app_test()
-    labels = {*(level.key for level in RiskLevel), "not computed"}
-    risks = [row[6].split(" · ")[0] for row in _rows(app)]
+def test_a_pc_has_two_exponent_digits(app_test: OpenApp) -> None:
+    pcs = [str(row["Latest Pc"]) for row in _rows(app_test())]
+    assert pcs
+    assert all(len(pc.split("e")[1]) == 3 for pc in pcs)
+
+
+def test_risk_shown_as_words_with_a_coloured_mark(app_test: OpenApp) -> None:
+    risks = {row["Risk"] for row in _rows(app_test())}
+    words = {text.risk_text(level, action) for level in RiskLevel for action in Action}
     assert risks
-    assert set(risks) <= labels
-    # And as colour: each chip is filled with its level's colour.
-    chips = [item.value for item in app.markdown if "<span" in item.value]
-    assert len(chips) == len(risks)
-    assert all("background:#" in chip for chip in chips)
+    assert risks <= words | {"not computed"}
 
 
 def test_risk_not_computed(
@@ -119,8 +95,8 @@ def test_risk_not_computed(
     assert not app.exception
     rows = _rows(app)
     assert len(rows) == 7
-    assert {(row[4], row[5], row[6]) for row in rows} == {
-        ("not computed", "", "not computed")
+    assert {(row["Latest Pc"], row["Provenance"], row["Risk"]) for row in rows} == {
+        ("not computed", None, "not computed")
     }
 
 
@@ -139,10 +115,22 @@ def test_past_events_are_shown_on_the_toggle(
     ]
     app.toggle(key="events-past").set_value(True).run()
     assert not app.exception
-    rows = _rows(app)
+    (rows,) = _tables(app)
     assert len(rows) == 12
-    assert all(row[3].endswith(" ago") for row in rows)
+    assert all(str(row["Until TCA"]).endswith(" ago") for row in rows)
     assert [item.value for item in app.info] == []
+
+
+def test_past_events_are_apart_and_have_no_planner(app_test: OpenApp) -> None:
+    app = app_test()
+    app.toggle(key="events-past").set_value(True).run()
+    assert not app.exception
+    upcoming, past = _tables(app)
+    assert len(upcoming) == 7
+    assert len(past) == 5
+    assert all("Manoeuvre" in row for row in upcoming)
+    assert not any("Manoeuvre" in row for row in past)
+    assert "**Past events**" in [item.value for item in app.markdown]
 
 
 def _many(path: Path, count: int) -> Path:
@@ -169,48 +157,47 @@ def test_the_list_shows_25_events_a_page(
     assert [caption.value for caption in app.caption] == ["Events 1 to 25 of 30"]
     assert app.button(key="events-previous").disabled
     assert not app.button(key="events-next").disabled
-    first = [row[0] for row in _rows(app)]
+    first = [row["Event"] for row in _rows(app)]
 
     app.button(key="events-next").click().run()
     assert not app.exception
-    second = [row[0] for row in _rows(app)]
+    second = [row["Event"] for row in _rows(app)]
     assert len(second) == 5
     assert not set(first) & set(second)
     assert [caption.value for caption in app.caption] == ["Events 26 to 30 of 30"]
     assert app.button(key="events-next").disabled
 
     app.button(key="events-previous").click().run()
-    assert [row[0] for row in _rows(app)] == first
+    assert [row["Event"] for row in _rows(app)] == first
 
 
-def test_row_links_to_event(app_test: OpenApp) -> None:
+def test_the_event_and_planner_links_are_link_columns(app_test: OpenApp) -> None:
     app = app_test()
-    links = app.get("page_link")
-    # Each row links to its event's page and to its manoeuvre planner.
-    assert len(links) == 14
-    events = _event_links(app)
-    assert len(events) == 7
-    for link in events:
-        assert link.proto.query_string == f"event={link.value}"
-    planners = [link for link in links if link not in events]
-    assert [link.proto.page for link in planners] == ["planner"] * 7
-    assert [link.proto.label for link in planners] == ["Planner"] * 7
-    assert [link.proto.query_string for link in planners] == [
-        link.proto.query_string for link in events
-    ]
+    columns = json.loads(app.dataframe[0].proto.columns)
+    assert columns["Event"]["type_config"]["type"] == "link"
+    assert columns["Manoeuvre"]["type_config"] == {
+        "type": "link",
+        "display_text": "Planner",
+    }
 
 
-def test_no_chart_so_no_table(app_test: OpenApp) -> None:
-    # Every chart is followed by its data table; this page has neither.
+def test_the_upload_starts_collapsed(app_test: OpenApp) -> None:
+    (expander,) = app_test().expander
+    assert expander.label == "Upload CDMs"
+    assert not expander.proto.expanded
+
+
+def test_adding_no_file_asks_for_one(app_test: OpenApp) -> None:
     app = app_test()
-    assert app.get("plotly_chart") == []
-    assert app.dataframe == []
+    app.button(key="FormSubmitter:upload-Add to store").click().run()
+    assert not app.exception
+    assert [item.value for item in app.warning] == ["Choose CDM files to add."]
 
 
 def _upload(app: AppTest, *files: tuple[str, bytes]) -> AppTest:
     """The app after ``files`` are uploaded and ingested."""
     app.file_uploader[0].set_value([(name, data, "text/plain") for name, data in files])
-    app.button(key="FormSubmitter:upload-Ingest").click()
+    app.button(key="FormSubmitter:upload-Add to store").click()
     return app.run()
 
 
@@ -223,7 +210,7 @@ def test_page_uploads_and_queues_refresh(
     assert not app.exception
     assert not app.error
     assert [item.value for item in app.success] == [
-        "Stored 1 CDM (0 already stored) in 1 event; queued 1 Pc refresh job."
+        "Added 1 CDM (0 already stored) in 1 event; queued 1 Pc refresh job."
     ]
     with open_store(seed_copy, create=False) as store:
         (job,) = JobQueue(store).jobs()

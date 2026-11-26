@@ -10,8 +10,19 @@ from hypothesis import strategies as st
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
 
-from keepout.dashboard.text import AFTER_TCA, FAILED, countdown, literal, unrated
-from keepout.risk import assess
+from keepout.dashboard.text import (
+    AFTER_TCA,
+    FAILED,
+    NOT_COMPUTED,
+    assessment_text,
+    british,
+    countdown,
+    literal,
+    merged_notes,
+    risk_text,
+    unrated,
+)
+from keepout.risk import Action, RiskLevel, assess
 
 AS_OF = Time("2026-10-07T12:00:00", scale="utc")
 
@@ -47,6 +58,53 @@ def test_unrated_when_issued_after_tca() -> None:
     assessment = assess(series((-0.5, 1e-5)))
     assert assessment.level is None
     assert unrated(assessment) == AFTER_TCA
+
+
+def test_british_spells_manoeuvre() -> None:
+    assert british("prepare maneuver") == "prepare manoeuvre"
+
+
+@pytest.mark.parametrize(
+    ("level", "action", "words"),
+    [
+        (RiskLevel.RED, Action.MANEUVER, "🔴 red · manoeuvre"),
+        (RiskLevel.RED, Action.PREPARE_MANEUVER, "🔴 red · prepare manoeuvre"),
+        (RiskLevel.YELLOW, Action.MONITOR, "🟡 yellow · monitor"),
+        (RiskLevel.GREEN, Action.IGNORE, "🟢 green · ignore"),
+        (RiskLevel.GREEN, None, "🟢 green"),
+    ],
+)
+def test_risk_text_marks_the_level_and_names_the_action(
+    level: RiskLevel, action: Action | None, words: str
+) -> None:
+    assert risk_text(level, action) == words
+
+
+def test_risk_text_without_an_assessment_is_not_computed() -> None:
+    assert assessment_text(None) == NOT_COMPUTED
+
+
+def test_risk_text_without_a_level_says_why() -> None:
+    assert assessment_text(assess(series((-0.5, 1e-5)))) == AFTER_TCA
+
+
+def test_a_note_of_the_baseline_and_burns_is_said_once_naming_them() -> None:
+    notes = [
+        "2-D Pc may be off",
+        "drag is off",
+        "prograde: 2-D Pc may be off",
+        "retrograde: 2-D Pc may be off",
+        "retrograde: slow encounter",
+    ]
+    assert merged_notes(notes) == [
+        "2-D Pc may be off (baseline, prograde, retrograde)",
+        "drag is off",
+        "retrograde: slow encounter",
+    ]
+
+
+def test_a_note_with_a_colon_of_its_own_is_kept() -> None:
+    assert merged_notes(["drag: off"]) == ["drag: off"]
 
 
 @pytest.mark.parametrize(

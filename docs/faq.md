@@ -20,8 +20,10 @@
 
 **Is it "maneuver" or "manoeuvre"?**
 :   Commands, options, the command line's output and API names use the US
-    "maneuver", as the CCSDS keywords do. The prose of these pages uses the
-    British "manoeuvre".
+    "maneuver", as the CCSDS keywords do. The prose of these pages, and
+    everything the dashboard shows, uses the British "manoeuvre": its action
+    `maneuver` reads `manoeuvre` there, its `maneuver` jobs too, while the
+    values in JSON and on the command line stay `maneuver`.
 
 ## Errors
 

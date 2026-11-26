@@ -3,6 +3,7 @@ grid, the smallest burn each way and its re-screen), the job that plans it,
 what-if jobs on another target Pc or hard-body radius, and their status."""
 
 import dataclasses
+import json
 import shutil
 from pathlib import Path
 from typing import NamedTuple
@@ -20,8 +21,11 @@ from streamlit.testing.v1 import AppTest
 from streamlit.testing.v1.element_tree import PageLink
 
 import keepout.cdm
+from keepout import figures
 from keepout._text import ASSUMED_COVARIANCES
+from keepout.dashboard.text import merged_notes, risk_text
 from keepout.errors import KeepoutError
+from keepout.figures import GridFigure
 from keepout.maneuver import ManeuverOutcome, NewApproach, RescreenResult
 from keepout.maneuver.wording import NO_BURN_NEEDED
 from keepout.risk import RiskLevel
@@ -107,7 +111,9 @@ def planned(seed_db: Path, tmp_path_factory: pytest.TempPathFactory) -> Planned:
 
 
 @pytest.fixture
-def store(planned: Planned, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def store_path(
+    planned: Planned, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Path:
     """A copy of :func:`planned` the test may write to, which the app opens."""
     path = Path(shutil.copy2(planned.store, tmp_path / "planned.db"))
     use_store(monkeypatch, path, planned.settings, seed.seed_as_of())
@@ -132,10 +138,10 @@ def _jobs(path: Path, event_id: str) -> list[Job]:
 
 def _queue(app: AppTest, event_id: str) -> Job:
     """Click the page's Plan manoeuvre button; the one job it queued."""
-    store = Path(app.session_state["context"].store_path)
+    store_path = Path(app.session_state["context"].store_path)
     app.button(key=f"planner-plan-{event_id}").click().run()
     assert not app.exception
-    (job,) = _jobs(store, event_id)
+    (job,) = _jobs(store_path, event_id)
     return job
 
 
@@ -151,14 +157,14 @@ def _what_if(
     assert not app.exception
 
 
-def test_no_event_param(store: Path) -> None:
+def test_no_event_param(store_path: Path) -> None:
     app = open_app("planner")
     assert not app.exception
     assert [item.value for item in app.title] == ["Manoeuvre planner"]
     assert "Pick an event" in shown(app)
 
 
-def test_an_unknown_event_is_a_warning_with_the_way_back(store: Path) -> None:
+def test_an_unknown_event_is_a_warning_with_the_way_back(store_path: Path) -> None:
     # As the event page: a warning and the way back to the list.
     app = open_app("planner", query={"event": "nope"})
     assert not app.exception
@@ -171,7 +177,7 @@ def test_an_unknown_event_is_a_warning_with_the_way_back(store: Path) -> None:
     assert link.proto.page == ""
 
 
-def test_cached_plan_shown(store: Path, planned: Planned) -> None:
+def test_cached_plan_shown(store_path: Path, planned: Planned) -> None:
     app = open_app("planner", query={"event": planned.event_id})
     assert not app.exception
     assert not app.error
@@ -199,35 +205,37 @@ def test_cached_plan_shown(store: Path, planned: Planned) -> None:
     assert "Job " not in text
 
 
-def test_no_plan_offers_queue(store: Path) -> None:
-    event_id = _unplanned(store)
+def test_no_plan_offers_queue(store_path: Path) -> None:
+    event_id = _unplanned(store_path)
     app = open_app("planner", query={"event": event_id})
     assert not app.exception
     assert not app.get("plotly_chart")
     job = _queue(app, event_id)
     assert job.status is JobStatus.QUEUED
-    assert f"Job {job.id} (maneuver): **queued**" in shown(app)
+    assert f"Job {job.id} (manoeuvre): **queued**" in shown(app)
     # While it is queued, the page offers no second job.
     assert all(button.key != f"planner-plan-{event_id}" for button in app.button)
 
 
-def test_a_queued_job_is_found_after_a_reload(store: Path, planned: Planned) -> None:
-    event_id = _unplanned(store)
-    with open_store(store) as opened:
+def test_a_queued_job_is_found_after_a_reload(
+    store_path: Path, planned: Planned
+) -> None:
+    event_id = _unplanned(store_path)
+    with open_store(store_path) as opened:
         job = JobQueue(opened).submit(event_id, load_settings(planned.settings)).job
     assert job is not None
     app = open_app("planner", query={"event": event_id})
     assert not app.exception
-    assert f"Job {job.id} (maneuver): **queued**" in shown(app)
+    assert f"Job {job.id} (manoeuvre): **queued**" in shown(app)
 
 
-def test_what_if_dedupes(store: Path, planned: Planned) -> None:
+def test_what_if_dedupes(store_path: Path, planned: Planned) -> None:
     event_id = planned.event_id
-    before = {job.id for job in _jobs(store, event_id)}
+    before = {job.id for job in _jobs(store_path, event_id)}
     app = open_app("planner", query={"event": event_id})
     _what_if(app, event_id, 1e-6, None)
     _what_if(app, event_id, 1e-6, None)
-    added = [job for job in _jobs(store, event_id) if job.id not in before]
+    added = [job for job in _jobs(store_path, event_id) if job.id not in before]
     (job,) = added
     assert job.status is JobStatus.QUEUED
     assert job.settings.target_pc == 1e-6
@@ -235,30 +243,30 @@ def test_what_if_dedupes(store: Path, planned: Planned) -> None:
     assert not app.get("plotly_chart")
     # The operator's own values: their plan is cached, no job.
     _what_if(app, event_id, 1e-5, None)
-    assert [item.id for item in _jobs(store, event_id) if item.id not in before] == [
-        job.id
-    ]
+    assert [
+        item.id for item in _jobs(store_path, event_id) if item.id not in before
+    ] == [job.id]
     assert len(app.get("plotly_chart")) == 1
     assert "What-if" not in shown(app)
 
 
-def test_a_queued_job_is_cancelled_and_can_be_queued_again(store: Path) -> None:
-    event_id = _unplanned(store)
+def test_a_queued_job_is_cancelled_and_can_be_queued_again(store_path: Path) -> None:
+    event_id = _unplanned(store_path)
     app = open_app("planner", query={"event": event_id})
     job = _queue(app, event_id)
     app.button(key=f"cancel-job-{job.id}").click().run()
     assert not app.exception
     assert not app.error
-    (cancelled,) = _jobs(store, event_id)
+    (cancelled,) = _jobs(store_path, event_id)
     assert cancelled.status is JobStatus.CANCELLED
-    assert f"Job {job.id} (maneuver): **cancelled**" in shown(app)
+    assert f"Job {job.id} (manoeuvre): **cancelled**" in shown(app)
     # It can be queued again.
     assert any(button.key == f"planner-plan-{event_id}" for button in app.button)
 
 
-def test_failed_job_shows_error(store: Path, planned: Planned) -> None:
-    event_id = _unplanned(store)
-    with open_store(store) as opened:
+def test_failed_job_shows_error(store_path: Path, planned: Planned) -> None:
+    event_id = _unplanned(store_path)
+    with open_store(store_path) as opened:
         queue = JobQueue(opened)
         queue.submit(event_id, load_settings(planned.settings))
         job = queue.claim("test")
@@ -267,17 +275,17 @@ def test_failed_job_shows_error(store: Path, planned: Planned) -> None:
     app = open_app("planner", query={"event": event_id})
     assert not app.exception
     assert [item.value for item in app.error] == ["the burn window closed"]
-    assert f"Job {job.id} (maneuver): **failed**" in shown(app)
+    assert f"Job {job.id} (manoeuvre): **failed**" in shown(app)
 
 
 def test_a_refused_what_if_shows_its_refusal_and_queues_nothing(
-    store: Path, planned: Planned
+    store_path: Path, planned: Planned
 ) -> None:
     event_id = planned.event_id
-    before = len(_jobs(store, event_id))
+    before = len(_jobs(store_path, event_id))
     app = open_app("planner", query={"event": event_id})
     _what_if(app, event_id, REFUSED_TARGET, REFUSED_HBR)
-    assert len(_jobs(store, event_id)) == before
+    assert len(_jobs(store_path, event_id)) == before
     assert not app.error
     assert [item.value for item in app.warning] == [
         "No burn on the grid meets the target Pc 1.00e-12."
@@ -287,7 +295,7 @@ def test_a_refused_what_if_shows_its_refusal_and_queues_nothing(
     assert len(app.get("plotly_chart")) == 1
 
 
-def test_a_bad_what_if_is_an_error(store: Path, planned: Planned) -> None:
+def test_a_bad_what_if_is_an_error(store_path: Path, planned: Planned) -> None:
     event_id = planned.event_id
     app = open_app("planner", query={"event": event_id})
     _what_if(app, event_id, 1e-5, 0.0)
@@ -296,7 +304,7 @@ def test_a_bad_what_if_is_an_error(store: Path, planned: Planned) -> None:
 
 
 def test_the_what_if_form_starts_from_the_what_if_shown(
-    store: Path, planned: Planned
+    store_path: Path, planned: Planned
 ) -> None:
     event_id = planned.event_id
     app = open_app("planner", query={"event": event_id})
@@ -316,13 +324,13 @@ def test_the_what_if_form_starts_from_the_what_if_shown(
     assert not app.exception
     (job,) = [
         job
-        for job in _jobs(store, event_id)
+        for job in _jobs(store_path, event_id)
         if job.status.is_active and job.settings.target_pc == 1e-7
     ]
     assert job.settings.combined_hard_body_radius == 30.0
 
 
-def test_back_to_the_operators_settings(store: Path, planned: Planned) -> None:
+def test_back_to_the_operators_settings(store_path: Path, planned: Planned) -> None:
     event_id = planned.event_id
     app = open_app("planner", query={"event": event_id})
     _what_if(app, event_id, REFUSED_TARGET, REFUSED_HBR)
@@ -380,9 +388,9 @@ def _outcome(planned: Planned) -> ManeuverOutcome:
 
 
 def _rescreened(
-    store: Path, planned: Planned, results: tuple[RescreenResult | None, ...]
+    store_path: Path, planned: Planned, results: tuple[RescreenResult | None, ...]
 ) -> AppTest:
-    """The planner of the planned event, its plan cached in ``store`` as if
+    """The planner of the planned event, its plan cached in ``store_path`` as if
     re-screened against a catalog with ``results``, a burn each (``None``:
     not re-screened); a real re-screen takes tens of seconds."""
     outcome = _outcome(planned)
@@ -395,7 +403,7 @@ def _rescreened(
             for burn, result in zip(outcome.burns, results, strict=True)
         ),
     )
-    with open_store(store, create=False) as opened:
+    with open_store(store_path, create=False) as opened:
         detail = opened.plan_detail(planned.event_id, load_settings(planned.settings))
         assert detail is not None
         with opened.write() as session:
@@ -412,7 +420,7 @@ def _rescreened(
     return app
 
 
-def test_a_rescreen_with_a_conflict(store: Path, planned: Planned) -> None:
+def test_a_rescreen_with_a_conflict(store_path: Path, planned: Planned) -> None:
     outcome = _outcome(planned)
     tca = outcome.event.latest.tca
     result = _rescreen(
@@ -421,7 +429,7 @@ def test_a_rescreen_with_a_conflict(store: Path, planned: Planned) -> None:
         closer=(_approach(40002, tca + 4 * u.hour, 3e-6, RiskLevel.YELLOW),),
         event_range=1234.0,
     )
-    app = _rescreened(store, planned, (result, None))
+    app = _rescreened(store_path, planned, (result, None))
     text = shown(app)
     assert "re-screened against 120 objects (the test catalog)" in text
     assert "range 1234 m after the burn" in text
@@ -434,20 +442,21 @@ def test_a_rescreen_with_a_conflict(store: Path, planned: Planned) -> None:
     assert table["approach"].tolist() == ["new", "closer"]
     assert table["secondary"].tolist() == [40001, 40002]
     assert table["risk"].tolist() == [
-        RiskLevel.RED.key,
-        RiskLevel.YELLOW.key,
+        risk_text(RiskLevel.RED),
+        risk_text(RiskLevel.YELLOW),
     ]
-    assert table["assumed Pc"].tolist() == [2e-4, 3e-6]
-    assert set(table["provenance"]) == {"assumed (GP age model)"}
+    assert table["assumed Pc"].tolist() == ["2.00e-04", "3.00e-06"]
+    # The caption says every Pc rests on assumed covariances: no column.
+    assert "provenance" not in table
     assert table["range [m]"].tolist() == pytest.approx([300.0, 300.0])
     # The second burn was not re-screened: one head only.
     assert text.count("re-screened against") == 1
 
 
-def test_a_rescreen_without_approaches(store: Path, planned: Planned) -> None:
+def test_a_rescreen_without_approaches(store_path: Path, planned: Planned) -> None:
     outcome = _outcome(planned)
     result = _rescreen(outcome, screened=False)
-    app = _rescreened(store, planned, (result, result))
+    app = _rescreened(store_path, planned, (result, result))
     text = shown(app)
     assert not app.error
     assert (
@@ -458,11 +467,11 @@ def test_a_rescreen_without_approaches(store: Path, planned: Planned) -> None:
     assert ASSUMED_COVARIANCES not in text
 
 
-def test_a_rescreen_bringing_the_pair_back(store: Path, planned: Planned) -> None:
+def test_a_rescreen_bringing_the_pair_back(store_path: Path, planned: Planned) -> None:
     outcome = _outcome(planned)
     back = _approach(40003, outcome.event.latest.tca + 12 * u.hour, 1e-3, RiskLevel.RED)
     result = _rescreen(outcome, returns=(back,))
-    app = _rescreened(store, planned, (None, result))
+    app = _rescreened(store_path, planned, (None, result))
     text = shown(app)
     assert not app.error
     assert "no approach within" in text
@@ -508,40 +517,40 @@ def test_a_rescreened_plan_shows_the_rescreen(
     assert "re-screened against" in text
     assert "Event secondary" in text
     assert "No new or closer approach at red" in text or "CONFLICT" in text
-    # Each approach once, in a data table: its risk in words, its Pc next
-    # to its provenance.
+    # Each approach once, in a data table: its risk in words.
     tables = [frame.value for frame in app.dataframe if "risk" in frame.value]
     assert tables
     for table in tables:
-        assert set(table["risk"]) <= {level.key for level in RiskLevel}
-        assert set(table["provenance"]) == {"assumed (GP age model)"}
+        assert set(table["risk"]) <= {risk_text(level) for level in RiskLevel}
     assert ":orange-badge[assumed (GP age model)]" in text
 
 
 @pytest.mark.parametrize("typed", ["abc", "0", "1", "nan", "-1e-5"])
-def test_a_bad_target_pc_is_an_error(store: Path, planned: Planned, typed: str) -> None:
+def test_a_bad_target_pc_is_an_error(
+    store_path: Path, planned: Planned, typed: str
+) -> None:
     event_id = planned.event_id
-    before = len(_jobs(store, event_id))
+    before = len(_jobs(store_path, event_id))
     app = open_app("planner", query={"event": event_id})
     _what_if(app, event_id, typed, None)
     assert [item.value for item in app.error] == [
         f"The target Pc must be a number in (0, 1), got {typed!r}."
     ]
-    assert len(_jobs(store, event_id)) == before
+    assert len(_jobs(store_path, event_id)) == before
 
 
-def test_each_job_names_its_settings(store: Path, planned: Planned) -> None:
+def test_each_job_names_its_settings(store_path: Path, planned: Planned) -> None:
     event_id = planned.event_id
     app = open_app("planner", query={"event": event_id})
     _what_if(app, event_id, 1e-6, None)
     _what_if(app, event_id, 1e-7, 30.0)
-    jobs = [job for job in _jobs(store, event_id) if job.status.is_active]
+    jobs = [job for job in _jobs(store_path, event_id) if job.status.is_active]
     assert len(jobs) == 2
     radii = {1e-6: "the CDMs' radii", 1e-7: "30 m"}
     assert {job.settings.target_pc for job in jobs} == set(radii)
     lines = shown(app).splitlines()
     for job in jobs:
-        status = lines.index(f"Job {job.id} (maneuver): **queued**")
+        status = lines.index(f"Job {job.id} (manoeuvre): **queued**")
         # The caption right under the job's own status line.
         assert lines[status + 1] == (
             f"target Pc {job.settings.target_pc:.2e}, combined hard-body radius "
@@ -550,21 +559,21 @@ def test_each_job_names_its_settings(store: Path, planned: Planned) -> None:
 
 
 def test_a_refused_cancel_of_a_job_planned_meanwhile(
-    store: Path, planned: Planned, monkeypatch: pytest.MonkeyPatch
+    store_path: Path, planned: Planned, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     event_id = planned.event_id
     app = open_app("planner", query={"event": event_id})
     _what_if(app, event_id, 1e-6, None)
-    (job,) = [job for job in _jobs(store, event_id) if job.status.is_active]
+    (job,) = [job for job in _jobs(store_path, event_id) if job.status.is_active]
     cancel = JobQueue.cancel
 
     def worker_first(queue: JobQueue, job_id: int) -> Job:
         # A worker plans the job between the page's read and the click: the
         # plan is cached, and the page no longer shows the job.
-        with open_store(store) as opened:
+        with open_store(store_path) as opened:
             claimed = JobQueue(opened).claim("test")
             assert claimed is not None
-            payload = run_maneuver_job(str(store), claimed, 1, grid=SMALL_GRID)
+            payload = run_maneuver_job(str(store_path), claimed, 1, grid=SMALL_GRID)
             assert JobQueue(opened).finish(claimed, payload)
         return cancel(queue, job_id)
 
@@ -584,18 +593,73 @@ def test_a_refused_cancel_of_a_job_planned_meanwhile(
 
 
 def test_an_unchanged_many_digit_target_is_the_operators(
-    store: Path, planned: Planned, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    store_path: Path, planned: Planned, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # The form's default must read back as the operator's very target.
     settings_file = tmp_path / "precise.toml"
     settings_file.write_text(SETTINGS.replace("1e-5", "1.234567891e-5"))
     monkeypatch.setenv("KEEPOUT_SETTINGS", str(settings_file))
-    _plan(store, planned.event_id, load_settings(settings_file))
-    before = len(_jobs(store, planned.event_id))
+    _plan(store_path, planned.event_id, load_settings(settings_file))
+    before = len(_jobs(store_path, planned.event_id))
     app = open_app("planner", query={"event": planned.event_id})
     app.button(key=f"planner-what-if-{planned.event_id}").click().run()
     assert not app.exception
     assert not app.error
-    assert len(_jobs(store, planned.event_id)) == before
+    assert len(_jobs(store_path, planned.event_id)) == before
     assert "What-if" not in shown(app)
     assert len(app.get("plotly_chart")) == 1
+
+
+def test_the_plans_notes_are_said_once_and_collapsed(
+    store_path: Path, planned: Planned
+) -> None:
+    notes = merged_notes(_outcome(planned).notes)
+    assert notes
+    app = open_app("planner", query={"event": planned.event_id})
+    (expander,) = [item for item in app.expander if item.label.startswith("Notes")]
+    assert expander.label == f"Notes ({len(notes)})"
+    assert not expander.proto.expanded
+    assert not [item for item in app.caption if item.value.startswith("Note:")]
+
+
+def test_the_burns_table_gives_signed_dv_and_pc_with_two_exponent_digits(
+    store_path: Path, planned: Planned
+) -> None:
+    app = open_app("planner", query={"event": planned.event_id})
+    burns = app.dataframe[0]
+    columns = json.loads(burns.proto.columns)
+    assert columns["Δv (m/s)"]["type_config"]["format"] == "%+.4f"
+    pcs = burns.value["Pc"].tolist()
+    assert pcs[0] == f"{_outcome(planned).baseline.pc:.2e}"
+    assert all(len(pc.split("e")[1]) == 3 for pc in pcs)
+
+
+def test_the_grid_cells_are_a_collapsed_table(
+    store_path: Path, planned: Planned
+) -> None:
+    grid = _outcome(planned).grid
+    assert grid is not None
+    app = open_app("planner", query={"event": planned.event_id})
+    (expander,) = [item for item in app.expander if item.label.startswith("Grid")]
+    assert expander.label == f"Grid cells ({grid.pc.size})"
+    assert not expander.proto.expanded
+    (cells,) = [frame.value for frame in expander.dataframe]
+    assert len(cells) == grid.pc.size
+
+
+def test_the_heatmap_is_made_once_per_plan(
+    store_path: Path, planned: Planned, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    made: list[None] = []
+    original = figures.grid_figure
+
+    def counted(outcome: ManeuverOutcome) -> GridFigure:
+        made.append(None)
+        return original(outcome)
+
+    monkeypatch.setattr(figures, "grid_figure", counted)
+    app = open_app("planner", query={"event": planned.event_id})
+    app.run()
+    assert not app.exception
+    assert len(app.get("plotly_chart")) == 1
+    assert len(made) == 1

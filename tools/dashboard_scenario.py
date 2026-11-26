@@ -133,33 +133,39 @@ def run_scenario(
     def events_list() -> None:
         page.goto(base_url)
         _visible(page.get_by_text(AS_OF_TEXT), timeout_s)
-        _visible(page.get_by_role("link", name=DEMO_EVENT), timeout_s)
-        _visible(page.get_by_text("assumed (GP age model)"), timeout_s)
+        # The table is drawn on a canvas; its cells are in a hidden
+        # accessible table too (a link's cell holds its address).
+        table = page.get_by_test_id("stDataFrame")
+        _visible(table, timeout_s)
+        for name in (f"event?event={DEMO_EVENT}", "assumed (GP age model)"):
+            cell = table.get_by_role("gridcell", name=name, include_hidden=True)
+            expect(cell.first).to_be_attached(timeout=timeout_s * 1000)
 
     def planner() -> None:
         page.goto(f"{base_url}/planner?event={DEMO_EVENT}")
-        _visible(page.get_by_text("Pc over burn time and Δv"), timeout_s)
+        for heading in ("Pc over burn time and Δv", "Smallest burn each way"):
+            _visible(page.get_by_role("heading", name=heading), timeout_s)
         _visible(page.locator(".js-plotly-plot"), timeout_s)
-        _visible(page.get_by_text("Smallest burn each way"), timeout_s)
-        _visible(page.get_by_text("Re-screen"), timeout_s)
+        _visible(page.get_by_role("heading", name="Re-screen"), timeout_s)
         show(page.locator(".js-plotly-plot"))  # The Pc heatmap over burn time and Δv.
 
     def event_before() -> None:
         page.goto(event_url)
         _visible(page.get_by_text(f"{ISSUES} CDMs"), timeout_s)
-        _visible(page.get_by_text("Pc trend"), timeout_s)
+        _visible(page.get_by_role("heading", name="Pc trend"), timeout_s)
         show(page.locator(".js-plotly-plot"))  # The trend, 4 yellow points.
 
     def uploaded() -> None:
         page.goto(base_url)
+        page.get_by_text("Upload CDMs").click()
         page.locator("input[type=file]").set_input_files(upload)
-        # Streamlit sends the file in the background: Ingest before it is
+        # Streamlit sends the file in the background: adding before it is
         # listed with its size would submit no file. (The name is shortened.)
         uploader = page.get_by_test_id("stFileUploader")
         _visible(uploader.get_by_text(UPLOADED_SIZE), timeout_s)
         hold()
-        page.get_by_role("button", name="Ingest").click()
-        _visible(page.get_by_text("Stored 1 CDM (0 already stored)"), timeout_s)
+        page.get_by_role("button", name="Add to store").click()
+        _visible(page.get_by_text("Added 1 CDM (0 already stored)"), timeout_s)
 
     def event_after() -> None:
         page.goto(event_url)

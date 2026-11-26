@@ -7,10 +7,12 @@ read-only: a test that writes to a store takes :func:`seed_copy`.
 
 import shutil
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 import dashboard_seed as seed
 import pytest
+import streamlit as st
 from dashboard_builders import OpenApp, open_app, use_store
 
 from keepout.store import Job, JobQueue
@@ -22,6 +24,16 @@ def _main_module_kept(monkeypatch: pytest.MonkeyPatch) -> None:
     # later test's spawned process pool would run that script on start and
     # break. Put the test runner's back after each test.
     monkeypatch.setitem(sys.modules, "__main__", sys.modules["__main__"])
+
+
+@pytest.fixture(autouse=True)
+def _caches_cleared() -> Iterator[None]:
+    # The app's caches are the process's: a store opened, settings read or
+    # a figure made by one test is not another's. Clearing closes the
+    # stores.
+    yield
+    st.cache_resource.clear()
+    st.cache_data.clear()
 
 
 @pytest.fixture(scope="session")
