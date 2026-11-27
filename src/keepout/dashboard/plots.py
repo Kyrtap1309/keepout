@@ -68,8 +68,9 @@ def _decision_side(
     (further from TCA)."""
     if not hours.size:
         return "top right"
-    nearer = decision_point_hours - float(hours.min())
-    further = float(hours.max()) - decision_point_hours
+    # np.min, not hours.min(): typed as a float on every supported NumPy.
+    nearer = decision_point_hours - float(np.min(hours))
+    further = float(np.max(hours)) - decision_point_hours
     return "top left" if further > nearer else "top right"
 
 
