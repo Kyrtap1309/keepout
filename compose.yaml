@@ -87,5 +87,53 @@ services:
     # stop signal); give it time to.
     stop_grace_period: 30s
 
+  # The Iridium-Cosmos case study as known two days before the 2009
+  # collision (docs/case-study-iridium-cosmos.md): docker compose --profile
+  # iridium up, then http://127.0.0.1:8502. Its what-if plans are
+  # precomputed in its store, so it has no worker.
+  iridium-init:
+    <<: *keepout
+    profiles: [iridium]
+    volumes:
+      - iridium-data:/data
+    command: ["/opt/keepout/init-store.sh", "/opt/keepout/seed/iridium"]
+
+  iridium-dashboard:
+    <<: *keepout
+    profiles: [iridium]
+    init: true
+    volumes:
+      - iridium-data:/data
+    command:
+      - keepout
+      - dashboard
+      - --store
+      - /data/keepout.db
+      - --settings
+      - /opt/keepout/iridium-settings.toml
+      - --host
+      - 0.0.0.0
+    environment:
+      # The decision point, two days before the collision.
+      KEEPOUT_AS_OF: "2009-02-08T16:55:59.806Z"
+      STREAMLIT_BROWSER_SERVER_PORT: ${KEEPOUT_IRIDIUM_PORT:-8502}
+    ports:
+      - "127.0.0.1:${KEEPOUT_IRIDIUM_PORT:-8502}:8501"
+    depends_on:
+      iridium-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=3)"
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
 volumes:
   data:
+  iridium-data:

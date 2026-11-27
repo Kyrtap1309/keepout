@@ -70,6 +70,25 @@ The planner names the catalog its re-screen used as
 `stored copy of tests/screening/data/celestrak-public.csv.gz`: the store
 keeps a copy of the catalog, labelled by its path in the repository.
 
+## The Iridium-Cosmos case study
+
+A second profile serves the [case study](case-study-iridium-cosmos.md) as an
+operator would have seen it two days before the 2009 collision:
+
+```bash
+docker compose --profile iridium up
+```
+
+then <http://127.0.0.1:8502> (`KEEPOUT_IRIDIUM_PORT` picks another port).
+Its store, built into the image by
+`tools/dashboard_seed.py --iridium-store`, holds the 17 synthetic CDMs of
+Iridium 33 and Cosmos 2251 created by 2009-02-08 16:55 UTC, and nothing
+later; the time is fixed there, so the event is 48 hours ahead, yellow, and
+its manoeuvre plan (to green, `examples/dashboard/iridium-settings.toml`)
+is precomputed, re-screened against the 2009 catalog as known then. The
+profile has its own volume, `iridium-data`, and no worker. Without
+`--profile iridium`, `docker compose up` starts the demo only.
+
 ## Your own data
 
 - **Your own time.** `KEEPOUT_AS_OF= docker compose up --wait` (an empty

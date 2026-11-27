@@ -205,7 +205,13 @@ jobs:
           docker compose logs init | grep -q "store kept: /data/keepout.db"
           # The seed's 37 CDMs and the demo's update, uploaded by the scenario.
           test "$(docker compose exec -T worker python -c "import sqlite3; print(sqlite3.connect('file:/data/keepout.db?mode=ro', uri=True).execute('select count(*) from cdms').fetchone()[0])")" = 38
+      - name: The Iridium-Cosmos profile, as known two days before the collision
+        run: |
+          docker compose --profile iridium up --wait --wait-timeout 180 iridium-dashboard
+          curl --fail --silent --show-error http://127.0.0.1:8502/_stcore/health
+          # The 17 synthetic CDMs created by the decision point, none later.
+          test "$(docker compose --profile iridium exec -T iridium-dashboard python -c "import sqlite3; print(sqlite3.connect('file:/data/keepout.db?mode=ro', uri=True).execute('select count(*) from cdms').fetchone()[0])")" = 17
       - if: failure()
-        run: docker compose logs
+        run: docker compose --profile iridium logs
       - if: always()
-        run: docker compose down -v
+        run: docker compose --profile iridium down -v

@@ -4,6 +4,7 @@ import shutil
 from pathlib import Path
 
 import dashboard_seed as seed
+import iridium_cosmos
 import operator_example
 import pytest
 from astropy.time import Time
@@ -14,6 +15,7 @@ from sqlalchemy import select
 from keepout.cdm import kvn, load
 from keepout.cdm.model import Section
 from keepout.errors import SourceUnavailable
+from keepout.omm import load as load_omms
 from keepout.settings import Settings, load_settings, settings_to_data
 from keepout.sources import cara
 from keepout.store import models, open_store
@@ -396,3 +398,38 @@ def test_store_option_exclusive(
         seed.main(["--store", "x.db", *other])
     assert exit_info.value.code == 2
     assert "not allowed with argument" in capsys.readouterr().err
+
+
+@pytest.fixture(scope="module")
+def iridium_store(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """The Iridium-Cosmos store, built once (its plan takes tens of seconds)."""
+    return seed.iridium_store(tmp_path_factory.mktemp("iridium") / "iridium.db")
+
+
+@pytest.mark.slow
+def test_iridium_store_has_no_future_cdm(iridium_store: Path) -> None:
+    with open_store(iridium_store, create=False) as store, store.read() as session:
+        created = list(session.scalars(select(models.Cdm.creation_date)))
+    assert len(created) == 17
+    assert all(time <= iridium_cosmos.IRIDIUM_AS_OF for time in created)
+
+
+@pytest.mark.slow
+def test_iridium_store_catalog_is_as_known_at_the_decision_point(
+    iridium_store: Path,
+) -> None:
+    (copy,) = (iridium_store.parent / "iridium.db.catalogs").iterdir()
+    omms = load_omms(copy)
+    assert omms
+    assert max(omm.epoch for omm in omms) <= iridium_cosmos.IRIDIUM_AS_OF
+
+
+@pytest.mark.slow
+def test_iridium_store_has_plan(iridium_store: Path) -> None:
+    settings = load_settings(seed.IRIDIUM_SETTINGS)
+    assert settings.target_pc == iridium_cosmos.MANEUVER_TARGET
+    with open_store(iridium_store, create=False) as store:
+        outcome = store.maneuver(seed.iridium_event_id(), settings)
+    assert outcome is not None
+    assert outcome.catalog_label is not None
+    assert "as known at 2009-02-08 16:55 UTC" in outcome.catalog_label

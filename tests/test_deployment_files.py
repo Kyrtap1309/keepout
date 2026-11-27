@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Final
 
 import dashboard_seed as seed
+import iridium_cosmos
 import pytest
 import yaml
 from builders import store_at
@@ -43,6 +44,29 @@ def test_compose_publishes_on_loopback_at_the_demo_time() -> None:
     assert as_of.utc.isot == seed.DEMO_AS_OF.utc.isot
     assert "ports" not in worker
     assert "ports" not in services["init"]
+
+
+def test_compose_iridium_profile() -> None:
+    services = _compose()["services"]
+    iridium = {name: service for name, service in services.items() if "iridium" in name}
+    assert set(iridium) == {"iridium-init", "iridium-dashboard"}
+    for service in iridium.values():
+        assert service["profiles"] == ["iridium"]
+        assert service["volumes"] == ["iridium-data:/data"]
+    for name, service in services.items():
+        if name not in iridium:
+            assert "profiles" not in service
+            assert all("iridium" not in volume for volume in service.get("volumes", []))
+    dashboard = iridium["iridium-dashboard"]
+    assert dashboard["ports"] == ["127.0.0.1:${KEEPOUT_IRIDIUM_PORT:-8502}:8501"]
+    as_of = parse_time(dashboard["environment"]["KEEPOUT_AS_OF"])
+    assert as_of.utc.isot == iridium_cosmos.IRIDIUM_AS_OF.utc.isot
+    init = iridium["iridium-init"]
+    assert init["command"] == [
+        "/opt/keepout/init-store.sh",
+        "/opt/keepout/seed/iridium",
+    ]
+    assert "iridium-data" in _compose()["volumes"]
 
 
 def test_the_worker_s_healthcheck_reads_its_heartbeat_file() -> None:

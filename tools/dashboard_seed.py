@@ -65,6 +65,7 @@ from keepout.cdm import Cdm, kvn, load, make_message_id, read_text
 from keepout.cdm.keywords import covariance_names
 from keepout.cdm.model import Field, Section
 from keepout.errors import SourceUnavailable
+from keepout.events import ConjunctionEvent
 from keepout.screening import DEFAULT_DURATION
 from keepout.settings import load_settings
 from keepout.sources import cara
@@ -602,6 +603,94 @@ def seed_store(path: Path, *, cara: bool = False) -> Path:
     return path
 
 
+IRIDIUM_SETTINGS: Final = REPO / "examples/dashboard/iridium-settings.toml"
+"""The settings of the Iridium-Cosmos store: the defaults, a green target."""
+
+
+def iridium_event_id() -> str:
+    """The Iridium-Cosmos event's id in its store: that of its first CDM."""
+    import iridium_cosmos as study
+
+    issues = study.cdm_series(study.read_pair())
+    known = [
+        i.cdm for i in issues if i.cdm is not None and i.time <= study.IRIDIUM_AS_OF
+    ]
+    return ConjunctionEvent.from_cdms(known).event_id
+
+
+def iridium_store(path: Path) -> Path:
+    """The store of the Iridium-Cosmos case study, as known at its decision
+    point: the synthetic CDMs created up to then, the excerpt's element sets
+    with an epoch up to then as its catalog, their Pc and the manoeuvre plan
+    with :data:`IRIDIUM_SETTINGS`, computed by a worker and cached.
+
+    Nothing later than the decision point is in it, so the dashboard shown at
+    that time (``KEEPOUT_AS_OF``) sees what was known then. Closed with its
+    write-ahead log merged, as :func:`demo_store`.
+
+    Parameters
+    ----------
+    path
+        The store's file: made, or added to if it is a store.
+
+    Returns
+    -------
+    pathlib.Path
+        ``path``.
+
+    Raises
+    ------
+    RuntimeError
+        If the plan's job does not succeed.
+    StoreError
+        If ``path`` cannot be made a store.
+    """
+    import tempfile
+
+    import iridium_cosmos as study
+
+    from keepout.omm.celestrak import dumps_csv
+    from keepout.store import CdmInput, JobQueue, JobStatus, open_store
+    from keepout.store.worker import run_worker
+
+    issues = study.cdm_series(study.read_pair())
+    cdms = [
+        i.cdm for i in issues if i.cdm is not None and i.time <= study.IRIDIUM_AS_OF
+    ]
+    inputs = [
+        CdmInput.parse(
+            kvn.dumps(cdm), f"{study.CATALOG_FILE}: synthetic CDM {cdm.message_id}"
+        )
+        for cdm in cdms
+    ]
+    known = study.known_at(study.read_catalog(named=False), study.IRIDIUM_AS_OF)
+    settings = load_settings(IRIDIUM_SETTINGS)
+    with tempfile.TemporaryDirectory() as scratch:
+        file = Path(scratch) / "iridium-cosmos-known.csv"
+        file.write_text(dumps_csv(known), encoding="utf-8")
+        label = (
+            f"{(study.DATA / study.CATALOG_FILE).relative_to(REPO).as_posix()}, "
+            f"as known at {isot(study.IRIDIUM_AS_OF)[:16].replace('T', ' ')} UTC"
+        )
+        catalog = dataclasses.replace(CatalogReference.of_file(file), label=label)
+        with open_store(path) as store:
+            store.ingest(inputs, catalog=catalog)
+            store.refresh(settings)
+    event_id = ConjunctionEvent.from_cdms(cdms).event_id
+    with open_store(path) as store:
+        job = JobQueue(store).submit(event_id, settings).job
+    if job is None:
+        return path
+    run_worker(path, until_idle=True)
+    with open_store(path) as store:
+        (done,) = JobQueue(store).jobs_by_id([job.id])
+    if done.status is not JobStatus.SUCCEEDED:
+        raise RuntimeError(
+            f"the plan of {event_id} did not succeed: {done.status}, {done.error}"
+        )
+    return path
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """The entry point writing (or with ``--check`` verifying) the seed.
 
@@ -625,7 +714,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         metavar="PATH",
         help="build the demo's store at PATH instead of writing CDMs",
     )
+    parser.add_argument(
+        "--iridium-store",
+        type=Path,
+        metavar="PATH",
+        help="build the Iridium-Cosmos store at PATH instead of writing CDMs",
+    )
     args = parser.parse_args(argv)
+    if args.iridium_store is not None:
+        if args.store is not None or args.check or args.cara or args.dir is not None:
+            parser.error("argument --iridium-store: not allowed with other arguments")
+        iridium_store(args.iridium_store)
+        print(f"wrote the Iridium-Cosmos store {args.iridium_store}")
+        return 0
     if args.store is not None:
         given = [
             flag
