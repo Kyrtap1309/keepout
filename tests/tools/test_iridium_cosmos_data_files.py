@@ -7,25 +7,23 @@ import iridium_cosmos as study
 import iridium_cosmos_data as data_tool
 import pytest
 
-DATA = study.DATA
-
 
 @pytest.fixture(scope="module")
 def inputs() -> data_tool.Inputs:
-    return data_tool.inputs_from_data(DATA)
+    return data_tool.inputs_from_data(study.DATA)
 
 
 def test_the_manifest_lists_every_file() -> None:
-    manifest = data_tool.read_manifest(DATA)
+    manifest = data_tool.read_manifest(study.DATA)
     assert set(manifest["files"]) == {study.CATALOG_FILE, data_tool.NOTICE}
-    assert sorted(path.name for path in DATA.iterdir()) == sorted(
+    assert sorted(path.name for path in study.DATA.iterdir()) == sorted(
         [study.CATALOG_FILE, data_tool.NOTICE, data_tool.MANIFEST]
     )
 
 
 def test_every_file_follows_from_the_data(inputs: data_tool.Inputs) -> None:
-    for name, stored in data_tool.stored_files(DATA, inputs).items():
-        assert (DATA / name).read_bytes() == stored, name
+    for name, stored in data_tool.stored_files(study.DATA, inputs).items():
+        assert (study.DATA / name).read_bytes() == stored, name
 
 
 def test_the_excerpt_is_what_the_manifest_says(inputs: data_tool.Inputs) -> None:

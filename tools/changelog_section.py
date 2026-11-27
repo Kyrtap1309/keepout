@@ -19,10 +19,12 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
-from generated import REPO
-
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+REPO: Final = Path(__file__).resolve().parents[1]
+"""The repository's root. Not :data:`generated.REPO`: the release workflow
+runs this tool without installing the project (standard library only)."""
 
 CHANGELOG: Final = REPO / "docs/changelog.md"
 """The changelog."""

@@ -3,17 +3,17 @@ bulk TLE file.
 
 Usage::
 
-    uv run python tools/iridium_cosmos_data.py build ZIP [--check] [--data DIR]
+    uv run python tools/iridium_cosmos_data.py build RAW [--check] [--data DIR]
         [--workers N]
     uv run python tools/iridium_cosmos_data.py verify [--data DIR]
 
 Space-Track.org limits its ``gp_history`` class to one query per object for
 an account's lifetime and sends queries "of many objects or large date
 ranges" to yearly zip files of TLEs on its cloud storage (API documentation,
-"API Use Guidelines"). ``ZIP`` is the file for 2009 (``tle2009.txt.zip``),
+"API Use Guidelines"). ``RAW`` is the file for 2009 (``tle2009.txt.zip``),
 downloaded by hand once; it is never committed (about 315 MB).
 
-``build`` streams ``ZIP`` (:func:`read_bulk`), keeping the element sets with
+``build`` streams ``RAW`` (:func:`read_bulk`), keeping the element sets with
 an epoch from :data:`WINDOW_START` (the decision point less
 :data:`~keepout.screening.MAX_AGE`) to the collision. Of two sets of one
 object and epoch, the one with the higher element set number, issued later,
@@ -53,7 +53,6 @@ import re
 import sys
 import zipfile
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING, Final, Literal, TypedDict
 
 import astropy.units as u
@@ -64,13 +63,14 @@ from sgp4.io import compute_checksum
 from snapshot_files import MANIFEST, MANIFEST_FORMAT, REDISTRIBUTION, FileDigest
 
 from keepout.errors import OmmParseError
-from keepout.omm import tle
+from keepout.omm import deduplicate, tle
 from keepout.omm.celestrak import dumps_csv
 from keepout.screening import MAX_AGE, ScreeningVolume, screen
 from keepout.units import DAY, KM
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator, Mapping, Sequence
+    from pathlib import Path
 
     from astropy.time import Time
 
@@ -260,12 +260,14 @@ def read_bulk(path: Path, start: Time, end: Time) -> BulkRead:
         with archive.open(member) as raw:
             for number, line_one, two in _pairs(raw, member):
                 total += 1
-                one = _blank_short_designator(line_one) or line_one
-                if not low <= _line_key(one) <= high:
+                # The designator's columns are not the epoch's: filter first.
+                if not low <= _line_key(line_one) <= high:
                     continue
                 in_window += 1
-                if one is not line_one:
-                    short.add(int(one[2:7]))
+                one = line_one
+                if blanked := _blank_short_designator(line_one):
+                    short.add(int(blanked[2:7]))
+                    one = blanked
                 omm = _parsed(one, two)
                 if isinstance(omm, str):
                     unreadable.append(
@@ -329,16 +331,12 @@ def excerpt_sets(
         workers=workers,
     )
     found = {approach.secondary_number for approach in result.approaches}
-    newest: dict[int, Omm] = {}
-    for omm in known:
-        if omm.catalog_number in found - set(study.PAIR):
-            best = newest.get(omm.catalog_number)
-            if best is None or omm.epoch > best.epoch:
-                newest[omm.catalog_number] = omm
+    others = found - set(study.PAIR)
+    newest = deduplicate(omm for omm in known if omm.catalog_number in others).kept
     pair = (omm for omm in sets if omm.catalog_number in study.PAIR)
     excerpt = tuple(
         sorted(
-            (*pair, *newest.values()),
+            (*pair, *newest),
             key=lambda omm: (omm.catalog_number, omm.epoch.jd),
         )
     )
@@ -366,11 +364,8 @@ class Inputs:
 
 
 def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
     with path.open("rb") as file:
-        while chunk := file.read(1 << 20):
-            digest.update(chunk)
-    return digest.hexdigest()
+        return hashlib.file_digest(file, "sha256").hexdigest()
 
 
 def inputs_from_bulk(path: Path, *, workers: int | None = None) -> Inputs:
@@ -477,13 +472,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     """
     parser = argparse.ArgumentParser(prog=TOOL)
     commands = parser.add_subparsers(dest="command", required=True)
-    build = commands.add_parser("build", help="write the excerpt from the bulk ZIP")
-    build.add_argument("raw", type=Path, metavar="ZIP")
-    build.add_argument("--check", action="store_true", help="fail if out of date")
-    build.add_argument("--data", type=Path, default=study.DATA)
+    build = snapshot_files.add_data_commands(
+        commands.add_parser, study.DATA, "2009 bulk TLE file"
+    )
     build.add_argument("--workers", type=positive, default=None)
-    verify = commands.add_parser("verify", help="check the committed files (offline)")
-    verify.add_argument("--data", type=Path, default=study.DATA)
     args = parser.parse_args(argv)
     building = args.command == "build"
     return snapshot_files.build_or_verify(

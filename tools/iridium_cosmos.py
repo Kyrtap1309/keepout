@@ -24,8 +24,7 @@ Conference, Maui, 2009 September 2.
 from __future__ import annotations
 
 import dataclasses
-import json
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Final
 
 import astropy.units as u
 import numpy as np
@@ -58,6 +57,8 @@ from keepout.units import DAY, HOUR, KM, MINUTE
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
     from pathlib import Path
+
+    from iridium_cosmos_data import Selection
 
     from keepout.cdm import Cdm
     from keepout.omm import Omm
@@ -128,18 +129,18 @@ def read_catalog(data: Path = DATA, *, named: bool = True) -> tuple[Omm, ...]:
     return tuple(with_name(omm) for omm in omms) if named else omms
 
 
-def read_pair(data: Path = DATA) -> tuple[Omm, ...]:
-    """The pair's element sets from :data:`PAIR_SPAN` before the collision."""
+def pair_of(catalog: Iterable[Omm]) -> tuple[Omm, ...]:
+    """The pair's element sets in ``catalog`` from :data:`PAIR_SPAN` before
+    the collision."""
     start = TCA_REFERENCE - PAIR_SPAN * u.s
     return tuple(
-        omm
-        for omm in read_catalog(data)
-        if omm.catalog_number in PAIR and omm.epoch >= start
+        omm for omm in catalog if omm.catalog_number in PAIR and omm.epoch >= start
     )
 
 
-MAX_PC_METHODS: Final = ("frisbee", "dilution", "alfano")
-"""The maximum-Pc methods shown beside the model's Pc."""
+def read_pair(data: Path = DATA) -> tuple[Omm, ...]:
+    """The pair's element sets in the excerpt (:func:`pair_of`)."""
+    return pair_of(read_catalog(data))
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -176,6 +177,13 @@ def fleet(hbr: float = BASE_HBR) -> Fleet:
     )
 
 
+def is_collision(approach: CloseApproach) -> bool:
+    """Whether ``approach`` is the collision: Cosmos 2251 within the event
+    TCA tolerance of :data:`TCA_REFERENCE`."""
+    offset = abs((approach.tca - TCA_REFERENCE).to_value(u.s))
+    return approach.secondary_number == COSMOS_2251 and offset <= DEFAULT_TCA_TOLERANCE
+
+
 def _issue(pair: Sequence[Omm], time: Time, hbr: float) -> Issue:
     """The CDM issued at ``time`` from the pair's sets known then."""
     known = known_at(pair, time)
@@ -185,9 +193,7 @@ def _issue(pair: Sequence[Omm], time: Time, hbr: float) -> Issue:
     duration = (TCA_REFERENCE - time).to_value(u.s) + HOUR
     result = run(fleet(hbr), known, time, duration, created=time)
     for event in result.events:
-        approach = event.approach
-        offset = abs((approach.tca - TCA_REFERENCE).to_value(u.s))
-        if approach.secondary_number == COSMOS_2251 and offset <= DEFAULT_TCA_TOLERANCE:
+        if is_collision(event.approach):
             return Issue(time, event.cdm, None)
     return Issue(
         time,
@@ -232,7 +238,7 @@ def known_cdms(event: ConjunctionEvent, time: Time) -> tuple[Cdm, ...]:
 
 
 def max_pcs(cdm: Cdm, hbr: float) -> dict[str, float]:
-    """The maximum Pc of each of :data:`MAX_PC_METHODS` for the CDM's
+    """The maximum Pc of each method (Frisbee, dilution, Alfano) for the CDM's
     conjunction with the combined radius ``hbr`` [m]: Frisbee's over Cosmos
     2251's covariance taken as unknown, dilution's over a scale of the
     combined covariance, Alfano's over every covariance."""
@@ -306,20 +312,26 @@ class Ranked:
         The synthetic operator's run: screening, a CDM and Pc per approach.
     collision
         The event of the approach at the collision.
-    by_pc, by_miss
-        Its rank, from 1, by Pc (highest first; an approach without a Pc
-        last) and by miss distance (smallest first).
+    events_by_pc
+        Every event, by Pc: highest first, an approach without a Pc last.
+    by_miss
+        The collision's rank, from 1, by miss distance (smallest first).
     """
 
     result: OperatorResult
     collision: OperatorEvent
-    by_pc: int
+    events_by_pc: tuple[OperatorEvent, ...]
     by_miss: int
 
     @property
     def approaches(self) -> int:
         """How many approaches Iridium 33 had in the window."""
         return len(self.result.events)
+
+    @property
+    def by_pc(self) -> int:
+        """The collision's rank, from 1, by Pc."""
+        return self.events_by_pc.index(self.collision) + 1
 
 
 def rank(excerpt: Sequence[Omm]) -> Ranked:
@@ -337,16 +349,7 @@ def rank(excerpt: Sequence[Omm]) -> Ranked:
     known = known_at(excerpt, IRIDIUM_AS_OF)
     result = run(fleet(), known, IRIDIUM_AS_OF, DEFAULT_DURATION, workers=None)
     events = result.events
-    collision = next(
-        (
-            event
-            for event in events
-            if event.approach.secondary_number == COSMOS_2251
-            and abs((event.approach.tca - TCA_REFERENCE).to_value(u.s))
-            <= DEFAULT_TCA_TOLERANCE
-        ),
-        None,
-    )
+    collision = next((event for event in events if is_collision(event.approach)), None)
     if collision is None:
         raise LookupError("no approach of Cosmos 2251 at the collision")
 
@@ -354,12 +357,11 @@ def rank(excerpt: Sequence[Omm]) -> Ranked:
         pc = event.observation.pc
         return -1.0 if pc is None else pc
 
-    by_pc = sorted(events, key=pc_key, reverse=True)
     by_miss = sorted(events, key=lambda event: event.approach.range_at_tca)
     return Ranked(
         result=result,
         collision=collision,
-        by_pc=by_pc.index(collision) + 1,
+        events_by_pc=tuple(sorted(events, key=pc_key, reverse=True)),
         by_miss=by_miss.index(collision) + 1,
     )
 
@@ -371,9 +373,8 @@ class Maneuver:
     Parameters
     ----------
     plan
-        The plan on the event's CDMs known at :data:`IRIDIUM_AS_OF`.
-    target
-        The Pc the burns had to bring the event below.
+        The plan on the event's CDMs known at :data:`IRIDIUM_AS_OF`, to
+        :data:`MANEUVER_TARGET`.
     rescreens
         Each option's re-screen against the excerpt, by direction.
     shifts
@@ -382,7 +383,6 @@ class Maneuver:
     """
 
     plan: ManeuverPlan
-    target: float
     rescreens: Mapping[BurnDirection, RescreenResult]
     shifts: Mapping[BurnDirection, float]
 
@@ -400,18 +400,10 @@ def largest_shift(plan: ManeuverPlan, option: ManeuverOption, primary: Omm) -> f
     return float(np.max(np.linalg.norm(after - before, axis=-1)))
 
 
-def read_selection(data: Path = DATA) -> Mapping[str, Any]:
-    """How the committed excerpt was chosen: the manifest's ``selection``
-    (its radius, screening start and days)."""
-    manifest = json.loads((data / "manifest.json").read_text(encoding="utf-8"))
-    selection: Mapping[str, Any] = manifest["selection"]
-    return selection
-
-
 def require_within_excerpt(
     shifts: Mapping[BurnDirection, float],
     windows: Iterable[tuple[Time, Time]],
-    selection: Mapping[str, Any],
+    selection: Selection,
 ) -> None:
     """A check that the excerpt holds every object a re-screen could find:
     no burn moves Iridium 33 more than half the radius the excerpt was
@@ -423,7 +415,7 @@ def require_within_excerpt(
     ExcerptTooSmall
         If a shift is larger, or a window ends later.
     """
-    radius = float(selection["radius_km"]) * KM
+    radius = selection["radius_km"] * KM
     for direction, shift in shifts.items():
         if shift > radius / 2:
             raise ExcerptTooSmall(
@@ -432,7 +424,7 @@ def require_within_excerpt(
             )
     covered = (
         Time(selection["screening_start"], scale="utc")
-        + float(selection["screening_days"]) * u.day
+        + selection["screening_days"] * u.day
     )
     for _, end in windows:
         # A second's slack: the manifest's days are a rounded fraction.
@@ -443,10 +435,12 @@ def require_within_excerpt(
             )
 
 
-def maneuver(event: ConjunctionEvent, excerpt: Sequence[Omm]) -> Maneuver:
+def maneuver(
+    event: ConjunctionEvent, excerpt: Sequence[Omm], selection: Selection
+) -> Maneuver:
     """The burns of :data:`BURN_GRID` planned on the event as known at the
     decision point to :data:`MANEUVER_TARGET`, each option re-screened
-    against the excerpt as known then.
+    against the excerpt as known then (chosen as ``selection`` records).
 
     Raises
     ------
@@ -471,10 +465,8 @@ def maneuver(event: ConjunctionEvent, excerpt: Sequence[Omm]) -> Maneuver:
         for option in plan.options
     }
     windows = [result.window for result in rescreens.values()]
-    require_within_excerpt(shifts, windows, read_selection())
-    return Maneuver(
-        plan=plan, target=MANEUVER_TARGET, rescreens=rescreens, shifts=shifts
-    )
+    require_within_excerpt(shifts, windows, selection)
+    return Maneuver(plan=plan, rescreens=rescreens, shifts=shifts)
 
 
 DEBRIS_PREFIXES: Final[Mapping[str, str]] = {

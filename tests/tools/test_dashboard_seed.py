@@ -12,6 +12,7 @@ from builders import cached_pc
 from generated import CARA_CDM_ID
 from sqlalchemy import select
 
+from keepout._text import minute
 from keepout.cdm import kvn, load
 from keepout.cdm.model import Section
 from keepout.errors import SourceUnavailable
@@ -429,7 +430,9 @@ def test_iridium_store_has_plan(iridium_store: Path) -> None:
     settings = load_settings(seed.IRIDIUM_SETTINGS)
     assert settings.target_pc == iridium_cosmos.MANEUVER_TARGET
     with open_store(iridium_store, create=False) as store:
-        outcome = store.maneuver(seed.iridium_event_id(), settings)
+        (event,) = store.events()
+        outcome = store.maneuver(event.event_id, settings)
     assert outcome is not None
     assert outcome.catalog_label is not None
-    assert "as known at 2009-02-08 16:55 UTC" in outcome.catalog_label
+    as_of = minute(iridium_cosmos.IRIDIUM_AS_OF)
+    assert f"as known at {as_of} UTC" in outcome.catalog_label

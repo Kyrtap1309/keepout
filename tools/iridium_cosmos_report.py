@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Final, TypedDict
 
 import astropy.units as u
 import iridium_cosmos as study
+import iridium_cosmos_data
 import spacetrack_snapshot as snapshot
 from astropy.time import Time
 from generated import (
@@ -41,6 +42,7 @@ from generated import (
 from maneuver_heatmap import DPI, FACECOLOR, heatmap_figure
 from matplotlib.figure import Figure
 
+from keepout._text import pc_text, plural
 from keepout.figures import (
     DECISION_POINT_COLOUR,
     FIT_COLOUR,
@@ -51,7 +53,13 @@ from keepout.figures import (
     grid_figure,
     trend_figure,
 )
-from keepout.risk import DEFAULT_THRESHOLDS, Action, Assessment, RiskLevel
+from keepout.risk import (
+    DEFAULT_DECISION_CONFIG,
+    DEFAULT_THRESHOLDS,
+    Action,
+    Assessment,
+    RiskLevel,
+)
 from keepout.units import DAY, HOUR, KM
 
 if TYPE_CHECKING:
@@ -109,7 +117,11 @@ class Settings(TypedDict):
     iridium_hbr: float
     hbr_sensitivity: list[float]
     series_days: float
+    window_days: float
     excerpt_radius_km: float
+    designators_blanked: int
+    unreadable_sets: int
+    unreadable_objects: int
     green_below: float
     red_from: float
     basis: str
@@ -236,6 +248,7 @@ def _metres(value: float) -> float:
 
 
 def _iso(time: Time) -> str:
+    """``time`` in ISO, to the millisecond (element set epochs carry more)."""
     return str(time.utc.isot)[:23]
 
 
@@ -243,36 +256,26 @@ def _issues(issues: Sequence[study.Issue], event: ConjunctionEvent) -> list[Issu
     observations = {o.message_id: o for o in event.observations()}
     rows: list[Issue] = []
     for issue in issues:
-        known = bool(issue.time <= study.IRIDIUM_AS_OF)
-        if issue.cdm is None:
-            rows.append(
-                {
-                    "created": _iso(issue.time),
-                    "tca": None,
-                    "miss_m": None,
-                    "pc": None,
-                    "frisbee": None,
-                    "dilution": None,
-                    "alfano": None,
-                    "known_at_decision": known,
-                    "reason": issue.reason,
-                }
-            )
-            continue
-        bounds = study.max_pcs(issue.cdm, study.BASE_HBR)
-        rows.append(
-            {
-                "created": _iso(issue.time),
-                "tca": _iso(issue.cdm.tca),
-                "miss_m": _metres(issue.cdm.miss_distance),
-                "pc": _pc(observations[issue.cdm.message_id].pc),
-                "frisbee": _pc(bounds["frisbee"]),
-                "dilution": _pc(bounds["dilution"]),
-                "alfano": _pc(bounds["alfano"]),
-                "known_at_decision": known,
-                "reason": None,
-            }
-        )
+        row: Issue = {
+            "created": _iso(issue.time),
+            "tca": None,
+            "miss_m": None,
+            "pc": None,
+            "frisbee": None,
+            "dilution": None,
+            "alfano": None,
+            "known_at_decision": bool(issue.time <= study.IRIDIUM_AS_OF),
+            "reason": issue.reason,
+        }
+        if (cdm := issue.cdm) is not None:
+            bounds = study.max_pcs(cdm, study.BASE_HBR)
+            row["tca"] = _iso(cdm.tca)
+            row["miss_m"] = _metres(cdm.miss_distance)
+            row["pc"] = _pc(observations[cdm.message_id].pc)
+            row["frisbee"] = _pc(bounds["frisbee"])
+            row["dilution"] = _pc(bounds["dilution"])
+            row["alfano"] = _pc(bounds["alfano"])
+        rows.append(row)
     return rows
 
 
@@ -290,12 +293,6 @@ def _verdict(assessment: Assessment) -> Verdict:
 
 def _rank(ranked: study.Ranked, excerpt: Sequence[Omm]) -> RankSummary:
     designators = {omm.catalog_number: omm.international_designator for omm in excerpt}
-    events = sorted(
-        ranked.result.events,
-        key=lambda event: (
-            -1.0 if event.observation.pc is None else -event.observation.pc
-        ),
-    )
     return {
         "approaches": ranked.approaches,
         "by_pc": ranked.by_pc,
@@ -311,7 +308,7 @@ def _rank(ranked: study.Ranked, excerpt: Sequence[Omm]) -> RankSummary:
                 "pc": _pc(event.observation.pc),
                 "collision": event is ranked.collision,
             }
-            for event in events
+            for event in ranked.events_by_pc
         ],
     }
 
@@ -338,7 +335,7 @@ def _maneuver(result: study.Maneuver) -> ManeuverSummary:
         )
     return {
         "baseline_pc": significant(result.plan.baseline.pc, DIGITS),
-        "target": result.target,
+        "target": study.MANEUVER_TARGET,
         "options": options,
     }
 
@@ -368,18 +365,19 @@ def _debris(catalog: Sequence[Omm], start: Time) -> Debris:
 def summarise() -> tuple[Summary, study.Maneuver, Assessment]:
     """Every number of the page, the manoeuvre (for its heatmap) and the
     assessment on all CDMs (for the trend figure)."""
-    pair = study.read_pair()
     excerpt = study.read_catalog()
-    issues = study.cdm_series(pair)
+    issues = study.cdm_series(study.pair_of(excerpt))
     event = study.collision_event(issues)
     at_decision, final = study.assessments(event)
     sensitivity = study.hbr_sensitivity(event)
-    maneuver = study.maneuver(event, excerpt)
-    manifest = snapshot.read_manifest(snapshot.DATA)
-    retrieved = manifest["download"]["retrieved"]
+    excerpt_manifest = iridium_cosmos_data.read_manifest(study.DATA)
+    bulk = excerpt_manifest["bulk"]
+    maneuver = study.maneuver(event, excerpt, excerpt_manifest["selection"])
+    retrieved = snapshot.read_manifest(snapshot.DATA)["download"]["retrieved"]
     start = Time(retrieved.removesuffix("Z"), scale="utc")
-    bulk = study_manifest_sha()
     thresholds = threshold_settings(DEFAULT_THRESHOLDS)
+    unreadable = bulk["counts"]["unreadable"]
+    window = study.TCA_REFERENCE - iridium_cosmos_data.WINDOW_START
     summary: Summary = {
         "settings": {
             "tca_reference": _iso(study.TCA_REFERENCE),
@@ -388,14 +386,18 @@ def summarise() -> tuple[Summary, study.Maneuver, Assessment]:
             "iridium_hbr": study.IRIDIUM_HBR,
             "hbr_sensitivity": list(study.HBR_SENSITIVITY),
             "series_days": study.SERIES_SPAN / DAY,
+            "window_days": round(float(window.to_value(u.day)), 3),
             "excerpt_radius_km": study.EXCERPT_RADIUS / KM,
+            "designators_blanked": len(bulk["counts"]["designators_blanked"]),
+            "unreadable_sets": len(unreadable),
+            "unreadable_objects": len({item["catalog_number"] for item in unreadable}),
             "green_below": thresholds["green_below"],
             "red_from": thresholds["red_from"],
             "basis": thresholds["basis"],
             "maneuver_target": study.MANEUVER_TARGET,
             "burn_earliest_hours": study.BURN_GRID.earliest_lead / HOUR,
             "burn_latest_hours": study.BURN_GRID.latest_lead / HOUR,
-            "bulk_sha256": bulk,
+            "bulk_sha256": bulk["sha256"],
             "snapshot_retrieved": retrieved,
         },
         "series": _issues(issues, event),
@@ -416,19 +418,7 @@ def summarise() -> tuple[Summary, study.Maneuver, Assessment]:
     return summary, maneuver, final
 
 
-def study_manifest_sha() -> str:
-    """The SHA-256 of the bulk file the excerpt was made from."""
-    import iridium_cosmos_data
-
-    sha256: str = iridium_cosmos_data.read_manifest(study.DATA)["bulk"]["sha256"]
-    return sha256
-
-
 # The page.
-
-
-def _pc_text(value: float | None) -> str:
-    return "-" if value is None else f"{value:.2e}"
 
 
 def _km(metres: float) -> str:
@@ -508,7 +498,7 @@ def meaning(summary: Summary) -> str:
     lead = (
         f"At the decision point keepout's default rules on the model Pc say "
         f"**{action}**: the event was {decision['level']}, its Pc "
-        f"{_pc_text(decision['latest_pc'])} on the assumed covariance"
+        f"{pc_text(decision['latest_pc'])} on the assumed covariance"
         + (", and no CDM was red." if _never_red(summary) else ".")
     )
     if action in BURN_ACTIONS:
@@ -526,68 +516,58 @@ def meaning(summary: Summary) -> str:
     )
 
 
-def _summary_section(summary: Summary, images: str) -> list[str]:
+def _summary_section(summary: Summary) -> list[str]:
     settings, rank, debris = summary["settings"], summary["rank"], summary["debris"]
-    last = _found(summary)[-1]
+    found = _found(summary)
+    misses = [row["miss_m"] or 0.0 for row in found]
     best = _best(summary)
     fragments = sum(debris["on_orbit"].values())
+    never_red = ", never red." if _never_red(summary) else "."
     return [
         "## Summary",
         "",
         (
             "On 2009 February 10, Iridium 33 (24946), an operational communications "
             "satellite, and Cosmos 2251 (22675), a long-defunct one, collided at "
-            "nearly "
-            "right angles over northern Russia: the first known collision of two "
-            "satellites (Kelso (2009)). This page runs keepout on the element sets "
-            "that "
-            "were public then, as an operator could have, and asks what it would have "
-            "said."
+            "nearly right angles over northern Russia: the first known collision of "
+            "two satellites (Kelso 2009). This page runs keepout on the element sets "
+            "that were public then, as an operator could have, and asks what it "
+            "would have said."
         ),
         "",
         (
             f"- **Screening.** Each new element set of the pair in the "
             f"{settings['series_days']:g} days before gives a synthetic CDM. Their "
-            "miss "
-            f"distances run from {_km(min(r['miss_m'] or 0 for r in _found(summary)))} "
-            "to "
-            f"{_km(max(r['miss_m'] or 0 for r in _found(summary)))}; the last, "
-            f"{_km(last['miss_m'] or 0)}. They match what CelesTrak's SOCRATES printed "
-            f"from the same kind of data ({KELSO['miss_span']}; "
-            f"{KELSO['last_report_miss']} "
-            "in its last report)."
+            f"miss distances run from {_km(min(misses))} to {_km(max(misses))}; "
+            f"the last, {_km(misses[-1])}. They match what CelesTrak's SOCRATES "
+            f"printed from the same kind of data ({KELSO['miss_span']}; "
+            f"{KELSO['last_report_miss']} in its last report)."
         ),
         (
             f"- **Pc.** On keepout's assumed covariance the Pc rose from "
-            f"{_pc_text(_found(summary)[0]['pc'])} to {_pc_text(last['pc'])}: "
-            f"{summary['decision']['level']} at the decision point"
-            + (", never red." if _never_red(summary) else ".")
+            f"{pc_text(found[0]['pc'])} to {pc_text(found[-1]['pc'])}: "
+            f"{summary['decision']['level']} at the decision point{never_red}"
         ),
         f"- **Decision.** Two days before TCA: **{summary['decision']['action']}**.",
         (
             f"- **Rank.** Among Iridium 33's {rank['approaches']} approaches in the "
-            "week "
-            f"from the decision point, the collision was {_ordinal(rank['by_pc'])} by "
-            "Pc "
-            f"and {_ordinal(rank['by_miss'])} by miss distance."
+            f"week from the decision point, the collision was "
+            f"{_ordinal(rank['by_pc'])} by Pc and {_ordinal(rank['by_miss'])} by "
+            "miss distance."
         ),
         (
             f"- **Manoeuvre.** A {best['direction']} burn of "
-            f"{abs(best['delta_v']) * 100:.1f} "
-            f"cm/s {best['burn_lead_hours']:.0f} h before TCA would have brought the "
-            "Pc "
-            f"below {summary['maneuver']['target']:.0e}."
+            f"{abs(best['delta_v']) * 100:.1f} cm/s {best['burn_lead_hours']:.0f} h "
+            f"before TCA would have brought the Pc below "
+            f"{summary['maneuver']['target']:.0e}."
         ),
         (
-            f"- **Today.** {fragments} catalogued fragments of the two were still in "
-            f"orbit on {settings['snapshot_retrieved'][:10]}; in one day they came "
-            "within "
-            f"5 km of other objects {debris['approaches']} times."
+            f"- **Today.** {fragments:,} catalogued fragments of the two were still "
+            f"in orbit on {settings['snapshot_retrieved'][:10]}; in one day they "
+            f"came within 5 km of other objects {debris['approaches']:,} times."
         ),
         "",
         meaning(summary),
-        "",
-        f"![Pc of the synthetic CDMs before the collision]({images}/{TREND})",
     ]
 
 
@@ -600,37 +580,36 @@ def _ordinal(rank: int) -> str:
 
 def _data_section(summary: Summary) -> list[str]:
     settings = summary["settings"]
+    blanked = plural(settings["designators_blanked"], "designator")
+    unreadable = plural(settings["unreadable_sets"], "set")
+    objects = plural(settings["unreadable_objects"], "object")
     return [
         "## Data",
         "",
         (
             "Space-Track.org allows the history of an object's element sets to be "
-            "queried once per account, and sends queries of many objects to its yearly "
-            "bulk files. The excerpt in `tests/case_study/data/iridium-cosmos/` comes "
-            "from the 2009 file (SHA-256 "
-            f"`{settings['bulk_sha256'][:16]}...`, see its `manifest.json`): every "
-            "element set of Iridium 33 and Cosmos 2251 from 32 days before the "
-            "collision, "
-            "and the newest set known at the decision point of each object that passed "
-            f"within {settings['excerpt_radius_km']:g} km of Iridium 33 from then "
-            "to a week after the latest burn the planner may try. "
-            "`tools/iridium_cosmos_data.py` makes it; the manifest counts what "
-            "it "
+            "queried once per account, and sends queries of many objects to its "
+            "yearly bulk files. The excerpt in `tests/case_study/data/iridium-cosmos/` "
+            f"comes from the 2009 file (SHA-256 `{settings['bulk_sha256'][:16]}...`, "
+            "see its `manifest.json`): every element set of Iridium 33 and Cosmos "
+            f"2251 from {settings['window_days']:g} days before the collision, and "
+            "the newest set known at the decision point of each object that passed "
+            f"within {settings['excerpt_radius_km']:g} km of Iridium 33 from then to "
+            "a week after the latest burn the planner may try. "
+            "`tools/iridium_cosmos_data.py` makes it; the manifest counts what it "
             "left out: re-issued and corrected sets of the same epoch (the later "
-            "kept), "
-            "two designators without piece letters (blanked) and four sets keepout "
-            "cannot "
-            "read (a malformed B\\*, one object). Its TLEs carry no names, so objects "
-            "other than the pair are named by catalog number and international "
-            "designator."
+            f"kept), {blanked} without piece letters (blanked) and {unreadable} "
+            f"keepout cannot read (a malformed B\\*, {objects}). Its TLEs carry no "
+            "names, so objects other than the pair are named by catalog number and "
+            "international designator."
         ),
         "",
         (
             f"Times: the collision, {settings['tca_reference']} UTC, is the TCA of "
             "SOCRATES's last report, which Kelso (2009) takes as the time of the "
             f"collision. The decision point is two days before, {settings['as_of']} "
-            "UTC; "
-            "an analysis at a time sees only the element sets with an epoch up to it."
+            "UTC; an analysis at a time sees only the element sets with an epoch up "
+            "to it."
         ),
     ]
 
@@ -642,33 +621,44 @@ def _screening_section(summary: Summary) -> list[str]:
             "yes" if row["known_at_decision"] else "no",
             "-" if row["tca"] is None else row["tca"][11:23],
             "-" if row["miss_m"] is None else _km(row["miss_m"]),
-            _pc_text(row["pc"]),
-            _pc_text(row["frisbee"]),
-            _pc_text(row["dilution"]),
-            _pc_text(row["alfano"]),
+            pc_text(row["pc"]),
+            pc_text(row["frisbee"]),
+            pc_text(row["dilution"]),
+            pc_text(row["alfano"]),
         )
         for row in summary["series"]
     ]
     missing = [row for row in summary["series"] if row["reason"] is not None]
+    missing_text = (
+        [
+            f"No CDM at {len(missing)} issue time(s): "
+            + "; ".join(
+                f"{minute_text(row['created'])}: {row['reason']}" for row in missing
+            )
+            + ".",
+            "",
+        ]
+        if missing
+        else []
+    )
     return [
         "## What screening saw",
         "",
         (
-            "Each CDM is created at the epoch of the newer of the two element sets it "
-            "uses (no publication latency) and screens the pair from then to an hour "
-            "past "
-            "the collision with SGP4. Pc is keepout's on the synthetic covariance; the "
-            "maximum Pc columns bound it from above, each trusting less of that "
-            "covariance: Frisbee's with Cosmos 2251's covariance unknown (Iridium "
-            "33's kept), dilution's over a scale of the combined one (its shape "
-            "kept), Alfano's over any covariance."
+            "Each CDM is created at the epoch of the newer of the two element sets "
+            "it uses (no publication latency) and screens the pair from then to an "
+            "hour past the collision with SGP4. Pc is keepout's on the synthetic "
+            "covariance; the maximum Pc columns bound it from above, each trusting "
+            "less of that covariance: Frisbee's with Cosmos 2251's covariance "
+            "unknown (Iridium 33's kept), dilution's over a scale of the combined "
+            "one (its shape kept), Alfano's over any covariance."
         ),
         "",
         *table(
             (
                 "Created (UTC)",
                 "Known at decision point",
-                "TCA",
+                "TCA (UTC)",
                 "Miss",
                 "Pc",
                 "Max Pc (Frisbee)",
@@ -678,27 +668,15 @@ def _screening_section(summary: Summary) -> list[str]:
             rows,
         ),
         "",
-        *(
-            [
-                f"No CDM at {len(missing)} issue time(s): "
-                + "; ".join(
-                    f"{minute_text(row['created'])}: {row['reason']}" for row in missing
-                )
-                + ".",
-                "",
-            ]
-            if missing
-            else []
-        ),
+        *missing_text,
         (
-            "SOCRATES, from the same kind of data, predicted this approach in each of "
-            "its "
-            f"{KELSO['reports']} reports from {KELSO['first_report']}, at "
-            f"{KELSO['tca_span']}, with miss distances from {KELSO['miss_span']}; its "
-            f"report 5 gave {KELSO['report_5']}; its last report, of "
-            f"{KELSO['last_report']}, gave {KELSO['last_report_miss']} (Kelso (2009)). "
-            "The CDMs above give the same spread: screening on these element sets "
-            "finds what SOCRATES found."
+            "SOCRATES, from the same kind of data, predicted this approach in each "
+            f"of its {KELSO['reports']} reports from {KELSO['first_report']}, at "
+            f"{KELSO['tca_span']}, with miss distances from {KELSO['miss_span']}; "
+            f"its report 5 gave {KELSO['report_5']}; its last report, of "
+            f"{KELSO['last_report']}, gave {KELSO['last_report_miss']} (Kelso "
+            "2009). The CDMs above give the same spread: screening on these element "
+            "sets finds what SOCRATES found."
         ),
     ]
 
@@ -706,18 +684,19 @@ def _screening_section(summary: Summary) -> list[str]:
 def _trend_section(summary: Summary, images: str) -> list[str]:
     settings = summary["settings"]
     thresholds = threshold_text(settings["green_below"], settings["red_from"])
+    misses = [row["miss_m"] or 0.0 for row in _found(summary)]
     return [
         "## Pc and trend",
         "",
         f"![Pc of the synthetic CDMs before the collision]({images}/{TREND})",
         "",
         (
-            "Each point is one CDM's Pc on the synthetic covariance, coloured by its "
-            f"risk level ({thresholds}); "
-            "the grey line is Frisbee's maximum Pc. The Pc rises as TCA nears because "
-            "the model's covariance shrinks as the element sets are propagated less "
-            "far, not because the miss distance falls: the misses jump between 117 m "
-            "and 1.8 km."
+            "Each point is one CDM's Pc on the synthetic covariance, coloured by "
+            f"its risk level ({thresholds}); the grey line is Frisbee's maximum Pc. "
+            "The Pc rises as TCA nears because the model's covariance shrinks as "
+            "the element sets are propagated less far, not because the miss "
+            f"distance falls: the misses jump between {_km(min(misses))} and "
+            f"{_km(max(misses))}."
         ),
     ]
 
@@ -729,8 +708,8 @@ def _decision_section(summary: Summary) -> list[str]:
         (
             f"{row['radius']:g} m"
             + (" (base)" if row["radius"] == settings["base_hbr"] else ""),
-            _pc_text(row["pc_at_decision"]),
-            _pc_text(row["pc_last"]),
+            pc_text(row["pc_at_decision"]),
+            pc_text(row["pc_last"]),
         )
         for row in summary["sensitivity"]
     ]
@@ -738,8 +717,8 @@ def _decision_section(summary: Summary) -> list[str]:
         "## Decision two days before",
         "",
         f"On the {decision['cdms']} CDMs created by {minute_text(settings['as_of'])} "
-        "UTC, "
-        f"`keepout.risk.assess` with the default rules gives **{decision['action']}**: "
+        f"UTC, `keepout.risk.assess` with the default rules gives "
+        f"**{decision['action']}**: "
         + "; ".join(decision["reasons"])
         + f". On all {final['cdms']} CDMs: **{final['action']}** ("
         + "; ".join(final["reasons"])
@@ -747,9 +726,8 @@ def _decision_section(summary: Summary) -> list[str]:
         "",
         (
             f"The combined hard-body radius is {settings['base_hbr']:g} m, an "
-            "assumption "
-            "(no dimensions are published with the data). The Pc grows about as its "
-            "square:"
+            "assumption (no dimensions are published with the data). The Pc grows "
+            "about as its square:"
         ),
         "",
         *table(
@@ -760,18 +738,20 @@ def _decision_section(summary: Summary) -> list[str]:
 
 def _rank_section(summary: Summary, images: str) -> list[str]:
     rank = summary["rank"]
+
+    def secondary(item: Approach) -> str:
+        if item["secondary"] == study.COSMOS_2251:
+            name = f"Cosmos 2251 ({study.COSMOS_2251})"
+        else:
+            name = f"{item['secondary']} ({item['designator']})"
+        return f"**{name}**" if item["collision"] else name
+
     rows = [
         (
-            ("**" if item["collision"] else "")
-            + (
-                "Cosmos 2251 (22675)"
-                if item["secondary"] == study.COSMOS_2251
-                else f"{item['secondary']} ({item['designator']})"
-            )
-            + ("**" if item["collision"] else ""),
+            secondary(item),
             minute_text(item["tca"]),
             _km(item["miss_m"]),
-            _pc_text(item["pc"]),
+            pc_text(item["pc"]),
         )
         for item in rank["table"]
     ]
@@ -779,15 +759,19 @@ def _rank_section(summary: Summary, images: str) -> list[str]:
         "## Rank among the week's approaches",
         "",
         (
-            "Iridium 33 screened against every object as known at the decision point, "
-            "for 7 days, in the default 5 km sphere, each approach with the model's "
-            "covariance and the same combined hard-body radius for every secondary (so "
-            f"the order reflects geometry and covariance only): {rank['approaches']} "
-            f"approaches. The collision ranks {_ordinal(rank['by_pc'])} by Pc and "
-            f"{_ordinal(rank['by_miss'])} by miss distance."
+            "Iridium 33 screened against every object as known at the decision "
+            "point, for 7 days, in the default 5 km sphere, each approach with the "
+            "model's covariance and the same combined hard-body radius for every "
+            "secondary (so the order reflects geometry and covariance only): "
+            f"{rank['approaches']} approaches. The collision ranks "
+            f"{_ordinal(rank['by_pc'])} by Pc and {_ordinal(rank['by_miss'])} by "
+            "miss distance."
         ),
         "",
-        f"![Iridium 33's approaches in the week after]({images}/{RANK})",
+        (
+            "![Iridium 33's approaches in the week from the decision point]"
+            f"({images}/{RANK})"
+        ),
         "",
         *table(("Secondary", "TCA (UTC)", "Miss", "Pc"), rows),
         "",
@@ -795,11 +779,10 @@ def _rank_section(summary: Summary, images: str) -> list[str]:
             "SOCRATES ranked conjunctions across the whole catalog and the whole "
             f"Iridium constellation: the collision's overall rank went from "
             f"{KELSO['overall_rank']}, and among all Iridium conjunctions from "
-            f"{KELSO['iridium_rank']}; Iridium 33 alone saw {KELSO['weekly']} "
-            f"out of {KELSO['constellation_weekly']} for the whole constellation "
-            "(Kelso (2009)). For one satellite, as here, the list is short; an "
-            "operator "
-            "of 66 had to sort about a thousand a week, on Pc no better than this."
+            f"{KELSO['iridium_rank']}; Iridium 33 alone saw {KELSO['weekly']} out "
+            f"of {KELSO['constellation_weekly']} for the whole constellation (Kelso "
+            "2009). For one satellite, as here, the list is short; an operator of "
+            "66 had to sort about a thousand a week, on Pc no better than this."
         ),
     ]
 
@@ -811,11 +794,11 @@ def _maneuver_section(summary: Summary, images: str) -> list[str]:
             option["direction"],
             f"{option['burn_lead_hours']:.1f} h",
             f"{option['delta_v']:+.4f} m/s",
-            _pc_text(option["pc"]),
+            pc_text(option["pc"]),
             _km(option["range_at_tca_m"]),
             f"{option['shift_km']:g} km",
             f"{option['new']} new, {option['closer']} closer",
-            _pc_text(option["worst_pc"]),
+            pc_text(option["worst_pc"]),
             "yes" if option["conflict"] else "no",
         )
         for option in plan["options"]
@@ -824,17 +807,15 @@ def _maneuver_section(summary: Summary, images: str) -> list[str]:
         "## A manoeuvre",
         "",
         (
-            "Had the operator chosen to act at the decision point, `plan_maneuver` on "
-            "the "
-            "CDMs known then gives the smallest along-track burns, from "
+            "Had the operator chosen to act at the decision point, `plan_maneuver` "
+            "on the CDMs known then gives the smallest along-track burns, from "
             f"{settings['burn_earliest_hours']:g} h to "
-            f"{settings['burn_latest_hours']:g} h "
-            f"before TCA, that bring the Pc ({_pc_text(plan['baseline_pc'])} without a "
-            f"burn) below {plan['target']:.0e}, green; the planner's own default, red, "
-            "the "
+            f"{settings['burn_latest_hours']:g} h before TCA, that bring the Pc "
+            f"({pc_text(plan['baseline_pc'])} without a burn) below "
+            f"{plan['target']:.0e}, green; the planner's own default, red, the "
             "event already meets. Each burn is then re-screened against the excerpt "
-            "for a "
-            "week (`rescreen`): the approaches it brings, and the worst Pc among them."
+            "for a week (`rescreen`): the approaches it brings, and the worst Pc "
+            "among them."
         ),
         "",
         f"![Pc after an along-track burn of Iridium 33]({images}/{HEATMAP})",
@@ -886,13 +867,12 @@ def _debris_section(summary: Summary) -> list[str]:
         "",
         (
             "The committed Space-Track catalog of "
-            f"{settings['snapshot_retrieved'][:10]} "
-            f"still holds {sum(debris['on_orbit'].values())} catalogued fragments of "
-            "the "
-            f"collision ({counts}: objects of the two launches' designators catalogued "
-            "after it). Screened against that catalog for one day from its retrieval, "
-            "in the default 5 km sphere, they came within 5 km of other objects "
-            f"{debris['approaches']} times. The closest:"
+            f"{settings['snapshot_retrieved'][:10]} still holds "
+            f"{sum(debris['on_orbit'].values()):,} catalogued fragments of the "
+            f"collision ({counts}: objects of the two launches' designators "
+            "catalogued after it). Screened against that catalog for one day from "
+            "its retrieval, in the default 5 km sphere, they came within 5 km of "
+            f"other objects {debris['approaches']:,} times. The closest:"
         ),
         "",
         *table(("Fragment", "Other object", "TCA (UTC)", "Range"), rows),
@@ -905,19 +885,17 @@ def _assumptions_section(summary: Summary) -> list[str]:
         "## Assumptions",
         "",
         (
-            "- Covariance: keepout's GP element-set age model, assumed (GP age model), "
-            "not a calibrated product ([Assumptions](assumptions.md))."
+            "- Covariance: keepout's GP element-set age model, assumed (GP age "
+            "model), not a calibrated product ([Assumptions](assumptions.md))."
         ),
         (
             "- No publication latency: a CDM is created at the epoch of its newer "
             "element set."
         ),
         (
-            "- Corrections: of two sets of one object and epoch, the one issued later "
-            "is "
-            "used, even if it was issued after a CDM's creation time; the bulk file "
-            "has "
-            "no issue times."
+            "- Corrections: of two sets of one object and epoch, the one issued "
+            "later is used, even if it was issued after a CDM's creation time; the "
+            "bulk file has no issue times."
         ),
         (
             f"- Hard-body radius: {settings['base_hbr']:g} m combined "
@@ -960,7 +938,7 @@ def render_page(summary: Summary, images: str) -> str:
         "",
         generated_notice(TOOL),
         "",
-        *_summary_section(summary, images),
+        *_summary_section(summary),
         "",
         *_data_section(summary),
         "",
@@ -992,14 +970,12 @@ def render_summary(summary: Summary, page: str, images: str) -> str:
             (
                 "keepout on the element sets public before the 2009 collision "
                 f"([case study]({page})): two days before TCA the event was "
-                f"{decision['level']} (Pc {_pc_text(decision['latest_pc'])} on the "
-                "assumed "
-                f"covariance) and the rules said **{decision['action']}**; it ranked "
-                f"{_ordinal(rank['by_pc'])} by Pc among Iridium 33's "
-                f"{rank['approaches']} "
-                f"approaches that week; a {abs(best['delta_v']) * 100:.1f} cm/s burn "
-                "would "
-                "have made it green."
+                f"{decision['level']} (Pc {pc_text(decision['latest_pc'])} on the "
+                f"assumed covariance) and the rules said **{decision['action']}**; "
+                f"it ranked {_ordinal(rank['by_pc'])} by Pc among Iridium 33's "
+                f"{rank['approaches']} approaches that week; a "
+                f"{abs(best['delta_v']) * 100:.1f} cm/s burn would have made it "
+                "green."
             ),
             "",
             f"![Pc of the synthetic CDMs before the collision]({images}/{TREND})",
@@ -1017,8 +993,15 @@ def trend_plot(assessment: Assessment, summary: Summary) -> Figure:
     drawing = Figure(figsize=(8.5, 3.8))
     axes = drawing.subplots()
     axes.plot(days, figure.pc, color=FIT_COLOUR, linewidth=1.0, zorder=1)
-    for day, value, level in zip(days, figure.pc, figure.levels, strict=True):
-        axes.scatter([day], [value], s=36, zorder=2, color=RISK_COLOURS[level])
+    axes.scatter(
+        days,
+        figure.pc,
+        s=36,
+        zorder=2,
+        c=[RISK_COLOURS[level] for level in figure.levels],
+        edgecolors=INK_COLOUR,
+        linewidths=0.5,
+    )
     found = _found(summary)
     frisbee = [row["frisbee"] or 0.0 for row in found]
     tca = summary["settings"]["tca_reference"]
@@ -1040,11 +1023,14 @@ def trend_plot(assessment: Assessment, summary: Summary) -> Figure:
             label=f"{THRESHOLD_LABELS[level]} {value:.0e}",
         )
     axes.axvline(
-        2.0, color=DECISION_POINT_COLOUR, linestyle=":", label="decision point"
+        DEFAULT_DECISION_CONFIG.decision_point / DAY,
+        color=DECISION_POINT_COLOUR,
+        linestyle=":",
+        label="decision point",
     )
     axes.set_yscale("log")
     axes.set_ylim(1e-8, 1e-3)
-    axes.set_xlim(7.2, 0.0)
+    axes.set_xlim(summary["settings"]["series_days"] * 1.03, 0.0)
     axes.set_xlabel("days to the collision")
     axes.set_ylabel("Pc (assumed covariance)")
     axes.set_title("Iridium 33 vs Cosmos 2251: synthetic CDMs from public TLEs")
@@ -1060,20 +1046,23 @@ def rank_plot(summary: Summary) -> Figure:
     drawing = Figure(figsize=(6.5, 4.0))
     axes = drawing.subplots()
     floor = 1e-30
-    for item in items:
-        pc = max(item["pc"] or floor, floor)
-        colour = RISK_COLOURS[
-            RiskLevel.YELLOW if item["collision"] else RiskLevel.GREEN
-        ]
-        axes.scatter(
-            [item["miss_m"] / KM],
-            [pc],
-            s=70 if item["collision"] else 30,
-            color=colour if item["collision"] else MUTED_COLOUR,
-            edgecolors=INK_COLOUR if item["collision"] else "none",
-            zorder=3 if item["collision"] else 2,
-            label="Cosmos 2251" if item["collision"] else None,
+
+    def points(*, collision: bool) -> tuple[list[float], list[float]]:
+        chosen = [item for item in items if item["collision"] is collision]
+        return (
+            [item["miss_m"] / KM for item in chosen],
+            [max(item["pc"] or floor, floor) for item in chosen],
         )
+
+    axes.scatter(*points(collision=False), s=30, color=MUTED_COLOUR, zorder=2)
+    axes.scatter(
+        *points(collision=True),
+        s=70,
+        color=RISK_COLOURS[RiskLevel.YELLOW],
+        edgecolors=INK_COLOUR,
+        zorder=3,
+        label="Cosmos 2251",
+    )
     axes.set_yscale("log")
     axes.set_xlabel("miss distance [km]")
     axes.set_ylabel("Pc (assumed covariance)")
@@ -1119,7 +1108,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.images / RANK: lambda: rank_plot(summary),
         args.images / HEATMAP: lambda: heatmap_figure(
             grid_figure(maneuver.plan),
-            f"Iridium 33 (24946) vs Cosmos 2251 (22675)\nTCA {tca} UTC, Pc "
+            f"Iridium 33 ({study.IRIDIUM_33}) vs Cosmos 2251 ({study.COSMOS_2251})"
+            f"\nTCA {tca} UTC, Pc "
             f"{summary['maneuver']['baseline_pc']:.2e} without a burn, as known "
             "two days before",
         ),

@@ -17,7 +17,7 @@ The [changelog](changelog.md) lists every change by version.
   [exit statuses](cli.md).
 - **The command line's JSON output**: the fields and their meaning, as
   [JSON output](cli-json.md) documents them. New fields may be added in a
-  minor version; a field is never removed or given another meaning in one.
+  minor version; a field is never removed or redefined within 1.x.
 - **The store's schema**: a store made by any 1.x keepout opens in a later
   1.x, after `keepout store upgrade` when the release notes say a
   migration was added ([Upgrading](store.md#upgrading)). The schema changes

@@ -76,19 +76,22 @@ A second profile serves the [case study](case-study-iridium-cosmos.md) as an
 operator would have seen it two days before the 2009 collision:
 
 ```bash
-docker compose --profile iridium up
+docker compose build
+docker compose --profile iridium up --wait iridium-dashboard iridium-worker
 ```
 
 then <http://127.0.0.1:8502> (`KEEPOUT_IRIDIUM_PORT` picks another port).
-Its store, built into the image by
-`tools/dashboard_seed.py --iridium-store`, holds the 17 synthetic CDMs of
-Iridium 33 and Cosmos 2251 created by 2009-02-08 16:55 UTC, and nothing
-later; the time is fixed there, so the event is 48 hours ahead, yellow, and
-its manoeuvre plan (to green, `examples/dashboard/iridium-settings.toml`)
-is precomputed, re-screened against the 2009 catalog as known then. The
-profile has its own volume, `iridium-data`, and its own worker, which
-computes the planner's what-if plans against that same catalog. Without
-`--profile iridium`, `docker compose up` starts the demo only.
+`docker compose --profile iridium up` alone starts the demo on 8501 too.
+
+- **Its store**, built into the image by
+  `tools/dashboard_seed.py --iridium-store`, holds the synthetic CDMs of
+  Iridium 33 and Cosmos 2251 created by the decision point, and nothing
+  later. The dashboard's time is fixed there, so the event is two days
+  ahead.
+- **Its manoeuvre plan** (to green, `examples/dashboard/iridium-settings.toml`)
+  is precomputed, re-screened against the 2009 catalog as known then.
+- **Its own volume**, `iridium-data`, and **its own worker**, which computes
+  the planner's what-if plans against that same catalog.
 
 ## Your own data
 

@@ -246,21 +246,11 @@ emergency-reportable events and may not be redistributed.
 ## The case study's assumptions
 
 The [Iridium 33 – Cosmos 2251 case study](case-study-iridium-cosmos.md)
-uses the same model on the element sets of 2009, with these assumptions of
-its own:
-
-- **One CDM per new element set, with no publication latency.** A CDM is
-  created at the epoch of the newer of its two element sets, as if each set
-  were published the moment it was fitted.
-- **The later of two sets of one epoch.** Space-Track's bulk file holds
-  re-issued and corrected sets of the same object and epoch; the one issued
-  later is used, even if it was issued after a CDM's creation time.
-- **Hard-body radius 6 m combined** (4 m Iridium 33 with its arrays, 2 m
-  Cosmos 2251), an enclosing-sphere estimate; no dimensions are published
-  with the data. The page shows the Pc at 5, 10 and 20 m too.
-- **The same radius for every secondary** when the collision is ranked
-  among Iridium 33's approaches, so the order reflects geometry and the
-  model's covariance only.
+uses the same model on the element sets of 2009. Its own assumptions (no
+publication latency, the later of two sets of one epoch, the hard-body
+radius and the same radius for every ranked secondary) are listed, with
+their values, in [its Assumptions](case-study-iridium-cosmos.md#assumptions),
+which the report tool writes from the numbers it uses.
 
 ## References
 

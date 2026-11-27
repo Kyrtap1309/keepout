@@ -63,12 +63,9 @@ file, downloaded by hand (see `tools/iridium_cosmos_data.py`):
 
 ## Compatibility
 
-keepout follows semantic versioning; [Stability](docs/stability.md) says
-what it covers. A change that breaks a covered name, option, JSON field or
-the store's schema waits for the next major version; until then the old
-form keeps working with a deprecation warning, listed under **Deprecated**
-in the [changelog](docs/changelog.md). Every change goes into the changelog's
-**Unreleased** section.
+A change to what [Stability](docs/stability.md) covers follows its
+deprecation policy. Every change goes into the
+[changelog](docs/changelog.md)'s **Unreleased** section.
 
 ## Releasing
 

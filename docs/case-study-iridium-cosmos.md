@@ -4,22 +4,20 @@
 
 ## Summary
 
-On 2009 February 10, Iridium 33 (24946), an operational communications satellite, and Cosmos 2251 (22675), a long-defunct one, collided at nearly right angles over northern Russia: the first known collision of two satellites (Kelso (2009)). This page runs keepout on the element sets that were public then, as an operator could have, and asks what it would have said.
+On 2009 February 10, Iridium 33 (24946), an operational communications satellite, and Cosmos 2251 (22675), a long-defunct one, collided at nearly right angles over northern Russia: the first known collision of two satellites (Kelso 2009). This page runs keepout on the element sets that were public then, as an operator could have, and asks what it would have said.
 
 - **Screening.** Each new element set of the pair in the 7 days before gives a synthetic CDM. Their miss distances run from 117 m to 1.812 km; the last, 698 m. They match what CelesTrak's SOCRATES printed from the same kind of data (117 m to 1.812 km; 584 m in its last report).
 - **Pc.** On keepout's assumed covariance the Pc rose from 2.71e-06 to 1.65e-05: yellow at the decision point, never red.
 - **Decision.** Two days before TCA: **monitor**.
 - **Rank.** Among Iridium 33's 15 approaches in the week from the decision point, the collision was 1st by Pc and 2nd by miss distance.
 - **Manoeuvre.** A prograde burn of 6.3 cm/s 46 h before TCA would have brought the Pc below 1e-07.
-- **Today.** 672 catalogued fragments of the two were still in orbit on 2026-10-15; in one day they came within 5 km of other objects 1815 times.
+- **Today.** 672 catalogued fragments of the two were still in orbit on 2026-10-15; in one day they came within 5 km of other objects 1,815 times.
 
 At the decision point keepout's default rules on the model Pc say **monitor**: the event was yellow, its Pc 9.43e-06 on the assumed covariance, and no CDM was red. Still, it was the one to watch: among Iridium 33's own 15 approaches that week it ranked 1st by Pc, 7 times the next, and its dilution maximum Pc had reached 1e-04. The rules do not call for a burn on a yellow event, and whether it stood out among the whole constellation's conjunctions keepout did not compute. Kelso found that, on the TLE data, it could not be told apart: "Determining that the predicted conjunction for Iridium 33 and Cosmos 2251 was more significant than the many dozens of other Iridium conjunctions for that week is simply not possible using the TLE data." keepout's Pc is only as good as the covariance it is given, and here the covariance is a model of GP accuracy, not of these two orbits.
 
-![Pc of the synthetic CDMs before the collision](img/iridium-cosmos/trend.svg)
-
 ## Data
 
-Space-Track.org allows the history of an object's element sets to be queried once per account, and sends queries of many objects to its yearly bulk files. The excerpt in `tests/case_study/data/iridium-cosmos/` comes from the 2009 file (SHA-256 `e7b317ccfbe7c3d6...`, see its `manifest.json`): every element set of Iridium 33 and Cosmos 2251 from 32 days before the collision, and the newest set known at the decision point of each object that passed within 300 km of Iridium 33 from then to a week after the latest burn the planner may try. `tools/iridium_cosmos_data.py` makes it; the manifest counts what it left out: re-issued and corrected sets of the same epoch (the later kept), two designators without piece letters (blanked) and four sets keepout cannot read (a malformed B\*, one object). Its TLEs carry no names, so objects other than the pair are named by catalog number and international designator.
+Space-Track.org allows the history of an object's element sets to be queried once per account, and sends queries of many objects to its yearly bulk files. The excerpt in `tests/case_study/data/iridium-cosmos/` comes from the 2009 file (SHA-256 `e7b317ccfbe7c3d6...`, see its `manifest.json`): every element set of Iridium 33 and Cosmos 2251 from 32 days before the collision, and the newest set known at the decision point of each object that passed within 300 km of Iridium 33 from then to a week after the latest burn the planner may try. `tools/iridium_cosmos_data.py` makes it; the manifest counts what it left out: re-issued and corrected sets of the same epoch (the later kept), 2 designators without piece letters (blanked) and 4 sets keepout cannot read (a malformed B\*, 1 object). Its TLEs carry no names, so objects other than the pair are named by catalog number and international designator.
 
 Times: the collision, 2009-02-10T16:55:59.806 UTC, is the TCA of SOCRATES's last report, which Kelso (2009) takes as the time of the collision. The decision point is two days before, 2009-02-08T16:55:59.806 UTC; an analysis at a time sees only the element sets with an epoch up to it.
 
@@ -27,7 +25,7 @@ Times: the collision, 2009-02-10T16:55:59.806 UTC, is the TCA of SOCRATES's last
 
 Each CDM is created at the epoch of the newer of the two element sets it uses (no publication latency) and screens the pair from then to an hour past the collision with SGP4. Pc is keepout's on the synthetic covariance; the maximum Pc columns bound it from above, each trusting less of that covariance: Frisbee's with Cosmos 2251's covariance unknown (Iridium 33's kept), dilution's over a scale of the combined one (its shape kept), Alfano's over any covariance.
 
-| Created (UTC) | Known at decision point | TCA | Miss | Pc | Max Pc (Frisbee) | Max Pc (dilution) | Max Pc (Alfano) |
+| Created (UTC) | Known at decision point | TCA (UTC) | Miss | Pc | Max Pc (Frisbee) | Max Pc (dilution) | Max Pc (Alfano) |
 |---|---|---|---|---|---|---|---|
 | 2009-02-03 18:49 | yes | 16:55:59.699 | 1.585 km | 2.71e-06 | 4.73e-06 | 7.35e-06 | 1.83e-03 |
 | 2009-02-04 08:13 | yes | 16:55:59.710 | 1.488 km | 2.83e-06 | 5.18e-06 | 7.87e-06 | 1.95e-03 |
@@ -51,13 +49,13 @@ Each CDM is created at the epoch of the newer of the two element sets it uses (n
 | 2009-02-09 11:57 | no | 16:55:59.806 | 584 m | 1.45e-05 | 2.73e-05 | 2.81e-04 | 4.97e-03 |
 | 2009-02-09 18:49 | no | 16:55:59.795 | 698 m | 1.65e-05 | 3.58e-05 | 2.59e-04 | 4.16e-03 |
 
-SOCRATES, from the same kind of data, predicted this approach in each of its 14 reports from 2009-02-04 04:01 UTC, at 16:55:59.670 to 16:55:59.990 UTC, with miss distances from 117 m to 1.812 km; its report 5 gave 117 m (2009-02-06 04:02 UTC), then 1.243 km the next day; its last report, of 2009-02-10 15:02 UTC, gave 584 m (Kelso (2009)). The CDMs above give the same spread: screening on these element sets finds what SOCRATES found.
+SOCRATES, from the same kind of data, predicted this approach in each of its 14 reports from 2009-02-04 04:01 UTC, at 16:55:59.670 to 16:55:59.990 UTC, with miss distances from 117 m to 1.812 km; its report 5 gave 117 m (2009-02-06 04:02 UTC), then 1.243 km the next day; its last report, of 2009-02-10 15:02 UTC, gave 584 m (Kelso 2009). The CDMs above give the same spread: screening on these element sets finds what SOCRATES found.
 
 ## Pc and trend
 
 ![Pc of the synthetic CDMs before the collision](img/iridium-cosmos/trend.svg)
 
-Each point is one CDM's Pc on the synthetic covariance, coloured by its risk level (green below 1e-07, red from 1e-04); the grey line is Frisbee's maximum Pc. The Pc rises as TCA nears because the model's covariance shrinks as the element sets are propagated less far, not because the miss distance falls: the misses jump between 117 m and 1.8 km.
+Each point is one CDM's Pc on the synthetic covariance, coloured by its risk level (green below 1e-07, red from 1e-04); the grey line is Frisbee's maximum Pc. The Pc rises as TCA nears because the model's covariance shrinks as the element sets are propagated less far, not because the miss distance falls: the misses jump between 117 m and 1.812 km.
 
 ## Decision two days before
 
@@ -76,7 +74,7 @@ The combined hard-body radius is 6 m, an assumption (no dimensions are published
 
 Iridium 33 screened against every object as known at the decision point, for 7 days, in the default 5 km sphere, each approach with the model's covariance and the same combined hard-body radius for every secondary (so the order reflects geometry and covariance only): 15 approaches. The collision ranks 1st by Pc and 2nd by miss distance.
 
-![Iridium 33's approaches in the week after](img/iridium-cosmos/rank.svg)
+![Iridium 33's approaches in the week from the decision point](img/iridium-cosmos/rank.svg)
 
 | Secondary | TCA (UTC) | Miss | Pc |
 |---|---|---|---|
@@ -96,7 +94,7 @@ Iridium 33 screened against every object as known at the decision point, for 7 d
 | 32316 (1999-025CXH) | 2009-02-10 07:59 | 3.863 km | 1.66e-43 |
 | 28432 (2001-049NY) | 2009-02-12 22:11 | 4.975 km | 4.85e-64 |
 
-SOCRATES ranked conjunctions across the whole catalog and the whole Iridium constellation: the collision's overall rank went from 1,611 (report 3) to 11; 152 at the collision, and among all Iridium conjunctions from 149 (report 3) to 2 (report 5), 64 on average; Iridium 33 alone saw 10 to 15 approaches within 5 km a week out of 1,007 to 1,095 for the whole constellation (Kelso (2009)). For one satellite, as here, the list is short; an operator of 66 had to sort about a thousand a week, on Pc no better than this.
+SOCRATES ranked conjunctions across the whole catalog and the whole Iridium constellation: the collision's overall rank went from 1,611 (report 3) to 11; 152 at the collision, and among all Iridium conjunctions from 149 (report 3) to 2 (report 5), 64 on average; Iridium 33 alone saw 10 to 15 approaches within 5 km a week out of 1,007 to 1,095 for the whole constellation (Kelso 2009). For one satellite, as here, the list is short; an operator of 66 had to sort about a thousand a week, on Pc no better than this.
 
 ## A manoeuvre
 
@@ -113,7 +111,7 @@ A burn moves Iridium 33 along its orbit for the rest of the week; the excerpt ho
 
 ## Seventeen years later
 
-The committed Space-Track catalog of 2026-10-15 still holds 672 catalogued fragments of the collision (104 of IRIDIUM 33, 568 of COSMOS 2251: objects of the two launches' designators catalogued after it). Screened against that catalog for one day from its retrieval, in the default 5 km sphere, they came within 5 km of other objects 1815 times. The closest:
+The committed Space-Track catalog of 2026-10-15 still holds 672 catalogued fragments of the collision (104 of IRIDIUM 33, 568 of COSMOS 2251: objects of the two launches' designators catalogued after it). Screened against that catalog for one day from its retrieval, in the default 5 km sphere, they came within 5 km of other objects 1,815 times. The closest:
 
 | Fragment | Other object | TCA (UTC) | Range |
 |---|---|---|---|
