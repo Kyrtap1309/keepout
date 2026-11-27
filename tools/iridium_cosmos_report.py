@@ -81,6 +81,10 @@ DIGITS: Final = 3
 """Significant digits of the probabilities written: the last digits of a
 Pc vary between machines."""
 
+PC_FLOOR: Final = 1e-12
+"""The smallest Pc the page and figures show as a number; one below is
+shown as below it (the JSON keeps every value)."""
+
 KELSO: Final = {
     "citation": (
         'T.S. Kelso, "Analysis of the Iridium 33-Cosmos 2251 Collision", '
@@ -421,6 +425,14 @@ def summarise() -> tuple[Summary, study.Maneuver, Assessment]:
 # The page.
 
 
+def _pc_text(value: float | None) -> str:
+    """A Pc for the page: as :func:`~keepout._text.pc_text`, or
+    ``< 1e-12`` below :data:`PC_FLOOR`."""
+    if value is not None and value < PC_FLOOR:
+        return f"< {PC_FLOOR:.0e}"
+    return pc_text(value)
+
+
 def _km(metres: float) -> str:
     return f"{metres / KM:.3f} km" if metres >= KM else f"{metres:.0f} m"
 
@@ -498,7 +510,7 @@ def meaning(summary: Summary) -> str:
     lead = (
         f"At the decision point keepout's default rules on the model Pc say "
         f"**{action}**: the event was {decision['level']}, its Pc "
-        f"{pc_text(decision['latest_pc'])} on the assumed covariance"
+        f"{_pc_text(decision['latest_pc'])} on the assumed covariance"
         + (", and no CDM was red." if _never_red(summary) else ".")
     )
     if action in BURN_ACTIONS:
@@ -545,7 +557,7 @@ def _summary_section(summary: Summary) -> list[str]:
         ),
         (
             f"- **Pc.** On keepout's assumed covariance the Pc rose from "
-            f"{pc_text(found[0]['pc'])} to {pc_text(found[-1]['pc'])}: "
+            f"{_pc_text(found[0]['pc'])} to {_pc_text(found[-1]['pc'])}: "
             f"{summary['decision']['level']} at the decision point{never_red}"
         ),
         f"- **Decision.** Two days before TCA: **{summary['decision']['action']}**.",
@@ -621,10 +633,10 @@ def _screening_section(summary: Summary) -> list[str]:
             "yes" if row["known_at_decision"] else "no",
             "-" if row["tca"] is None else row["tca"][11:23],
             "-" if row["miss_m"] is None else _km(row["miss_m"]),
-            pc_text(row["pc"]),
-            pc_text(row["frisbee"]),
-            pc_text(row["dilution"]),
-            pc_text(row["alfano"]),
+            _pc_text(row["pc"]),
+            _pc_text(row["frisbee"]),
+            _pc_text(row["dilution"]),
+            _pc_text(row["alfano"]),
         )
         for row in summary["series"]
     ]
@@ -708,8 +720,8 @@ def _decision_section(summary: Summary) -> list[str]:
         (
             f"{row['radius']:g} m"
             + (" (base)" if row["radius"] == settings["base_hbr"] else ""),
-            pc_text(row["pc_at_decision"]),
-            pc_text(row["pc_last"]),
+            _pc_text(row["pc_at_decision"]),
+            _pc_text(row["pc_last"]),
         )
         for row in summary["sensitivity"]
     ]
@@ -751,7 +763,7 @@ def _rank_section(summary: Summary, images: str) -> list[str]:
             secondary(item),
             minute_text(item["tca"]),
             _km(item["miss_m"]),
-            pc_text(item["pc"]),
+            _pc_text(item["pc"]),
         )
         for item in rank["table"]
     ]
@@ -794,11 +806,11 @@ def _maneuver_section(summary: Summary, images: str) -> list[str]:
             option["direction"],
             f"{option['burn_lead_hours']:.1f} h",
             f"{option['delta_v']:+.4f} m/s",
-            pc_text(option["pc"]),
+            _pc_text(option["pc"]),
             _km(option["range_at_tca_m"]),
             f"{option['shift_km']:g} km",
             f"{option['new']} new, {option['closer']} closer",
-            pc_text(option["worst_pc"]),
+            _pc_text(option["worst_pc"]),
             "yes" if option["conflict"] else "no",
         )
         for option in plan["options"]
@@ -811,7 +823,7 @@ def _maneuver_section(summary: Summary, images: str) -> list[str]:
             "on the CDMs known then gives the smallest along-track burns, from "
             f"{settings['burn_earliest_hours']:g} h to "
             f"{settings['burn_latest_hours']:g} h before TCA, that bring the Pc "
-            f"({pc_text(plan['baseline_pc'])} without a burn) below "
+            f"({_pc_text(plan['baseline_pc'])} without a burn) below "
             f"{plan['target']:.0e}, green; the planner's own default, red, the "
             "event already meets. Each burn is then re-screened against the excerpt "
             "for a week (`rescreen`): the approaches it brings, and the worst Pc "
@@ -970,7 +982,7 @@ def render_summary(summary: Summary, page: str, images: str) -> str:
             (
                 "keepout on the element sets public before the 2009 collision "
                 f"([case study]({page})): two days before TCA the event was "
-                f"{decision['level']} (Pc {pc_text(decision['latest_pc'])} on the "
+                f"{decision['level']} (Pc {_pc_text(decision['latest_pc'])} on the "
                 f"assumed covariance) and the rules said **{decision['action']}**; "
                 f"it ranked {_ordinal(rank['by_pc'])} by Pc among Iridium 33's "
                 f"{rank['approaches']} approaches that week; a "
@@ -1045,18 +1057,29 @@ def rank_plot(summary: Summary) -> Figure:
     items = summary["rank"]["table"]
     drawing = Figure(figsize=(6.5, 4.0))
     axes = drawing.subplots()
-    floor = 1e-30
 
-    def points(*, collision: bool) -> tuple[list[float], list[float]]:
-        chosen = [item for item in items if item["collision"] is collision]
+    def points(chosen: Sequence[Approach]) -> tuple[list[float], list[float]]:
         return (
             [item["miss_m"] / KM for item in chosen],
-            [max(item["pc"] or floor, floor) for item in chosen],
+            [max(item["pc"] or 0.0, PC_FLOOR) for item in chosen],
         )
 
-    axes.scatter(*points(collision=False), s=30, color=MUTED_COLOUR, zorder=2)
+    others = [item for item in items if not item["collision"]]
+    shown = [item for item in others if (item["pc"] or 0.0) >= PC_FLOOR]
+    below = [item for item in others if (item["pc"] or 0.0) < PC_FLOOR]
+    axes.scatter(*points(shown), s=30, color=MUTED_COLOUR, zorder=2)
+    if below:
+        axes.scatter(
+            *points(below),
+            s=40,
+            marker="v",
+            facecolors="none",
+            edgecolors=MUTED_COLOUR,
+            zorder=2,
+            label=f"Pc below {PC_FLOOR:.0e}",
+        )
     axes.scatter(
-        *points(collision=True),
+        *points([item for item in items if item["collision"]]),
         s=70,
         color=RISK_COLOURS[RiskLevel.YELLOW],
         edgecolors=INK_COLOUR,
@@ -1064,6 +1087,7 @@ def rank_plot(summary: Summary) -> Figure:
         label="Cosmos 2251",
     )
     axes.set_yscale("log")
+    axes.set_ylim(bottom=PC_FLOOR / 3)
     axes.set_xlabel("miss distance [km]")
     axes.set_ylabel("Pc (assumed covariance)")
     axes.set_title(

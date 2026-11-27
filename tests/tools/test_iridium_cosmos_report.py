@@ -92,6 +92,20 @@ def test_window_is_the_data_tool_s(summary: report.Summary, page: str) -> None:
     assert f"from {days:g} days before the collision" in page
 
 
+def test_pc_below_the_floor_is_shown_as_below(
+    summary: report.Summary, page: str
+) -> None:
+    tiny = [
+        item["pc"]
+        for item in summary["rank"]["table"]
+        if item["pc"] is not None and item["pc"] < report.PC_FLOOR
+    ]
+    assert tiny
+    assert f"< {report.PC_FLOOR:.0e}" in page
+    for pc in tiny:
+        assert f"{pc:.2e}" not in page
+
+
 def test_assumptions_page_lists_the_case_study() -> None:
     text = (REPO / "docs/assumptions.md").read_text(encoding="utf-8")
     assert "(case-study-iridium-cosmos.md" in text

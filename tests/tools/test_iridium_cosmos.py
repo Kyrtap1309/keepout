@@ -211,7 +211,7 @@ def test_rescreen_window_beyond_excerpt_fails(
     selection: iridium_cosmos_data.Selection,
 ) -> None:
     start = Time(selection["screening_start"], scale="utc")
-    end = start + selection["screening_days"] * u.day
+    end = Time(selection["screening_end"], scale="utc")
     study.require_within_excerpt({}, [(start, end)], selection)
     late = (start + 2 * u.hour, end + 2 * u.hour)
     with pytest.raises(study.ExcerptTooSmall, match="after the excerpt's screening"):
@@ -222,10 +222,10 @@ def test_excerpt_covers_the_latest_burn_s_week(
     selection: iridium_cosmos_data.Selection,
 ) -> None:
     assert selection["radius_km"] * KM == study.EXCERPT_RADIUS
-    start = Time(selection["screening_start"], scale="utc")
-    covered = start + selection["screening_days"] * u.day
+    covered = Time(selection["screening_end"], scale="utc")
     latest_burn = study.TCA_REFERENCE - study.BURN_GRID.latest_lead * u.s
-    assert covered + 1 * u.s >= latest_burn + DEFAULT_DURATION * u.s
+    week_after = latest_burn + DEFAULT_DURATION * u.s
+    assert covered + study.ISO_ROUNDING * u.s >= week_after
 
 
 @pytest.fixture(scope="module")

@@ -9,7 +9,7 @@ and how a name is deprecated before it goes, is in [Stability](stability.md).
 
 ## [Unreleased]
 
-## [1.0.0] - YYYY-MM-DD
+## [1.0.0] - 2026-11-27
 
 The first release. Everything is new in it; the development versions before
 it were never released, so their changes are not listed. A store made by a

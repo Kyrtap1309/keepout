@@ -66,7 +66,7 @@ from keepout.errors import OmmParseError
 from keepout.omm import deduplicate, tle
 from keepout.omm.celestrak import dumps_csv
 from keepout.screening import MAX_AGE, ScreeningVolume, screen
-from keepout.units import DAY, KM
+from keepout.units import KM
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator, Mapping, Sequence
@@ -145,7 +145,7 @@ class Selection(TypedDict):
     window_start: str
     window_end: str
     screening_start: str
-    screening_days: float
+    screening_end: str
     radius_km: float
     screened_objects: int
     approaches: int
@@ -344,7 +344,7 @@ def excerpt_sets(
         "window_start": WINDOW_START.isot,
         "window_end": study.TCA_REFERENCE.isot,
         "screening_start": study.IRIDIUM_AS_OF.isot,
-        "screening_days": study.EXCERPT_DURATION / DAY,
+        "screening_end": (study.IRIDIUM_AS_OF + study.EXCERPT_DURATION * u.s).isot,
         "radius_km": study.EXCERPT_RADIUS / KM,
         "screened_objects": len({omm.catalog_number for omm in known}),
         "approaches": len(result.approaches),
@@ -424,8 +424,8 @@ def render_notice(inputs: Inputs) -> str:
         f"  Cosmos 2251 with an epoch from {selection['window_start']} to\n"
         f"  {selection['window_end']} UTC, and the newest set known at\n"
         f"  {selection['screening_start']} UTC of every object passing within\n"
-        f"  {selection['radius_km']:g} km of Iridium 33 in the "
-        f"{selection['screening_days']:g} days from then,\n"
+        f"  {selection['radius_km']:g} km of Iridium 33 from then to\n"
+        f"  {selection['screening_end']} UTC,\n"
         "  as gzipped CelesTrak CSV (the OMM keywords; the TLEs carry no names).\n"
         "\n"
         f"{MANIFEST} lists the bulk file's size and SHA-256, the counts and\n"

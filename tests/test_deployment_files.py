@@ -5,6 +5,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 from typing import Any, Final
 
@@ -185,3 +186,16 @@ def test_init_keeps_catalogs_without_their_store(
     assert "refusing" in result.stderr
     assert not (data_dir / "keepout.db").exists()
     assert (catalogs / "mine.csv.gz").read_bytes() == b"restored"
+
+
+def test_python_classifiers_are_the_ci_matrix() -> None:
+    """docs/stability.md: the versions tested in CI are the classifiers'."""
+    project = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))
+    prefix = "Programming Language :: Python :: 3."
+    classified = [
+        "3." + item.removeprefix(prefix)
+        for item in project["project"]["classifiers"]
+        if item.startswith(prefix)
+    ]
+    ci = yaml.safe_load((REPO / ".github/workflows/ci.yml").read_text("utf-8"))
+    assert ci["jobs"]["test"]["strategy"]["matrix"]["python-version"] == classified

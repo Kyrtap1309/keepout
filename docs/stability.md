@@ -43,7 +43,8 @@ is to go:
 
 ## Supported Python versions
 
-keepout 1.x supports the Python versions its `requires-python` names
-(3.11 and later at 1.0.0) and is tested on each in CI. Dropping a Python
-version that has reached its end of life is not a breaking change; it is
-done in a minor release and listed in the changelog.
+keepout 1.x is tested in CI on the Python versions its classifiers list
+(3.11, 3.12 and 3.13 at 1.0.0). Its `requires-python` (3.11 and later)
+lets it install on newer ones too, untested. Dropping a Python version that
+has reached its end of life is not a breaking change; it is done in a minor
+release and listed in the changelog.

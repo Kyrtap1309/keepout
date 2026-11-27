@@ -84,15 +84,15 @@ Iridium 33 screened against every object as known at the decision point, for 7 d
 | 14240 (1983-079A) | 2009-02-11 20:28 | 3.153 km | 4.64e-07 |
 | 25112 (1997-084A) | 2009-02-15 06:03 | 4.639 km | 3.21e-08 |
 | 3522 (1968-092B) | 2009-02-10 01:51 | 1.718 km | 1.16e-08 |
-| 30546 (1999-025AKL) | 2009-02-08 18:13 | 3.469 km | 6.03e-13 |
-| 31380 (1999-025BSL) | 2009-02-13 22:50 | 3.077 km | 9.44e-15 |
-| 33637 (1999-025DDW) | 2009-02-12 23:28 | 2.764 km | 1.75e-15 |
-| 23433 (1994-083C) | 2009-02-10 15:06 | 4.839 km | 4.92e-18 |
-| 29892 (1999-025GN) | 2009-02-10 16:13 | 3.058 km | 2.74e-19 |
-| 5903 (1972-018A) | 2009-02-10 06:10 | 3.561 km | 3.19e-37 |
-| 20347 (1989-080J) | 2009-02-09 16:49 | 4.567 km | 7.04e-40 |
-| 32316 (1999-025CXH) | 2009-02-10 07:59 | 3.863 km | 1.66e-43 |
-| 28432 (2001-049NY) | 2009-02-12 22:11 | 4.975 km | 4.85e-64 |
+| 30546 (1999-025AKL) | 2009-02-08 18:13 | 3.469 km | < 1e-12 |
+| 31380 (1999-025BSL) | 2009-02-13 22:50 | 3.077 km | < 1e-12 |
+| 33637 (1999-025DDW) | 2009-02-12 23:28 | 2.764 km | < 1e-12 |
+| 23433 (1994-083C) | 2009-02-10 15:06 | 4.839 km | < 1e-12 |
+| 29892 (1999-025GN) | 2009-02-10 16:13 | 3.058 km | < 1e-12 |
+| 5903 (1972-018A) | 2009-02-10 06:10 | 3.561 km | < 1e-12 |
+| 20347 (1989-080J) | 2009-02-09 16:49 | 4.567 km | < 1e-12 |
+| 32316 (1999-025CXH) | 2009-02-10 07:59 | 3.863 km | < 1e-12 |
+| 28432 (2001-049NY) | 2009-02-12 22:11 | 4.975 km | < 1e-12 |
 
 SOCRATES ranked conjunctions across the whole catalog and the whole Iridium constellation: the collision's overall rank went from 1,611 (report 3) to 11; 152 at the collision, and among all Iridium conjunctions from 149 (report 3) to 2 (report 5), 64 on average; Iridium 33 alone saw 10 to 15 approaches within 5 km a week out of 1,007 to 1,095 for the whole constellation (Kelso 2009). For one satellite, as here, the list is short; an operator of 66 had to sort about a thousand a week, on Pc no better than this.
 

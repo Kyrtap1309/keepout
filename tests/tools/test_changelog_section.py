@@ -6,6 +6,8 @@ import changelog_section as section
 import pytest
 from generated import REPO
 
+import keepout
+
 CHANGELOG = """# Changelog
 
 Intro.
@@ -62,9 +64,9 @@ def test_main_prints_the_section(
     assert capsys.readouterr().out == "### Added\n\n- Everything.\n"
 
 
-def test_the_committed_changelog_has_the_version_section() -> None:
+def test_the_committed_changelog_has_the_version_s_dated_section() -> None:
     text = (REPO / "docs/changelog.md").read_text(encoding="utf-8")
-    assert "## [1.0.0] - " in text
+    assert section.changelog_section(text, keepout.__version__).strip()
 
 
 def test_relative_links_point_at_the_site() -> None:

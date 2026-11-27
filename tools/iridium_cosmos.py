@@ -293,6 +293,10 @@ MANEUVER_TARGET: Final = DEFAULT_THRESHOLDS.green_below
 """The Pc a burn must bring the event below: green. The planner's default
 target, red, is met without a burn by an event that is yellow."""
 
+ISO_ROUNDING: Final = 1e-3
+"""How far a time the manifest records may be from the one it was written
+from [s]: ISO times are written to the millisecond."""
+
 SHIFT_STEP: Final = MINUTE
 """Time between the states compared for a burn's position change [s]."""
 
@@ -422,13 +426,9 @@ def require_within_excerpt(
                 f"the {direction} burn moves Iridium 33 by {shift:.0f} m, more than "
                 f"half the excerpt's radius ({radius:.0f} m)"
             )
-    covered = (
-        Time(selection["screening_start"], scale="utc")
-        + selection["screening_days"] * u.day
-    )
+    covered = Time(selection["screening_end"], scale="utc")
     for _, end in windows:
-        # A second's slack: the manifest's days are a rounded fraction.
-        if end > covered + 1 * u.s:
+        if end > covered + ISO_ROUNDING * u.s:
             raise ExcerptTooSmall(
                 f"a re-screen runs to {end.utc.isot[:16]} UTC, after the excerpt's "
                 f"screening ends ({covered.utc.isot[:16]} UTC)"
