@@ -74,7 +74,8 @@ def _values(data: object) -> list[float]:
     bytes and their dtype)."""
     if isinstance(data, dict):
         raw = base64.b64decode(data["bdata"])
-        return np.frombuffer(raw, dtype=np.dtype(data["dtype"])).tolist()
+        values: list[float] = np.frombuffer(raw, dtype=np.dtype(data["dtype"])).tolist()
+        return values
     assert isinstance(data, list)
     return [float(value) for value in data]
 
