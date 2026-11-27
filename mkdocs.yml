@@ -1,4 +1,5 @@
 site_name: keepout
+site_url: https://kyrtap1309.github.io/keepout/
 site_description: Spacecraft conjunction assessment in Python
 copyright: Copyright &copy; 2026 Patryk Niczke — MIT licence
 repo_url: https://github.com/Kyrtap1309/keepout
