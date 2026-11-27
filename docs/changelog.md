@@ -1,82 +1,56 @@
 # Changelog
 
-keepout is pre-alpha (version `0.1.0.dev0`) and has not been released.
-Until the first release, any change may break the API, the command line,
-the JSON output or the store's schema. A store made by an older keepout is
-migrated with `keepout store upgrade` ([Upgrading](store.md#upgrading)).
-From the first release on, this page will list every change by version.
+Every change to keepout, by version. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and keepout follows
+[semantic versioning](https://semver.org/) from 1.0.0: what that covers,
+and how a name is deprecated before it goes, is in [Stability](stability.md).
 
 `keepout.__version__` gives the version installed.
 
-## Unreleased
+## [Unreleased]
 
-The features in the order they were added:
+## [1.0.0] - YYYY-MM-DD
 
-- **2026-09:** CDM reading and writing (CCSDS 508.0-B-1 and TraCSS CDM 2.0,
-  KVN and XML); covariance checks and repairs; frames and the encounter
-  plane. 2-D Pc (Foster, Elrod), then 3-D (Hall 3D-Nc), Monte Carlo and
-  maximum Pc (Frisbee, dilution, Alfano), validated against NASA CARA.
-- **2026-10:** risk assessment of conjunction events (levels, trend,
-  action). Element sets (OMM, CelesTrak CSV and JSON, TLE), SGP4
-  propagation and screening against CelesTrak's public catalog, compared
-  with SOCRATES. The synthetic operator, the Space-Track client and the
-  `keepout` command.
-- **2026-11:** collision-avoidance manoeuvre planning and its re-screen
-  (`keepout maneuver`). The conjunction store with stable event ids
-  (`keepout store`), then background jobs and the worker (`keepout jobs`,
-  `keepout worker`). The [dashboard](dashboard.md) (`keepout dashboard`,
-  the `dashboard` extra), with CDM uploads and refresh jobs. `keepout.figures`
-  and a colour-blind-safe palette shared by the reports and the dashboard
-  (the report SVGs changed colours). Store schema revision `0003`:
-  `keepout store upgrade` migrates an older store. `docker compose up`
-  runs the dashboard and a worker on a demo store
-  ([Deployment](deployment.md)); `keepout dashboard --host` sets the
-  address it listens on, warning off loopback.
+The first release. Everything is new in it; the development versions before
+it were never released, so their changes are not listed. A store made by a
+development version is migrated with `keepout store upgrade`
+([Upgrading](store.md#upgrading)).
 
-Then a review of the whole code base changed:
+### Added
 
-### Fixed
+- **Conjunction data messages.** CDM reading and writing (CCSDS 508.0-B-1
+  and TraCSS CDM 2.0, KVN and XML), covariance checks and repairs, frames
+  and the encounter plane ([Working with CDMs](cdm.md)).
+- **Probability of collision.** 2-D Pc (Foster, Elrod), 3-D Pc (Hall
+  3D-Nc), Monte Carlo with a confidence interval, and maximum Pc (Frisbee,
+  dilution, Alfano), each validated against NASA CARA's reference cases
+  ([2-D](pc-2d.md), [3-D, Monte Carlo and maximum Pc](pc-3d.md),
+  [validation](validation.md)).
+- **Risk assessment** of conjunction events: risk levels, trend and the
+  recommended action at a decision point ([Risk assessment](risk.md)),
+  shown on ESA's Kelvins data ([report](risk-kelvins.md)).
+- **Screening.** Element sets (OMM, CelesTrak CSV and JSON, TLE), batched
+  SGP4 and screening against a catalog, compared with CelesTrak's SOCRATES
+  ([Screening](screening.md)); clients for CelesTrak and Space-Track.org
+  within their published limits ([Space-Track data](spacetrack.md)).
+- **Synthetic operator.** CDMs for a fleet from public GP data with an
+  assumed covariance model ([Synthetic operator](synthetic.md),
+  [Assumptions](assumptions.md)).
+- **Manoeuvre planning.** Along-track burns over a grid of size and time,
+  with a Cowell propagator, and the re-screen of a planned burn against the
+  catalog ([Manoeuvre planning](maneuver.md)).
+- **Command line.** `keepout fetch`, `screen`, `assess`, `maneuver`,
+  `validate`, `store`, `jobs`, `worker` and `dashboard`, with `--json`
+  output ([Command line](cli.md), [JSON output](cli-json.md)).
+- **Conjunction store** with stable event ids, background jobs and a worker
+  ([The conjunction store](store.md)).
+- **Dashboard.** Events, Pc trends, the manoeuvre planner and CDM uploads
+  on a local store ([The dashboard](dashboard.md)); `docker compose up`
+  runs it with a worker on a demo store ([Deployment](deployment.md)).
+- **Case study.** The Iridium 33 – Cosmos 2251 collision of 2009 on the
+  element sets public then: screening, synthetic CDMs, Pc, decision, rank,
+  manoeuvre and re-screen ([case study](case-study-iridium-cosmos.md)), and
+  its dashboard (`docker compose --profile iridium up`).
 
-- `dilution`: a conjunction is diluted only when the maximum beats the
-  nominal Pc. `frisbee` gives Alfano's line maximum when the known object's
-  covariance is zero. Monte Carlo counts samples whose orbit is no ellipse
-  as misses (`details["non_elliptic"]`, with a diagnostic) instead of
-  carrying NaN.
-- Screening takes each object's newest element set usable in the window: an
-  older set is no longer lost behind a newer one outside it.
-- `keepout maneuver` says "No burn needed" when the Pc without a burn
-  already meets the target, and the event's own approach is never reported
-  as a new one by the re-screen.
-- CDM XML with any `USER_DEFINED` parameter name is read; epoch fractions
-  that round up to the next second are accepted; SOCRATES text with blank
-  lines is read.
-- A refresh queued while another one runs is no longer lost; a stopped
-  refresh keeps the Pc it computed. Two processes opening a new store at
-  once no longer fail with "database is locked".
-- `keepout dashboard`: Ctrl+C or SIGTERM stops Streamlit too (killed after
-  10 s or a second Ctrl+C); a bad `$KEEPOUT_AS_OF` is named as such.
-- Dashboard plots: the green threshold line is green; the planner names
-  the demo's catalog by its path in the repository.
-
-### Changed
-
-- `elrod` refuses a non-integer quadrature order. UTC epochs before 1972
-  are refused ([Frames and units](frames-and-units.md)).
-- Command line: options that do not go together are usage errors; progress
-  goes to standard error on a terminal; `assess` and `screen` tables have
-  an Event column and are printed whole when piped; every `--json` document
-  starts with `"schema": 1` ([JSON output](cli-json.md)); a scoped IPv6
-  `--host` is refused.
-- `keepout worker --heartbeat-file`, and a healthcheck on the worker in
-  `compose.yaml`.
-- The dashboard's tables are sortable, the risk reads as "red ·
-  manoeuvre", red events get a primary planner button, past events are
-  shown apart and the planner's grid cells and notes are collapsed
-  ([The dashboard](dashboard.md)).
-- `PcObservation.method` is a `Method`; `trend_figure` takes only the
-  assessment.
-
-### Removed
-
-- `keepout.omm.tle.checksum`, `keepout.figures.RISK_LABELS` and
-  `ACTION_LABELS`, `keepout.validation.cases.MonteCarloSizing`.
+[Unreleased]: https://github.com/Kyrtap1309/keepout/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/Kyrtap1309/keepout/releases/tag/v1.0.0

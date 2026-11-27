@@ -58,7 +58,7 @@ that assumption implies, not the real risk
 ([Synthetic covariance model](assumptions.md)).
 
 !!! warning "keepout is not an operational service"
-    keepout is a pre-alpha library. Its risk rules are transparent
+    keepout is a library, not a service. Its risk rules are transparent
     heuristics, not an operational standard. No decision about a real
     satellite should rest on keepout alone.
 

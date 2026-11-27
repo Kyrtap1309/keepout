@@ -133,3 +133,7 @@ covariance with no positive variance raises `CovarianceError`.
 - Alfano, S. (2009). *Satellite conjunction Monte Carlo analysis.* AAS 09-233.
 - Elrod, C. (2019). Doctoral dissertation, Department of Statistical Science,
   Baylor University (as cited by NASA CARA for its Gauss-Chebyshev 2-D Pc).
+- NASA, *Spacecraft Conjunction Assessment and Collision Avoidance Best
+  Practices Handbook*, NASA/SP-20205011318 Rev. 2: the 2-D Pc in operational
+  conjunction assessment, and the 1e-4 manoeuvre threshold that keepout's
+  red level follows.

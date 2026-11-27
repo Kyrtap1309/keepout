@@ -121,6 +121,7 @@ nav:
           - Validation tooling: reference/validation.md
           - Errors: reference/errors.md
   - Changelog: changelog.md
+  - Stability: stability.md
 
 validation:
   links:

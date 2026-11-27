@@ -36,7 +36,7 @@ as it is.
 
 The summaries below are written by the same scripts as the pages they link
 to. The validation against NASA CARA is summarised in the
-[README](https://github.com/Kyrtap1309/keepout#validation) and on its
+[README](https://github.com/Kyrtap1309/keepout#at-a-glance) and on its
 [page](validation.md#summary).
 
 ### Monte Carlo against CARA

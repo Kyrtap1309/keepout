@@ -5,8 +5,9 @@ catalog, CCSDS CDM ingest and generation, probability of collision (Pc),
 risk trends, a synthetic operator on public data, a command line and
 collision-avoidance manoeuvre planning.
 
-!!! warning "Pre-alpha"
-    Status: pre-alpha; the API may change without notice.
+!!! note "Stable"
+    Since 1.0.0 the Python API, the command line, its JSON output and the
+    store's schema follow semantic versioning ([Stability](stability.md)).
 
 ## Quickstart
 
@@ -34,8 +35,8 @@ collision-avoidance manoeuvre planning.
 
 ## Install
 
-keepout needs Python 3.11 or later. It is not on PyPI yet, so install it
-from GitHub:
+keepout needs Python 3.11 or later. It is not on PyPI (another project
+holds the name), so install it from GitHub:
 
 ```bash
 pip install "keepout[cli,store] @ git+https://github.com/Kyrtap1309/keepout"
@@ -299,7 +300,7 @@ keepout has no paper yet. Cite the repository, with the version
 (`keepout.__version__`) or the commit you used:
 
 > Niczke, P. *keepout: spacecraft conjunction assessment in Python*,
-> version 0.1.0.dev0, 2026. <https://github.com/Kyrtap1309/keepout>
+> version 1.0.0, 2026. <https://github.com/Kyrtap1309/keepout>
 
 Cite the data as well, as below.
 
@@ -312,7 +313,9 @@ tests is not covered by it:
   catalog in `tests/screening/data/` was retrieved from CelesTrak
   (celestrak.org) on 2026-10-06. The frozen full catalog in
   `tests/screening/spacetrack-data/` was retrieved from Space-Track.org on
-  2026-10-15. See their `NOTICE` files.
+  2026-10-15. The excerpt of Space-Track.org's 2009 bulk TLE file in
+  `tests/case_study/data/iridium-cosmos/` is the case study's. See their
+  `NOTICE` files.
 - **Kelvins data.** ESA, *Collision Avoidance Challenge dataset*, Zenodo,
   2021, [doi:10.5281/zenodo.4463683](https://doi.org/10.5281/zenodo.4463683);
   © ESA, [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The
