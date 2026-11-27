@@ -30,14 +30,18 @@ import astropy.units as u
 from astropy.time import Time
 from generated import REPO
 
+from keepout.events import DEFAULT_TCA_TOLERANCE, ConjunctionEvent
 from keepout.omm import load
-from keepout.risk import DEFAULT_DECISION_CONFIG
-from keepout.units import DAY, KM
+from keepout.pc import compute_pc
+from keepout.risk import DEFAULT_DECISION_CONFIG, Assessment, assess
+from keepout.synthetic import Fleet, FleetSatellite, run
+from keepout.units import DAY, HOUR, KM
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
+    from collections.abc import Iterable, Mapping, Sequence
     from pathlib import Path
 
+    from keepout.cdm import Cdm
     from keepout.omm import Omm
 
 IRIDIUM_33: Final = 24946
@@ -69,6 +73,9 @@ SERIES_SPAN: Final = 7 * DAY
 BASE_HBR: Final = 6.0
 """The combined hard-body radius [m]: an enclosing-sphere estimate (Iridium 33
 with its arrays about 4 m, Cosmos 2251 about 2 m), an assumption."""
+
+IRIDIUM_HBR: Final = 4.0
+"""Iridium 33's part of :data:`BASE_HBR` [m]; Cosmos 2251 has the rest."""
 
 HBR_SENSITIVITY: Final = (5.0, 10.0, 20.0)
 """Further combined radii [m] the Pc is shown at."""
@@ -110,3 +117,138 @@ def read_pair(data: Path = DATA) -> tuple[Omm, ...]:
         for omm in read_catalog(data)
         if omm.catalog_number in PAIR and omm.epoch >= start
     )
+
+
+MAX_PC_METHODS: Final = ("frisbee", "dilution", "alfano")
+"""The maximum-Pc methods shown beside the model's Pc."""
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class Issue:
+    """One synthetic CDM issue: the time and its CDM of the collision's
+    approach, or why there is none.
+
+    Parameters
+    ----------
+    time
+        The issue time: the epoch of the newest element set of either object.
+    cdm
+        The CDM of the approach at the collision, ``None`` if not found.
+    reason
+        Why there is no CDM; ``None`` when there is one.
+    """
+
+    time: Time
+    cdm: Cdm | None
+    reason: str | None
+
+
+def fleet(hbr: float = BASE_HBR) -> Fleet:
+    """Iridium 33 as a one-satellite fleet, manoeuvrable, the combined radius
+    ``hbr`` split as :data:`IRIDIUM_HBR` is in :data:`BASE_HBR`."""
+    share = IRIDIUM_HBR / BASE_HBR
+    return Fleet(
+        satellites=(
+            FleetSatellite(
+                IRIDIUM_33, hbr * share, maneuverable=True, name=NAMES[IRIDIUM_33]
+            ),
+        ),
+        catalog_hard_body_radius=hbr * (1 - share),
+    )
+
+
+def _issue(pair: Sequence[Omm], time: Time, hbr: float) -> Issue:
+    """The CDM issued at ``time`` from the pair's sets known then."""
+    known = known_at(pair, time)
+    for number in PAIR:
+        if not any(omm.catalog_number == number for omm in known):
+            return Issue(time, None, f"no element set of {number} known")
+    duration = (TCA_REFERENCE - time).to_value(u.s) + HOUR
+    result = run(fleet(hbr), known, time, duration, created=time)
+    for event in result.events:
+        approach = event.approach
+        offset = abs((approach.tca - TCA_REFERENCE).to_value(u.s))
+        if approach.secondary_number == COSMOS_2251 and offset <= DEFAULT_TCA_TOLERANCE:
+            return Issue(time, event.cdm, None)
+    return Issue(
+        time,
+        None,
+        f"no approach within {DEFAULT_TCA_TOLERANCE:g} s of the collision",
+    )
+
+
+def cdm_series(pair: Sequence[Omm], *, hbr: float = BASE_HBR) -> tuple[Issue, ...]:
+    """A synthetic CDM at each new element set of the pair in the
+    :data:`SERIES_SPAN` before the collision.
+
+    Each issue screens Iridium 33 against Cosmos 2251 as known at its time
+    (:func:`known_at`) to an hour past the collision, with the synthetic
+    operator (:func:`keepout.synthetic.run`, the GP age covariance model) and
+    the combined radius ``hbr``; created at the issue time (no publication
+    latency). Its CDM is the approach within the event TCA tolerance of
+    :data:`TCA_REFERENCE`.
+    """
+    start = TCA_REFERENCE - SERIES_SPAN * u.s
+    times = sorted(
+        {
+            omm.epoch.isot: omm.epoch
+            for omm in pair
+            if start <= omm.epoch < TCA_REFERENCE
+        }.values(),
+        key=lambda time: time.jd,
+    )
+    return tuple(_issue(pair, time, hbr) for time in times)
+
+
+def collision_event(issues: Iterable[Issue]) -> ConjunctionEvent:
+    """The event of the issues' CDMs."""
+    return ConjunctionEvent.from_cdms(
+        issue.cdm for issue in issues if issue.cdm is not None
+    )
+
+
+def known_cdms(event: ConjunctionEvent, time: Time) -> tuple[Cdm, ...]:
+    """The event's CDMs created up to ``time``."""
+    return tuple(cdm for cdm in event.cdms if cdm.creation_date <= time)
+
+
+def max_pcs(cdm: Cdm, hbr: float) -> dict[str, float]:
+    """The maximum Pc of each of :data:`MAX_PC_METHODS` for the CDM's
+    conjunction with the combined radius ``hbr`` [m]: Frisbee's over Cosmos
+    2251's covariance taken as unknown, dilution's over a scale of the
+    combined covariance, Alfano's over every covariance."""
+    conjunction = cdm.conjunction(combined_hard_body_radius=hbr)
+    unknown_secondary = dataclasses.replace(
+        conjunction,
+        secondary=dataclasses.replace(conjunction.secondary, covariance=None),
+    )
+    return {
+        "frisbee": compute_pc(unknown_secondary, "frisbee").value,
+        "dilution": compute_pc(conjunction, "dilution").value,
+        "alfano": compute_pc(conjunction, "alfano").value,
+    }
+
+
+def assessments(event: ConjunctionEvent) -> tuple[Assessment, Assessment]:
+    """The event assessed at the decision point (its CDMs created up to
+    :data:`IRIDIUM_AS_OF`) and on all its CDMs."""
+    observations = event.observations()
+    known = {cdm.message_id for cdm in known_cdms(event, IRIDIUM_AS_OF)}
+    at_decision = [o for o in observations if o.message_id in known]
+    return assess(at_decision), assess(observations)
+
+
+def hbr_sensitivity(event: ConjunctionEvent) -> dict[float, tuple[float, float]]:
+    """The Pc at each radius of :data:`BASE_HBR` and :data:`HBR_SENSITIVITY`
+    [m], ascending: of the last CDM known at the decision point and of the
+    last CDM."""
+    at_decision = known_cdms(event, IRIDIUM_AS_OF)[-1]
+    last = event.latest
+
+    def pc(cdm: Cdm, radius: float) -> float:
+        return compute_pc(cdm.conjunction(combined_hard_body_radius=radius)).value
+
+    return {
+        radius: (pc(at_decision, radius), pc(last, radius))
+        for radius in sorted({BASE_HBR, *HBR_SENSITIVITY})
+    }
