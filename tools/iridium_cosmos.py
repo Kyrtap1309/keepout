@@ -27,15 +27,32 @@ import dataclasses
 from typing import TYPE_CHECKING, Final
 
 import astropy.units as u
+import numpy as np
 from astropy.time import Time
 from generated import REPO
 
 from keepout.events import DEFAULT_TCA_TOLERANCE, ConjunctionEvent
+from keepout.maneuver import (
+    BurnDirection,
+    BurnGrid,
+    ManeuverOption,
+    ManeuverPlan,
+    RescreenResult,
+    plan_maneuver,
+    rescreen,
+)
 from keepout.omm import load
 from keepout.pc import compute_pc
-from keepout.risk import DEFAULT_DECISION_CONFIG, Assessment, assess
-from keepout.synthetic import Fleet, FleetSatellite, run
-from keepout.units import DAY, HOUR, KM
+from keepout.propagation import ManeuveredPropagator, Sgp4Propagator
+from keepout.risk import (
+    DEFAULT_DECISION_CONFIG,
+    DEFAULT_THRESHOLDS,
+    Assessment,
+    assess,
+)
+from keepout.screening import DEFAULT_DURATION
+from keepout.synthetic import Fleet, FleetSatellite, OperatorEvent, OperatorResult, run
+from keepout.units import DAY, HOUR, KM, MINUTE
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
@@ -80,7 +97,7 @@ IRIDIUM_HBR: Final = 4.0
 HBR_SENSITIVITY: Final = (5.0, 10.0, 20.0)
 """Further combined radii [m] the Pc is shown at."""
 
-EXCERPT_RADIUS: Final = 100 * KM
+EXCERPT_RADIUS: Final = 300 * KM
 """Radius of the sphere around Iridium 33 within which an object's approach
 puts it in the excerpt [m]."""
 
@@ -252,3 +269,175 @@ def hbr_sensitivity(event: ConjunctionEvent) -> dict[float, tuple[float, float]]
         radius: (pc(at_decision, radius), pc(last, radius))
         for radius in sorted({BASE_HBR, *HBR_SENSITIVITY})
     }
+
+
+BURN_GRID: Final = BurnGrid(earliest_lead=2 * DAY, latest_lead=2 * HOUR)
+"""The burns tried: from the decision point to 2 hours before TCA."""
+
+MANEUVER_TARGET: Final = DEFAULT_THRESHOLDS.green_below
+"""The Pc a burn must bring the event below: green. The planner's default
+target, red, is met without a burn by an event that is yellow."""
+
+SHIFT_STEP: Final = MINUTE
+"""Time between the states compared for a burn's position change [s]."""
+
+
+class ExcerptTooSmall(Exception):
+    """A burn moves Iridium 33 further than the excerpt's radius covers."""
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class Ranked:
+    """The collision's approach among every approach of Iridium 33 in the
+    7 days from the decision point.
+
+    Parameters
+    ----------
+    result
+        The synthetic operator's run: screening, a CDM and Pc per approach.
+    collision
+        The event of the approach at the collision.
+    by_pc, by_miss
+        Its rank, from 1, by Pc (highest first; an approach without a Pc
+        last) and by miss distance (smallest first).
+    """
+
+    result: OperatorResult
+    collision: OperatorEvent
+    by_pc: int
+    by_miss: int
+
+    @property
+    def approaches(self) -> int:
+        """How many approaches Iridium 33 had in the window."""
+        return len(self.result.events)
+
+
+def rank(excerpt: Sequence[Omm]) -> Ranked:
+    """Iridium 33 screened against the excerpt as known at
+    :data:`IRIDIUM_AS_OF`, for :data:`~keepout.screening.DEFAULT_DURATION`,
+    in the default 5 km sphere, every approach with the same combined radius
+    :data:`BASE_HBR` and the model's covariance; the collision's ranks.
+
+    Raises
+    ------
+    LookupError
+        If no approach of Cosmos 2251 lies within the TCA tolerance of
+        :data:`TCA_REFERENCE`.
+    """
+    known = known_at(excerpt, IRIDIUM_AS_OF)
+    result = run(fleet(), known, IRIDIUM_AS_OF, DEFAULT_DURATION, workers=None)
+    events = result.events
+    collision = next(
+        (
+            event
+            for event in events
+            if event.approach.secondary_number == COSMOS_2251
+            and abs((event.approach.tca - TCA_REFERENCE).to_value(u.s))
+            <= DEFAULT_TCA_TOLERANCE
+        ),
+        None,
+    )
+    if collision is None:
+        raise LookupError("no approach of Cosmos 2251 at the collision")
+
+    def pc_key(event: OperatorEvent) -> float:
+        pc = event.observation.pc
+        return -1.0 if pc is None else pc
+
+    by_pc = sorted(events, key=pc_key, reverse=True)
+    by_miss = sorted(events, key=lambda event: event.approach.range_at_tca)
+    return Ranked(
+        result=result,
+        collision=collision,
+        by_pc=by_pc.index(collision) + 1,
+        by_miss=by_miss.index(collision) + 1,
+    )
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class Maneuver:
+    """The plan of a burn at the decision point, each option re-screened.
+
+    Parameters
+    ----------
+    plan
+        The plan on the event's CDMs known at :data:`IRIDIUM_AS_OF`.
+    target
+        The Pc the burns had to bring the event below.
+    rescreens
+        Each option's re-screen against the excerpt, by direction.
+    shifts
+        Each option's largest change of Iridium 33's position [m] over the
+        re-screen's window, by direction.
+    """
+
+    plan: ManeuverPlan
+    target: float
+    rescreens: Mapping[BurnDirection, RescreenResult]
+    shifts: Mapping[BurnDirection, float]
+
+
+def largest_shift(plan: ManeuverPlan, option: ManeuverOption, primary: Omm) -> float:
+    """The largest distance [m] between Iridium 33 with the burn of
+    ``option`` and without it, every :data:`SHIFT_STEP` over the
+    re-screen's window (the burn, then 7 days)."""
+    base = Sgp4Propagator([primary])
+    burn = plan.conjunction.tca - option.burn_lead * u.s
+    burned = ManeuveredPropagator(base, burn, option.delta_v, DEFAULT_DURATION + HOUR)
+    offsets = np.arange(0.0, DEFAULT_DURATION + SHIFT_STEP, SHIFT_STEP)
+    before = base.propagate(burn, offsets).r
+    after = burned.propagate(burn, offsets).r
+    return float(np.max(np.linalg.norm(after - before, axis=-1)))
+
+
+def require_within_excerpt(shifts: Mapping[BurnDirection, float]) -> None:
+    """A check that no burn moves Iridium 33 more than half
+    :data:`EXCERPT_RADIUS`: beyond it, an object the excerpt left out could
+    come near.
+
+    Raises
+    ------
+    ExcerptTooSmall
+        If a shift is larger.
+    """
+    limit = EXCERPT_RADIUS / 2
+    for direction, shift in shifts.items():
+        if shift > limit:
+            raise ExcerptTooSmall(
+                f"the {direction} burn moves Iridium 33 by {shift:.0f} m, more than "
+                f"half the excerpt's radius ({EXCERPT_RADIUS:g} m)"
+            )
+
+
+def maneuver(event: ConjunctionEvent, excerpt: Sequence[Omm]) -> Maneuver:
+    """The burns of :data:`BURN_GRID` planned on the event as known at the
+    decision point to :data:`MANEUVER_TARGET`, each option re-screened
+    against the excerpt as known then.
+
+    Raises
+    ------
+    ExcerptTooSmall
+        As :func:`require_within_excerpt`.
+    """
+    known_event = ConjunctionEvent.from_cdms(
+        known_cdms(event, IRIDIUM_AS_OF), event_id=event.event_id
+    )
+    plan = plan_maneuver(known_event, target_pc=MANEUVER_TARGET, grid=BURN_GRID)
+    catalog = known_at(excerpt, IRIDIUM_AS_OF)
+    primary = max(
+        (omm for omm in catalog if omm.catalog_number == IRIDIUM_33),
+        key=lambda omm: omm.epoch.jd,
+    )
+    shifts = {
+        option.direction: largest_shift(plan, option, primary)
+        for option in plan.options
+    }
+    require_within_excerpt(shifts)
+    rescreens = {
+        option.direction: rescreen(plan, option, catalog, workers=None)
+        for option in plan.options
+    }
+    return Maneuver(
+        plan=plan, target=MANEUVER_TARGET, rescreens=rescreens, shifts=shifts
+    )

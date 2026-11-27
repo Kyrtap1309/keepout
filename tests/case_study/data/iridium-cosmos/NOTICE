@@ -7,7 +7,7 @@ Excerpt made by tools/iridium_cosmos_data.py (see manifest.json):
   Cosmos 2251 with an epoch from 2009-01-09T16:55:59.806 to
   2009-02-10T16:55:59.806 UTC, and the newest set known at
   2009-02-08T16:55:59.806 UTC of every object passing within
-  100 km of Iridium 33 in the 7 days from then,
+  300 km of Iridium 33 in the 7 days from then,
   as gzipped CelesTrak CSV (the OMM keywords; the TLEs carry no names).
 
 manifest.json lists the bulk file's size and SHA-256, the counts and

@@ -5,7 +5,9 @@ import iridium_cosmos as study
 import pytest
 
 from keepout.events import DEFAULT_TCA_TOLERANCE, ConjunctionEvent
-from keepout.risk import Assessment
+from keepout.omm import Omm
+from keepout.risk import DEFAULT_THRESHOLDS, Assessment
+from keepout.units import DAY, HOUR
 
 
 @pytest.fixture(scope="module")
@@ -111,3 +113,58 @@ def test_series_with_other_radius_changes_only_radius() -> None:
     for cdm in wider:
         radii = [cdm.object1.hard_body_radius, cdm.object2.hard_body_radius]
         assert sum(r or 0.0 for r in radii) == pytest.approx(10.0)
+
+
+@pytest.fixture(scope="module")
+def excerpt() -> tuple[Omm, ...]:
+    return study.read_catalog()
+
+
+@pytest.fixture(scope="module")
+def ranked(excerpt: tuple[Omm, ...]) -> study.Ranked:
+    return study.rank(excerpt)
+
+
+@pytest.mark.slow
+def test_rank_finds_collision(ranked: study.Ranked) -> None:
+    assert ranked.collision.approach.secondary_number == study.COSMOS_2251
+    assert 1 <= ranked.by_pc <= ranked.approaches
+    assert 1 <= ranked.by_miss <= ranked.approaches
+    assert ranked.approaches == len(ranked.result.events)
+    assert ranked.result.created == study.IRIDIUM_AS_OF
+
+
+@pytest.mark.slow
+def test_rank_same_hbr_for_all(ranked: study.Ranked) -> None:
+    for event in ranked.result.events:
+        cdm = event.cdm
+        radii = [cdm.object1.hard_body_radius, cdm.object2.hard_body_radius]
+        assert sum(r or 0.0 for r in radii) == pytest.approx(study.BASE_HBR)
+
+
+@pytest.fixture(scope="module")
+def maneuver(event: ConjunctionEvent, excerpt: tuple[Omm, ...]) -> study.Maneuver:
+    return study.maneuver(event, excerpt)
+
+
+@pytest.mark.slow
+def test_burn_grid_window(maneuver: study.Maneuver) -> None:
+    leads = maneuver.plan.burn_leads
+    assert leads.max() <= 2 * DAY
+    assert leads.min() >= 2 * HOUR
+    assert maneuver.plan.event.latest.creation_date <= study.IRIDIUM_AS_OF
+    assert set(maneuver.rescreens) == {o.direction for o in maneuver.plan.options}
+    assert set(maneuver.shifts) == set(maneuver.rescreens)
+    assert maneuver.target == DEFAULT_THRESHOLDS.green_below
+    for option in maneuver.plan.options:
+        assert option.pc < DEFAULT_THRESHOLDS.green_below
+
+
+@pytest.mark.slow
+def test_shift_beyond_excerpt_fails(
+    maneuver: study.Maneuver, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    study.require_within_excerpt(maneuver.shifts)
+    monkeypatch.setattr(study, "EXCERPT_RADIUS", 1.0)
+    with pytest.raises(study.ExcerptTooSmall, match="1 m"):
+        study.require_within_excerpt(maneuver.shifts)
