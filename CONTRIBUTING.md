@@ -1,7 +1,14 @@
 # Contributing to keepout
 
-keepout is developed with [uv](https://docs.astral.sh/uv/). Clone the
-repository and install every dependency, with the development tools:
+keepout is developed with [uv](https://docs.astral.sh/uv/): every command here runs through it.
+Install it first ([other ways](https://docs.astral.sh/uv/getting-started/installation/)):
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh   # or: pipx install uv
+```
+
+Then clone the repository and install every dependency, with the
+development tools:
 
 ```bash
 git clone https://github.com/Kyrtap1309/keepout

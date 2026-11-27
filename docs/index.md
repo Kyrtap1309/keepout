@@ -11,7 +11,11 @@ collision-avoidance manoeuvre planning.
 
 ## Quickstart
 
-1. Clone the repository and install keepout with its command line, since
+1. Install [uv](https://docs.astral.sh/uv/) if you do not have it
+    (`curl -LsSf https://astral.sh/uv/install.sh | sh`, or `pipx install uv`;
+    [other ways](https://docs.astral.sh/uv/getting-started/installation/)).
+
+2. Clone the repository and install keepout with its command line, since
     the examples read files committed to it:
 
     ```bash
@@ -19,7 +23,7 @@ collision-avoidance manoeuvre planning.
     uv sync --extra cli --extra store
     ```
 
-2. Assess a CDM: its Pc, the risk of its event and the action to take.
+3. Assess a CDM: its Pc, the risk of its event and the action to take.
     Here a sample CDM with a combined hard-body radius of 20 m:
 
     ```bash
@@ -28,7 +32,7 @@ collision-avoidance manoeuvre planning.
 
     It ends with exit status 3: this sample event needs a manoeuvre.
 
-3. Screen a fleet against the public catalog and assess each close
+4. Screen a fleet against the public catalog and assess each close
     approach: see [Synthetic operator and command
     line](#synthetic-operator-and-command-line). From Python, start with
     [Probability of collision](#probability-of-collision).
@@ -56,6 +60,12 @@ read files committed to the repository: a sample CDM, the example fleet
 and the frozen catalogs. To run them, work inside a clone as in the
 [Quickstart](#quickstart), with the extras you need (`uv sync
 --all-extras` for every one).
+
+A clone needs [uv](https://docs.astral.sh/uv/): `uv sync` installs keepout and the locked versions of
+its dependencies into the clone's `.venv`, and `uv run` runs a command
+there, so every `uv run ...` on these pages works from the clone's root.
+`pip install` above needs no uv; the dashboard's `docker compose up`
+([Deployment](deployment.md)) needs Docker only.
 
 ## Where to start
 

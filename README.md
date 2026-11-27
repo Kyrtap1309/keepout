@@ -67,10 +67,21 @@ pip install "keepout[cli,store] @ git+https://github.com/Kyrtap1309/keepout"
 The extras (`cli`, `store`, `dashboard`, `validation`) are in
 [Install](docs/index.md#install).
 
+Working from a clone, as the examples below, the reports and development
+do, needs [uv](https://docs.astral.sh/uv/), which installs keepout and its
+locked dependencies into the clone's own environment and runs commands in
+it (`uv sync`, `uv run`). Install it once:
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh   # or: pipx install uv
+```
+
+The dashboard's `docker compose up` needs Docker only.
+
 ## Example
 
 The examples read a sample CDM, a fleet file and a frozen catalog committed
-to the repository. From a clone:
+to the repository. From a clone, with [uv](#install) installed:
 
 ```bash
 git clone https://github.com/Kyrtap1309/keepout && cd keepout
