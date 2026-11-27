@@ -1,7 +1,14 @@
 # Contributing to keepout
 
-keepout is developed with [uv](https://docs.astral.sh/uv/). Clone the
-repository and install every dependency, with the development tools:
+keepout is developed with [uv](https://docs.astral.sh/uv/): every command here runs through it.
+Install it first ([other ways](https://docs.astral.sh/uv/getting-started/installation/)):
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh   # or: pipx install uv
+```
+
+Then clone the repository and install every dependency, with the
+development tools:
 
 ```bash
 git clone https://github.com/Kyrtap1309/keepout
@@ -52,8 +59,30 @@ uv run python tools/synthetic_operator_report.py   # synthetic operator report (
 uv run python tools/maneuver_report.py   # manoeuvre report (downloads one CARA CDM)
 uv run python tools/spacetrack_snapshot.py verify   # frozen Space-Track catalog (offline)
 uv run python tools/dashboard_seed.py   # the dashboard's seed and the demo's update CDM (offline)
+uv run python tools/iridium_cosmos_report.py   # Iridium-Cosmos case study (offline, minutes)
+uv run python tools/iridium_cosmos_data.py verify   # its 2009 excerpt (offline)
 uv run python tools/dashboard_gif.py   # README GIF; on a fresh stack, -p keepout-docs (see its --help)
 ```
+
+The case study's excerpt is rebuilt only from Space-Track's 2009 bulk TLE
+file, downloaded by hand (see `tools/iridium_cosmos_data.py`):
+`uv run python tools/iridium_cosmos_data.py build tle2009.txt.zip`.
+
+## Compatibility
+
+A change to what [Stability](docs/stability.md) covers follows its
+deprecation policy. Every change goes into the
+[changelog](docs/changelog.md)'s **Unreleased** section.
+
+## Releasing
+
+1. Move the changelog's **Unreleased** entries under a new
+   `## [X.Y.Z] - YYYY-MM-DD` heading with the day's date, add its link at
+   the bottom, and set `version` in `pyproject.toml` (then `uv lock`).
+2. Merge to `main`, then tag and push: `git tag -a vX.Y.Z -m "keepout X.Y.Z"`
+   and `git push origin vX.Y.Z`. The release workflow checks the tag
+   against the version, builds the sdist and wheel and creates the GitHub
+   Release with the changelog section as its notes.
 
 ## Test data
 

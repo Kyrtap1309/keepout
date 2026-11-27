@@ -5,12 +5,17 @@ catalog, CCSDS CDM ingest and generation, probability of collision (Pc),
 risk trends, a synthetic operator on public data, a command line and
 collision-avoidance manoeuvre planning.
 
-!!! warning "Pre-alpha"
-    Status: pre-alpha; the API may change without notice.
+!!! note "Stable"
+    Since 1.0.0 the Python API, the command line, its JSON output and the
+    store's schema follow semantic versioning ([Stability](stability.md)).
 
 ## Quickstart
 
-1. Clone the repository and install keepout with its command line, since
+1. Install [uv](https://docs.astral.sh/uv/) if you do not have it
+    (`curl -LsSf https://astral.sh/uv/install.sh | sh`, or `pipx install uv`;
+    [other ways](https://docs.astral.sh/uv/getting-started/installation/)).
+
+2. Clone the repository and install keepout with its command line, since
     the examples read files committed to it:
 
     ```bash
@@ -18,7 +23,7 @@ collision-avoidance manoeuvre planning.
     uv sync --extra cli --extra store
     ```
 
-2. Assess a CDM: its Pc, the risk of its event and the action to take.
+3. Assess a CDM: its Pc, the risk of its event and the action to take.
     Here a sample CDM with a combined hard-body radius of 20 m:
 
     ```bash
@@ -27,15 +32,15 @@ collision-avoidance manoeuvre planning.
 
     It ends with exit status 3: this sample event needs a manoeuvre.
 
-3. Screen a fleet against the public catalog and assess each close
+4. Screen a fleet against the public catalog and assess each close
     approach: see [Synthetic operator and command
     line](#synthetic-operator-and-command-line). From Python, start with
     [Probability of collision](#probability-of-collision).
 
 ## Install
 
-keepout needs Python 3.11 or later. It is not on PyPI yet, so install it
-from GitHub:
+keepout needs Python 3.11 or later. It is not on PyPI (another project
+holds the name), so install it from GitHub:
 
 ```bash
 pip install "keepout[cli,store] @ git+https://github.com/Kyrtap1309/keepout"
@@ -55,6 +60,12 @@ read files committed to the repository: a sample CDM, the example fleet
 and the frozen catalogs. To run them, work inside a clone as in the
 [Quickstart](#quickstart), with the extras you need (`uv sync
 --all-extras` for every one).
+
+A clone needs [uv](https://docs.astral.sh/uv/): `uv sync` installs keepout and the locked versions of
+its dependencies into the clone's `.venv`, and `uv run` runs a command
+there, so every `uv run ...` on these pages works from the clone's root.
+`pip install` above needs no uv; the dashboard's `docker compose up`
+([Deployment](deployment.md)) needs Docker only.
 
 ## Where to start
 
@@ -299,7 +310,7 @@ keepout has no paper yet. Cite the repository, with the version
 (`keepout.__version__`) or the commit you used:
 
 > Niczke, P. *keepout: spacecraft conjunction assessment in Python*,
-> version 0.1.0.dev0, 2026. <https://github.com/Kyrtap1309/keepout>
+> version 1.0.0, 2026. <https://github.com/Kyrtap1309/keepout>
 
 Cite the data as well, as below.
 
@@ -312,7 +323,9 @@ tests is not covered by it:
   catalog in `tests/screening/data/` was retrieved from CelesTrak
   (celestrak.org) on 2026-10-06. The frozen full catalog in
   `tests/screening/spacetrack-data/` was retrieved from Space-Track.org on
-  2026-10-15. See their `NOTICE` files.
+  2026-10-15. The excerpt of Space-Track.org's 2009 bulk TLE file in
+  `tests/case_study/data/iridium-cosmos/` is the case study's. See their
+  `NOTICE` files.
 - **Kelvins data.** ESA, *Collision Avoidance Challenge dataset*, Zenodo,
   2021, [doi:10.5281/zenodo.4463683](https://doi.org/10.5281/zenodo.4463683);
   © ESA, [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The

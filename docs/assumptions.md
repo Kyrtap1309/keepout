@@ -243,6 +243,15 @@ emergency-reportable events and may not be redistributed.
   the [limits of GP data](screening.md#limits-of-gp-data). The screening
   volume decides which approaches exist at all.
 
+## The case study's assumptions
+
+The [Iridium 33 – Cosmos 2251 case study](case-study-iridium-cosmos.md)
+uses the same model on the element sets of 2009. Its own assumptions (no
+publication latency, the later of two sets of one epoch, the hard-body
+radius and the same radius for every ranked secondary) are listed, with
+their values, in [its Assumptions](case-study-iridium-cosmos.md#assumptions),
+which the report tool writes from the numbers it uses.
+
 ## References
 
 - T. Flohrer, H. Krag, H. Klinkrad, B. Bastida Virgili, C. Früh, "Improving

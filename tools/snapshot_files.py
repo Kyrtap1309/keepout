@@ -260,8 +260,9 @@ def stored_files(
 
 def add_data_commands(
     add_parser: Callable[..., argparse.ArgumentParser], data: Path, saved: str
-) -> None:
-    """A snapshot tool's ``build`` and ``verify`` commands, added to its parser.
+) -> argparse.ArgumentParser:
+    """A snapshot tool's ``build`` and ``verify`` commands, added to its parser;
+    ``build``'s parser, for options of the tool's own.
 
     Parameters
     ----------
@@ -271,6 +272,11 @@ def add_data_commands(
         The default of ``--data``: where the committed data is.
     saved
         What ``RAW`` holds, in ``build``'s help: ``bodies``, ``answers``.
+
+    Returns
+    -------
+    argparse.ArgumentParser
+        The ``build`` command's parser.
     """
     build = add_parser("build", help=f"write the data from the {saved} in RAW")
     build.add_argument("raw", type=Path)
@@ -280,6 +286,7 @@ def add_data_commands(
         "verify", help="check the committed files against each other (offline)"
     )
     verify.add_argument("--data", type=Path, default=data)
+    return build
 
 
 def build_or_verify(

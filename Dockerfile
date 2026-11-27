@@ -25,9 +25,13 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 COPY tools tools
 COPY examples examples
 COPY tests/screening/data tests/screening/data
+COPY tests/case_study/data tests/case_study/data
 # The store's catalog copies are read-only to their owner (root here): the
-# init service, run as keepout, must read them.
+# init service, run as keepout, must read them. The Iridium-Cosmos store
+# (compose profile iridium) is built beside the demo's.
 RUN uv run --no-sync python tools/dashboard_seed.py --store /out/keepout.db \
+    && uv run --no-sync python tools/dashboard_seed.py \
+        --iridium-store /out/iridium/keepout.db \
     && chmod -R a+rX /out
 
 # The runtime environment: keepout with the cli, store and dashboard extras,
@@ -49,6 +53,7 @@ RUN groupadd --gid 10001 keepout \
 COPY --from=deps /opt/keepout/venv /opt/keepout/venv
 COPY --from=seed /out /opt/keepout/seed
 COPY examples/dashboard/settings.toml /opt/keepout/settings.toml
+COPY examples/dashboard/iridium-settings.toml /opt/keepout/iridium-settings.toml
 COPY --chmod=0755 docker/init-store.sh /opt/keepout/init-store.sh
 ENV PATH=/opt/keepout/venv/bin:$PATH PYTHONUNBUFFERED=1
 # Numeric, so that a runtime can check it is not root without /etc/passwd.

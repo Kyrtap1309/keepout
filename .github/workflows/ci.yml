@@ -161,7 +161,7 @@ jobs:
       - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
       - run: uv sync --locked
       - run: uv run mkdocs build --strict
-      # The site is not published; download it from the run's artifacts.
+      # main publishes the site (pages.yml); a pull request's is in the run's artifacts.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: docs-site
@@ -205,7 +205,13 @@ jobs:
           docker compose logs init | grep -q "store kept: /data/keepout.db"
           # The seed's 37 CDMs and the demo's update, uploaded by the scenario.
           test "$(docker compose exec -T worker python -c "import sqlite3; print(sqlite3.connect('file:/data/keepout.db?mode=ro', uri=True).execute('select count(*) from cdms').fetchone()[0])")" = 38
+      - name: The Iridium-Cosmos profile, as known two days before the collision
+        run: |
+          docker compose --profile iridium up --wait --wait-timeout 180 iridium-dashboard iridium-worker
+          curl --fail --silent --show-error http://127.0.0.1:8502/_stcore/health
+          # The 17 synthetic CDMs created by the decision point, none later.
+          test "$(docker compose --profile iridium exec -T iridium-dashboard python -c "import sqlite3; print(sqlite3.connect('file:/data/keepout.db?mode=ro', uri=True).execute('select count(*) from cdms').fetchone()[0])")" = 17
       - if: failure()
-        run: docker compose logs
+        run: docker compose --profile iridium logs
       - if: always()
-        run: docker compose down -v
+        run: docker compose --profile iridium down -v

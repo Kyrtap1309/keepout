@@ -107,6 +107,7 @@ def test_a_count_below_one_is_refused(text: str) -> None:
 
 WORKERS_ARGUMENTS = {
     "maneuver_report": ["--workers", "0"],
+    "iridium_cosmos_data": ["build", "bulk.zip", "--workers", "0"],
     "screening_benchmark": ["--workers", "0"],
     "screening_report": ["--workers", "0"],
     "spacetrack_snapshot": ["compare", "raw", "--workers", "0"],

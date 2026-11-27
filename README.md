@@ -5,7 +5,8 @@ catalog, CCSDS CDM ingest and generation, probability of collision (Pc),
 risk trends, a synthetic operator on public data, a command line and
 collision-avoidance manoeuvre planning.
 
-> **Status:** pre-alpha; the API may change without notice.
+> **Status:** 1.0. The Python API, the command line, its JSON output and the
+> store's schema follow semantic versioning ([Stability](docs/stability.md)).
 
 Pc algorithms are implemented from the published literature and validated
 against the public test cases of the
@@ -13,14 +14,51 @@ against the public test cases of the
 keepout is not affiliated with NASA. CARA files are downloaded on demand and
 never redistributed.
 
+## At a glance
+
+**Validated against NASA CARA.** Every Pc method against every applicable
+CARA reference case ([full report](docs/validation.md)):
+
+<!-- validation-summary:start -->
+| Suite | Method | Cases passed | Worst relative error |
+|---|---|---|---|
+| Alfano (2009) | foster | 11 / 11 | 8.9e-08 |
+| Alfano (2009) | elrod | 11 / 11 | 8.9e-08 |
+| Alfano (2009), 3-D | hall3d | 12 / 12 | 5.5e-04 |
+| CARA Pc method test set | foster | 53 / 53 | 2.7e-08 |
+| CARA Pc method test set | elrod | 53 / 53 | 2.7e-08 |
+| CARA Pc method test set, 3-D | hall3d | 53 / 53 | 2.1e-03 |
+| CARA unit tests | foster | 3 / 3 | 3.7e-08 |
+| CARA unit tests | elrod | 3 / 3 | 3.7e-08 |
+| CARA unit tests | hall3d | 2 / 2 | 7.1e-04 |
+| CARA unit tests, maximum Pc | frisbee | 2 / 2 | - |
+| CARA unit tests, maximum Pc | dilution | 4 / 4 | 1.0e-03 |
+<!-- validation-summary:end -->
+
+**Manoeuvre planning.** The along-track burns that clear a red CARA test
+event, by size and time before TCA
+([report](docs/maneuver-report.md)):
+
+![Pc after an along-track burn of METOP-B (38771)](docs/img/maneuver/heatmap.svg)
+
+**Dashboard.** Events, Pc trends and the manoeuvre planner on a local store,
+from a clone: `docker compose up`, then http://127.0.0.1:8501
+([Deployment](docs/deployment.md)):
+
 ![The dashboard: events list, manoeuvre planner, a CDM uploaded and the event's Pc trend rising to red](docs/img/dashboard/dashboard.gif)
 
-The dashboard on its demo data, from a clone: `docker compose up`, then
-http://127.0.0.1:8501 ([Deployment](docs/deployment.md)).
+**Case study: Iridium 33 and Cosmos 2251.** keepout on the element sets
+public before the 2009 collision: its screening finds what SOCRATES found,
+and on an assumed covariance the event stays yellow two days before TCA
+([case study](docs/case-study-iridium-cosmos.md); its dashboard:
+`docker compose --profile iridium up`):
+
+![Pc of the synthetic CDMs before the collision](docs/img/iridium-cosmos/trend.svg)
 
 ## Install
 
-keepout needs Python 3.11 or later. It is not on PyPI yet:
+keepout needs Python 3.11 or later. It is not on PyPI (another project
+holds the name); install it from GitHub:
 
 ```bash
 pip install "keepout[cli,store] @ git+https://github.com/Kyrtap1309/keepout"
@@ -29,10 +67,21 @@ pip install "keepout[cli,store] @ git+https://github.com/Kyrtap1309/keepout"
 The extras (`cli`, `store`, `dashboard`, `validation`) are in
 [Install](docs/index.md#install).
 
+Working from a clone, as the examples below, the reports and development
+do, needs [uv](https://docs.astral.sh/uv/), which installs keepout and its
+locked dependencies into the clone's own environment and runs commands in
+it (`uv sync`, `uv run`). Install it once:
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh   # or: pipx install uv
+```
+
+The dashboard's `docker compose up` needs Docker only.
+
 ## Example
 
 The examples read a sample CDM, a fleet file and a frozen catalog committed
-to the repository. From a clone:
+to the repository. From a clone, with [uv](#install) installed:
 
 ```bash
 git clone https://github.com/Kyrtap1309/keepout && cd keepout
@@ -72,8 +121,9 @@ the workflow and the terms (Pc, TCA, HBR, CDM, ...).
 
 ## Documentation
 
-The documentation is in [`docs/`](docs/); `uv run mkdocs serve` renders
-it as a website, with the API reference generated from the docstrings.
+The documentation is at <https://kyrtap1309.github.io/keepout/>, built
+from [`docs/`](docs/) (`uv run mkdocs serve` renders it locally), with the
+API reference generated from the docstrings.
 
 - [Getting started](docs/index.md): install, where to start and a tour of
   every feature; [Concepts](docs/concepts.md) and the glossary.
@@ -89,28 +139,8 @@ it as a website, with the API reference generated from the docstrings.
 - [Command line](docs/cli.md), [the conjunction store](docs/store.md),
   [the dashboard](docs/dashboard.md) and
   [Space-Track data](docs/spacetrack.md).
-- [FAQ](docs/faq.md) and [changelog](docs/changelog.md).
-
-## Validation
-
-Every Pc method against every applicable CARA reference case
-([full report](docs/validation.md)):
-
-<!-- validation-summary:start -->
-| Suite | Method | Cases passed | Worst relative error |
-|---|---|---|---|
-| Alfano (2009) | foster | 11 / 11 | 8.9e-08 |
-| Alfano (2009) | elrod | 11 / 11 | 8.9e-08 |
-| Alfano (2009), 3-D | hall3d | 12 / 12 | 5.5e-04 |
-| CARA Pc method test set | foster | 53 / 53 | 2.7e-08 |
-| CARA Pc method test set | elrod | 53 / 53 | 2.7e-08 |
-| CARA Pc method test set, 3-D | hall3d | 53 / 53 | 2.1e-03 |
-| CARA unit tests | foster | 3 / 3 | 3.7e-08 |
-| CARA unit tests | elrod | 3 / 3 | 3.7e-08 |
-| CARA unit tests | hall3d | 2 / 2 | 7.1e-04 |
-| CARA unit tests, maximum Pc | frisbee | 2 / 2 | - |
-| CARA unit tests, maximum Pc | dilution | 4 / 4 | 1.0e-03 |
-<!-- validation-summary:end -->
+- [FAQ](docs/faq.md), [changelog](docs/changelog.md) and
+  [stability policy](docs/stability.md).
 
 ## Reports
 
@@ -129,6 +159,8 @@ summaries are in the [reports overview](docs/reports.md).
   over a week of public data.
 - [Manoeuvre planning on a CARA event](docs/maneuver-report.md): the
   burns that clear a red event.
+- [Case study: Iridium 33 and Cosmos 2251](docs/case-study-iridium-cosmos.md):
+  the whole chain on the element sets public before the 2009 collision.
 
 ## Licence
 
@@ -139,6 +171,8 @@ MIT. The third-party data committed for tests is not covered:
   `NOTICE`);
 - the Space-Track data in `tests/screening/spacetrack-data/` (retrieved from
   Space-Track.org on 2026-10-15; see its `NOTICE`);
+- the Space-Track data in `tests/case_study/data/iridium-cosmos/` (from
+  Space-Track.org's 2009 bulk TLE file; see its `NOTICE`);
 - the Kelvins excerpt in `tests/sources/data/` (see its `README.md`).
 
 See [`LICENSE`](LICENSE) for the licence text and

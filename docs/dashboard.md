@@ -104,6 +104,10 @@ cache. Add `examples/dashboard/cdms/*.cdm` to `keepout store add` and set
 `hbr_m = 10.0` under `[pc]` in the settings, as the README explains. Its
 TCA is in 2020, so it is listed with the past events.
 
+A second demo shows the [Iridium-Cosmos case study](case-study-iridium-cosmos.md)
+two days before the 2009 collision: `docker compose --profile iridium up`
+([Deployment](deployment.md#the-iridium-cosmos-case-study)).
+
 ## Data time (`--as-of`)
 
 Every page shows, at its top, the time it sees the data at:

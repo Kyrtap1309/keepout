@@ -1,0 +1,19 @@
+Data: USSPACECOM/18 SDS via Space-Track.org (www.space-track.org),
+from its yearly bulk TLE file tle2009.txt.zip (2009).
+
+Excerpt made by tools/iridium_cosmos_data.py (see manifest.json):
+
+- iridium-cosmos-2009.csv.gz: the element sets of Iridium 33 and
+  Cosmos 2251 with an epoch from 2009-01-09T16:55:59.806 to
+  2009-02-10T16:55:59.806 UTC, and the newest set known at
+  2009-02-08T16:55:59.806 UTC of every object passing within
+  300 km of Iridium 33 from then to
+  2009-02-17T14:55:59.806 UTC,
+  as gzipped CelesTrak CSV (the OMM keywords; the TLEs carry no names).
+
+manifest.json lists the bulk file's size and SHA-256, the counts and
+the SHA-256 digests of these files.
+
+This is basic space situational awareness data, which the
+Space-Track.org user agreement allows to redistribute with the
+citation above. It is not covered by keepout's MIT licence.

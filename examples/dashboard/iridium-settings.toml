@@ -1,0 +1,16 @@
+# The operator settings of the Iridium-Cosmos dashboard (compose profile
+# iridium; see docs/case-study-iridium-cosmos.md): keepout's defaults, but a
+# burn must make the event green. The event is yellow two days before TCA,
+# so the default target (red) would need no burn. No hbr_m: each CDM gives
+# its objects' hard-body radii (6 m combined).
+
+[pc]
+method = "auto"
+policy = "repair"
+
+[risk]
+green_below = 1e-7
+red_from = 1e-4
+
+[maneuver]
+target_pc = 1e-7

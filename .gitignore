@@ -16,3 +16,9 @@ site/
 
 # pytest-playwright traces and screenshots of failed e2e tests
 test-results/
+
+# Local stores and their catalog copies
+*.db
+*.db-shm
+*.db-wal
+*.db.catalogs/

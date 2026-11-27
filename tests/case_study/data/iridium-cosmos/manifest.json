@@ -1,0 +1,64 @@
+{
+  "format": 1,
+  "bulk": {
+    "file": "tle2009.txt.zip",
+    "bytes": 315313396,
+    "sha256": "e7b317ccfbe7c3d6fe812e23065ce61d3f6880cd0ce8b0067461db6b31a063ea",
+    "member": "tle2009.txt",
+    "member_bytes": 789432210,
+    "counts": {
+      "sets": 5598810,
+      "sets_in_window": 438735,
+      "objects_in_window": 11989,
+      "duplicates": 10386,
+      "corrected": 8786,
+      "designators_blanked": [
+        12530,
+        29420
+      ],
+      "unreadable": [
+        {
+          "catalog_number": 23211,
+          "line": "tle2009.txt:1237921",
+          "reason": "invalid TLE field '359008+0' (record 1, line 1, keyword BSTAR)"
+        },
+        {
+          "catalog_number": 23211,
+          "line": "tle2009.txt:1238527",
+          "reason": "invalid TLE field '754318+0' (record 1, line 1, keyword BSTAR)"
+        },
+        {
+          "catalog_number": 23211,
+          "line": "tle2009.txt:1252071",
+          "reason": "invalid TLE field '208006+1' (record 1, line 1, keyword BSTAR)"
+        },
+        {
+          "catalog_number": 23211,
+          "line": "tle2009.txt:1252149",
+          "reason": "invalid TLE field '346015+0' (record 1, line 1, keyword BSTAR)"
+        }
+      ]
+    }
+  },
+  "selection": {
+    "window_start": "2009-01-09T16:55:59.806",
+    "window_end": "2009-02-10T16:55:59.806",
+    "screening_start": "2009-02-08T16:55:59.806",
+    "screening_end": "2009-02-17T14:55:59.806",
+    "radius_km": 300.0,
+    "screened_objects": 11930,
+    "approaches": 38860,
+    "objects": 6213,
+    "sets": 6325
+  },
+  "files": {
+    "iridium-cosmos-2009.csv.gz": {
+      "bytes": 337476,
+      "sha256": "5de568c78e21659984dd334ef533845491011f15d1a7fafc62c81124322e3352"
+    },
+    "NOTICE": {
+      "bytes": 861,
+      "sha256": "b00921c9742f874fc84299b08ae14e278679bb0ddfaeaae3b7d51922652ff021"
+    }
+  }
+}

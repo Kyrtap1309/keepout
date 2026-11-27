@@ -17,7 +17,7 @@ services:
     build: .
     command: ["/opt/keepout/init-store.sh"]
 
-  dashboard:
+  dashboard: &dashboard
     <<: *keepout
     # keepout dashboard runs Streamlit in a child process: an init process
     # forwards signals to it and reaps it.
@@ -58,7 +58,7 @@ services:
     restart: unless-stopped
 
   # Computes the queued jobs: Pc refreshes after an upload, manoeuvre plans.
-  worker:
+  worker: &worker
     <<: *keepout
     # Each job runs in a child process; an init process reaps the ones the
     # worker kills (docs/store.md, Deployment).
@@ -87,5 +87,53 @@ services:
     # stop signal); give it time to.
     stop_grace_period: 30s
 
+  # The Iridium-Cosmos case study as known two days before the 2009
+  # collision (docs/case-study-iridium-cosmos.md): docker compose --profile
+  # iridium up (the demo starts too; docs/deployment.md starts it alone),
+  # then http://127.0.0.1:8502. Its store holds one plan precomputed; its
+  # worker computes the what-if plans and uploads.
+  iridium-init:
+    <<: *keepout
+    profiles: [iridium]
+    volumes:
+      - iridium-data:/data
+    command: ["/opt/keepout/init-store.sh", "/opt/keepout/seed/iridium"]
+
+  # The demo's dashboard and worker on the Iridium volume; only what differs
+  # is given.
+  iridium-dashboard:
+    <<: *dashboard
+    profiles: [iridium]
+    volumes:
+      - iridium-data:/data
+    command:
+      - keepout
+      - dashboard
+      - --store
+      - /data/keepout.db
+      - --settings
+      - /opt/keepout/iridium-settings.toml
+      - --host
+      - 0.0.0.0
+    environment:
+      # The decision point, two days before the collision.
+      KEEPOUT_AS_OF: "2009-02-08T16:55:59.806Z"
+      STREAMLIT_BROWSER_SERVER_PORT: ${KEEPOUT_IRIDIUM_PORT:-8502}
+    ports:
+      - "127.0.0.1:${KEEPOUT_IRIDIUM_PORT:-8502}:8501"
+    depends_on:
+      iridium-init:
+        condition: service_completed_successfully
+
+  iridium-worker:
+    <<: *worker
+    profiles: [iridium]
+    volumes:
+      - iridium-data:/data
+    depends_on:
+      iridium-init:
+        condition: service_completed_successfully
+
 volumes:
   data:
+  iridium-data:
