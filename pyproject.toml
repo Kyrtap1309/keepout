@@ -131,7 +131,7 @@ ignore_missing_imports = true
 
 [tool.codespell]
 # Data, generated and locked files; test data holds verbatim external records.
-skip = "*.csv,*.gz,*.xsd,*.json,uv.lock,./site,*tests/*/data*"
+skip = "*.csv,*.gz,*.xsd,*.json,*.svg,uv.lock,./site,*tests/*/data*"
 # AAS: American Astronautical Society; oint: LaTeX \oint; precesses: precession.
 ignore-words-list = "aas,oint,precesses"
 

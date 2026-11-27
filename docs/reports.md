@@ -30,6 +30,7 @@ as it is.
 | [Risk on ESA's Kelvins data](risk-kelvins.md) | The decision rules: risk level, trend and decision point | ESA's own Pc in real CDM sequences, not keepout's Pc; no ground truth | A decision for every event, set against the challenge's high-risk label | How the default rules behave on real CDM sequences; not whether they decide right |
 | [Synthetic operator on public data](synthetic-operator.md) | The whole chain: screening, a CDM per approach, Pc, decision | Nothing: public GP data with keepout's [synthetic covariance model](assumptions.md) | A decision for each approach of a small real fleet over a week | The pieces work together; the Pc values show what the assumed covariances imply, not the real risk |
 | [Manoeuvre planning on a CARA event](maneuver-report.md) | The manoeuvre planner and the re-screen of its burns | A CARA test CDM, and an event of the synthetic operator for the re-screen | The smallest along-track burns that bring the Pc below the target; the re-screen shows when a burn brings the pair back | How the planner and the re-screen behave; not advice about these satellites |
+| [Case study: Iridium 33 and Cosmos 2251](case-study-iridium-cosmos.md) | The whole chain on the element sets public before the 2009 collision: screening, synthetic CDMs, Pc and maximum Pc, decision, rank, manoeuvre and re-screen | Kelso (2009)'s account of what SOCRATES predicted from the same kind of data; no Pc reference | Screening finds the approaches SOCRATES found; the Pc on the assumed covariance stays yellow and the rules say monitor | What public data and an assumed covariance could tell an operator in 2009; not what Iridium knew or should have done |
 
 ## The results in brief
 
@@ -135,3 +136,11 @@ The plan of the 5642 cells took 9.9 to 11.0 s (CPU time 162.8 to 181.9 s, numeri
 CARA test CDM: NASA CARA Analysis Tools (NASA Open Source Agreement),
 downloaded on demand; only numbers derived from it and the figure are
 committed.
+
+### Case study: Iridium 33 and Cosmos 2251
+
+<!-- iridium-cosmos-summary:start -->
+keepout on the element sets public before the 2009 collision ([case study](case-study-iridium-cosmos.md)): two days before TCA the event was yellow (Pc 9.43e-06 on the assumed covariance) and the rules said **monitor**; it ranked 1st by Pc among Iridium 33's 15 approaches that week; a 6.3 cm/s burn would have made it green.
+
+![Pc of the synthetic CDMs before the collision](img/iridium-cosmos/trend.svg)
+<!-- iridium-cosmos-summary:end -->

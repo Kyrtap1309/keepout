@@ -81,6 +81,7 @@ nav:
       - Screening against SOCRATES: screening-socrates.md
       - Synthetic operator on public data: synthetic-operator.md
       - Manoeuvre planning on a CARA event: maneuver-report.md
+      - "Case study: Iridium 33 and Cosmos 2251": case-study-iridium-cosmos.md
   - Reference:
       - Overview: reference/index.md
       - Core types:
