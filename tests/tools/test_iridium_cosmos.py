@@ -3,9 +3,10 @@
 import astropy.units as u
 import iridium_cosmos as study
 import pytest
+from generated import REPO
 
 from keepout.events import DEFAULT_TCA_TOLERANCE, ConjunctionEvent
-from keepout.omm import Omm
+from keepout.omm import Omm, load
 from keepout.risk import DEFAULT_THRESHOLDS, Assessment
 from keepout.units import DAY, HOUR
 
@@ -168,3 +169,28 @@ def test_shift_beyond_excerpt_fails(
     monkeypatch.setattr(study, "EXCERPT_RADIUS", 1.0)
     with pytest.raises(study.ExcerptTooSmall, match="1 m"):
         study.require_within_excerpt(maneuver.shifts)
+
+
+@pytest.fixture(scope="module")
+def fixture_catalog() -> tuple[Omm, ...]:
+    return load(REPO / "tests/screening/data/celestrak-fixture.csv")
+
+
+def test_debris_counted_by_parent(fixture_catalog: tuple[Omm, ...]) -> None:
+    start = max(omm.epoch for omm in fixture_catalog)
+    today = study.debris_today(fixture_catalog, start, workers=1)
+    # The fixture holds 2 Iridium 33 and 6 Cosmos 2251 fragments.
+    assert today.on_orbit == {"IRIDIUM 33": 2, "COSMOS 2251": 6}
+    ranges = [approach.range_at_tca for approach in today.closest]
+    assert ranges == sorted(ranges)
+    assert len(today.closest) <= study.DEBRIS_CLOSEST
+    pieces = {omm.catalog_number for omm in fixture_catalog if study.is_debris(omm)}
+    for approach in today.closest:
+        assert approach.primary_number in pieces
+        assert approach.secondary_number not in pieces
+    assert today.approaches >= len(today.closest)
+
+
+def test_launch_pieces_are_not_debris() -> None:
+    omm = next(o for o in study.read_pair() if o.catalog_number == study.IRIDIUM_33)
+    assert not study.is_debris(omm)

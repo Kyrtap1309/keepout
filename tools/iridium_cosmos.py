@@ -50,7 +50,7 @@ from keepout.risk import (
     Assessment,
     assess,
 )
-from keepout.screening import DEFAULT_DURATION
+from keepout.screening import DEFAULT_DURATION, DEFAULT_VOLUME, screen
 from keepout.synthetic import Fleet, FleetSatellite, OperatorEvent, OperatorResult, run
 from keepout.units import DAY, HOUR, KM, MINUTE
 
@@ -60,6 +60,7 @@ if TYPE_CHECKING:
 
     from keepout.cdm import Cdm
     from keepout.omm import Omm
+    from keepout.screening import CloseApproach
 
 IRIDIUM_33: Final = 24946
 """Iridium 33's catalog number (international designator 1997-051C)."""
@@ -440,4 +441,71 @@ def maneuver(event: ConjunctionEvent, excerpt: Sequence[Omm]) -> Maneuver:
     }
     return Maneuver(
         plan=plan, target=MANEUVER_TARGET, rescreens=rescreens, shifts=shifts
+    )
+
+
+DEBRIS_PREFIXES: Final[Mapping[str, str]] = {
+    "1997-051": NAMES[IRIDIUM_33],
+    "1993-036": NAMES[COSMOS_2251],
+}
+"""The international designators of the collision's fragments, by launch:
+each object's fragments share its launch's designator."""
+
+DEBRIS_FIRST_NUMBER: Final = 33000
+"""Catalog numbers of the fragments start above this (catalogued after the
+collision); the launches' own pieces (satellites, rocket bodies, earlier
+fragments) have lower ones."""
+
+DEBRIS_CLOSEST: Final = 5
+"""How many of the fragments' closest approaches are listed."""
+
+
+def is_debris(omm: Omm) -> bool:
+    """Whether ``omm`` is a fragment of the collision: a designator of
+    :data:`DEBRIS_PREFIXES` and a number above :data:`DEBRIS_FIRST_NUMBER`."""
+    return (
+        omm.catalog_number > DEBRIS_FIRST_NUMBER
+        and omm.international_designator[:8] in DEBRIS_PREFIXES
+    )
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class DebrisToday:
+    """The collision's fragments in a catalog of today.
+
+    Parameters
+    ----------
+    on_orbit
+        Fragments in the catalog, by parent's name.
+    approaches
+        Approaches of a fragment with an object that is no fragment, in the
+        day screened.
+    closest
+        The :data:`DEBRIS_CLOSEST` closest of those, nearest first.
+    """
+
+    on_orbit: Mapping[str, int]
+    approaches: int
+    closest: tuple[CloseApproach, ...]
+
+
+def debris_today(
+    catalog: Sequence[Omm], start: Time, *, workers: int | None = None
+) -> DebrisToday:
+    """The fragments in ``catalog`` (one set per object), screened against
+    it for a day from ``start`` in the default 5 km sphere."""
+    pieces = [omm for omm in catalog if is_debris(omm)]
+    numbers = {omm.catalog_number for omm in pieces}
+    counts = dict.fromkeys(DEBRIS_PREFIXES.values(), 0)
+    for omm in pieces:
+        counts[DEBRIS_PREFIXES[omm.international_designator[:8]]] += 1
+    result = screen(pieces, catalog, start, DAY, DEFAULT_VOLUME, workers=workers)
+    others = sorted(
+        (a for a in result.approaches if a.secondary_number not in numbers),
+        key=lambda approach: approach.range_at_tca,
+    )
+    return DebrisToday(
+        on_orbit=counts,
+        approaches=len(others),
+        closest=tuple(others[:DEBRIS_CLOSEST]),
     )
