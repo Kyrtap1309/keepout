@@ -89,8 +89,8 @@ services:
 
   # The Iridium-Cosmos case study as known two days before the 2009
   # collision (docs/case-study-iridium-cosmos.md): docker compose --profile
-  # iridium up, then http://127.0.0.1:8502. Its what-if plans are
-  # precomputed in its store, so it has no worker.
+  # iridium up, then http://127.0.0.1:8502. Its store holds one plan
+  # precomputed; its worker computes the what-if plans and uploads.
   iridium-init:
     <<: *keepout
     profiles: [iridium]
@@ -133,6 +133,31 @@ services:
       retries: 12
       start_period: 10s
     restart: unless-stopped
+
+  iridium-worker:
+    <<: *keepout
+    profiles: [iridium]
+    init: true
+    volumes:
+      - iridium-data:/data
+    command: ["keepout", "worker", "--store", "/data/keepout.db"]
+    environment:
+      KEEPOUT_HEARTBEAT_FILE: /tmp/keepout-worker.alive
+    depends_on:
+      iridium-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import os, sys, time; sys.exit(time.time() - os.stat('/tmp/keepout-worker.alive').st_mtime > 60)"
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    stop_grace_period: 30s
 
 volumes:
   data:

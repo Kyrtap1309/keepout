@@ -24,7 +24,9 @@ TLE reader refuses, gets a blank one (``OBJECT_ID`` ``UNKNOWN``) and its
 checksum redone; the manifest lists those objects. Any other set keepout
 cannot read is left out and listed in the manifest with the reason (in 2009's
 file, four sets of one object with a malformed B*). It then screens
-Iridium 33 against every object as known at the decision point, for 7 days, in a
+Iridium 33 against every object as known at the decision point, to a week
+after the latest burn
+(:data:`~iridium_cosmos.EXCERPT_DURATION`), in a
 :data:`~iridium_cosmos.EXCERPT_RADIUS` sphere (:func:`excerpt_sets`), and
 writes to ``tests/case_study/data/iridium-cosmos/``:
 
@@ -64,7 +66,7 @@ from snapshot_files import MANIFEST, MANIFEST_FORMAT, REDISTRIBUTION, FileDigest
 from keepout.errors import OmmParseError
 from keepout.omm import tle
 from keepout.omm.celestrak import dumps_csv
-from keepout.screening import DEFAULT_DURATION, MAX_AGE, ScreeningVolume, screen
+from keepout.screening import MAX_AGE, ScreeningVolume, screen
 from keepout.units import DAY, KM
 
 if TYPE_CHECKING:
@@ -309,7 +311,8 @@ def excerpt_sets(
 ) -> tuple[tuple[Omm, ...], Selection]:
     """The excerpt and how it was chosen: every set of the pair, and of each
     object passing within :data:`~iridium_cosmos.EXCERPT_RADIUS` of Iridium
-    33 in the 7 days from the decision point, as known then, its newest set
+    33 from the decision point for
+    :data:`~iridium_cosmos.EXCERPT_DURATION`, as known then, its newest set
     known then: the one screening at the decision point takes.
     """
     known = study.known_at(sets, study.IRIDIUM_AS_OF)
@@ -318,7 +321,12 @@ def excerpt_sets(
         study.EXCERPT_RADIUS, label=f"{study.EXCERPT_RADIUS / KM:g} km sphere"
     )
     result = screen(
-        primary, known, study.IRIDIUM_AS_OF, DEFAULT_DURATION, volume, workers=workers
+        primary,
+        known,
+        study.IRIDIUM_AS_OF,
+        study.EXCERPT_DURATION,
+        volume,
+        workers=workers,
     )
     found = {approach.secondary_number for approach in result.approaches}
     newest: dict[int, Omm] = {}
@@ -338,7 +346,7 @@ def excerpt_sets(
         "window_start": WINDOW_START.isot,
         "window_end": study.TCA_REFERENCE.isot,
         "screening_start": study.IRIDIUM_AS_OF.isot,
-        "screening_days": DEFAULT_DURATION / DAY,
+        "screening_days": study.EXCERPT_DURATION / DAY,
         "radius_km": study.EXCERPT_RADIUS / KM,
         "screened_objects": len({omm.catalog_number for omm in known}),
         "approaches": len(result.approaches),

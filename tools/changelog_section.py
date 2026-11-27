@@ -6,8 +6,9 @@ Usage::
 
 Prints the body under ``## [VERSION] - DATE`` in ``docs/changelog.md``
 (Keep a Changelog format), without the heading, up to the next ``## ``
-heading or the link references at the end. The release workflow runs it on
-the tag's version.
+heading or the link references at the end, its links to ``docs/`` pages
+made links to the documentation site. The release workflow runs it on the
+tag's version.
 """
 
 from __future__ import annotations
@@ -31,6 +32,12 @@ _DATE: Final = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 
 _LINK: Final = re.compile(r"^\[[^\]]+\]: ", re.MULTILINE)
 """A link reference line, which ends the last section."""
+
+SITE: Final = "https://kyrtap1309.github.io/keepout/"
+"""The documentation site (``site_url`` in ``mkdocs.yml``)."""
+
+_PAGE_LINK: Final = re.compile(r"\]\((?P<page>[a-z0-9_./-]+)\.md(?P<anchor>#[^)]*)?\)")
+"""A Markdown link to a page of ``docs/`` by its relative path."""
 
 
 def changelog_section(text: str, version: str) -> str:
@@ -65,6 +72,17 @@ def changelog_section(text: str, version: str) -> str:
     return body
 
 
+def absolute_links(body: str, site: str) -> str:
+    """``body`` with each link to a ``docs/`` page made a link to that page
+    on the documentation ``site``: a release's notes are read on GitHub,
+    where the relative paths lead nowhere."""
+
+    def page(match: re.Match[str]) -> str:
+        return f"]({site}{match['page']}/{match['anchor'] or ''})"
+
+    return _PAGE_LINK.sub(page, body)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """The entry point: print the section.
 
@@ -76,8 +94,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="tools/changelog_section.py")
     parser.add_argument("version")
     parser.add_argument("--changelog", type=Path, default=CHANGELOG)
+    parser.add_argument("--site", default=SITE, help="where relative links lead")
     args = parser.parse_args(argv)
-    print(changelog_section(args.changelog.read_text(encoding="utf-8"), args.version))
+    body = changelog_section(args.changelog.read_text(encoding="utf-8"), args.version)
+    print(absolute_links(body, args.site))
     return 0
 
 

@@ -44,21 +44,21 @@
     "window_start": "2009-01-09T16:55:59.806",
     "window_end": "2009-02-10T16:55:59.806",
     "screening_start": "2009-02-08T16:55:59.806",
-    "screening_days": 7.0,
+    "screening_days": 8.916666666666666,
     "radius_km": 300.0,
     "screened_objects": 11930,
-    "approaches": 30698,
-    "objects": 5972,
-    "sets": 6084
+    "approaches": 38860,
+    "objects": 6213,
+    "sets": 6325
   },
   "files": {
     "iridium-cosmos-2009.csv.gz": {
-      "bytes": 324749,
-      "sha256": "dc6eebe1e541da57b08c417bd7f52d7afc675eebaa01d3c57fa6910e07029640"
+      "bytes": 337476,
+      "sha256": "5de568c78e21659984dd334ef533845491011f15d1a7fafc62c81124322e3352"
     },
     "NOTICE": {
-      "bytes": 842,
-      "sha256": "33bcc7ed15bfb38cc348d628bcb3e212ef7a41f1f09890215c0ccb83e6314796"
+      "bytes": 848,
+      "sha256": "957c272b4a9b0857cc507841bc4af29c138f12de045ca3be6de79fac72ac0461"
     }
   }
 }

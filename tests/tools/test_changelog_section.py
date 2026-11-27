@@ -65,3 +65,30 @@ def test_main_prints_the_section(
 def test_the_committed_changelog_has_the_version_section() -> None:
     text = (REPO / "docs/changelog.md").read_text(encoding="utf-8")
     assert "## [1.0.0] - " in text
+
+
+def test_relative_links_point_at_the_site() -> None:
+    body = (
+        "See [CDMs](cdm.md), [upgrading](store.md#upgrading) and [x](https://a.b/c.md)."
+    )
+    assert section.absolute_links(body, "https://site.invalid/keepout/") == (
+        "See [CDMs](https://site.invalid/keepout/cdm/), "
+        "[upgrading](https://site.invalid/keepout/store/#upgrading) and "
+        "[x](https://a.b/c.md)."
+    )
+
+
+def test_main_prints_site_links(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    path = tmp_path / "changelog.md"
+    path.write_text(
+        CHANGELOG.replace("- Everything.", "- [CDMs](cdm.md)."), encoding="utf-8"
+    )
+    assert section.main(["1.0.0", "--changelog", str(path)]) == 0
+    assert f"[CDMs]({section.SITE}cdm/)" in capsys.readouterr().out
+
+
+def test_site_is_mkdocs_site_url() -> None:
+    text = (REPO / "mkdocs.yml").read_text(encoding="utf-8")
+    assert f"site_url: {section.SITE}\n" in text

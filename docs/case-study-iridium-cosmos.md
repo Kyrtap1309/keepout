@@ -13,19 +13,19 @@ On 2009 February 10, Iridium 33 (24946), an operational communications satellite
 - **Manoeuvre.** A prograde burn of 6.3 cm/s 46 h before TCA would have brought the Pc below 1e-07.
 - **Today.** 672 catalogued fragments of the two were still in orbit on 2026-10-15; in one day they came within 5 km of other objects 1815 times.
 
-At the decision point keepout's rules would have said **monitor**: the event was yellow, its Pc 9.43e-06 on the assumed covariance. Nothing in the element sets set this approach apart enough to call for a burn, which is Kelso's conclusion too: "Determining that the predicted conjunction for Iridium 33 and Cosmos 2251 was more significant than the many dozens of other Iridium conjunctions for that week is simply not possible using the TLE data." keepout does not change that: its Pc is only as good as the covariance it is given, and here the covariance is a model of GP accuracy, not of these two orbits.
+At the decision point keepout's default rules on the model Pc say **monitor**: the event was yellow, its Pc 9.43e-06 on the assumed covariance, and no CDM was red. Still, it was the one to watch: among Iridium 33's own 15 approaches that week it ranked 1st by Pc, 7 times the next, and its dilution maximum Pc had reached 1e-04. The rules do not call for a burn on a yellow event, and whether it stood out among the whole constellation's conjunctions keepout did not compute. Kelso found that, on the TLE data, it could not be told apart: "Determining that the predicted conjunction for Iridium 33 and Cosmos 2251 was more significant than the many dozens of other Iridium conjunctions for that week is simply not possible using the TLE data." keepout's Pc is only as good as the covariance it is given, and here the covariance is a model of GP accuracy, not of these two orbits.
 
 ![Pc of the synthetic CDMs before the collision](img/iridium-cosmos/trend.svg)
 
 ## Data
 
-Space-Track.org allows the history of an object's element sets to be queried once per account, and sends queries of many objects to its yearly bulk files. The excerpt in `tests/case_study/data/iridium-cosmos/` comes from the 2009 file (SHA-256 `e7b317ccfbe7c3d6...`, see its `manifest.json`): every element set of Iridium 33 and Cosmos 2251 from 30 days before the collision, and the newest set known at the decision point of each object that passed within 300 km of Iridium 33 in the following week. `tools/iridium_cosmos_data.py` makes it; the manifest counts what it left out: re-issued and corrected sets of the same epoch (the later kept), two designators without piece letters (blanked) and four sets keepout cannot read (a malformed B\*, one object). Its TLEs carry no names, so objects other than the pair are named by catalog number and international designator.
+Space-Track.org allows the history of an object's element sets to be queried once per account, and sends queries of many objects to its yearly bulk files. The excerpt in `tests/case_study/data/iridium-cosmos/` comes from the 2009 file (SHA-256 `e7b317ccfbe7c3d6...`, see its `manifest.json`): every element set of Iridium 33 and Cosmos 2251 from 32 days before the collision, and the newest set known at the decision point of each object that passed within 300 km of Iridium 33 from then to a week after the latest burn the planner may try. `tools/iridium_cosmos_data.py` makes it; the manifest counts what it left out: re-issued and corrected sets of the same epoch (the later kept), two designators without piece letters (blanked) and four sets keepout cannot read (a malformed B\*, one object). Its TLEs carry no names, so objects other than the pair are named by catalog number and international designator.
 
 Times: the collision, 2009-02-10T16:55:59.806 UTC, is the TCA of SOCRATES's last report, which Kelso (2009) takes as the time of the collision. The decision point is two days before, 2009-02-08T16:55:59.806 UTC; an analysis at a time sees only the element sets with an epoch up to it.
 
 ## What screening saw
 
-Each CDM is created at the epoch of the newer of the two element sets it uses (no publication latency) and screens the pair from then to an hour past the collision with SGP4. Pc is keepout's on the synthetic covariance; the maximum Pc columns bound it without trusting that covariance: Frisbee's with Cosmos 2251's covariance unknown, dilution's over a scale of the combined one, Alfano's over any covariance.
+Each CDM is created at the epoch of the newer of the two element sets it uses (no publication latency) and screens the pair from then to an hour past the collision with SGP4. Pc is keepout's on the synthetic covariance; the maximum Pc columns bound it from above, each trusting less of that covariance: Frisbee's with Cosmos 2251's covariance unknown (Iridium 33's kept), dilution's over a scale of the combined one (its shape kept), Alfano's over any covariance.
 
 | Created (UTC) | Known at decision point | TCA | Miss | Pc | Max Pc (Frisbee) | Max Pc (dilution) | Max Pc (Alfano) |
 |---|---|---|---|---|---|---|---|
@@ -109,7 +109,7 @@ Had the operator chosen to act at the decision point, `plan_maneuver` on the CDM
 | prograde | 45.9 h | +0.0631 m/s | 9.98e-08 | 18.456 km | 114.1 km | 6 new, 1 closer | 1.06e-06 | no |
 | retrograde | 42.6 h | -0.0631 m/s | 9.69e-08 | 19.112 km | 114.1 km | 5 new, 1 closer | 9.38e-07 | no |
 
-A burn moves Iridium 33 along its orbit for the rest of the week; the excerpt holds every object that came within 300 km of it, and the study stops if a burn moves it more than half that, so no object the excerpt left out can be the one a burn brings near. A demonstration of the mechanism, not advice about what Iridium should have done.
+A burn moves Iridium 33 along its orbit for the rest of the week; the excerpt holds every object that came within 300 km of it from the decision point to a week after the latest burn, and the study stops if a burn moves it more than half that radius or a re-screen runs past that time, so no object the excerpt left out can be the one a burn brings near. A demonstration of the mechanism, not advice about what Iridium should have done.
 
 ## Seventeen years later
 

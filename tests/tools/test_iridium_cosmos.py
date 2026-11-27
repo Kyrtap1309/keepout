@@ -3,12 +3,14 @@
 import astropy.units as u
 import iridium_cosmos as study
 import pytest
+from astropy.time import Time
 from generated import REPO
 
 from keepout.events import DEFAULT_TCA_TOLERANCE, ConjunctionEvent
 from keepout.omm import Omm, load
 from keepout.risk import DEFAULT_THRESHOLDS, Assessment
-from keepout.units import DAY, HOUR
+from keepout.screening import DEFAULT_DURATION
+from keepout.units import DAY, HOUR, KM
 
 
 @pytest.fixture(scope="module")
@@ -162,13 +164,32 @@ def test_burn_grid_window(maneuver: study.Maneuver) -> None:
 
 
 @pytest.mark.slow
-def test_shift_beyond_excerpt_fails(
-    maneuver: study.Maneuver, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    study.require_within_excerpt(maneuver.shifts)
-    monkeypatch.setattr(study, "EXCERPT_RADIUS", 1.0)
-    with pytest.raises(study.ExcerptTooSmall, match="1 m"):
-        study.require_within_excerpt(maneuver.shifts)
+def test_shift_beyond_excerpt_fails(maneuver: study.Maneuver) -> None:
+    selection = study.read_selection()
+    windows = [result.window for result in maneuver.rescreens.values()]
+    study.require_within_excerpt(maneuver.shifts, windows, selection)
+    small = {**selection, "radius_km": 1.0}
+    with pytest.raises(study.ExcerptTooSmall, match="1000 m"):
+        study.require_within_excerpt(maneuver.shifts, windows, small)
+
+
+def test_rescreen_window_beyond_excerpt_fails() -> None:
+    selection = study.read_selection()
+    start = Time(selection["screening_start"], scale="utc")
+    end = start + selection["screening_days"] * u.day
+    study.require_within_excerpt({}, [(start, end)], selection)
+    late = (start + 2 * u.hour, end + 2 * u.hour)
+    with pytest.raises(study.ExcerptTooSmall, match="after the excerpt's screening"):
+        study.require_within_excerpt({}, [late], selection)
+
+
+def test_excerpt_covers_the_latest_burn_s_week() -> None:
+    selection = study.read_selection()
+    assert selection["radius_km"] * KM == study.EXCERPT_RADIUS
+    start = Time(selection["screening_start"], scale="utc")
+    covered = start + selection["screening_days"] * u.day
+    latest_burn = study.TCA_REFERENCE - study.BURN_GRID.latest_lead * u.s
+    assert covered + 1 * u.s >= latest_burn + DEFAULT_DURATION * u.s
 
 
 @pytest.fixture(scope="module")

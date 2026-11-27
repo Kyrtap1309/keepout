@@ -86,7 +86,8 @@ Iridium 33 and Cosmos 2251 created by 2009-02-08 16:55 UTC, and nothing
 later; the time is fixed there, so the event is 48 hours ahead, yellow, and
 its manoeuvre plan (to green, `examples/dashboard/iridium-settings.toml`)
 is precomputed, re-screened against the 2009 catalog as known then. The
-profile has its own volume, `iridium-data`, and no worker. Without
+profile has its own volume, `iridium-data`, and its own worker, which
+computes the planner's what-if plans against that same catalog. Without
 `--profile iridium`, `docker compose up` starts the demo only.
 
 ## Your own data

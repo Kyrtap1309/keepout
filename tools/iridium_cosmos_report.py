@@ -51,7 +51,7 @@ from keepout.figures import (
     grid_figure,
     trend_figure,
 )
-from keepout.risk import DEFAULT_THRESHOLDS, Assessment, RiskLevel
+from keepout.risk import DEFAULT_THRESHOLDS, Action, Assessment, RiskLevel
 from keepout.units import DAY, HOUR, KM
 
 if TYPE_CHECKING:
@@ -455,26 +455,74 @@ def _best(summary: Summary) -> Option:
     )
 
 
-def _meaning(summary: Summary) -> str:
-    """What the result means, worded after the decision at the decision point."""
+BURN_ACTIONS: Final = frozenset({Action.MANEUVER.label, Action.PREPARE_MANEUVER.label})
+"""The decisions that call for a burn."""
+
+KELSO_QUOTE: Final = (
+    "Determining that the predicted conjunction for Iridium 33 and Cosmos 2251 "
+    "was more significant than the many dozens of other Iridium conjunctions for "
+    "that week is simply not possible using the TLE data."
+)
+"""Kelso (2009, sec. 2)."""
+
+
+def _never_red(summary: Summary) -> bool:
+    """Whether no CDM's model Pc reached the red threshold."""
+    red = summary["settings"]["red_from"]
+    return all((row["pc"] or 0.0) < red for row in _found(summary))
+
+
+def _dilution_red_by_decision(summary: Summary) -> bool:
+    """Whether the dilution maximum Pc of a CDM known at the decision point
+    reached the red threshold."""
+    red = summary["settings"]["red_from"]
+    return any(
+        (row["dilution"] or 0.0) >= red
+        for row in _found(summary)
+        if row["known_at_decision"]
+    )
+
+
+def _rank_text(summary: Summary) -> str:
+    """Where the collision ranked by Pc among Iridium 33's own approaches."""
+    rank = summary["rank"]
+    text = (
+        f"among Iridium 33's own {rank['approaches']} approaches that week it ranked "
+        f"{_ordinal(rank['by_pc'])} by Pc"
+    )
+    collision = next(item["pc"] or 0.0 for item in rank["table"] if item["collision"])
+    others = sorted(
+        (item["pc"] or 0.0 for item in rank["table"] if not item["collision"]),
+        reverse=True,
+    )
+    if rank["by_pc"] == 1 and others and others[0] > 0:
+        text += f", {collision / others[0]:.0f} times the next"
+    return text
+
+
+def meaning(summary: Summary) -> str:
+    """What the result means, worded from the summary's own numbers."""
     decision = summary["decision"]
     action = decision["action"]
+    red = summary["settings"]["red_from"]
     lead = (
-        f"At the decision point keepout's rules would have said **{action}**: "
-        f"the event was {decision['level']}, its Pc {_pc_text(decision['latest_pc'])} "
-        "on "
-        "the assumed covariance."
+        f"At the decision point keepout's default rules on the model Pc say "
+        f"**{action}**: the event was {decision['level']}, its Pc "
+        f"{_pc_text(decision['latest_pc'])} on the assumed covariance"
+        + (", and no CDM was red." if _never_red(summary) else ".")
     )
-    if action.lower().startswith("manoeuvre"):
-        return lead
+    if action in BURN_ACTIONS:
+        return f"{lead} The burn they call for is planned below."
+    watch = f"Still, it was the one to watch: {_rank_text(summary)}"
+    if _dilution_red_by_decision(summary):
+        watch += f", and its dilution maximum Pc had reached {red:.0e}"
     return (
-        f"{lead} Nothing in the element sets set this approach apart enough to "
-        "call for a burn, which is Kelso's conclusion too: \"Determining that the "
-        "predicted conjunction for Iridium 33 and Cosmos 2251 was more significant "
-        "than the many dozens of other Iridium conjunctions for that week is simply "
-        'not possible using the TLE data." keepout does not change that: its Pc is '
-        "only as good as the covariance it is given, and here the covariance is a "
-        "model of GP accuracy, not of these two orbits."
+        f"{lead} {watch}. The rules do not call for a burn on a {decision['level']} "
+        "event, and whether it stood out among the whole constellation's "
+        "conjunctions keepout did not compute. Kelso found that, on the TLE data, "
+        f'it could not be told apart: "{KELSO_QUOTE}" keepout\'s Pc is only as good '
+        "as the covariance it is given, and here the covariance is a model of GP "
+        "accuracy, not of these two orbits."
     )
 
 
@@ -512,7 +560,8 @@ def _summary_section(summary: Summary, images: str) -> list[str]:
         (
             f"- **Pc.** On keepout's assumed covariance the Pc rose from "
             f"{_pc_text(_found(summary)[0]['pc'])} to {_pc_text(last['pc'])}: "
-            f"{summary['decision']['level']} at the decision point, never red."
+            f"{summary['decision']['level']} at the decision point"
+            + (", never red." if _never_red(summary) else ".")
         ),
         f"- **Decision.** Two days before TCA: **{summary['decision']['action']}**.",
         (
@@ -536,7 +585,7 @@ def _summary_section(summary: Summary, images: str) -> list[str]:
             f"5 km of other objects {debris['approaches']} times."
         ),
         "",
-        _meaning(summary),
+        meaning(summary),
         "",
         f"![Pc of the synthetic CDMs before the collision]({images}/{TREND})",
     ]
@@ -560,12 +609,12 @@ def _data_section(summary: Summary) -> list[str]:
             "bulk files. The excerpt in `tests/case_study/data/iridium-cosmos/` comes "
             "from the 2009 file (SHA-256 "
             f"`{settings['bulk_sha256'][:16]}...`, see its `manifest.json`): every "
-            "element set of Iridium 33 and Cosmos 2251 from 30 days before the "
+            "element set of Iridium 33 and Cosmos 2251 from 32 days before the "
             "collision, "
             "and the newest set known at the decision point of each object that passed "
-            f"within {settings['excerpt_radius_km']:g} km of Iridium 33 in the "
-            "following "
-            "week. `tools/iridium_cosmos_data.py` makes it; the manifest counts what "
+            f"within {settings['excerpt_radius_km']:g} km of Iridium 33 from then "
+            "to a week after the latest burn the planner may try. "
+            "`tools/iridium_cosmos_data.py` makes it; the manifest counts what "
             "it "
             "left out: re-issued and corrected sets of the same epoch (the later "
             "kept), "
@@ -609,9 +658,10 @@ def _screening_section(summary: Summary) -> list[str]:
             "uses (no publication latency) and screens the pair from then to an hour "
             "past "
             "the collision with SGP4. Pc is keepout's on the synthetic covariance; the "
-            "maximum Pc columns bound it without trusting that covariance: Frisbee's "
-            "with Cosmos 2251's covariance unknown, dilution's over a scale of the "
-            "combined one, Alfano's over any covariance."
+            "maximum Pc columns bound it from above, each trusting less of that "
+            "covariance: Frisbee's with Cosmos 2251's covariance unknown (Iridium "
+            "33's kept), dilution's over a scale of the combined one (its shape "
+            "kept), Alfano's over any covariance."
         ),
         "",
         *table(
@@ -807,11 +857,12 @@ def _maneuver_section(summary: Summary, images: str) -> list[str]:
         (
             "A burn moves Iridium 33 along its orbit for the rest of the week; the "
             "excerpt holds every object that came within "
-            f"{settings['excerpt_radius_km']:g} km of it, and the study stops if a "
-            "burn "
-            "moves it more than half that, so no object the excerpt left out can be "
-            "the one a burn brings near. A demonstration of the mechanism, not advice "
-            "about what Iridium should have done."
+            f"{settings['excerpt_radius_km']:g} km of it from the decision point to "
+            "a week after the latest burn, and the study stops if a burn moves it "
+            "more than half that radius or a re-screen runs past that time, so no "
+            "object the excerpt left out can be the one a burn brings near. A "
+            "demonstration of the mechanism, not advice about what Iridium should "
+            "have done."
         ),
     ]
 

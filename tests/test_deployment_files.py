@@ -49,7 +49,7 @@ def test_compose_publishes_on_loopback_at_the_demo_time() -> None:
 def test_compose_iridium_profile() -> None:
     services = _compose()["services"]
     iridium = {name: service for name, service in services.items() if "iridium" in name}
-    assert set(iridium) == {"iridium-init", "iridium-dashboard"}
+    assert set(iridium) == {"iridium-init", "iridium-dashboard", "iridium-worker"}
     for service in iridium.values():
         assert service["profiles"] == ["iridium"]
         assert service["volumes"] == ["iridium-data:/data"]
@@ -61,6 +61,9 @@ def test_compose_iridium_profile() -> None:
     assert dashboard["ports"] == ["127.0.0.1:${KEEPOUT_IRIDIUM_PORT:-8502}:8501"]
     as_of = parse_time(dashboard["environment"]["KEEPOUT_AS_OF"])
     assert as_of.utc.isot == iridium_cosmos.IRIDIUM_AS_OF.utc.isot
+    worker = iridium["iridium-worker"]
+    assert worker["command"] == ["keepout", "worker", "--store", "/data/keepout.db"]
+    assert "ports" not in worker
     init = iridium["iridium-init"]
     assert init["command"] == [
         "/opt/keepout/init-store.sh",

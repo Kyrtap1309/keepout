@@ -24,7 +24,8 @@ Conference, Maui, 2009 September 2.
 from __future__ import annotations
 
 import dataclasses
-from typing import TYPE_CHECKING, Final
+import json
+from typing import TYPE_CHECKING, Any, Final
 
 import astropy.units as u
 import numpy as np
@@ -275,6 +276,13 @@ def hbr_sensitivity(event: ConjunctionEvent) -> dict[float, tuple[float, float]]
 BURN_GRID: Final = BurnGrid(earliest_lead=2 * DAY, latest_lead=2 * HOUR)
 """The burns tried: from the decision point to 2 hours before TCA."""
 
+EXCERPT_DURATION: Final = (
+    DEFAULT_DURATION + DEFAULT_DECISION_CONFIG.decision_point - BURN_GRID.latest_lead
+)
+"""How long from the decision point the excerpt's objects were screened for
+[s]: up to a week after the latest burn of :data:`BURN_GRID`, the window
+every re-screen of a burn covers."""
+
 MANEUVER_TARGET: Final = DEFAULT_THRESHOLDS.green_below
 """The Pc a burn must bring the event below: green. The planner's default
 target, red, is met without a burn by an event that is yellow."""
@@ -392,22 +400,46 @@ def largest_shift(plan: ManeuverPlan, option: ManeuverOption, primary: Omm) -> f
     return float(np.max(np.linalg.norm(after - before, axis=-1)))
 
 
-def require_within_excerpt(shifts: Mapping[BurnDirection, float]) -> None:
-    """A check that no burn moves Iridium 33 more than half
-    :data:`EXCERPT_RADIUS`: beyond it, an object the excerpt left out could
-    come near.
+def read_selection(data: Path = DATA) -> Mapping[str, Any]:
+    """How the committed excerpt was chosen: the manifest's ``selection``
+    (its radius, screening start and days)."""
+    manifest = json.loads((data / "manifest.json").read_text(encoding="utf-8"))
+    selection: Mapping[str, Any] = manifest["selection"]
+    return selection
+
+
+def require_within_excerpt(
+    shifts: Mapping[BurnDirection, float],
+    windows: Iterable[tuple[Time, Time]],
+    selection: Mapping[str, Any],
+) -> None:
+    """A check that the excerpt holds every object a re-screen could find:
+    no burn moves Iridium 33 more than half the radius the excerpt was
+    chosen with, and no re-screen window ends after the time its objects
+    were screened to (the manifest's ``selection``).
 
     Raises
     ------
     ExcerptTooSmall
-        If a shift is larger.
+        If a shift is larger, or a window ends later.
     """
-    limit = EXCERPT_RADIUS / 2
+    radius = float(selection["radius_km"]) * KM
     for direction, shift in shifts.items():
-        if shift > limit:
+        if shift > radius / 2:
             raise ExcerptTooSmall(
                 f"the {direction} burn moves Iridium 33 by {shift:.0f} m, more than "
-                f"half the excerpt's radius ({EXCERPT_RADIUS:g} m)"
+                f"half the excerpt's radius ({radius:.0f} m)"
+            )
+    covered = (
+        Time(selection["screening_start"], scale="utc")
+        + float(selection["screening_days"]) * u.day
+    )
+    for _, end in windows:
+        # A second's slack: the manifest's days are a rounded fraction.
+        if end > covered + 1 * u.s:
+            raise ExcerptTooSmall(
+                f"a re-screen runs to {end.utc.isot[:16]} UTC, after the excerpt's "
+                f"screening ends ({covered.utc.isot[:16]} UTC)"
             )
 
 
@@ -434,11 +466,12 @@ def maneuver(event: ConjunctionEvent, excerpt: Sequence[Omm]) -> Maneuver:
         option.direction: largest_shift(plan, option, primary)
         for option in plan.options
     }
-    require_within_excerpt(shifts)
     rescreens = {
         option.direction: rescreen(plan, option, catalog, workers=None)
         for option in plan.options
     }
+    windows = [result.window for result in rescreens.values()]
+    require_within_excerpt(shifts, windows, read_selection())
     return Maneuver(
         plan=plan, target=MANEUVER_TARGET, rescreens=rescreens, shifts=shifts
     )
